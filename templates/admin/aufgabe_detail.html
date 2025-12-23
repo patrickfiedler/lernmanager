@@ -1,0 +1,174 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ task.name }} - Lernfortschritt{% endblock %}
+
+{% block content %}
+<div class="flex flex-between flex-center mb-2">
+    <h1>📝 {{ task.name }}</h1>
+    <div class="flex gap-1">
+        {% if task.kategorie == 'bonus' %}
+        <span class="badge badge-warning">⭐ Bonus</span>
+        {% else %}
+        <span class="badge badge-primary">Pflicht</span>
+        {% endif %}
+        <form method="POST" action="{{ url_for('admin_aufgabe_loeschen', task_id=task.id) }}" onsubmit="return confirm('Aufgabe wirklich löschen?');">
+            <button type="submit" class="btn btn-danger">🗑️ Löschen</button>
+        </form>
+    </div>
+</div>
+
+<div class="grid grid-2">
+    <!-- Basic Info -->
+    <div class="card">
+        <div class="card-header">ℹ️ Grunddaten</div>
+        <form method="POST" action="{{ url_for('admin_aufgabe_bearbeiten', task_id=task.id) }}">
+            <div class="form-group">
+                <label>Name</label>
+                <input type="text" name="name" class="form-control" value="{{ task.name }}" required>
+            </div>
+            <div class="grid grid-2">
+                <div class="form-group">
+                    <label>Fach</label>
+                    <select name="fach" class="form-control" required>
+                        {% for s in subjects %}<option value="{{ s }}" {% if task.fach == s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Stufe</label>
+                    <select name="stufe" class="form-control" required>
+                        {% for l in levels %}<option value="{{ l }}" {% if task.stufe == l %}selected{% endif %}>{{ l }}</option>{% endfor %}
+                    </select>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Kategorie</label>
+                <select name="kategorie" class="form-control" required>
+                    <option value="pflicht" {% if task.kategorie == 'pflicht' %}selected{% endif %}>Pflicht</option>
+                    <option value="bonus" {% if task.kategorie == 'bonus' %}selected{% endif %}>⭐ Bonus</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Lernziel</label>
+                <textarea name="lernziel" class="form-control" rows="2">{{ task.lernziel or '' }}</textarea>
+            </div>
+            <div class="form-group">
+                <label>Beschreibung</label>
+                <textarea name="beschreibung" class="form-control" rows="3">{{ task.beschreibung or '' }}</textarea>
+            </div>
+            <div class="form-group">
+                <label>Voraussetzung</label>
+                <select name="voraussetzung_id" class="form-control">
+                    <option value="">-- Keine --</option>
+                    {% for t in all_tasks %}
+                    {% if t.id != task.id %}
+                    <option value="{{ t.id }}" {% if task.voraussetzung_id == t.id %}selected{% endif %}>{{ t.name }}</option>
+                    {% endif %}
+                    {% endfor %}
+                </select>
+            </div>
+            <input type="hidden" name="quiz_json" value="{{ task.quiz_json or '' }}">
+            <button type="submit" class="btn btn-primary">Speichern</button>
+        </form>
+    </div>
+
+    <!-- Subtasks -->
+    <div class="card">
+        <div class="card-header">✅ Teilaufgaben</div>
+        <form method="POST" action="{{ url_for('admin_aufgabe_teilaufgaben', task_id=task.id) }}">
+            <div class="form-group">
+                <label>Eine Teilaufgabe pro Zeile:</label>
+                <textarea name="subtasks" class="form-control" rows="8" placeholder="Kapitel 1 lesen&#10;Übung 1-5 bearbeiten&#10;Vokabeln lernen">{% for st in subtasks %}{{ st.beschreibung }}{% if not loop.last %}
+{% endif %}{% endfor %}</textarea>
+            </div>
+            <button type="submit" class="btn btn-primary">Teilaufgaben speichern</button>
+        </form>
+    </div>
+</div>
+
+<!-- Materials -->
+<div class="card mt-2">
+    <div class="card-header">📎 Materialien</div>
+
+    {% if materials %}
+    <ul class="material-list mb-2">
+        {% for mat in materials %}
+        <li class="material-item flex flex-between">
+            <div>
+                {% if mat.typ == 'link' %}
+                <span class="material-icon">🔗</span>
+                <a href="{{ mat.pfad }}" target="_blank">{{ mat.beschreibung or mat.pfad }}</a>
+                {% else %}
+                <span class="material-icon">📄</span>
+                <a href="{{ url_for('static', filename='uploads/' + mat.pfad) }}" target="_blank">{{ mat.beschreibung or mat.pfad }}</a>
+                {% endif %}
+            </div>
+            <form method="POST" action="{{ url_for('admin_material_loeschen', material_id=mat.id) }}" style="display: inline;">
+                <button type="submit" class="btn btn-sm btn-danger">🗑️</button>
+            </form>
+        </li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+
+    <div class="grid grid-2">
+        <div>
+            <h4 class="mb-1">🔗 Link hinzufügen</h4>
+            <form method="POST" action="{{ url_for('admin_aufgabe_material_link', task_id=task.id) }}">
+                <div class="form-group">
+                    <input type="url" name="url" class="form-control" placeholder="https://..." required>
+                </div>
+                <div class="form-group">
+                    <input type="text" name="beschreibung" class="form-control" placeholder="Beschreibung (optional)">
+                </div>
+                <button type="submit" class="btn btn-secondary">Link hinzufügen</button>
+            </form>
+        </div>
+        <div>
+            <h4 class="mb-1">📤 Datei hochladen</h4>
+            <form method="POST" action="{{ url_for('admin_aufgabe_material_upload', task_id=task.id) }}" enctype="multipart/form-data">
+                <div class="form-group">
+                    <input type="file" name="file" class="form-control" accept=".pdf,.png,.jpg,.jpeg,.gif" required>
+                </div>
+                <div class="form-group">
+                    <input type="text" name="beschreibung" class="form-control" placeholder="Beschreibung (optional)">
+                </div>
+                <button type="submit" class="btn btn-secondary">Hochladen</button>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Quiz -->
+<div class="card mt-2">
+    <div class="card-header">❓ Quiz</div>
+    <form method="POST" action="{{ url_for('admin_aufgabe_bearbeiten', task_id=task.id) }}">
+        <input type="hidden" name="name" value="{{ task.name }}">
+        <input type="hidden" name="fach" value="{{ task.fach }}">
+        <input type="hidden" name="stufe" value="{{ task.stufe }}">
+        <input type="hidden" name="kategorie" value="{{ task.kategorie }}">
+        <input type="hidden" name="lernziel" value="{{ task.lernziel or '' }}">
+        <input type="hidden" name="beschreibung" value="{{ task.beschreibung or '' }}">
+        <input type="hidden" name="voraussetzung_id" value="{{ task.voraussetzung_id or '' }}">
+
+        <div class="form-group">
+            <label>Quiz JSON (für LLM-Generierung geeignet):</label>
+            <textarea name="quiz_json" class="form-control" rows="10" placeholder='{
+  "questions": [
+    {
+      "question": "Was ist die Hauptstadt von Deutschland?",
+      "answers": ["Berlin", "München", "Hamburg", "Köln"],
+      "correct": [0]
+    },
+    {
+      "question": "Welche Farben hat die deutsche Flagge?",
+      "answers": ["Rot und Weiß", "Blau und Gelb", "Schwarz, Rot und Gold", "Grün und Weiß"],
+      "correct": [2]
+    }
+  ]
+}'>{{ task.quiz_json or '' }}</textarea>
+            <small class="text-muted">Format: JSON mit "questions" Array. Jede Frage hat "question", "answers" (4 Optionen) und "correct" (Array mit Indizes der richtigen Antworten).</small>
+        </div>
+        <button type="submit" class="btn btn-primary">Quiz speichern</button>
+    </form>
+</div>
+{% endblock %}

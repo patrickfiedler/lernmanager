@@ -1,0 +1,71 @@
+{% extends 'base.html' %}
+
+{% block title %}{% if task %}Aufgabe bearbeiten{% else %}Neue Aufgabe{% endif %} - Lernfortschritt{% endblock %}
+
+{% block content %}
+<h1 class="mb-2">{% if task %}📝 Aufgabe bearbeiten{% else %}➕ Neue Aufgabe{% endif %}</h1>
+
+<div class="card">
+    <form method="POST" action="{% if task %}{{ url_for('admin_aufgabe_bearbeiten', task_id=task.id) }}{% else %}{{ url_for('admin_aufgabe_neu') }}{% endif %}">
+        <div class="grid grid-2">
+            <div class="form-group">
+                <label for="name">Name</label>
+                <input type="text" id="name" name="name" class="form-control" value="{{ task.name if task else '' }}" required>
+            </div>
+
+            <div class="form-group">
+                <label for="fach">Fach</label>
+                <select id="fach" name="fach" class="form-control" required>
+                    {% for subject in subjects %}
+                    <option value="{{ subject }}" {% if task and task.fach == subject %}selected{% endif %}>{{ subject }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="stufe">Stufe</label>
+                <select id="stufe" name="stufe" class="form-control" required>
+                    {% for level in levels %}
+                    <option value="{{ level }}" {% if task and task.stufe == level %}selected{% endif %}>{{ level }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="kategorie">Kategorie</label>
+                <select id="kategorie" name="kategorie" class="form-control" required>
+                    <option value="pflicht" {% if task and task.kategorie == 'pflicht' %}selected{% endif %}>Pflicht</option>
+                    <option value="bonus" {% if task and task.kategorie == 'bonus' %}selected{% endif %}>⭐ Bonus</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label for="lernziel">Lernziel</label>
+            <textarea id="lernziel" name="lernziel" class="form-control" rows="2">{{ task.lernziel if task else '' }}</textarea>
+        </div>
+
+        <div class="form-group">
+            <label for="beschreibung">Beschreibung</label>
+            <textarea id="beschreibung" name="beschreibung" class="form-control" rows="4">{{ task.beschreibung if task else '' }}</textarea>
+        </div>
+
+        <div class="form-group">
+            <label for="voraussetzung_id">Voraussetzung (optional)</label>
+            <select id="voraussetzung_id" name="voraussetzung_id" class="form-control">
+                <option value="">-- Keine --</option>
+                {% for t in tasks %}
+                {% if not task or t.id != task.id %}
+                <option value="{{ t.id }}" {% if task and task.voraussetzung_id == t.id %}selected{% endif %}>
+                    {{ t.fach }} ({{ t.stufe }}): {{ t.name }}
+                </option>
+                {% endif %}
+                {% endfor %}
+            </select>
+        </div>
+
+        <button type="submit" class="btn btn-primary">{% if task %}Speichern{% else %}Erstellen{% endif %}</button>
+        <a href="{{ url_for('admin_aufgaben') }}" class="btn btn-secondary">Abbrechen</a>
+    </form>
+</div>
+{% endblock %}

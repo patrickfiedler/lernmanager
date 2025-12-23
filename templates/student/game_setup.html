@@ -1,0 +1,58 @@
+{% extends 'base.html' %}
+
+{% block title %}Spielmodus starten - Lernfortschritt{% endblock %}
+
+{% block content %}
+<div class="game-setup-container">
+    <div class="card game-setup-card">
+        <h1 class="text-center mb-2">🎮 Spielmodus</h1>
+
+        <p class="text-center mb-2">
+            Willkommen im Abenteuermodus! Erkunde verschiedene Gebiete,
+            kaempfe gegen Monster und lerne dabei.
+        </p>
+
+        <div class="game-features mb-2">
+            <div class="feature">
+                <span class="feature-icon">🗺️</span>
+                <span>Erkunde Gebiete</span>
+            </div>
+            <div class="feature">
+                <span class="feature-icon">⚔️</span>
+                <span>Besiege Monster</span>
+            </div>
+            <div class="feature">
+                <span class="feature-icon">📚</span>
+                <span>Lerne durch Fragen</span>
+            </div>
+            <div class="feature">
+                <span class="feature-icon">⬆️</span>
+                <span>Steige Level auf</span>
+            </div>
+        </div>
+
+        <form method="POST" action="{{ url_for('game.game_setup') }}">
+            <div class="form-group mb-2">
+                <label for="fach"><strong>Waehle dein Fach:</strong></label>
+                <p class="text-muted mb-1">Die Fragen im Spiel kommen aus diesem Fach.</p>
+                <div class="subject-grid">
+                    {% for subject in subjects %}
+                    <label class="subject-option">
+                        <input type="radio" name="fach" value="{{ subject }}" required>
+                        <span class="subject-card">
+                            {% if subject == 'Englisch' %}🇬🇧{% elif subject == 'Chemie' %}🧪{% elif subject == 'MBI' %}💻{% elif subject == 'Geographie' %}🌍{% else %}📖{% endif %}
+                            <span>{{ subject }}</span>
+                        </span>
+                    </label>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <div class="flex flex-between">
+                <a href="{{ url_for('student_dashboard') }}" class="btn btn-secondary">Abbrechen</a>
+                <button type="submit" class="btn btn-success">Abenteuer starten!</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

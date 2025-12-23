@@ -1,0 +1,53 @@
+{% extends 'base.html' %}
+
+{% block title %}Quiz: {{ task.name }} - Lernfortschritt{% endblock %}
+
+{% block content %}
+<div class="flex flex-between flex-center mb-2">
+    <h1>❓ Quiz: {{ task.name }}</h1>
+    <a href="{{ url_for('student_dashboard') }}" class="btn btn-secondary">← Abbrechen</a>
+</div>
+
+<div class="card mb-2">
+    <p><strong>🎯 Lernziel:</strong> {{ task.lernziel or 'Nicht angegeben' }}</p>
+    <p class="text-muted">Du brauchst mindestens 80% richtige Antworten, um das Quiz zu bestehen.</p>
+</div>
+
+<form method="POST" action="{{ url_for('student_quiz', student_task_id=student_task_id) }}">
+    {% for question in quiz.questions %}
+    <div class="quiz-question">
+        <h4>Frage {{ loop.index }}: {{ question.question }}</h4>
+        {% for answer in question.answers %}
+        <label class="quiz-option">
+            <input type="checkbox" name="q{{ loop.index0 - 1 }}" value="{{ loop.index0 }}"
+                   {% if question.correct|length == 1 %}onclick="uncheckOthers(this)"{% endif %}>
+            <span>{{ answer }}</span>
+        </label>
+        {% endfor %}
+        {% if question.correct|length > 1 %}
+        <p class="text-muted mt-1">💡 Mehrere Antworten können richtig sein.</p>
+        {% endif %}
+    </div>
+    {% endfor %}
+
+    <button type="submit" class="btn btn-primary btn-lg">Quiz abschicken</button>
+</form>
+{% endblock %}
+
+{% block scripts %}
+// Fix for question indexing
+document.querySelectorAll('.quiz-question').forEach((q, idx) => {
+    q.querySelectorAll('input[type="checkbox"]').forEach(input => {
+        input.name = 'q' + idx;
+    });
+});
+
+function uncheckOthers(checkbox) {
+    if (checkbox.checked) {
+        const name = checkbox.name;
+        document.querySelectorAll(`input[name="${name}"]`).forEach(cb => {
+            if (cb !== checkbox) cb.checked = false;
+        });
+    }
+}
+{% endblock %}

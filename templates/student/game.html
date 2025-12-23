@@ -1,0 +1,105 @@
+{% extends 'base_game.html' %}
+
+{% block title %}Spielmodus - Lernfortschritt{% endblock %}
+
+{% block content %}
+<div id="game-wrapper">
+    <!-- Game canvas will be injected here by Phaser -->
+    <div id="game-container"></div>
+
+    <!-- HUD Overlay -->
+    <div id="game-hud">
+        <div class="hud-left">
+            <div class="hud-stat">
+                <span class="hud-label">HP</span>
+                <div class="hud-bar hp-bar">
+                    <div class="hud-bar-fill" id="hp-fill" style="width: {{ (character.hp / character.max_hp * 100)|int }}%;"></div>
+                </div>
+                <span class="hud-value" id="hp-value">{{ character.hp }}/{{ character.max_hp }}</span>
+            </div>
+            <div class="hud-stat">
+                <span class="hud-label">XP</span>
+                <div class="hud-bar xp-bar">
+                    <div class="hud-bar-fill" id="xp-fill" style="width: 0%;"></div>
+                </div>
+                <span class="hud-value" id="xp-value">{{ character.xp }}</span>
+            </div>
+        </div>
+        <div class="hud-center">
+            <span class="hud-level">Level {{ character.level }}</span>
+            <span class="hud-area" id="current-area">{{ character.current_area|capitalize }}</span>
+        </div>
+        <div class="hud-right">
+            <span class="hud-subject">{{ character.fach }}</span>
+            <a href="{{ url_for('student_dashboard') }}" class="btn btn-small btn-secondary" id="exit-btn">Zurueck</a>
+        </div>
+    </div>
+
+    <!-- Question Panel (hidden by default) -->
+    <div id="question-panel" class="hidden">
+        <div class="question-content">
+            <div class="question-header">
+                <span class="monster-name" id="monster-name">Monster</span>
+                <span class="question-source" id="question-source"></span>
+            </div>
+            <div class="question-text" id="question-text"></div>
+            <div class="answers-container" id="answers-container"></div>
+            <div class="question-footer">
+                <button id="submit-answer" class="btn btn-primary" disabled>Antworten</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Result Panel (hidden by default) -->
+    <div id="result-panel" class="hidden">
+        <div class="result-content">
+            <div class="result-icon" id="result-icon"></div>
+            <div class="result-text" id="result-text"></div>
+            <div class="result-details" id="result-details"></div>
+            <button id="continue-btn" class="btn btn-primary">Weiter</button>
+        </div>
+    </div>
+
+    <!-- Level Up Panel (hidden by default) -->
+    <div id="levelup-panel" class="hidden">
+        <div class="levelup-content">
+            <div class="levelup-icon">⬆️</div>
+            <div class="levelup-text">Level Up!</div>
+            <div class="levelup-level" id="new-level"></div>
+            <button id="levelup-continue" class="btn btn-success">Weiter</button>
+        </div>
+    </div>
+
+    <!-- Defeat Panel (hidden by default) -->
+    <div id="defeat-panel" class="hidden">
+        <div class="defeat-content">
+            <div class="defeat-icon">💀</div>
+            <div class="defeat-text">Besiegt!</div>
+            <p>Du wurdest zurueck ins Dorf gebracht.</p>
+            <button id="defeat-continue" class="btn btn-primary">Zurueck zum Dorf</button>
+        </div>
+    </div>
+</div>
+
+<!-- Pass character data to JavaScript -->
+<script>
+    window.GAME_DATA = {
+        character: {{ character|tojson }},
+        apiBase: '',
+        areas: null // Will be loaded from API
+    };
+</script>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
+<script src="{{ url_for('static', filename='js/game/config.js') }}"></script>
+<script src="{{ url_for('static', filename='js/game/api.js') }}"></script>
+<script src="{{ url_for('static', filename='js/game/scenes/BootScene.js') }}"></script>
+<script src="{{ url_for('static', filename='js/game/scenes/VillageScene.js') }}"></script>
+<script src="{{ url_for('static', filename='js/game/scenes/ExplorationScene.js') }}"></script>
+<script src="{{ url_for('static', filename='js/game/scenes/CombatScene.js') }}"></script>
+<script src="{{ url_for('static', filename='js/game/ui/HUD.js') }}"></script>
+<script src="{{ url_for('static', filename='js/game/ui/QuestionPanel.js') }}"></script>
+<script src="{{ url_for('static', filename='js/game/main.js') }}"></script>
+{% endblock %}

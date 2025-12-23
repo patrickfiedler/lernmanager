@@ -1,0 +1,11 @@
+services:
+  lernfortschritt:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data
+      - ./static/uploads:/app/static/uploads
+    environment:
+      - SECRET_KEY=${SECRET_KEY:-change-this-in-production}
+    restart: unless-stopped

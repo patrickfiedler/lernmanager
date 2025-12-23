@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Lernfortschritt{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    {% if session.admin_id or session.student_id %}
+    <nav>
+        <div class="nav-content">
+            <a href="/" class="logo">📚 Lernfortschritt</a>
+            <div class="nav-links">
+                {% if session.admin_id %}
+                    <a href="{{ url_for('admin_dashboard') }}">Dashboard</a>
+                    <a href="{{ url_for('admin_klassen') }}">Klassen</a>
+                    <a href="{{ url_for('admin_aufgaben') }}">Aufgaben</a>
+                    <span>👤 {{ session.admin_username }}</span>
+                {% elif session.student_id %}
+                    <a href="{{ url_for('student_dashboard') }}">Meine Aufgaben</a>
+                    <span>👤 {{ session.student_name }}</span>
+                {% endif %}
+                <a href="{{ url_for('logout') }}">Abmelden</a>
+            </div>
+        </div>
+    </nav>
+    {% endif %}
+
+    <div class="container">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        {% block content %}{% endblock %}
+    </div>
+
+    <script>
+        {% block scripts %}{% endblock %}
+    </script>
+</body>
+</html>

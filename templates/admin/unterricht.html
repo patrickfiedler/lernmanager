@@ -1,0 +1,134 @@
+{% extends 'base.html' %}
+
+{% block title %}Unterricht {{ klasse.name }} - Lernfortschritt{% endblock %}
+
+{% block content %}
+<div class="flex flex-between flex-center mb-2">
+    <h1>📅 Unterricht: {{ klasse.name }}</h1>
+    <a href="{{ url_for('admin_klasse_detail', klasse_id=klasse.id) }}" class="btn btn-secondary">← Zurück zur Klasse</a>
+</div>
+
+<div class="card mb-2">
+    <div class="card-header">📆 Datum wählen</div>
+    <form method="GET" action="{{ url_for('admin_unterricht_datum', klasse_id=klasse.id, datum=datum) }}" class="flex gap-1" id="date-form">
+        <input type="date" name="datum" class="form-control" style="width: auto;" value="{{ datum }}" onchange="this.form.action = '{{ url_for('admin_unterricht_datum', klasse_id=klasse.id, datum='') }}' + this.value; this.form.submit();">
+    </form>
+</div>
+
+{% if students %}
+<div class="card">
+    <div class="card-header">👥 Schülerbewertung für {{ datum }}</div>
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th style="width: 80px;">Anwesend</th>
+                <th style="width: 120px;">Selbstständigkeit</th>
+                <th style="width: 120px;">Respekt</th>
+                <th style="width: 120px;">Fortschritt</th>
+                <th>Kommentar</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for student in students %}
+            <tr data-student-id="{{ student.student_id }}">
+                <td><strong>{{ student.nachname }}, {{ student.vorname }}</strong></td>
+                <td>
+                    <label class="attendance-toggle {% if student.anwesend %}active{% endif %}" onclick="toggleAttendance(this, {{ student.student_id }})">
+                        <input type="hidden" name="anwesend" value="{{ student.anwesend }}">
+                    </label>
+                </td>
+                <td>
+                    <div class="rating-group">
+                        {% for i in [1, 2, 3] %}
+                        <button type="button" class="rating-btn {% if student.admin_selbststaendigkeit == i %}active-{{ i }}{% endif %}"
+                                onclick="setRating(this, {{ student.student_id }}, 'admin_selbststaendigkeit', {{ i }})">{{ i }}</button>
+                        {% endfor %}
+                    </div>
+                </td>
+                <td>
+                    <div class="rating-group">
+                        {% for i in [1, 2, 3] %}
+                        <button type="button" class="rating-btn {% if student.admin_respekt == i %}active-{{ i }}{% endif %}"
+                                onclick="setRating(this, {{ student.student_id }}, 'admin_respekt', {{ i }})">{{ i }}</button>
+                        {% endfor %}
+                    </div>
+                </td>
+                <td>
+                    <div class="rating-group">
+                        {% for i in [1, 2, 3] %}
+                        <button type="button" class="rating-btn {% if student.admin_fortschritt == i %}active-{{ i }}{% endif %}"
+                                onclick="setRating(this, {{ student.student_id }}, 'admin_fortschritt', {{ i }})">{{ i }}</button>
+                        {% endfor %}
+                    </div>
+                </td>
+                <td>
+                    <input type="text" class="form-control" value="{{ student.admin_kommentar or '' }}"
+                           onchange="updateComment(this, {{ student.student_id }})"
+                           placeholder="Kommentar...">
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="card mt-2">
+    <div class="card-header">📊 Legende</div>
+    <div class="flex gap-2">
+        <div><span class="rating-btn active-1" style="pointer-events: none;">1</span> = Verbesserungsbedarf</div>
+        <div><span class="rating-btn active-2" style="pointer-events: none;">2</span> = Gut (Standard)</div>
+        <div><span class="rating-btn active-3" style="pointer-events: none;">3</span> = Sehr gut</div>
+    </div>
+</div>
+{% else %}
+<div class="card text-center text-muted">
+    <p>Keine Schüler in dieser Klasse.</p>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+const unterrichtId = {{ unterricht_id }};
+
+function saveStudent(studentId) {
+    const row = document.querySelector(`tr[data-student-id="${studentId}"]`);
+    const data = new FormData();
+    data.append('student_id', studentId);
+    data.append('anwesend', row.querySelector('.attendance-toggle').classList.contains('active') ? '1' : '');
+
+    // Get ratings
+    ['admin_selbststaendigkeit', 'admin_respekt', 'admin_fortschritt'].forEach(field => {
+        const active = row.querySelector(`.rating-group button[onclick*="${field}"].active-1, .rating-group button[onclick*="${field}"].active-2, .rating-group button[onclick*="${field}"].active-3`);
+        if (active) {
+            const val = active.textContent;
+            data.append(field, val);
+        }
+    });
+
+    data.append('admin_kommentar', row.querySelector('input[type="text"]').value);
+
+    fetch(`/admin/unterricht/${unterrichtId}/bewertung`, {
+        method: 'POST',
+        body: data
+    });
+}
+
+function toggleAttendance(el, studentId) {
+    el.classList.toggle('active');
+    saveStudent(studentId);
+}
+
+function setRating(btn, studentId, field, value) {
+    const group = btn.parentElement;
+    group.querySelectorAll('.rating-btn').forEach(b => {
+        b.classList.remove('active-1', 'active-2', 'active-3');
+    });
+    btn.classList.add(`active-${value}`);
+    saveStudent(studentId);
+}
+
+function updateComment(input, studentId) {
+    saveStudent(studentId);
+}
+{% endblock %}

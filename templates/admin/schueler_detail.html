@@ -1,0 +1,94 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ student.vorname }} {{ student.nachname }} - Lernfortschritt{% endblock %}
+
+{% block content %}
+<div class="flex flex-between flex-center mb-2">
+    <h1>👤 {{ student.nachname }}, {{ student.vorname }}</h1>
+    <form method="POST" action="{{ url_for('admin_schueler_loeschen', student_id=student.id) }}" onsubmit="return confirm('Schüler wirklich löschen?');">
+        <button type="submit" class="btn btn-danger">🗑️ Löschen</button>
+    </form>
+</div>
+
+<div class="grid grid-2">
+    <!-- Login Info -->
+    <div class="card">
+        <div class="card-header">🔑 Anmeldedaten</div>
+        <p><strong>Benutzername:</strong> <code>{{ student.username }}</code></p>
+        <p><strong>Passwort:</strong> <code>{{ student.password_plain }}</code></p>
+    </div>
+
+    <!-- Classes -->
+    <div class="card">
+        <div class="card-header">📁 Klassen</div>
+        {% if klassen %}
+        <ul class="material-list">
+            {% for klasse in klassen %}
+            <li class="material-item">
+                <a href="{{ url_for('admin_klasse_detail', klasse_id=klasse.id) }}">{{ klasse.name }}</a>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="text-muted">Keine Klassen zugewiesen.</p>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Move Student -->
+{% if klassen %}
+<div class="card mt-2">
+    <div class="card-header">🔄 Schüler verschieben</div>
+    <form method="POST" action="{{ url_for('admin_schueler_verschieben', student_id=student.id) }}" class="flex gap-1 flex-center">
+        <label>Von:</label>
+        <select name="from_klasse" class="form-control" style="width: auto;" required>
+            {% for klasse in klassen %}
+            <option value="{{ klasse.id }}">{{ klasse.name }}</option>
+            {% endfor %}
+        </select>
+        <label>Nach:</label>
+        <select name="to_klasse" class="form-control" style="width: auto;" required>
+            {% for klasse in all_klassen %}
+            <option value="{{ klasse.id }}">{{ klasse.name }}</option>
+            {% endfor %}
+        </select>
+        <button type="submit" class="btn btn-primary">Verschieben</button>
+    </form>
+</div>
+{% endif %}
+
+<!-- Assign Individual Task -->
+{% if klassen %}
+<div class="card mt-2">
+    <div class="card-header">📝 Individuelle Aufgabe zuweisen</div>
+    <form method="POST" action="{{ url_for('admin_schueler_aufgabe_zuweisen', student_id=student.id) }}" class="flex gap-1 flex-center">
+        <label>Klasse:</label>
+        <select name="klasse_id" class="form-control" style="width: auto;" required>
+            {% for klasse in klassen %}
+            <option value="{{ klasse.id }}">{{ klasse.name }}</option>
+            {% endfor %}
+        </select>
+        <label>Aufgabe:</label>
+        <select name="task_id" class="form-control" style="flex: 1;" required>
+            <option value="">-- Aufgabe wählen --</option>
+            {% for task in tasks %}
+            <option value="{{ task.id }}">{{ task.fach }} ({{ task.stufe }}): {{ task.name }}</option>
+            {% endfor %}
+        </select>
+        <button type="submit" class="btn btn-primary">Zuweisen</button>
+    </form>
+</div>
+
+<!-- Manual Task Completion -->
+<div class="card mt-2">
+    <div class="card-header">✅ Aufgabe manuell abschließen</div>
+    <div class="flex gap-1">
+        {% for klasse in klassen %}
+        <form method="POST" action="{{ url_for('admin_schueler_aufgabe_abschliessen', student_id=student.id, klasse_id=klasse.id) }}" style="display: inline;">
+            <button type="submit" class="btn btn-success">{{ klasse.name }} abschließen</button>
+        </form>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+{% endblock %}

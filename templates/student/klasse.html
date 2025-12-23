@@ -1,0 +1,248 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ klasse.name }} - Lernfortschritt{% endblock %}
+
+{% block content %}
+<div class="flex flex-between flex-center mb-2">
+    <h1>📁 {{ klasse.name }}</h1>
+    <a href="{{ url_for('student_dashboard') }}" class="btn btn-secondary">← Zurück</a>
+</div>
+
+{% if task %}
+<div class="grid grid-2">
+    <!-- Task Info -->
+    <div class="card task-card {% if task.abgeschlossen %}complete{% elif task.kategorie == 'bonus' %}bonus{% endif %}">
+        <div class="card-header flex flex-between">
+            <span>📝 Aktuelle Aufgabe</span>
+            {% if task.abgeschlossen %}
+            <span class="badge badge-success">✅ Abgeschlossen</span>
+            {% endif %}
+        </div>
+
+        <h2>{{ task.name }}</h2>
+        {% if task.kategorie == 'bonus' %}
+        <span class="badge badge-warning mb-1">⭐ Bonusaufgabe</span>
+        {% endif %}
+
+        <p class="text-muted">{{ task.fach }} · {{ task.stufe }}</p>
+
+        {% if task.lernziel %}
+        <div class="mt-1 mb-1" style="background: #f0f9ff; padding: 0.75rem; border-radius: 0.375rem; border-left: 3px solid #0284c7;">
+            <strong>🎯 Lernziel:</strong><br>
+            {{ task.lernziel }}
+        </div>
+        {% endif %}
+
+        {% if task.beschreibung %}
+        <div class="mt-1">
+            <strong>📋 Beschreibung:</strong><br>
+            {{ task.beschreibung }}
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Subtasks -->
+    <div class="card">
+        <div class="card-header">✅ Teilaufgaben</div>
+        {% if subtasks %}
+        <ul class="subtask-list">
+            {% for sub in subtasks %}
+            <li class="subtask-item {% if sub.erledigt %}completed{% endif %}" data-subtask-id="{{ sub.id }}">
+                <input type="checkbox" class="subtask-checkbox"
+                       {% if sub.erledigt %}checked{% endif %}
+                       {% if task.abgeschlossen %}disabled{% endif %}
+                       onchange="toggleSubtask({{ task.id }}, {{ sub.id }}, this.checked)">
+                <span class="subtask-text">{{ sub.beschreibung }}</span>
+            </li>
+            {% endfor %}
+        </ul>
+
+        <div class="mt-1">
+            <div class="flex flex-between mb-1">
+                <span>Fortschritt</span>
+                <span id="progress-text">{{ subtasks|selectattr('erledigt')|list|length }}/{{ subtasks|length }}</span>
+            </div>
+            <div class="progress-container">
+                <div class="progress-bar" id="progress-bar"
+                     style="width: {{ (subtasks|selectattr('erledigt')|list|length / subtasks|length * 100) if subtasks|length > 0 else 0 }}%;"></div>
+            </div>
+        </div>
+        {% else %}
+        <p class="text-muted">Keine Teilaufgaben definiert.</p>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Materials -->
+{% if materials %}
+<div class="card mt-2">
+    <div class="card-header">📎 Materialien</div>
+    <ul class="material-list">
+        {% for mat in materials %}
+        <li class="material-item">
+            {% if mat.typ == 'link' %}
+            <span class="material-icon">🔗</span>
+            <a href="{{ mat.pfad }}" target="_blank">{{ mat.beschreibung or mat.pfad }}</a>
+            {% else %}
+            <span class="material-icon">📄</span>
+            <a href="{{ url_for('static', filename='uploads/' + mat.pfad) }}" target="_blank">{{ mat.beschreibung or mat.pfad }}</a>
+            {% endif %}
+        </li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}
+
+<!-- Quiz -->
+{% if task.quiz_json and not task.abgeschlossen %}
+<div class="card mt-2">
+    <div class="card-header">❓ Quiz</div>
+    {% if quiz_attempts %}
+    <p>Bisherige Versuche: {{ quiz_attempts|length }}</p>
+    {% for attempt in quiz_attempts[:3] %}
+    <p>
+        {{ attempt.timestamp[:10] }}: {{ attempt.punkte }}/{{ attempt.max_punkte }} Punkte
+        {% if attempt.bestanden %}<span class="badge badge-success">✅ Bestanden</span>{% else %}<span class="badge badge-danger">❌</span>{% endif %}
+    </p>
+    {% endfor %}
+    {% endif %}
+    <a href="{{ url_for('student_quiz', student_task_id=task.id) }}" class="btn btn-primary">Quiz starten</a>
+    <p class="text-muted mt-1">Du brauchst mindestens 80% richtige Antworten.</p>
+</div>
+{% elif task.quiz_json and task.abgeschlossen %}
+<div class="card mt-2">
+    <div class="card-header">❓ Quiz</div>
+    <p class="text-success">✅ Quiz bestanden!</p>
+</div>
+{% endif %}
+
+{% else %}
+<div class="card text-center text-muted">
+    <p>Keine Aufgabe zugewiesen.</p>
+</div>
+{% endif %}
+
+<!-- Self Evaluation -->
+{% if unterricht %}
+<div class="card mt-2">
+    <div class="card-header">📊 Selbstbewertung pro Unterricht</div>
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Datum</th>
+                <th>Selbstständigkeit</th>
+                <th>Respekt</th>
+                <th>Aktion</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for u in unterricht %}
+            <tr>
+                <td>{{ u.datum }}</td>
+                <td>
+                    {% if u.selbst_selbststaendigkeit %}
+                    <span class="rating-btn active-{{ u.selbst_selbststaendigkeit }}" style="pointer-events: none;">{{ u.selbst_selbststaendigkeit }}</span>
+                    {% else %}
+                    <span class="text-muted">-</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if u.selbst_respekt %}
+                    <span class="rating-btn active-{{ u.selbst_respekt }}" style="pointer-events: none;">{{ u.selbst_respekt }}</span>
+                    {% else %}
+                    <span class="text-muted">-</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if not u.selbst_selbststaendigkeit %}
+                    <button class="btn btn-sm btn-primary" onclick="showEvalForm({{ u.unterricht_id }})">Bewerten</button>
+                    {% else %}
+                    <span class="text-muted">✓</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<!-- Self Evaluation Modal/Form -->
+<div id="eval-modal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1000;">
+    <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 2rem; border-radius: 0.5rem; max-width: 400px; width: 90%;">
+        <h3 class="mb-2">📊 Selbstbewertung</h3>
+        <form id="eval-form" method="POST">
+            <div class="form-group">
+                <label><strong>Selbstständigkeit</strong></label>
+                <p class="text-muted">Wie gut hast du selbstständig gearbeitet?</p>
+                <div class="rating-group">
+                    {% for i in [1, 2, 3] %}
+                    <button type="button" class="rating-btn" onclick="selectRating(this, 'selbst_selbststaendigkeit', {{ i }})">{{ i }}</button>
+                    {% endfor %}
+                </div>
+                <input type="hidden" name="selbst_selbststaendigkeit" id="selbst_selbststaendigkeit" value="2">
+            </div>
+            <div class="form-group">
+                <label><strong>Respekt</strong></label>
+                <p class="text-muted">Wie respektvoll warst du gegenüber anderen?</p>
+                <div class="rating-group">
+                    {% for i in [1, 2, 3] %}
+                    <button type="button" class="rating-btn" onclick="selectRating(this, 'selbst_respekt', {{ i }})">{{ i }}</button>
+                    {% endfor %}
+                </div>
+                <input type="hidden" name="selbst_respekt" id="selbst_respekt" value="2">
+            </div>
+            <div class="flex gap-1 mt-2">
+                <button type="submit" class="btn btn-primary">Speichern</button>
+                <button type="button" class="btn btn-secondary" onclick="hideEvalForm()">Abbrechen</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+function toggleSubtask(studentTaskId, subtaskId, checked) {
+    fetch(`/schueler/aufgabe/${studentTaskId}/teilaufgabe/${subtaskId}`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({erledigt: checked})
+    }).then(r => r.json()).then(data => {
+        // Update UI
+        const item = document.querySelector(`[data-subtask-id="${subtaskId}"]`);
+        if (checked) {
+            item.classList.add('completed');
+        } else {
+            item.classList.remove('completed');
+        }
+
+        // Update progress
+        const completed = document.querySelectorAll('.subtask-item.completed').length;
+        const total = document.querySelectorAll('.subtask-item').length;
+        document.getElementById('progress-text').textContent = `${completed}/${total}`;
+        document.getElementById('progress-bar').style.width = `${completed/total*100}%`;
+
+        if (data.task_complete) {
+            location.reload();
+        }
+    });
+}
+
+function showEvalForm(unterrichtId) {
+    document.getElementById('eval-form').action = `/schueler/unterricht/${unterrichtId}/selbstbewertung`;
+    document.getElementById('eval-modal').style.display = 'block';
+}
+
+function hideEvalForm() {
+    document.getElementById('eval-modal').style.display = 'none';
+}
+
+function selectRating(btn, field, value) {
+    const group = btn.parentElement;
+    group.querySelectorAll('.rating-btn').forEach(b => {
+        b.classList.remove('active-1', 'active-2', 'active-3');
+    });
+    btn.classList.add(`active-${value}`);
+    document.getElementById(field).value = value;
+}
+{% endblock %}

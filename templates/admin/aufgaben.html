@@ -1,0 +1,57 @@
+{% extends 'base.html' %}
+
+{% block title %}Aufgaben - Lernfortschritt{% endblock %}
+
+{% block content %}
+<div class="flex flex-between flex-center mb-2">
+    <h1>📝 Aufgaben</h1>
+    <a href="{{ url_for('admin_aufgabe_neu') }}" class="btn btn-primary">+ Neue Aufgabe</a>
+</div>
+
+{% if tasks %}
+<div class="card">
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Fach</th>
+                <th>Stufe</th>
+                <th>Kategorie</th>
+                <th>Aktionen</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for task in tasks %}
+            <tr>
+                <td>
+                    <a href="{{ url_for('admin_aufgabe_detail', task_id=task.id) }}">
+                        <strong>{{ task.name }}</strong>
+                    </a>
+                    {% if task.voraussetzung_name %}
+                    <br><small class="text-muted">Voraussetzung: {{ task.voraussetzung_name }}</small>
+                    {% endif %}
+                </td>
+                <td>{{ task.fach }}</td>
+                <td>{{ task.stufe }}</td>
+                <td>
+                    {% if task.kategorie == 'pflicht' %}
+                    <span class="badge badge-primary">Pflicht</span>
+                    {% else %}
+                    <span class="badge badge-warning">⭐ Bonus</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <a href="{{ url_for('admin_aufgabe_detail', task_id=task.id) }}" class="btn btn-sm btn-secondary">Bearbeiten</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="card text-center text-muted">
+    <p>Noch keine Aufgaben vorhanden.</p>
+    <a href="{{ url_for('admin_aufgabe_neu') }}" class="btn btn-primary mt-1">Erste Aufgabe erstellen</a>
+</div>
+{% endif %}
+{% endblock %}

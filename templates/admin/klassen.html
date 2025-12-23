@@ -1,0 +1,49 @@
+{% extends 'base.html' %}
+
+{% block title %}Klassen - Lernfortschritt{% endblock %}
+
+{% block content %}
+<div class="flex flex-between flex-center mb-2">
+    <h1>📁 Klassen</h1>
+</div>
+
+<div class="card mb-2">
+    <div class="card-header">➕ Neue Klasse</div>
+    <form method="POST" action="{{ url_for('admin_klasse_neu') }}" class="flex gap-1">
+        <input type="text" name="name" class="form-control" placeholder="Klassenname" required style="flex: 1;">
+        <button type="submit" class="btn btn-primary">Erstellen</button>
+    </form>
+</div>
+
+{% if klassen %}
+<div class="card">
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th style="width: 150px;">Aktionen</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for klasse in klassen %}
+            <tr>
+                <td>
+                    <a href="{{ url_for('admin_klasse_detail', klasse_id=klasse.id) }}">
+                        <strong>{{ klasse.name }}</strong>
+                    </a>
+                </td>
+                <td>
+                    <a href="{{ url_for('admin_klasse_detail', klasse_id=klasse.id) }}" class="btn btn-sm btn-secondary">Öffnen</a>
+                    <a href="{{ url_for('admin_unterricht', klasse_id=klasse.id) }}" class="btn btn-sm btn-primary">📅</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="card text-center text-muted">
+    <p>Noch keine Klassen vorhanden.</p>
+</div>
+{% endif %}
+{% endblock %}

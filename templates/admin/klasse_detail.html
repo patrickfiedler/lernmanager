@@ -1,0 +1,94 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ klasse.name }} - Lernfortschritt{% endblock %}
+
+{% block content %}
+<div class="flex flex-between flex-center mb-2">
+    <h1>📁 {{ klasse.name }}</h1>
+    <div class="flex gap-1">
+        <a href="{{ url_for('admin_unterricht', klasse_id=klasse.id) }}" class="btn btn-primary">📅 Unterricht</a>
+        <form method="POST" action="{{ url_for('admin_klasse_loeschen', klasse_id=klasse.id) }}" style="display: inline;" onsubmit="return confirm('Klasse wirklich löschen?');">
+            <button type="submit" class="btn btn-danger">🗑️ Löschen</button>
+        </form>
+    </div>
+</div>
+
+<!-- Batch Add Students -->
+<div class="card mb-2">
+    <div class="card-header">👥 Schüler hinzufügen (Batch)</div>
+    <form method="POST" action="{{ url_for('admin_klasse_schueler_hinzufuegen', klasse_id=klasse.id) }}">
+        <div class="form-group">
+            <label>Ein Schüler pro Zeile: <code>Nachname, Vorname</code></label>
+            <textarea name="batch_input" class="form-control" rows="5" placeholder="Müller, Max&#10;Schmidt, Anna&#10;Weber, Tim"></textarea>
+        </div>
+        <button type="submit" class="btn btn-primary">Hinzufügen</button>
+    </form>
+</div>
+
+<!-- Assign Task to Class -->
+<div class="card mb-2">
+    <div class="card-header">📝 Aufgabe für alle zuweisen</div>
+    <form method="POST" action="{{ url_for('admin_klasse_aufgabe_zuweisen', klasse_id=klasse.id) }}" class="flex gap-1">
+        <select name="task_id" class="form-control" style="flex: 1;" required>
+            <option value="">-- Aufgabe wählen --</option>
+            {% for task in tasks %}
+            <option value="{{ task.id }}">{{ task.fach }} ({{ task.stufe }}): {{ task.name }}</option>
+            {% endfor %}
+        </select>
+        <button type="submit" class="btn btn-primary">Zuweisen</button>
+    </form>
+</div>
+
+<!-- Students List -->
+<div class="card">
+    <div class="card-header">👥 Schüler ({{ students|length }})</div>
+    {% if students %}
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Benutzername</th>
+                <th>Passwort</th>
+                <th>Aktuelle Aufgabe</th>
+                <th>Status</th>
+                <th>Aktionen</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for student in students %}
+            <tr>
+                <td>
+                    <a href="{{ url_for('admin_schueler_detail', student_id=student.id) }}">
+                        <strong>{{ student.nachname }}, {{ student.vorname }}</strong>
+                    </a>
+                </td>
+                <td><code>{{ student.username }}</code></td>
+                <td><code>{{ student.password_plain }}</code></td>
+                <td>
+                    {% if student.task_name %}
+                        {{ student.task_name }}
+                    {% else %}
+                        <span class="text-muted">-</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if student.abgeschlossen %}
+                        <span class="badge badge-success">✅ Fertig</span>
+                    {% elif student.task_id %}
+                        <span class="badge badge-primary">🔄 In Arbeit</span>
+                    {% else %}
+                        <span class="badge badge-warning">⏳ Keine Aufgabe</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <a href="{{ url_for('admin_schueler_detail', student_id=student.id) }}" class="btn btn-sm btn-secondary">Bearbeiten</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="text-muted text-center">Noch keine Schüler in dieser Klasse.</p>
+    {% endif %}
+</div>
+{% endblock %}

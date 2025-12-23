@@ -1,0 +1,48 @@
+{% extends 'base.html' %}
+
+{% block title %}Quiz Ergebnis - Lernfortschritt{% endblock %}
+
+{% block content %}
+<div class="text-center mb-2">
+    {% if bestanden %}
+    <h1>🎉 Bestanden!</h1>
+    <p class="text-success" style="font-size: 1.5rem;">Du hast {{ punkte }} von {{ max_punkte }} Punkten erreicht.</p>
+    {% else %}
+    <h1>❌ Leider nicht bestanden</h1>
+    <p class="text-danger" style="font-size: 1.5rem;">Du hast {{ punkte }} von {{ max_punkte }} Punkten erreicht.</p>
+    <p>Du brauchst mindestens 80% ({{ (max_punkte * 0.8)|int }} Punkte).</p>
+    {% endif %}
+</div>
+
+<div class="card mb-2">
+    <div class="card-header">📊 Deine Antworten</div>
+    {% for question in quiz.questions %}
+    <div class="quiz-question">
+        <h4>Frage {{ loop.index }}: {{ question.question }}</h4>
+        {% set q_idx = loop.index0|string %}
+        {% set user_answers = antworten.get(q_idx, []) %}
+        {% for answer in question.answers %}
+        {% set is_correct = loop.index0 in question.correct %}
+        {% set was_selected = loop.index0 in user_answers %}
+        <div class="quiz-option {% if is_correct %}correct{% elif was_selected %}incorrect{% endif %}">
+            {% if was_selected %}
+                {% if is_correct %}✅{% else %}❌{% endif %}
+            {% elif is_correct %}
+                ✓
+            {% else %}
+                ○
+            {% endif %}
+            <span>{{ answer }}</span>
+        </div>
+        {% endfor %}
+    </div>
+    {% endfor %}
+</div>
+
+<div class="flex gap-1">
+    {% if not bestanden %}
+    <a href="{{ url_for('student_quiz', student_task_id=task.id) }}" class="btn btn-primary">🔄 Erneut versuchen</a>
+    {% endif %}
+    <a href="{{ url_for('student_dashboard') }}" class="btn btn-secondary">← Zurück</a>
+</div>
+{% endblock %}
