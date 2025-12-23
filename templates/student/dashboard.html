@@ -3,20 +3,7 @@
 {% block title %}Meine Aufgaben - Lernfortschritt{% endblock %}
 
 {% block content %}
-<div class="flex flex-between mb-2">
-    <h1>Hallo, {{ student.vorname }}!</h1>
-    <div>
-        {% if game_character %}
-        <a href="{{ url_for('game.game_view') }}" class="btn btn-success">
-            🎮 Spielmodus (Level {{ game_character.level }})
-        </a>
-        {% else %}
-        <a href="{{ url_for('game.game_setup') }}" class="btn btn-secondary">
-            🎮 Spielmodus starten
-        </a>
-        {% endif %}
-    </div>
-</div>
+<h1 class="mb-2">Hallo, {{ student.vorname }}!</h1>
 
 {% if klassen %}
 <div class="grid grid-2">

@@ -8,15 +8,10 @@ from werkzeug.utils import secure_filename
 import config
 import models
 from utils import generate_username, generate_password, allowed_file
-from game_routes import game_bp
-
 app = Flask(__name__)
 app.secret_key = config.SECRET_KEY
 app.config['UPLOAD_FOLDER'] = config.UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = config.MAX_CONTENT_LENGTH
-
-# Register game mode blueprint
-app.register_blueprint(game_bp)
 
 
 # ============ Auth Decorators ============
@@ -415,7 +410,6 @@ def admin_unterricht_bewertung(unterricht_id):
 @app.route('/schueler')
 @student_required
 def student_dashboard():
-    import game_models
     student_id = session['student_id']
     student = models.get_student(student_id)
     klassen = models.get_student_klassen(student_id)
@@ -431,11 +425,8 @@ def student_dashboard():
             task['completed_subtasks'] = sum(1 for s in subtasks if s['erledigt'])
         tasks_by_klasse[klasse['id']] = task
 
-    # Get game character if exists
-    game_character = game_models.get_character(student_id)
-
     return render_template('student/dashboard.html', student=student, klassen=klassen,
-                           tasks_by_klasse=tasks_by_klasse, game_character=game_character)
+                           tasks_by_klasse=tasks_by_klasse)
 
 
 @app.route('/schueler/klasse/<int:klasse_id>')
