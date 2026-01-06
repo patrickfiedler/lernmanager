@@ -602,9 +602,21 @@ def student_quiz(student_task_id):
         if models.check_task_completion(student_task_id):
             models.mark_task_complete(student_task_id)
 
+        # Transform quiz for display (JSON uses 'text'/'options', template expects 'question'/'answers')
+        display_quiz = {
+            'questions': [
+                {
+                    'question': q['text'],
+                    'answers': q['options'],
+                    'correct': q['correct']
+                }
+                for q in quiz['questions']
+            ]
+        }
+
         return render_template('student/quiz_result.html',
                                task=task,
-                               quiz=quiz,
+                               quiz=display_quiz,
                                punkte=punkte,
                                max_punkte=max_punkte,
                                bestanden=bestanden,
@@ -624,15 +636,16 @@ def student_quiz(student_task_id):
     for original_idx in question_order:
         q = quiz['questions'][original_idx]
 
-        # Create shuffled answer order
-        answer_order = list(range(len(q['answers'])))
+        # Create shuffled answer order (JSON uses 'options' for answers)
+        options = q['options']
+        answer_order = list(range(len(options)))
         quiz_random.shuffle(answer_order)
         answer_maps.append(answer_order)
 
-        # Build shuffled question
+        # Build shuffled question (template expects 'question' and 'answers')
         shuffled_q = {
-            'question': q['question'],
-            'answers': [q['answers'][i] for i in answer_order],
+            'question': q['text'],
+            'answers': [options[i] for i in answer_order],
             'correct': q['correct']  # Keep original for reference (not used in template)
         }
         shuffled_questions.append(shuffled_q)
