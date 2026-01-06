@@ -564,20 +564,34 @@ def student_quiz(student_task_id):
     quiz = json.loads(task['quiz_json'])
 
     if request.method == 'POST':
-        # Grade the quiz
+        # Grade the quiz using the mapping from hidden fields
         punkte = 0
         max_punkte = len(quiz['questions'])
         antworten = {}
 
-        for i, question in enumerate(quiz['questions']):
-            submitted = request.form.getlist(f'q{i}')
-            submitted_indices = [int(x) for x in submitted]
-            correct = question['correct']
+        # Get the question order mapping (shuffled index -> original index)
+        question_order = json.loads(request.form.get('question_order', '[]'))
 
-            antworten[str(i)] = submitted_indices
+        for shuffled_idx in range(len(quiz['questions'])):
+            # Map shuffled question index to original
+            original_q_idx = question_order[shuffled_idx] if question_order else shuffled_idx
+            question = quiz['questions'][original_q_idx]
+
+            # Get answer mapping for this question (shuffled answer index -> original answer index)
+            answer_map = json.loads(request.form.get(f'answer_map_{shuffled_idx}', '[]'))
+
+            # Get submitted answers (these are shuffled indices)
+            submitted = request.form.getlist(f'q{shuffled_idx}')
+            submitted_shuffled = [int(x) for x in submitted]
+
+            # Map submitted shuffled indices back to original indices
+            submitted_original = [answer_map[i] for i in submitted_shuffled] if answer_map else submitted_shuffled
+
+            correct = question['correct']
+            antworten[str(original_q_idx)] = submitted_original
 
             # Check if answer is correct (all correct options selected, no incorrect ones)
-            if set(submitted_indices) == set(correct):
+            if set(submitted_original) == set(correct):
                 punkte += 1
 
         attempt_id, bestanden = models.save_quiz_attempt(
@@ -596,7 +610,41 @@ def student_quiz(student_task_id):
                                bestanden=bestanden,
                                antworten=antworten)
 
-    return render_template('student/quiz.html', task=task, quiz=quiz, student_task_id=student_task_id)
+    # GET: Shuffle questions and answers for display
+    import random as quiz_random
+
+    # Create shuffled question order (list of original indices in shuffled order)
+    question_order = list(range(len(quiz['questions'])))
+    quiz_random.shuffle(question_order)
+
+    # Build shuffled quiz with answer mappings
+    shuffled_questions = []
+    answer_maps = []  # For each question: list mapping shuffled index -> original index
+
+    for original_idx in question_order:
+        q = quiz['questions'][original_idx]
+
+        # Create shuffled answer order
+        answer_order = list(range(len(q['answers'])))
+        quiz_random.shuffle(answer_order)
+        answer_maps.append(answer_order)
+
+        # Build shuffled question
+        shuffled_q = {
+            'question': q['question'],
+            'answers': [q['answers'][i] for i in answer_order],
+            'correct': q['correct']  # Keep original for reference (not used in template)
+        }
+        shuffled_questions.append(shuffled_q)
+
+    shuffled_quiz = {'questions': shuffled_questions}
+
+    return render_template('student/quiz.html',
+                           task=task,
+                           quiz=shuffled_quiz,
+                           student_task_id=student_task_id,
+                           question_order=json.dumps(question_order),
+                           answer_maps=[json.dumps(m) for m in answer_maps])
 
 
 @app.route('/schueler/unterricht/<int:unterricht_id>/selbstbewertung', methods=['POST'])
