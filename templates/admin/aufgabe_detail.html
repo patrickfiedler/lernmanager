@@ -17,28 +17,14 @@
     </div>
 </div>
 
-<div class="grid grid-2">
-    <!-- Basic Info -->
-    <div class="card">
-        <div class="card-header">ℹ️ Grunddaten</div>
-        <form method="POST" action="{{ url_for('admin_aufgabe_bearbeiten', task_id=task.id) }}">
+<!-- Basic Info -->
+<div class="card">
+    <div class="card-header">ℹ️ Grunddaten</div>
+    <form method="POST" action="{{ url_for('admin_aufgabe_bearbeiten', task_id=task.id) }}">
+        <div class="grid grid-2">
             <div class="form-group">
                 <label>Name</label>
                 <input type="text" name="name" class="form-control" value="{{ task.name }}" required>
-            </div>
-            <div class="grid grid-2">
-                <div class="form-group">
-                    <label>Fach</label>
-                    <select name="fach" class="form-control" required>
-                        {% for s in subjects %}<option value="{{ s }}" {% if task.fach == s %}selected{% endif %}>{{ s }}</option>{% endfor %}
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label>Stufe</label>
-                    <select name="stufe" class="form-control" required>
-                        {% for l in levels %}<option value="{{ l }}" {% if task.stufe == l %}selected{% endif %}>{{ l }}</option>{% endfor %}
-                    </select>
-                </div>
             </div>
             <div class="form-group">
                 <label>Kategorie</label>
@@ -48,53 +34,71 @@
                 </select>
             </div>
             <div class="form-group">
-                <label>Lernziel <small class="text-muted">(Markdown)</small></label>
-                <div class="markdown-editor">
-                    <textarea name="lernziel" id="lernziel" class="form-control" rows="3" oninput="updatePreview('lernziel', 'preview-lernziel')">{{ task.lernziel or '' }}</textarea>
-                    <div class="markdown-preview markdown-content" id="preview-lernziel"></div>
-                </div>
-            </div>
-            <div class="form-group">
-                <label>Beschreibung <small class="text-muted">(Markdown)</small></label>
-                <div class="markdown-editor">
-                    <textarea name="beschreibung" id="beschreibung" class="form-control" rows="4" oninput="updatePreview('beschreibung', 'preview-beschreibung')">{{ task.beschreibung or '' }}</textarea>
-                    <div class="markdown-preview markdown-content" id="preview-beschreibung"></div>
-                </div>
-            </div>
-            <div class="form-group">
-                <label>Voraussetzungen</label>
-                <select name="voraussetzungen" class="form-control" multiple size="4">
-                    {% for t in all_tasks %}
-                    {% if t.id != task.id %}
-                    <option value="{{ t.id }}" {% if t.id in voraussetzungen|map(attribute='id')|list %}selected{% endif %}>{{ t.fach }} ({{ t.stufe }}): {{ t.name }}</option>
-                    {% endif %}
-                    {% endfor %}
+                <label>Fach</label>
+                <select name="fach" class="form-control" required>
+                    {% for s in subjects %}<option value="{{ s }}" {% if task.fach == s %}selected{% endif %}>{{ s }}</option>{% endfor %}
                 </select>
-                <small class="text-muted">Strg/Cmd für Mehrfachauswahl</small>
             </div>
-            <input type="hidden" name="quiz_json" value="{{ task.quiz_json or '' }}">
-            <button type="submit" class="btn btn-primary">Speichern</button>
-        </form>
-    </div>
-
-    <!-- Subtasks -->
-    <div class="card">
-        <div class="card-header">✅ Teilaufgaben</div>
-        <form method="POST" action="{{ url_for('admin_aufgabe_teilaufgaben', task_id=task.id) }}">
-            <div id="subtask-list">
-                {% for st in subtasks %}
-                <div class="subtask-input-row">
-                    <textarea name="subtasks[]" class="form-control" rows="8" placeholder="Teilaufgabe... (Markdown unterstützt)">{{ st.beschreibung }}</textarea>
-                    <button type="button" class="btn btn-danger btn-remove" onclick="removeSubtask(this)">✕</button>
-                </div>
+            <div class="form-group">
+                <label>Stufe</label>
+                <select name="stufe" class="form-control" required>
+                    {% for l in levels %}<option value="{{ l }}" {% if task.stufe == l %}selected{% endif %}>{{ l }}</option>{% endfor %}
+                </select>
+            </div>
+        </div>
+        <div class="form-group">
+            <label>Lernziel <small class="text-muted">(Markdown)</small></label>
+            <div class="markdown-editor">
+                <textarea name="lernziel" id="lernziel" class="form-control" rows="3" oninput="updatePreview('lernziel', 'preview-lernziel')">{{ task.lernziel or '' }}</textarea>
+                <div class="markdown-preview markdown-content" id="preview-lernziel"></div>
+            </div>
+        </div>
+        <div class="form-group">
+            <label>Beschreibung <small class="text-muted">(Markdown)</small></label>
+            <div class="markdown-editor">
+                <textarea name="beschreibung" id="beschreibung" class="form-control" rows="4" oninput="updatePreview('beschreibung', 'preview-beschreibung')">{{ task.beschreibung or '' }}</textarea>
+                <div class="markdown-preview markdown-content" id="preview-beschreibung"></div>
+            </div>
+        </div>
+        <div class="form-group">
+            <label>Voraussetzungen</label>
+            <select name="voraussetzungen" class="form-control" multiple size="4">
+                {% for t in all_tasks %}
+                {% if t.id != task.id %}
+                <option value="{{ t.id }}" {% if t.id in voraussetzungen|map(attribute='id')|list %}selected{% endif %}>{{ t.fach }} ({{ t.stufe }}): {{ t.name }}</option>
+                {% endif %}
                 {% endfor %}
+            </select>
+            <small class="text-muted">Strg/Cmd für Mehrfachauswahl</small>
+        </div>
+        <input type="hidden" name="quiz_json" value="{{ task.quiz_json or '' }}">
+        <button type="submit" class="btn btn-primary">Speichern</button>
+    </form>
+</div>
+
+<!-- Subtasks -->
+<div class="card mt-2">
+    <div class="card-header">✅ Teilaufgaben <small class="text-muted">(Markdown)</small></div>
+    <form method="POST" action="{{ url_for('admin_aufgabe_teilaufgaben', task_id=task.id) }}">
+        <div id="subtask-list">
+            {% for st in subtasks %}
+            <div class="subtask-edit-item" data-index="{{ loop.index0 }}">
+                <div class="subtask-edit-header">
+                    <span class="subtask-edit-number">{{ loop.index }}</span>
+                    <button type="button" class="btn btn-danger btn-sm" onclick="removeSubtask(this)">✕ Entfernen</button>
+                </div>
+                <div class="markdown-editor">
+                    <textarea name="subtasks[]" class="form-control subtask-textarea" rows="6" placeholder="Teilaufgabe..." oninput="updateSubtaskPreview(this)">{{ st.beschreibung }}</textarea>
+                    <div class="markdown-preview markdown-content"></div>
+                </div>
             </div>
-            <div class="flex gap-1 mt-1">
-                <button type="button" class="btn btn-secondary" onclick="addSubtask()">+ Teilaufgabe</button>
-                <button type="submit" class="btn btn-primary">Speichern</button>
-            </div>
-        </form>
-    </div>
+            {% endfor %}
+        </div>
+        <div class="flex gap-1 mt-1">
+            <button type="button" class="btn btn-secondary" onclick="addSubtask()">+ Teilaufgabe</button>
+            <button type="submit" class="btn btn-primary">Speichern</button>
+        </div>
+    </form>
 </div>
 
 <!-- Materials -->
@@ -188,32 +192,57 @@
 {% endblock %}
 
 {% block scripts %}
-// Markdown preview
+// Markdown preview for main fields
 function updatePreview(textareaId, previewId) {
     const text = document.getElementById(textareaId).value;
     document.getElementById(previewId).innerHTML = marked.parse(text || '');
 }
 
-// Initialize previews on page load
+// Markdown preview for subtasks
+function updateSubtaskPreview(textarea) {
+    const preview = textarea.closest('.markdown-editor').querySelector('.markdown-preview');
+    preview.innerHTML = marked.parse(textarea.value || '');
+}
+
+// Initialize all previews on page load
 document.addEventListener('DOMContentLoaded', function() {
     updatePreview('lernziel', 'preview-lernziel');
     updatePreview('beschreibung', 'preview-beschreibung');
+    // Initialize subtask previews
+    document.querySelectorAll('.subtask-textarea').forEach(textarea => {
+        updateSubtaskPreview(textarea);
+    });
+    renumberSubtasks();
 });
 
 // Subtask management
 function addSubtask() {
     const list = document.getElementById('subtask-list');
-    const row = document.createElement('div');
-    row.className = 'subtask-input-row';
-    row.innerHTML = `
-        <textarea name="subtasks[]" class="form-control" rows="8" placeholder="Teilaufgabe... (Markdown unterstützt)"></textarea>
-        <button type="button" class="btn btn-danger btn-remove" onclick="removeSubtask(this)">✕</button>
+    const count = list.querySelectorAll('.subtask-edit-item').length;
+    const item = document.createElement('div');
+    item.className = 'subtask-edit-item';
+    item.innerHTML = `
+        <div class="subtask-edit-header">
+            <span class="subtask-edit-number">${count + 1}</span>
+            <button type="button" class="btn btn-danger btn-sm" onclick="removeSubtask(this)">✕ Entfernen</button>
+        </div>
+        <div class="markdown-editor">
+            <textarea name="subtasks[]" class="form-control subtask-textarea" rows="6" placeholder="Teilaufgabe..." oninput="updateSubtaskPreview(this)"></textarea>
+            <div class="markdown-preview markdown-content"></div>
+        </div>
     `;
-    list.appendChild(row);
-    row.querySelector('textarea').focus();
+    list.appendChild(item);
+    item.querySelector('textarea').focus();
 }
 
 function removeSubtask(btn) {
-    btn.closest('.subtask-input-row').remove();
+    btn.closest('.subtask-edit-item').remove();
+    renumberSubtasks();
+}
+
+function renumberSubtasks() {
+    document.querySelectorAll('.subtask-edit-item').forEach((item, index) => {
+        item.querySelector('.subtask-edit-number').textContent = index + 1;
+    });
 }
 {% endblock %}

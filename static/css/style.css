@@ -605,23 +605,31 @@ select.form-control {
 }
 
 /* Subtask Editor */
-.subtask-input-row {
+.subtask-edit-item {
+    background: var(--gray-50);
+    border: 1px solid var(--gray-200);
+    border-radius: 0.5rem;
+    padding: 1rem;
+    margin-bottom: 1rem;
+}
+
+.subtask-edit-header {
     display: flex;
-    gap: 0.5rem;
+    justify-content: space-between;
+    align-items: center;
     margin-bottom: 0.75rem;
-    align-items: flex-start;
 }
 
-.subtask-input-row textarea {
-    flex: 1;
-    min-height: 180px;
-    resize: vertical;
-}
-
-.subtask-input-row .btn-remove {
-    flex-shrink: 0;
-    padding: 0.5rem;
-    line-height: 1;
+.subtask-edit-number {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    background: var(--primary);
+    color: white;
+    border-radius: 50%;
+    font-weight: 600;
 }
 
 #subtask-list:empty::after {
