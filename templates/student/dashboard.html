@@ -30,7 +30,7 @@
             <p class="text-muted mb-1">{{ task.fach }} · {{ task.stufe }}</p>
 
             {% if task.lernziel %}
-            <p class="mb-1"><strong>🎯 Lernziel:</strong> {{ task.lernziel }}</p>
+            <div class="mb-1"><strong>🎯 Lernziel:</strong> <span class="markdown-content">{{ task.lernziel | markdown }}</span></div>
             {% endif %}
 
             <!-- Progress -->

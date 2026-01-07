@@ -603,3 +603,156 @@ select.form-control {
 .attendance-toggle.active::after {
     transform: translateX(1.5rem);
 }
+
+/* Subtask Editor */
+.subtask-input-row {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+    align-items: flex-start;
+}
+
+.subtask-input-row textarea {
+    flex: 1;
+    min-height: 180px;
+    resize: vertical;
+}
+
+.subtask-input-row .btn-remove {
+    flex-shrink: 0;
+    padding: 0.5rem;
+    line-height: 1;
+}
+
+#subtask-list:empty::after {
+    content: 'Keine Teilaufgaben. Klicke "+ Teilaufgabe" um eine hinzuzufügen.';
+    color: var(--gray-500);
+    font-style: italic;
+    display: block;
+    padding: 1rem;
+    text-align: center;
+}
+
+/* Markdown Content Styles */
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3,
+.markdown-content h4,
+.markdown-content h5,
+.markdown-content h6 {
+    margin-top: 1rem;
+    margin-bottom: 0.5rem;
+    font-weight: 600;
+    line-height: 1.25;
+}
+
+.markdown-content h1 { font-size: 1.5rem; }
+.markdown-content h2 { font-size: 1.25rem; }
+.markdown-content h3 { font-size: 1.125rem; }
+.markdown-content h4,
+.markdown-content h5,
+.markdown-content h6 { font-size: 1rem; }
+
+.markdown-content p {
+    margin-bottom: 0.75rem;
+}
+
+.markdown-content ul,
+.markdown-content ol {
+    margin-bottom: 0.75rem;
+    padding-left: 1.5rem;
+}
+
+.markdown-content li {
+    margin-bottom: 0.25rem;
+}
+
+.markdown-content code {
+    background: var(--gray-100);
+    padding: 0.125rem 0.375rem;
+    border-radius: 0.25rem;
+    font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+    font-size: 0.875em;
+}
+
+.markdown-content pre {
+    background: var(--gray-100);
+    padding: 1rem;
+    border-radius: 0.375rem;
+    overflow-x: auto;
+    margin-bottom: 0.75rem;
+}
+
+.markdown-content pre code {
+    background: none;
+    padding: 0;
+}
+
+.markdown-content blockquote {
+    border-left: 4px solid var(--primary);
+    padding-left: 1rem;
+    margin: 0.75rem 0;
+    color: var(--gray-700);
+    font-style: italic;
+}
+
+.markdown-content table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 0.75rem;
+}
+
+.markdown-content th,
+.markdown-content td {
+    border: 1px solid var(--gray-300);
+    padding: 0.5rem;
+    text-align: left;
+}
+
+.markdown-content th {
+    background: var(--gray-100);
+    font-weight: 600;
+}
+
+.markdown-content a {
+    color: var(--primary);
+    text-decoration: underline;
+}
+
+.markdown-content hr {
+    border: none;
+    border-top: 1px solid var(--gray-300);
+    margin: 1rem 0;
+}
+
+/* Markdown Editor with Preview */
+.markdown-editor {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+}
+
+.markdown-editor textarea {
+    min-height: 150px;
+}
+
+.markdown-preview {
+    background: var(--gray-50);
+    border: 1px solid var(--gray-200);
+    border-radius: 0.375rem;
+    padding: 0.75rem;
+    min-height: 150px;
+    overflow-y: auto;
+}
+
+.markdown-preview:empty::before {
+    content: 'Vorschau...';
+    color: var(--gray-500);
+    font-style: italic;
+}
+
+@media (max-width: 768px) {
+    .markdown-editor {
+        grid-template-columns: 1fr;
+    }
+}

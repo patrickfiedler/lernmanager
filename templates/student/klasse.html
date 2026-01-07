@@ -27,15 +27,15 @@
 
     {% if task.lernziel %}
     <div class="mt-1 mb-1" style="background: #f0f9ff; padding: 0.75rem; border-radius: 0.375rem; border-left: 3px solid #0284c7;">
-        <strong>🎯 Lernziel:</strong><br>
-        {{ task.lernziel }}
+        <strong>🎯 Lernziel:</strong>
+        <div class="markdown-content">{{ task.lernziel | markdown }}</div>
     </div>
     {% endif %}
 
     {% if task.beschreibung %}
     <div class="mt-1">
-        <strong>📋 Beschreibung:</strong><br>
-        {{ task.beschreibung }}
+        <strong>📋 Beschreibung:</strong>
+        <div class="markdown-content">{{ task.beschreibung | markdown }}</div>
     </div>
     {% endif %}
 </div>
@@ -53,8 +53,8 @@
         {% for sub in subtasks %}
         <div class="subtask-card {% if sub.erledigt %}completed{% endif %}" data-subtask-id="{{ sub.id }}">
             <div class="subtask-number">{{ loop.index }}</div>
-            <div class="subtask-content">
-                <span class="subtask-text">{{ sub.beschreibung }}</span>
+            <div class="subtask-content markdown-content">
+                {{ sub.beschreibung | markdown }}
             </div>
             <label class="subtask-toggle">
                 <input type="checkbox" class="subtask-checkbox"

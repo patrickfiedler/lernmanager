@@ -48,12 +48,18 @@
                 </select>
             </div>
             <div class="form-group">
-                <label>Lernziel</label>
-                <textarea name="lernziel" class="form-control" rows="2">{{ task.lernziel or '' }}</textarea>
+                <label>Lernziel <small class="text-muted">(Markdown)</small></label>
+                <div class="markdown-editor">
+                    <textarea name="lernziel" id="lernziel" class="form-control" rows="3" oninput="updatePreview('lernziel', 'preview-lernziel')">{{ task.lernziel or '' }}</textarea>
+                    <div class="markdown-preview markdown-content" id="preview-lernziel"></div>
+                </div>
             </div>
             <div class="form-group">
-                <label>Beschreibung</label>
-                <textarea name="beschreibung" class="form-control" rows="3">{{ task.beschreibung or '' }}</textarea>
+                <label>Beschreibung <small class="text-muted">(Markdown)</small></label>
+                <div class="markdown-editor">
+                    <textarea name="beschreibung" id="beschreibung" class="form-control" rows="4" oninput="updatePreview('beschreibung', 'preview-beschreibung')">{{ task.beschreibung or '' }}</textarea>
+                    <div class="markdown-preview markdown-content" id="preview-beschreibung"></div>
+                </div>
             </div>
             <div class="form-group">
                 <label>Voraussetzungen</label>
@@ -75,12 +81,18 @@
     <div class="card">
         <div class="card-header">✅ Teilaufgaben</div>
         <form method="POST" action="{{ url_for('admin_aufgabe_teilaufgaben', task_id=task.id) }}">
-            <div class="form-group">
-                <label>Eine Teilaufgabe pro Zeile:</label>
-                <textarea name="subtasks" class="form-control" rows="8" placeholder="Kapitel 1 lesen&#10;Übung 1-5 bearbeiten&#10;Vokabeln lernen">{% for st in subtasks %}{{ st.beschreibung }}{% if not loop.last %}
-{% endif %}{% endfor %}</textarea>
+            <div id="subtask-list">
+                {% for st in subtasks %}
+                <div class="subtask-input-row">
+                    <textarea name="subtasks[]" class="form-control" rows="8" placeholder="Teilaufgabe... (Markdown unterstützt)">{{ st.beschreibung }}</textarea>
+                    <button type="button" class="btn btn-danger btn-remove" onclick="removeSubtask(this)">✕</button>
+                </div>
+                {% endfor %}
             </div>
-            <button type="submit" class="btn btn-primary">Teilaufgaben speichern</button>
+            <div class="flex gap-1 mt-1">
+                <button type="button" class="btn btn-secondary" onclick="addSubtask()">+ Teilaufgabe</button>
+                <button type="submit" class="btn btn-primary">Speichern</button>
+            </div>
         </form>
     </div>
 </div>
@@ -173,4 +185,35 @@
         <button type="submit" class="btn btn-primary">Quiz speichern</button>
     </form>
 </div>
+{% endblock %}
+
+{% block scripts %}
+// Markdown preview
+function updatePreview(textareaId, previewId) {
+    const text = document.getElementById(textareaId).value;
+    document.getElementById(previewId).innerHTML = marked.parse(text || '');
+}
+
+// Initialize previews on page load
+document.addEventListener('DOMContentLoaded', function() {
+    updatePreview('lernziel', 'preview-lernziel');
+    updatePreview('beschreibung', 'preview-beschreibung');
+});
+
+// Subtask management
+function addSubtask() {
+    const list = document.getElementById('subtask-list');
+    const row = document.createElement('div');
+    row.className = 'subtask-input-row';
+    row.innerHTML = `
+        <textarea name="subtasks[]" class="form-control" rows="8" placeholder="Teilaufgabe... (Markdown unterstützt)"></textarea>
+        <button type="button" class="btn btn-danger btn-remove" onclick="removeSubtask(this)">✕</button>
+    `;
+    list.appendChild(row);
+    row.querySelector('textarea').focus();
+}
+
+function removeSubtask(btn) {
+    btn.closest('.subtask-input-row').remove();
+}
 {% endblock %}

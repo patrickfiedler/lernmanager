@@ -4,6 +4,8 @@ from functools import wraps
 from datetime import date
 from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify
 from werkzeug.utils import secure_filename
+from markupsafe import Markup
+import markdown as md
 
 import config
 import models
@@ -12,6 +14,17 @@ app = Flask(__name__)
 app.secret_key = config.SECRET_KEY
 app.config['UPLOAD_FOLDER'] = config.UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = config.MAX_CONTENT_LENGTH
+
+
+# ============ Template Filters ============
+
+@app.template_filter('markdown')
+def markdown_filter(text):
+    """Convert markdown text to HTML."""
+    if not text:
+        return ''
+    html = md.markdown(text, extensions=['nl2br', 'fenced_code', 'tables'])
+    return Markup(html)
 
 
 # ============ Auth Decorators ============
@@ -307,10 +320,9 @@ def admin_aufgabe_loeschen(task_id):
 @app.route('/admin/aufgabe/<int:task_id>/teilaufgaben', methods=['POST'])
 @admin_required
 def admin_aufgabe_teilaufgaben(task_id):
-    subtasks_text = request.form['subtasks']
-    subtasks_list = subtasks_text.strip().split('\n')
+    subtasks_list = request.form.getlist('subtasks[]')
     models.update_subtasks(task_id, subtasks_list)
-    flash('Teilaufgaben aktualisiert. ✅', 'success')
+    flash('Teilaufgaben aktualisiert.', 'success')
     return redirect(url_for('admin_aufgabe_detail', task_id=task_id))
 
 
