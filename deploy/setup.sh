@@ -119,6 +119,9 @@ main() {
     CURRENT_COMMIT=$(git rev-parse --short HEAD)
     log_info "Cloned commit: $CURRENT_COMMIT"
 
+    log_info "Setting ownership to $APP_USER..."
+    chown -R "$APP_USER:$APP_USER" "$APP_DIR"
+
     # 5. Create Python virtual environment
     log_step "Step 5/9: Setting Up Python Environment"
     log_info "Creating virtual environment..."
