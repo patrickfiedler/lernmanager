@@ -27,11 +27,9 @@ sudo useradd -r -s /usr/sbin/nologin -m -d /opt/lernmanager lernmanager
 
 ```bash
 # Clone the public repository
-sudo git clone https://github.com/YOUR_USERNAME/lernmanager.git /opt/lernmanager
+sudo git clone https://github.com/patrickfiedler/lernmanager.git /opt/lernmanager
 sudo chown -R lernmanager:lernmanager /opt/lernmanager
 ```
-
-**Note:** Replace `YOUR_USERNAME/lernmanager` with your actual GitHub repository path.
 
 ## 4. Set Up Python Environment
 

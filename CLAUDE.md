@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Lernmanager is a German-language learning progress tracker for schools. It allows teachers (admins) to manage classes, students, and learning tasks, while students can track their progress on assigned tasks, complete subtasks, and take quizzes.
 
+**Repository**: https://github.com/patrickfiedler/lernmanager
+
 ## Commands
 
 ### Development
