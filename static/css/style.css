@@ -490,6 +490,16 @@ select.form-control {
     background-color: #efe;
 }
 
+/* Unsaved row highlighting */
+tr.unsaved-row {
+    border-left: 4px solid #f59e0b;
+    background-color: #fef3c7;
+}
+
+tr.unsaved-row td {
+    background-color: rgba(254, 243, 199, 0.3);
+}
+
 /* Status message styling */
 .alert-danger-light {
     background-color: #fee2e2;

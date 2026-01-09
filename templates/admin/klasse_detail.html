@@ -27,6 +27,26 @@
     </form>
 </div>
 
+<!-- Class Schedule -->
+<div class="card mb-2">
+    <div class="card-header">📅 Wöchentlicher Unterricht</div>
+    <form method="POST" action="{{ url_for('admin_klasse_schedule', klasse_id=klasse.id) }}" class="flex gap-1">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <select name="weekday" class="form-control" style="flex: 1;">
+            <option value="">-- Kein regelmäßiger Termin --</option>
+            <option value="0" {% if schedule and schedule.weekday == 0 %}selected{% endif %}>Montag</option>
+            <option value="1" {% if schedule and schedule.weekday == 1 %}selected{% endif %}>Dienstag</option>
+            <option value="2" {% if schedule and schedule.weekday == 2 %}selected{% endif %}>Mittwoch</option>
+            <option value="3" {% if schedule and schedule.weekday == 3 %}selected{% endif %}>Donnerstag</option>
+            <option value="4" {% if schedule and schedule.weekday == 4 %}selected{% endif %}>Freitag</option>
+            <option value="5" {% if schedule and schedule.weekday == 5 %}selected{% endif %}>Samstag</option>
+            <option value="6" {% if schedule and schedule.weekday == 6 %}selected{% endif %}>Sonntag</option>
+        </select>
+        <button type="submit" class="btn btn-primary">Speichern</button>
+    </form>
+    <small class="text-muted">Verwende Vor/Zurück-Buttons im Unterricht, um wöchentlich zu navigieren.</small>
+</div>
+
 <!-- Assign Task to Class -->
 <div class="card mb-2">
     <div class="card-header">📝 Aufgabe für alle zuweisen</div>

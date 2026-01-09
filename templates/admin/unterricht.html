@@ -10,9 +10,13 @@
 
 <div class="card mb-2">
     <div class="card-header">📆 Datum wählen</div>
-    <form method="GET" action="{{ url_for('admin_unterricht_datum', klasse_id=klasse.id, datum=datum) }}" class="flex gap-1" id="date-form">
-        <input type="date" name="datum" class="form-control" style="width: auto;" value="{{ datum }}" onchange="this.form.action = '{{ url_for('admin_unterricht_datum', klasse_id=klasse.id, datum='') }}' + this.value; this.form.submit();">
-    </form>
+    <div class="flex gap-1 flex-center">
+        <a href="{{ url_for('admin_unterricht_prev', klasse_id=klasse.id, datum=datum) }}" class="btn btn-secondary" title="Vorherige Woche">←</a>
+        <form method="GET" action="{{ url_for('admin_unterricht_datum', klasse_id=klasse.id, datum=datum) }}" class="flex gap-1" id="date-form" style="flex: 1;">
+            <input type="date" name="datum" class="form-control" style="width: 100%;" value="{{ datum }}" onchange="this.form.action = '{{ url_for('admin_unterricht_datum', klasse_id=klasse.id, datum='') }}' + this.value; this.form.submit();">
+        </form>
+        <a href="{{ url_for('admin_unterricht_next', klasse_id=klasse.id, datum=datum) }}" class="btn btn-secondary" title="Nächste Woche">→</a>
+    </div>
 </div>
 
 {% if students %}
@@ -93,6 +97,10 @@
             {% endfor %}
         </tbody>
     </table>
+    <div class="flex gap-1 flex-between flex-center" style="padding: 1rem; background: var(--gray-50); border-top: 1px solid var(--gray-200);">
+        <span id="unsaved-count" style="display: none; color: var(--warning); font-weight: bold;"></span>
+        <button id="save-btn" class="btn btn-primary" onclick="saveAll()" disabled>💾 Speichern</button>
+    </div>
 </div>
 
 <div class="card mt-2">
@@ -112,6 +120,33 @@
 
 {% block scripts %}
 const unterrichtId = {{ unterricht_id }};
+const unsavedChanges = new Set();
+
+function updateUnsavedCount() {
+    const count = unsavedChanges.size;
+    const saveBtn = document.getElementById('save-btn');
+    const countDisplay = document.getElementById('unsaved-count');
+
+    if (count > 0) {
+        saveBtn.disabled = false;
+        saveBtn.classList.add('btn-warning');
+        saveBtn.classList.remove('btn-primary');
+        countDisplay.textContent = `${count} Änderung${count > 1 ? 'en' : ''} nicht gespeichert`;
+        countDisplay.style.display = 'inline';
+    } else {
+        saveBtn.disabled = true;
+        saveBtn.classList.remove('btn-warning');
+        saveBtn.classList.add('btn-primary');
+        countDisplay.style.display = 'none';
+    }
+}
+
+function markAsChanged(studentId) {
+    unsavedChanges.add(studentId);
+    const row = document.querySelector(`tr[data-student-id="${studentId}"]`);
+    row.classList.add('unsaved-row');
+    updateUnsavedCount();
+}
 
 function saveStudent(studentId) {
     const row = document.querySelector(`tr[data-student-id="${studentId}"]`);
@@ -131,11 +166,38 @@ function saveStudent(studentId) {
 
     data.append('admin_kommentar', row.querySelector('input[type="text"]').value);
 
-    fetch(`/admin/unterricht/${unterrichtId}/bewertung`, {
+    return fetch(`/admin/unterricht/${unterrichtId}/bewertung`, {
         method: 'POST',
         headers: {'X-CSRFToken': csrfToken},
         body: data
+    }).then(() => {
+        unsavedChanges.delete(studentId);
+        row.classList.remove('unsaved-row');
+        updateUnsavedCount();
     });
+}
+
+async function saveAll() {
+    const saveBtn = document.getElementById('save-btn');
+    const originalText = saveBtn.innerHTML;
+    saveBtn.innerHTML = '💾 Speichern...';
+    saveBtn.disabled = true;
+
+    const studentIds = Array.from(unsavedChanges);
+    const promises = studentIds.map(id => saveStudent(id));
+
+    try {
+        await Promise.all(promises);
+        saveBtn.innerHTML = '✅ Gespeichert!';
+        setTimeout(() => {
+            saveBtn.innerHTML = originalText;
+            updateUnsavedCount();
+        }, 2000);
+    } catch (error) {
+        alert('Fehler beim Speichern. Bitte erneut versuchen.');
+        saveBtn.innerHTML = originalText;
+        saveBtn.disabled = false;
+    }
 }
 
 function updateAttendanceUI(row, isPresent) {
@@ -169,9 +231,8 @@ function toggleAttendance(checkbox, studentId) {
     // Update UI based on attendance
     updateAttendanceUI(row, isPresent);
 
-    // Mark as changed (Phase 7 will implement this)
-    // For now, keep auto-save for attendance only
-    saveStudent(studentId);
+    // Mark as changed for manual save
+    markAsChanged(studentId);
 }
 
 // Initialize attendance UI on page load
@@ -184,16 +245,25 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 });
 
+// Warn before leaving page with unsaved changes
+window.addEventListener('beforeunload', (event) => {
+    if (unsavedChanges.size > 0) {
+        event.preventDefault();
+        event.returnValue = ''; // Chrome requires returnValue to be set
+        return 'Sie haben nicht gespeicherte Änderungen. Möchten Sie die Seite wirklich verlassen?';
+    }
+});
+
 function setRating(btn, studentId, field, value) {
     const group = btn.parentElement;
     group.querySelectorAll('.rating-btn').forEach(b => {
         b.classList.remove('active-1', 'active-2', 'active-3');
     });
     btn.classList.add(`active-${value}`);
-    saveStudent(studentId);
+    markAsChanged(studentId);
 }
 
 function updateComment(input, studentId) {
-    saveStudent(studentId);
+    markAsChanged(studentId);
 }
 {% endblock %}

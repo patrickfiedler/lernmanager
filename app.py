@@ -145,7 +145,8 @@ def admin_klasse_detail(klasse_id):
     students = models.get_students_in_klasse(klasse_id)
     tasks = models.get_all_tasks()
     unterricht = models.get_klasse_unterricht(klasse_id)
-    return render_template('admin/klasse_detail.html', klasse=klasse, students=students, tasks=tasks, unterricht=unterricht)
+    schedule = models.get_class_schedule(klasse_id)
+    return render_template('admin/klasse_detail.html', klasse=klasse, students=students, tasks=tasks, unterricht=unterricht, schedule=schedule)
 
 
 @app.route('/admin/klasse/<int:klasse_id>/loeschen', methods=['POST'])
@@ -156,6 +157,21 @@ def admin_klasse_loeschen(klasse_id):
         models.delete_klasse(klasse_id)
         flash(f'Klasse "{klasse["name"]}" gelöscht.', 'success')
     return redirect(url_for('admin_klassen'))
+
+
+@app.route('/admin/klasse/<int:klasse_id>/schedule', methods=['POST'])
+@admin_required
+def admin_klasse_schedule(klasse_id):
+    weekday_str = request.form.get('weekday')
+    if weekday_str:
+        weekday = int(weekday_str)
+        models.set_class_schedule(klasse_id, weekday)
+        weekday_names = ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag']
+        flash(f'Wöchentlicher Termin: {weekday_names[weekday]} ✅', 'success')
+    else:
+        models.delete_class_schedule(klasse_id)
+        flash('Wöchentlicher Termin entfernt.', 'success')
+    return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id))
 
 
 @app.route('/admin/klasse/<int:klasse_id>/schueler-hinzufuegen', methods=['POST'])
@@ -642,6 +658,22 @@ def admin_unterricht_datum(klasse_id, datum):
         students = [dict(s) for s in students]
 
     return render_template('admin/unterricht.html', klasse=klasse, datum=datum, unterricht_id=unterricht_id, students=students)
+
+
+@app.route('/admin/klasse/<int:klasse_id>/unterricht/<datum>/next')
+@admin_required
+def admin_unterricht_next(klasse_id, datum):
+    """Navigate to next week's class date."""
+    next_date = models.get_next_class_date(klasse_id, datum)
+    return redirect(url_for('admin_unterricht_datum', klasse_id=klasse_id, datum=next_date))
+
+
+@app.route('/admin/klasse/<int:klasse_id>/unterricht/<datum>/prev')
+@admin_required
+def admin_unterricht_prev(klasse_id, datum):
+    """Navigate to previous week's class date."""
+    prev_date = models.get_previous_class_date(klasse_id, datum)
+    return redirect(url_for('admin_unterricht_datum', klasse_id=klasse_id, datum=prev_date))
 
 
 @app.route('/admin/unterricht/<int:unterricht_id>/bewertung', methods=['POST'])

@@ -3,6 +3,7 @@ import os
 import sys
 from hashlib import sha256
 from contextlib import contextmanager
+from datetime import datetime, timedelta
 from werkzeug.security import generate_password_hash, check_password_hash
 import config
 
@@ -107,6 +108,14 @@ def init_db():
                 klasse_id INTEGER NOT NULL,
                 PRIMARY KEY (student_id, klasse_id),
                 FOREIGN KEY (student_id) REFERENCES student(id) ON DELETE CASCADE,
+                FOREIGN KEY (klasse_id) REFERENCES klasse(id) ON DELETE CASCADE
+            );
+
+            -- Class schedule (day of week each class meets)
+            CREATE TABLE IF NOT EXISTS class_schedule (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                klasse_id INTEGER NOT NULL UNIQUE,
+                weekday INTEGER NOT NULL,  -- 0=Monday, 1=Tuesday, ..., 6=Sunday (ISO 8601)
                 FOREIGN KEY (klasse_id) REFERENCES klasse(id) ON DELETE CASCADE
             );
 
@@ -412,6 +421,109 @@ def get_klasse(klasse_id):
     with db_session() as conn:
         row = conn.execute("SELECT * FROM klasse WHERE id = ?", (klasse_id,)).fetchone()
         return dict(row) if row else None
+
+
+# ============ Class Schedule functions ============
+
+def get_class_schedule(klasse_id):
+    """Get the scheduled weekday for a class."""
+    with db_session() as conn:
+        row = conn.execute(
+            "SELECT * FROM class_schedule WHERE klasse_id = ?",
+            (klasse_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def set_class_schedule(klasse_id, weekday):
+    """Set or update the scheduled weekday for a class (0=Monday, 6=Sunday)."""
+    with db_session() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO class_schedule (klasse_id, weekday) VALUES (?, ?)",
+            (klasse_id, weekday)
+        )
+
+
+def delete_class_schedule(klasse_id):
+    """Delete the schedule for a class."""
+    with db_session() as conn:
+        conn.execute("DELETE FROM class_schedule WHERE klasse_id = ?", (klasse_id,))
+
+
+def get_next_class_date(klasse_id, current_date):
+    """
+    Calculate the next class date based on schedule.
+    If schedule exists, finds next occurrence of scheduled weekday.
+    Otherwise, adds 7 days.
+
+    Args:
+        klasse_id: ID of the class
+        current_date: Current date as string (YYYY-MM-DD) or date object
+
+    Returns:
+        Next date as string (YYYY-MM-DD)
+    """
+    if isinstance(current_date, str):
+        current = datetime.strptime(current_date, '%Y-%m-%d').date()
+    else:
+        current = current_date
+
+    schedule = get_class_schedule(klasse_id)
+
+    if schedule:
+        # Find next occurrence of scheduled weekday
+        target_weekday = schedule['weekday']  # 0=Monday, 6=Sunday
+        current_weekday = current.weekday()   # 0=Monday, 6=Sunday
+
+        # Calculate days to add (always move forward at least 1 day)
+        days_ahead = (target_weekday - current_weekday) % 7
+        if days_ahead == 0:
+            days_ahead = 7  # If same weekday, jump to next week
+
+        next_date = current + timedelta(days=days_ahead)
+    else:
+        # No schedule: just add 7 days
+        next_date = current + timedelta(days=7)
+
+    return next_date.isoformat()
+
+
+def get_previous_class_date(klasse_id, current_date):
+    """
+    Calculate the previous class date based on schedule.
+    If schedule exists, finds previous occurrence of scheduled weekday.
+    Otherwise, subtracts 7 days.
+
+    Args:
+        klasse_id: ID of the class
+        current_date: Current date as string (YYYY-MM-DD) or date object
+
+    Returns:
+        Previous date as string (YYYY-MM-DD)
+    """
+    if isinstance(current_date, str):
+        current = datetime.strptime(current_date, '%Y-%m-%d').date()
+    else:
+        current = current_date
+
+    schedule = get_class_schedule(klasse_id)
+
+    if schedule:
+        # Find previous occurrence of scheduled weekday
+        target_weekday = schedule['weekday']  # 0=Monday, 6=Sunday
+        current_weekday = current.weekday()   # 0=Monday, 6=Sunday
+
+        # Calculate days to subtract (always move backward at least 1 day)
+        days_back = (current_weekday - target_weekday) % 7
+        if days_back == 0:
+            days_back = 7  # If same weekday, jump to previous week
+
+        previous_date = current - timedelta(days=days_back)
+    else:
+        # No schedule: just subtract 7 days
+        previous_date = current - timedelta(days=7)
+
+    return previous_date.isoformat()
 
 
 # ============ Student functions ============
