@@ -29,6 +29,10 @@
                 <input type="text" name="name" class="form-control" value="{{ task.name }}" required>
             </div>
             <div class="form-group">
+                <label>Nummer (für Sortierung)</label>
+                <input type="number" name="number" class="form-control" value="{{ task.number }}" min="0" required>
+            </div>
+            <div class="form-group">
                 <label>Kategorie</label>
                 <select name="kategorie" class="form-control" required>
                     <option value="pflicht" {% if task.kategorie == 'pflicht' %}selected{% endif %}>Pflicht</option>

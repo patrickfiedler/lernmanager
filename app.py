@@ -313,7 +313,8 @@ def admin_aufgabe_neu():
             lernziel=request.form['lernziel'],
             fach=request.form['fach'],
             stufe=request.form['stufe'],
-            kategorie=request.form['kategorie']
+            kategorie=request.form['kategorie'],
+            number=int(request.form.get('number', 0))
         )
         # Handle multiple prerequisites
         voraussetzung_ids = request.form.getlist('voraussetzungen')
@@ -351,7 +352,8 @@ def admin_aufgabe_bearbeiten(task_id):
         fach=request.form['fach'],
         stufe=request.form['stufe'],
         kategorie=request.form['kategorie'],
-        quiz_json=request.form.get('quiz_json') or None
+        quiz_json=request.form.get('quiz_json') or None,
+        number=int(request.form.get('number', 0))
     )
     # Handle multiple prerequisites
     voraussetzung_ids = request.form.getlist('voraussetzungen')

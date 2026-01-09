@@ -114,6 +114,7 @@ def init_db():
             CREATE TABLE IF NOT EXISTS task (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
+                number INTEGER DEFAULT 0,
                 beschreibung TEXT,
                 lernziel TEXT,
                 fach TEXT NOT NULL,
@@ -235,6 +236,7 @@ def init_db():
                 admin_respekt INTEGER DEFAULT 2,
                 admin_fortschritt INTEGER DEFAULT 2,
                 admin_kommentar TEXT,
+                has_been_saved INTEGER DEFAULT 0,
                 -- Student self-evaluation
                 selbst_selbststaendigkeit INTEGER,
                 selbst_respekt INTEGER,
@@ -536,7 +538,7 @@ def get_all_tasks():
     with db_session() as conn:
         rows = conn.execute('''
             SELECT * FROM task
-            ORDER BY fach, stufe, name
+            ORDER BY fach, stufe, number, name
         ''').fetchall()
         return [dict(r) for r in rows]
 
@@ -548,23 +550,23 @@ def get_task(task_id):
         return dict(row) if row else None
 
 
-def create_task(name, beschreibung, lernziel, fach, stufe, kategorie, quiz_json=None):
+def create_task(name, beschreibung, lernziel, fach, stufe, kategorie, quiz_json=None, number=0):
     """Create a new task."""
     with db_session() as conn:
         cursor = conn.execute(
-            "INSERT INTO task (name, beschreibung, lernziel, fach, stufe, kategorie, quiz_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (name, beschreibung, lernziel, fach, stufe, kategorie, quiz_json)
+            "INSERT INTO task (name, number, beschreibung, lernziel, fach, stufe, kategorie, quiz_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (name, number, beschreibung, lernziel, fach, stufe, kategorie, quiz_json)
         )
         return cursor.lastrowid
 
 
-def update_task(task_id, name, beschreibung, lernziel, fach, stufe, kategorie, quiz_json=None):
+def update_task(task_id, name, beschreibung, lernziel, fach, stufe, kategorie, quiz_json=None, number=0):
     """Update a task."""
     with db_session() as conn:
         conn.execute('''
-            UPDATE task SET name=?, beschreibung=?, lernziel=?, fach=?, stufe=?,
+            UPDATE task SET name=?, number=?, beschreibung=?, lernziel=?, fach=?, stufe=?,
             kategorie=?, quiz_json=? WHERE id=?
-        ''', (name, beschreibung, lernziel, fach, stufe, kategorie, quiz_json, task_id))
+        ''', (name, number, beschreibung, lernziel, fach, stufe, kategorie, quiz_json, task_id))
 
 
 def delete_task(task_id):
@@ -997,7 +999,7 @@ def get_klasse_unterricht(klasse_id):
         return [dict(r) for r in rows]
 
 
-def update_unterricht_student(unterricht_id, student_id, anwesend, admin_selbst, admin_respekt, admin_fortschritt, admin_kommentar):
+def update_unterricht_student(unterricht_id, student_id, anwesend, admin_selbst, admin_respekt, admin_fortschritt, admin_kommentar, has_been_saved=1):
     """Update admin evaluation for a student in a lesson."""
     with db_session() as conn:
         conn.execute('''
@@ -1006,9 +1008,10 @@ def update_unterricht_student(unterricht_id, student_id, anwesend, admin_selbst,
                 admin_selbststaendigkeit = ?,
                 admin_respekt = ?,
                 admin_fortschritt = ?,
-                admin_kommentar = ?
+                admin_kommentar = ?,
+                has_been_saved = ?
             WHERE unterricht_id = ? AND student_id = ?
-        ''', (anwesend, admin_selbst, admin_respekt, admin_fortschritt, admin_kommentar, unterricht_id, student_id))
+        ''', (anwesend, admin_selbst, admin_respekt, admin_fortschritt, admin_kommentar, has_been_saved, unterricht_id, student_id))
 
 
 def update_student_self_eval(unterricht_id, student_id, selbst_selbst, selbst_respekt):

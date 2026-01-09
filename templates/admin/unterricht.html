@@ -16,9 +16,27 @@
 </div>
 
 {% if students %}
+{# Calculate state based on has_been_saved #}
+{% set saved_count = students|selectattr('has_been_saved', 'equalto', 1)|list|length %}
+{% set total_count = students|length %}
+{% if saved_count == 0 %}
+    {% set table_state = 'no-data' %}
+    {% set state_message = '⚠️ Keine Daten für diesen Tag gespeichert. Standard-Werte (2) werden angezeigt.' %}
+    {% set state_class = 'alert-danger-light' %}
+{% elif saved_count < total_count %}
+    {% set table_state = 'partial' %}
+    {% set state_message = '⏳ Es gibt nicht gespeicherte Änderungen. Daten werden automatisch gespeichert.' %}
+    {% set state_class = 'alert-warning-light' %}
+{% else %}
+    {% set table_state = 'complete' %}
+    {% set state_message = '✓ Alle Daten für diesen Tag gespeichert.' %}
+    {% set state_class = 'alert-success-light' %}
+{% endif %}
+
 <div class="card">
     <div class="card-header">👥 Schülerbewertung für {{ datum }}</div>
-    <table class="table">
+    <div class="{{ state_class }}">{{ state_message }}</div>
+    <table class="table unterricht-table unterricht-{{ table_state }}">
         <thead>
             <tr>
                 <th>Name</th>
@@ -41,7 +59,7 @@
                 <td>
                     <div class="rating-group">
                         {% for i in [1, 2, 3] %}
-                        <button type="button" class="rating-btn {% if student.admin_selbststaendigkeit == i %}active-{{ i }}{% endif %}"
+                        <button type="button" class="rating-btn {% if student.admin_selbststaendigkeit == i %}active-{{ i }}{% if not student.has_been_saved %} unsaved{% endif %}{% endif %}"
                                 onclick="setRating(this, {{ student.student_id }}, 'admin_selbststaendigkeit', {{ i }})">{{ i }}</button>
                         {% endfor %}
                     </div>
@@ -49,7 +67,7 @@
                 <td>
                     <div class="rating-group">
                         {% for i in [1, 2, 3] %}
-                        <button type="button" class="rating-btn {% if student.admin_respekt == i %}active-{{ i }}{% endif %}"
+                        <button type="button" class="rating-btn {% if student.admin_respekt == i %}active-{{ i }}{% if not student.has_been_saved %} unsaved{% endif %}{% endif %}"
                                 onclick="setRating(this, {{ student.student_id }}, 'admin_respekt', {{ i }})">{{ i }}</button>
                         {% endfor %}
                     </div>
@@ -57,7 +75,7 @@
                 <td>
                     <div class="rating-group">
                         {% for i in [1, 2, 3] %}
-                        <button type="button" class="rating-btn {% if student.admin_fortschritt == i %}active-{{ i }}{% endif %}"
+                        <button type="button" class="rating-btn {% if student.admin_fortschritt == i %}active-{{ i }}{% if not student.has_been_saved %} unsaved{% endif %}{% endif %}"
                                 onclick="setRating(this, {{ student.student_id }}, 'admin_fortschritt', {{ i }})">{{ i }}</button>
                         {% endfor %}
                     </div>
