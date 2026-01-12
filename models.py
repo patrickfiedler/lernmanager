@@ -361,6 +361,28 @@ def init_db():
 
             CREATE INDEX IF NOT EXISTS idx_analytics_type
             ON analytics_events(event_type, timestamp DESC);
+
+            -- ============ Saved Reports ============
+
+            -- Stored PDF reports for historical comparison
+            CREATE TABLE IF NOT EXISTS saved_reports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                report_type TEXT NOT NULL,  -- 'class_simple', 'student_summary', 'student_complete'
+                klasse_id INTEGER,
+                student_id INTEGER,
+                date_generated DATETIME DEFAULT CURRENT_TIMESTAMP,
+                date_from DATE,
+                date_to DATE,
+                filename TEXT NOT NULL
+            );
+
+            -- Index for efficient retrieval by class
+            CREATE INDEX IF NOT EXISTS idx_saved_reports_klasse
+            ON saved_reports(klasse_id, date_generated DESC);
+
+            -- Index for efficient retrieval by student
+            CREATE INDEX IF NOT EXISTS idx_saved_reports_student
+            ON saved_reports(student_id, date_generated DESC);
         ''')
 
 
@@ -1587,3 +1609,204 @@ def clear_all_analytics_events():
     with db_session() as conn:
         cursor = conn.execute("DELETE FROM analytics_events")
         return cursor.rowcount
+
+
+# ============ Saved Reports ============
+
+def save_report_record(report_type, filename, klasse_id=None, student_id=None, date_from=None, date_to=None):
+    """Save a record of a generated report."""
+    with db_session() as conn:
+        conn.execute(
+            """INSERT INTO saved_reports (report_type, klasse_id, student_id, filename, date_from, date_to)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (report_type, klasse_id, student_id, filename, date_from, date_to)
+        )
+        return conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+
+def get_saved_reports(klasse_id=None, student_id=None, limit=20):
+    """Get saved reports for a class or student."""
+    with db_session() as conn:
+        if klasse_id:
+            rows = conn.execute(
+                """SELECT id, report_type, date_generated, date_from, date_to, filename
+                   FROM saved_reports
+                   WHERE klasse_id = ?
+                   ORDER BY date_generated DESC
+                   LIMIT ?""",
+                (klasse_id, limit)
+            ).fetchall()
+        elif student_id:
+            rows = conn.execute(
+                """SELECT id, report_type, date_generated, date_from, date_to, filename
+                   FROM saved_reports
+                   WHERE student_id = ?
+                   ORDER BY date_generated DESC
+                   LIMIT ?""",
+                (student_id, limit)
+            ).fetchall()
+        else:
+            return []
+        return [dict(row) for row in rows]
+
+
+def delete_old_saved_reports(days=365):
+    """Delete saved report records older than specified days (files must be deleted separately)."""
+    with db_session() as conn:
+        cursor = conn.execute(
+            "DELETE FROM saved_reports WHERE date_generated < datetime('now', ? || ' days')",
+            (f'-{days}',)
+        )
+        return cursor.rowcount
+
+
+def get_report_data_for_class(klasse_id, date_from=None, date_to=None):
+    """Get all data needed for class report generation."""
+    with db_session() as conn:
+        # Get class info
+        klasse = conn.execute(
+            "SELECT name, stufe, subject FROM klasse WHERE id = ?",
+            (klasse_id,)
+        ).fetchone()
+
+        if not klasse:
+            return None
+
+        # Get all students in class with their task status
+        students = get_students_in_klasse(klasse_id)
+
+        # For each student, get activity summary
+        student_data = []
+        for student in students:
+            summary = get_student_activity_summary(
+                student['id'],
+                date_from=date_from,
+                date_to=date_to
+            )
+
+            # Get current task info
+            current_task = get_student_task(student['id'], klasse_id)
+
+            # Get last activity date
+            last_activity = conn.execute(
+                """SELECT MAX(timestamp) as last_seen
+                   FROM analytics_events
+                   WHERE user_id = ? AND user_type = 'student'""",
+                (student['id'],)
+            ).fetchone()
+
+            student_data.append({
+                'id': student['id'],
+                'name': f"{student['nachname']}, {student['vorname']}",
+                'username': student['username'],
+                'task_name': current_task['task_name'] if current_task else 'Keine Aufgabe',
+                'task_order': current_task['task_order'] if current_task else 0,
+                'completed_subtasks': student.get('completed_subtasks', 0),
+                'total_subtasks': student.get('total_subtasks', 0),
+                'progress_percent': student.get('progress_percent', 0),
+                'quiz_passed': student.get('quiz_passed', False),
+                'is_completed': student.get('is_completed', False),
+                'login_days': summary['login_days'],
+                'tasks_completed': summary['tasks_completed'],
+                'last_activity': last_activity['last_seen'] if last_activity and last_activity['last_seen'] else None
+            })
+
+        return {
+            'klasse': dict(klasse),
+            'students': sorted(student_data, key=lambda x: x['name'])
+        }
+
+
+def get_report_data_for_student(student_id, report_type='summary', date_from=None, date_to=None):
+    """Get all data needed for student report generation."""
+    with db_session() as conn:
+        # Get student info
+        student = conn.execute(
+            "SELECT id, username, vorname, nachname FROM student WHERE id = ?",
+            (student_id,)
+        ).fetchone()
+
+        if not student:
+            return None
+
+        student_dict = dict(student)
+
+        # Get student's classes
+        klassen = conn.execute(
+            """SELECT k.name, k.stufe, k.subject
+               FROM klasse k
+               JOIN student_klasse sk ON k.id = sk.klasse_id
+               WHERE sk.student_id = ?""",
+            (student_id,)
+        ).fetchall()
+
+        # Get activity summary
+        summary = get_student_activity_summary(
+            student_id,
+            date_from=date_from,
+            date_to=date_to
+        )
+
+        # Get current tasks for all classes
+        current_tasks = []
+        for klasse in klassen:
+            task = conn.execute(
+                """SELECT t.name, t.order_num, st.completed_subtasks, st.total_subtasks,
+                          st.quiz_passed, st.is_completed, k.name as klasse_name
+                   FROM student_task st
+                   JOIN task t ON st.task_id = t.id
+                   JOIN klasse k ON st.klasse_id = k.id
+                   WHERE st.student_id = ? AND k.id = (
+                       SELECT id FROM klasse WHERE name = ? AND stufe = ? AND subject = ?
+                   )""",
+                (student_id, klasse['name'], klasse['stufe'], klasse['subject'])
+            ).fetchone()
+
+            if task:
+                current_tasks.append(dict(task))
+
+        result = {
+            'student': student_dict,
+            'klassen': [dict(k) for k in klassen],
+            'summary': summary,
+            'current_tasks': current_tasks
+        }
+
+        # For complete report, add additional data
+        if report_type == 'complete':
+            # Get activity timeline
+            result['activity_log'] = get_student_activity_log(
+                student_id,
+                date_from=date_from,
+                date_to=date_to,
+                limit=100
+            )
+
+            # Get attendance records
+            result['attendance'] = conn.execute(
+                """SELECT u.date, k.name as klasse_name, u.anwesend, u.evaluation
+                   FROM student_unterricht u
+                   JOIN unterricht ut ON u.unterricht_id = ut.id
+                   JOIN klasse k ON ut.klasse_id = k.id
+                   WHERE u.student_id = ?
+                   ORDER BY u.date DESC
+                   LIMIT 50""",
+                (student_id,)
+            ).fetchall()
+            result['attendance'] = [dict(row) for row in result['attendance']]
+
+            # Get quiz attempts
+            result['quiz_attempts'] = conn.execute(
+                """SELECT qa.timestamp, qa.score, qa.total_questions, qa.passed,
+                          t.name as task_name, k.name as klasse_name
+                   FROM quiz_attempt qa
+                   JOIN task t ON qa.task_id = t.id
+                   JOIN klasse k ON qa.klasse_id = k.id
+                   WHERE qa.student_id = ?
+                   ORDER BY qa.timestamp DESC
+                   LIMIT 20""",
+                (student_id,)
+            ).fetchall()
+            result['quiz_attempts'] = [dict(row) for row in result['quiz_attempts']]
+
+        return result

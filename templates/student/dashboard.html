@@ -3,7 +3,10 @@
 {% block title %}Meine Aufgaben - Lernmanager{% endblock %}
 
 {% block content %}
-<h1 class="mb-2">Hallo, {{ student.vorname }}!</h1>
+<div class="flex flex-between flex-center mb-2">
+    <h1>Hallo, {{ student.vorname }}!</h1>
+    <a href="{{ url_for('student_bericht') }}" class="btn btn-success">📊 Mein Lernfortschritt</a>
+</div>
 
 {% if klassen %}
 <div class="grid grid-2">

@@ -9,8 +9,8 @@
 
 - ~~Logging functionality: track number of users and page views~~ (Complete - Phase 5)
 - ~~logging functionality #2: track student activities in action log~~ (Complete - Phase 5)
-- ~~Student progress reports as PDF file per class: human readable format for quick overview~~ (Complete - Phase 6)
-- ~~student progress reports as PDF file per student: information from class progress report + student's individual activity log~~ (Complete - Phase 6)
+- Student progress reports as PDF file per class: human readable format for quick overview
+- student progress reports as PDF file per student: information from class progress report + student's individual activity log
 - ~~Add regular class dates for each class (schedule)~~ (Complete - implemented in student assessment improvements)
 
 ## Improvements

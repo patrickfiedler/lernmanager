@@ -198,6 +198,35 @@ def admin_klasse_schedule(klasse_id):
     return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id))
 
 
+@app.route('/admin/klasse/<int:klasse_id>/bericht')
+@admin_required
+def admin_klasse_bericht(klasse_id):
+    """Generate and download class progress report PDF."""
+    date_from = request.args.get('date_from')
+    date_to = request.args.get('date_to')
+
+    # Get report data
+    report_data = models.get_report_data_for_class(klasse_id, date_from=date_from, date_to=date_to)
+
+    if not report_data:
+        flash('Klasse nicht gefunden.', 'error')
+        return redirect(url_for('admin_klassen'))
+
+    # Generate PDF
+    pdf_buffer = utils.generate_class_report_pdf(report_data, date_from=date_from, date_to=date_to)
+
+    # Prepare filename
+    klasse_name = report_data['klasse']['name'].replace(' ', '_')
+    timestamp = datetime.now().strftime('%Y%m%d')
+    filename = f"klassenbericht_{klasse_name}_{timestamp}.pdf"
+
+    return Response(
+        pdf_buffer.getvalue(),
+        mimetype='application/pdf',
+        headers={'Content-Disposition': f'attachment; filename={filename}'}
+    )
+
+
 @app.route('/admin/klasse/<int:klasse_id>/schueler-hinzufuegen', methods=['POST'])
 @admin_required
 def admin_klasse_schueler_hinzufuegen(klasse_id):
@@ -328,6 +357,47 @@ def admin_schueler_aufgabe_abschliessen(student_id, klasse_id):
         models.mark_task_complete(student_task['id'], manual=True)
         flash('Aufgabe manuell abgeschlossen. ✅', 'success')
     return redirect(request.referrer or url_for('admin_schueler_detail', student_id=student_id))
+
+
+@app.route('/admin/schueler/<int:student_id>/bericht')
+@admin_required
+def admin_schueler_bericht(student_id):
+    """Generate and download student progress report PDF (admin version)."""
+    report_type = request.args.get('type', 'summary')  # 'summary' or 'complete'
+    date_from = request.args.get('date_from')
+    date_to = request.args.get('date_to')
+
+    # Validate report type
+    if report_type not in ['summary', 'complete']:
+        report_type = 'summary'
+
+    # Get report data
+    report_data = models.get_report_data_for_student(
+        student_id,
+        report_type=report_type,
+        date_from=date_from,
+        date_to=date_to
+    )
+
+    if not report_data:
+        flash('Schüler nicht gefunden.', 'error')
+        return redirect(url_for('admin_dashboard'))
+
+    # Generate PDF
+    pdf_buffer = utils.generate_student_report_pdf(report_data, report_type=report_type)
+
+    # Prepare filename
+    student = report_data['student']
+    student_name = f"{student['nachname']}_{student['vorname']}".replace(' ', '_')
+    timestamp = datetime.now().strftime('%Y%m%d')
+    report_label = 'vollstaendig' if report_type == 'complete' else 'zusammenfassung'
+    filename = f"fortschrittsbericht_{student_name}_{report_label}_{timestamp}.pdf"
+
+    return Response(
+        pdf_buffer.getvalue(),
+        mimetype='application/pdf',
+        headers={'Content-Disposition': f'attachment; filename={filename}'}
+    )
 
 
 # ============ Admin: Tasks ============
@@ -872,6 +942,42 @@ def student_dashboard():
 
     return render_template('student/dashboard.html', student=student, klassen=klassen,
                            tasks_by_klasse=tasks_by_klasse)
+
+
+@app.route('/schueler/bericht')
+@student_required
+def student_bericht():
+    """Generate and download student's own progress report PDF (student-facing version)."""
+    student_id = session['student_id']
+
+    # Get report data (summary only for students)
+    report_data = models.get_report_data_for_student(student_id, report_type='summary')
+
+    if not report_data:
+        flash('Fehler beim Erstellen des Berichts.', 'error')
+        return redirect(url_for('student_dashboard'))
+
+    # Generate PDF with student-friendly framing
+    pdf_buffer = utils.generate_student_self_report_pdf(report_data)
+
+    # Prepare filename
+    student = report_data['student']
+    timestamp = datetime.now().strftime('%Y%m%d')
+    filename = f"mein_lernfortschritt_{timestamp}.pdf"
+
+    # Log the download
+    models.log_analytics_event(
+        event_type='report_download',
+        user_id=student_id,
+        user_type='student',
+        metadata={'report_type': 'self_report'}
+    )
+
+    return Response(
+        pdf_buffer.getvalue(),
+        mimetype='application/pdf',
+        headers={'Content-Disposition': f'attachment; filename={filename}'}
+    )
 
 
 @app.route('/schueler/klasse/<int:klasse_id>')
