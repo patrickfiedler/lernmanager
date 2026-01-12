@@ -84,6 +84,13 @@ def login():
         if admin:
             session['admin_id'] = admin['id']
             session['admin_username'] = admin['username']
+            # Log login event
+            models.log_analytics_event(
+                event_type='login',
+                user_id=admin['id'],
+                user_type='admin',
+                metadata={'username': admin['username']}
+            )
             flash('Willkommen zurück! 👋', 'success')
             return redirect(url_for('admin_dashboard'))
 
@@ -92,6 +99,13 @@ def login():
         if student:
             session['student_id'] = student['id']
             session['student_name'] = f"{student['vorname']} {student['nachname']}"
+            # Log login event
+            models.log_analytics_event(
+                event_type='login',
+                user_id=student['id'],
+                user_type='student',
+                metadata={'username': student['username']}
+            )
             flash(f'Willkommen, {student["vorname"]}! 👋', 'success')
             return redirect(url_for('student_dashboard'))
 
@@ -532,6 +546,20 @@ def download_material(material_id):
         abort(404)
 
     try:
+        # Log file download
+        user_id = session.get('admin_id') or session.get('student_id')
+        user_type = 'admin' if 'admin_id' in session else 'student'
+        models.log_analytics_event(
+            event_type='file_download',
+            user_id=user_id,
+            user_type=user_type,
+            metadata={
+                'material_id': material_id,
+                'filename': material['pfad'],
+                'typ': material['typ']
+            }
+        )
+
         # Serve the file from the protected uploads directory
         return send_from_directory(
             config.UPLOAD_FOLDER,
@@ -680,6 +708,78 @@ def admin_errors_clear():
     return redirect(url_for('admin_errors'))
 
 
+# ============ Admin: Analytics ============
+
+@app.route('/admin/analytics')
+@admin_required
+def admin_analytics():
+    """View analytics overview."""
+    # Trigger cleanup of old analytics events (210 days)
+    deleted_count = models.cleanup_old_analytics_events(days=210)
+
+    # Get overview statistics
+    stats = models.get_analytics_overview()
+
+    return render_template('admin/analytics.html',
+                         stats=stats,
+                         deleted_count=deleted_count)
+
+
+@app.route('/admin/analytics/student/<int:student_id>')
+@admin_required
+def admin_student_activity(student_id):
+    """View individual student activity log."""
+    student = models.get_student(student_id)
+    if not student:
+        flash('Schüler nicht gefunden.', 'danger')
+        return redirect(url_for('admin_analytics'))
+
+    # Get pagination parameters
+    page = request.args.get('page', 1, type=int)
+    per_page = 50
+    offset = (page - 1) * per_page
+
+    # Get date range filters
+    date_from = request.args.get('date_from', None)
+    date_to = request.args.get('date_to', None)
+
+    # Get activity log
+    events = models.get_analytics_events(
+        limit=per_page,
+        offset=offset,
+        user_id=student_id,
+        user_type='student',
+        date_from=date_from,
+        date_to=date_to
+    )
+
+    # Get total count for pagination
+    total_count = models.get_analytics_count(
+        user_id=student_id,
+        user_type='student',
+        date_from=date_from,
+        date_to=date_to
+    )
+    total_pages = (total_count + per_page - 1) // per_page
+
+    # Get summary statistics
+    summary = models.get_student_activity_summary(
+        student_id=student_id,
+        date_from=date_from,
+        date_to=date_to
+    )
+
+    return render_template('admin/student_activity.html',
+                         student=student,
+                         events=events,
+                         summary=summary,
+                         page=page,
+                         total_pages=total_pages,
+                         total_count=total_count,
+                         date_from=date_from,
+                         date_to=date_to)
+
+
 # ============ Admin: Unterricht (Lessons) ============
 
 @app.route('/admin/klasse/<int:klasse_id>/unterricht')
@@ -823,9 +923,28 @@ def student_toggle_subtask(student_task_id, subtask_id):
     erledigt = request.json.get('erledigt', False)
     models.toggle_student_subtask(student_task_id, subtask_id, erledigt)
 
+    # Log subtask completion
+    if erledigt:
+        models.log_analytics_event(
+            event_type='subtask_complete',
+            user_id=student_id,
+            user_type='student',
+            metadata={
+                'student_task_id': student_task_id,
+                'subtask_id': subtask_id
+            }
+        )
+
     # Check if task should be auto-completed
     if models.check_task_completion(student_task_id):
         models.mark_task_complete(student_task_id)
+        # Log task completion
+        models.log_analytics_event(
+            event_type='task_complete',
+            user_id=student_id,
+            user_type='student',
+            metadata={'student_task_id': student_task_id}
+        )
         return jsonify({'status': 'ok', 'task_complete': True})
 
     return jsonify({'status': 'ok', 'task_complete': False})
@@ -892,9 +1011,30 @@ def student_quiz(student_task_id):
             student_task_id, punkte, max_punkte, json.dumps(antworten)
         )
 
+        # Log quiz attempt
+        models.log_analytics_event(
+            event_type='quiz_attempt',
+            user_id=student_id,
+            user_type='student',
+            metadata={
+                'student_task_id': student_task_id,
+                'punkte': punkte,
+                'max_punkte': max_punkte,
+                'bestanden': bestanden,
+                'prozent': int((punkte / max_punkte) * 100) if max_punkte > 0 else 0
+            }
+        )
+
         # Check task completion
         if models.check_task_completion(student_task_id):
             models.mark_task_complete(student_task_id)
+            # Log task completion (if not already logged from subtask completion)
+            models.log_analytics_event(
+                event_type='task_complete',
+                user_id=student_id,
+                user_type='student',
+                metadata={'student_task_id': student_task_id}
+            )
 
         # Transform quiz for display (JSON uses 'text'/'options', template expects 'question'/'answers')
         display_quiz = {
@@ -1066,6 +1206,56 @@ def handle_exception(error):
     )
     flash('Ein unerwarteter Fehler ist aufgetreten. Der Fehler wurde protokolliert.', 'danger')
     return redirect(url_for('index'))
+
+
+# ============ Analytics Middleware ============
+
+@app.before_request
+def log_analytics():
+    """Automatically log page views and activity."""
+    # Skip static files
+    if request.path.startswith('/static/'):
+        return
+
+    # Skip favicon
+    if request.path == '/favicon.ico':
+        return
+
+    # Skip analytics pages (avoid logging while viewing analytics)
+    if request.path.startswith('/admin/analytics'):
+        return
+
+    # Skip error logs page
+    if request.path.startswith('/admin/errors'):
+        return
+
+    # Skip file downloads (logged manually)
+    if '/download' in request.path:
+        return
+
+    # Only log authenticated requests
+    user_id = None
+    user_type = None
+    if 'admin_id' in session:
+        user_id = session['admin_id']
+        user_type = 'admin'
+    elif 'student_id' in session:
+        user_id = session['student_id']
+        user_type = 'student'
+    else:
+        return  # Don't log unauthenticated requests
+
+    # Log page view
+    models.log_analytics_event(
+        event_type='page_view',
+        user_id=user_id,
+        user_type=user_type,
+        metadata={
+            'route': request.endpoint,
+            'method': request.method,
+            'path': request.path
+        }
+    )
 
 
 # ============ Initialize ============

@@ -1,0 +1,148 @@
+{% extends 'base.html' %}
+
+{% block title %}Aktivitätslog: {{ student.vorname }} {{ student.nachname }} - Lernmanager{% endblock %}
+
+{% block content %}
+<div class="flex flex-between flex-center mb-2">
+    <h1>📝 Aktivitätslog: {{ student.nachname }}, {{ student.vorname }}</h1>
+    <a href="{{ url_for('admin_analytics') }}" class="btn btn-secondary">← Zurück</a>
+</div>
+
+<!-- Summary Cards -->
+<div class="flex gap-2 mb-2" style="flex-wrap: wrap;">
+    <div class="card" style="flex: 1; min-width: 150px;">
+        <div class="card-header">Login-Tage</div>
+        <div class="text-center" style="padding: 1rem; font-size: 2rem; font-weight: bold;">
+            {{ summary.login_days }}
+        </div>
+    </div>
+    <div class="card" style="flex: 1; min-width: 150px;">
+        <div class="card-header">Aufgaben</div>
+        <div class="text-center" style="padding: 1rem; font-size: 2rem; font-weight: bold;">
+            {{ summary.event_counts.get('task_complete', 0) }}
+        </div>
+    </div>
+    <div class="card" style="flex: 1; min-width: 150px;">
+        <div class="card-header">Quiz-Versuche</div>
+        <div class="text-center" style="padding: 1rem; font-size: 2rem; font-weight: bold;">
+            {{ summary.event_counts.get('quiz_attempt', 0) }}
+        </div>
+    </div>
+    <div class="card" style="flex: 1; min-width: 150px;">
+        <div class="card-header">Datei-Downloads</div>
+        <div class="text-center" style="padding: 1rem; font-size: 2rem; font-weight: bold;">
+            {{ summary.event_counts.get('file_download', 0) }}
+        </div>
+    </div>
+</div>
+
+<!-- Date Range Filter -->
+<div class="card mb-2">
+    <div class="card-header">Zeitraum filtern</div>
+    <form method="GET" class="flex gap-1" style="padding: 1rem;">
+        <div style="flex: 1;">
+            <label>Von:</label>
+            <input type="date" name="date_from" value="{{ date_from or '' }}" class="form-control">
+        </div>
+        <div style="flex: 1;">
+            <label>Bis:</label>
+            <input type="date" name="date_to" value="{{ date_to or '' }}" class="form-control">
+        </div>
+        <div style="display: flex; align-items: flex-end;">
+            <button type="submit" class="btn btn-primary">Filtern</button>
+            {% if date_from or date_to %}
+                <a href="{{ url_for('admin_student_activity', student_id=student.id) }}" class="btn btn-secondary" style="margin-left: 0.5rem;">Reset</a>
+            {% endif %}
+        </div>
+    </form>
+</div>
+
+<!-- Activity Log -->
+{% if events %}
+<div class="card">
+    <div class="card-header">
+        Aktivitätslog ({{ total_count }} Einträge)
+        {% if date_from or date_to %}
+            <span class="badge badge-info">Gefiltert</span>
+        {% endif %}
+    </div>
+    <table class="table">
+        <thead>
+            <tr>
+                <th style="width: 150px;">Datum & Zeit</th>
+                <th style="width: 150px;">Ereignis</th>
+                <th>Details</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for event in events %}
+            <tr>
+                <td style="font-size: 0.9rem;">{{ event.timestamp[:19] }}</td>
+                <td>
+                    {% if event.event_type == 'login' %}
+                        <span class="badge badge-success">Login</span>
+                    {% elif event.event_type == 'page_view' %}
+                        <span class="badge badge-light">Seitenaufruf</span>
+                    {% elif event.event_type == 'file_download' %}
+                        <span class="badge badge-info">Download</span>
+                    {% elif event.event_type == 'subtask_complete' %}
+                        <span class="badge badge-warning">Teilaufgabe</span>
+                    {% elif event.event_type == 'task_complete' %}
+                        <span class="badge badge-primary">Aufgabe ✓</span>
+                    {% elif event.event_type == 'quiz_attempt' %}
+                        <span class="badge badge-secondary">Quiz</span>
+                    {% else %}
+                        <span class="badge">{{ event.event_type }}</span>
+                    {% endif %}
+                </td>
+                <td style="font-size: 0.9rem;">
+                    {% if event.event_type == 'page_view' %}
+                        {{ event.metadata.get('route', 'Unbekannt') }}
+                    {% elif event.event_type == 'file_download' %}
+                        📄 {{ event.metadata.get('filename', 'Datei') }}
+                    {% elif event.event_type == 'quiz_attempt' %}
+                        {{ event.metadata.get('punkte', '?') }}/{{ event.metadata.get('max_punkte', '?') }} Punkte
+                        ({{ event.metadata.get('prozent', '?') }}%)
+                        {% if event.metadata.get('bestanden') %}
+                            <span style="color: green;">✓ Bestanden</span>
+                        {% else %}
+                            <span style="color: red;">✗ Nicht bestanden</span>
+                        {% endif %}
+                    {% elif event.event_type == 'task_complete' %}
+                        Aufgabe abgeschlossen
+                    {% elif event.event_type == 'subtask_complete' %}
+                        Teilaufgabe abgeschlossen
+                    {% elif event.event_type == 'login' %}
+                        Angemeldet als {{ event.metadata.get('username', student.username) }}
+                    {% else %}
+                        {{ event.metadata }}
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<!-- Pagination -->
+{% if total_pages > 1 %}
+<div class="card mt-2 text-center">
+    <div class="flex flex-center gap-1">
+        {% if page > 1 %}
+            <a href="{{ url_for('admin_student_activity', student_id=student.id, page=page-1, date_from=date_from, date_to=date_to) }}" class="btn btn-sm btn-secondary">← Zurück</a>
+        {% endif %}
+        <span>Seite {{ page }} von {{ total_pages }}</span>
+        {% if page < total_pages %}
+            <a href="{{ url_for('admin_student_activity', student_id=student.id, page=page+1, date_from=date_from, date_to=date_to) }}" class="btn btn-sm btn-secondary">Weiter →</a>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+{% else %}
+<div class="card text-center text-muted">
+    <p>Keine Aktivität im ausgewählten Zeitraum.</p>
+</div>
+{% endif %}
+
+{% endblock %}

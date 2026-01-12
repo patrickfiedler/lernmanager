@@ -2,8 +2,8 @@
 
 ## High Priority
 
-- 502 error when I try to upload a file
-- error logging functionality
+- ~~502 error when I try to upload a file~~ (Fixed - was database permissions issue)
+- ~~error logging functionality~~ (Complete - Phase 4)
 
 ## Features
 

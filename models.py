@@ -339,6 +339,28 @@ def init_db():
             -- Index for efficient log retrieval and cleanup
             CREATE INDEX IF NOT EXISTS idx_error_log_timestamp
             ON error_log(timestamp DESC);
+
+            -- ============ Analytics & Activity Logging ============
+
+            -- Analytics events for both usage statistics and student activity logs
+            CREATE TABLE IF NOT EXISTS analytics_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                event_type TEXT NOT NULL,  -- 'login', 'page_view', 'file_download', 'task_start', 'subtask_complete', 'task_complete', 'quiz_attempt', 'self_eval'
+                user_id INTEGER,
+                user_type TEXT,  -- 'admin' or 'student'
+                metadata TEXT    -- JSON format for flexible event data
+            );
+
+            -- Indexes for efficient querying
+            CREATE INDEX IF NOT EXISTS idx_analytics_timestamp
+            ON analytics_events(timestamp DESC);
+
+            CREATE INDEX IF NOT EXISTS idx_analytics_user
+            ON analytics_events(user_id, user_type, timestamp DESC);
+
+            CREATE INDEX IF NOT EXISTS idx_analytics_type
+            ON analytics_events(event_type, timestamp DESC);
         ''')
 
 
@@ -1258,4 +1280,310 @@ def clear_all_error_logs():
     """Clear all error logs."""
     with db_session() as conn:
         cursor = conn.execute("DELETE FROM error_log")
+        return cursor.rowcount
+
+
+# ============ Analytics & Activity Logging functions ============
+
+def log_analytics_event(event_type, user_id=None, user_type=None, metadata=None):
+    """Log an analytics event.
+
+    Args:
+        event_type: Type of event ('login', 'page_view', 'task_complete', etc.)
+        user_id: ID of user performing action
+        user_type: 'admin' or 'student'
+        metadata: Dictionary of additional data (will be stored as JSON)
+    """
+    try:
+        metadata_json = json.dumps(metadata) if metadata else None
+        with db_session() as conn:
+            conn.execute('''
+                INSERT INTO analytics_events (event_type, user_id, user_type, metadata)
+                VALUES (?, ?, ?, ?)
+            ''', (event_type, user_id, user_type, metadata_json))
+    except Exception as e:
+        # If logging fails, print to stderr but don't crash
+        print(f"ERROR: Failed to log analytics event: {e}", file=sys.stderr)
+
+
+def get_analytics_events(limit=100, offset=0, event_type=None, user_id=None, user_type=None, date_from=None, date_to=None):
+    """Get analytics events with optional filtering.
+
+    Args:
+        limit: Maximum number of events to return
+        offset: Number of events to skip (for pagination)
+        event_type: Filter by event type
+        user_id: Filter by user ID
+        user_type: Filter by user type ('admin' or 'student')
+        date_from: Filter events from this date (YYYY-MM-DD)
+        date_to: Filter events until this date (YYYY-MM-DD)
+    """
+    with db_session() as conn:
+        query = "SELECT * FROM analytics_events WHERE 1=1"
+        params = []
+
+        if event_type:
+            query += " AND event_type = ?"
+            params.append(event_type)
+
+        if user_id is not None:
+            query += " AND user_id = ?"
+            params.append(user_id)
+
+        if user_type:
+            query += " AND user_type = ?"
+            params.append(user_type)
+
+        if date_from:
+            query += " AND date(timestamp) >= ?"
+            params.append(date_from)
+
+        if date_to:
+            query += " AND date(timestamp) <= ?"
+            params.append(date_to)
+
+        query += " ORDER BY timestamp DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+
+        rows = conn.execute(query, params).fetchall()
+
+        # Parse JSON metadata
+        events = []
+        for row in rows:
+            event = dict(row)
+            if event['metadata']:
+                try:
+                    event['metadata'] = json.loads(event['metadata'])
+                except:
+                    event['metadata'] = {}
+            else:
+                event['metadata'] = {}
+            events.append(event)
+
+        return events
+
+
+def get_analytics_count(event_type=None, user_id=None, user_type=None, date_from=None, date_to=None):
+    """Get count of analytics events with optional filtering."""
+    with db_session() as conn:
+        query = "SELECT COUNT(*) as count FROM analytics_events WHERE 1=1"
+        params = []
+
+        if event_type:
+            query += " AND event_type = ?"
+            params.append(event_type)
+
+        if user_id is not None:
+            query += " AND user_id = ?"
+            params.append(user_id)
+
+        if user_type:
+            query += " AND user_type = ?"
+            params.append(user_type)
+
+        if date_from:
+            query += " AND date(timestamp) >= ?"
+            params.append(date_from)
+
+        if date_to:
+            query += " AND date(timestamp) <= ?"
+            params.append(date_to)
+
+        row = conn.execute(query, params).fetchone()
+        return row['count'] if row else 0
+
+
+def get_analytics_overview():
+    """Get overview statistics for analytics dashboard."""
+    with db_session() as conn:
+        # Active users today (unique users who logged in or had activity)
+        active_today = conn.execute('''
+            SELECT COUNT(DISTINCT user_id) as count
+            FROM analytics_events
+            WHERE date(timestamp) = date('now')
+            AND user_id IS NOT NULL
+        ''').fetchone()
+
+        # Active users this week
+        active_week = conn.execute('''
+            SELECT COUNT(DISTINCT user_id) as count
+            FROM analytics_events
+            WHERE timestamp >= datetime('now', '-7 days')
+            AND user_id IS NOT NULL
+        ''').fetchone()
+
+        # Page views today
+        views_today = conn.execute('''
+            SELECT COUNT(*) as count
+            FROM analytics_events
+            WHERE event_type = 'page_view'
+            AND date(timestamp) = date('now')
+        ''').fetchone()
+
+        # Page views this week
+        views_week = conn.execute('''
+            SELECT COUNT(*) as count
+            FROM analytics_events
+            WHERE event_type = 'page_view'
+            AND timestamp >= datetime('now', '-7 days')
+        ''').fetchone()
+
+        # Tasks completed today
+        tasks_today = conn.execute('''
+            SELECT COUNT(*) as count
+            FROM analytics_events
+            WHERE event_type = 'task_complete'
+            AND date(timestamp) = date('now')
+        ''').fetchone()
+
+        # Tasks completed this week
+        tasks_week = conn.execute('''
+            SELECT COUNT(*) as count
+            FROM analytics_events
+            WHERE event_type = 'task_complete'
+            AND timestamp >= datetime('now', '-7 days')
+        ''').fetchone()
+
+        # Logins today
+        logins_today = conn.execute('''
+            SELECT COUNT(*) as count
+            FROM analytics_events
+            WHERE event_type = 'login'
+            AND date(timestamp) = date('now')
+        ''').fetchone()
+
+        # Event type breakdown
+        by_type = conn.execute('''
+            SELECT event_type, COUNT(*) as count
+            FROM analytics_events
+            WHERE timestamp >= datetime('now', '-7 days')
+            GROUP BY event_type
+            ORDER BY count DESC
+        ''').fetchall()
+
+        # Most active students this week
+        active_students = conn.execute('''
+            SELECT ae.user_id, s.vorname, s.nachname, COUNT(*) as event_count
+            FROM analytics_events ae
+            JOIN student s ON ae.user_id = s.id
+            WHERE ae.user_type = 'student'
+            AND ae.timestamp >= datetime('now', '-7 days')
+            GROUP BY ae.user_id, s.vorname, s.nachname
+            ORDER BY event_count DESC
+            LIMIT 10
+        ''').fetchall()
+
+        # Popular routes this week
+        popular_routes = conn.execute('''
+            SELECT
+                json_extract(metadata, '$.route') as route,
+                COUNT(*) as count
+            FROM analytics_events
+            WHERE event_type = 'page_view'
+            AND timestamp >= datetime('now', '-7 days')
+            AND metadata IS NOT NULL
+            GROUP BY route
+            ORDER BY count DESC
+            LIMIT 10
+        ''').fetchall()
+
+        return {
+            'active_today': active_today['count'] if active_today else 0,
+            'active_week': active_week['count'] if active_week else 0,
+            'views_today': views_today['count'] if views_today else 0,
+            'views_week': views_week['count'] if views_week else 0,
+            'tasks_today': tasks_today['count'] if tasks_today else 0,
+            'tasks_week': tasks_week['count'] if tasks_week else 0,
+            'logins_today': logins_today['count'] if logins_today else 0,
+            'by_type': {row['event_type']: row['count'] for row in by_type},
+            'active_students': [dict(r) for r in active_students],
+            'popular_routes': [dict(r) for r in popular_routes]
+        }
+
+
+def get_student_activity_log(student_id, limit=100, offset=0):
+    """Get activity log for a specific student."""
+    return get_analytics_events(
+        limit=limit,
+        offset=offset,
+        user_id=student_id,
+        user_type='student'
+    )
+
+
+def get_student_activity_summary(student_id, date_from=None, date_to=None):
+    """Get activity summary for a student (for reports)."""
+    with db_session() as conn:
+        # Build date filter
+        date_filter = "1=1"
+        params = [student_id]
+
+        if date_from:
+            date_filter += " AND date(timestamp) >= ?"
+            params.append(date_from)
+
+        if date_to:
+            date_filter += " AND date(timestamp) <= ?"
+            params.append(date_to)
+
+        # Count by event type
+        event_counts = conn.execute(f'''
+            SELECT event_type, COUNT(*) as count
+            FROM analytics_events
+            WHERE user_id = ? AND user_type = 'student'
+            AND {date_filter}
+            GROUP BY event_type
+        ''', params).fetchall()
+
+        # Unique login days
+        login_days = conn.execute(f'''
+            SELECT COUNT(DISTINCT date(timestamp)) as count
+            FROM analytics_events
+            WHERE user_id = ? AND user_type = 'student'
+            AND event_type = 'login'
+            AND {date_filter}
+        ''', params).fetchone()
+
+        # Tasks completed with details
+        tasks_completed = conn.execute(f'''
+            SELECT metadata, timestamp
+            FROM analytics_events
+            WHERE user_id = ? AND user_type = 'student'
+            AND event_type = 'task_complete'
+            AND {date_filter}
+            ORDER BY timestamp DESC
+        ''', params).fetchall()
+
+        # Parse tasks
+        tasks = []
+        for row in tasks_completed:
+            task_data = {'timestamp': row['timestamp']}
+            if row['metadata']:
+                try:
+                    task_data.update(json.loads(row['metadata']))
+                except:
+                    pass
+            tasks.append(task_data)
+
+        return {
+            'event_counts': {row['event_type']: row['count'] for row in event_counts},
+            'login_days': login_days['count'] if login_days else 0,
+            'tasks_completed': tasks
+        }
+
+
+def cleanup_old_analytics_events(days=210):
+    """Delete analytics events older than specified days."""
+    with db_session() as conn:
+        cursor = conn.execute(
+            "DELETE FROM analytics_events WHERE timestamp < datetime('now', ? || ' days')",
+            (f'-{days}',)
+        )
+        return cursor.rowcount
+
+
+def clear_all_analytics_events():
+    """Clear all analytics events."""
+    with db_session() as conn:
+        cursor = conn.execute("DELETE FROM analytics_events")
         return cursor.rowcount

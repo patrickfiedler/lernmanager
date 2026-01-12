@@ -1,0 +1,131 @@
+{% extends 'base.html' %}
+
+{% block title %}Aktivität & Statistiken - Lernmanager{% endblock %}
+
+{% block content %}
+<div class="flex flex-between flex-center mb-2">
+    <h1>📊 Aktivität & Statistiken</h1>
+</div>
+
+<!-- Overview Cards -->
+<div class="flex gap-2 mb-2" style="flex-wrap: wrap;">
+    <div class="card" style="flex: 1; min-width: 200px;">
+        <div class="card-header">Aktive Nutzer Heute</div>
+        <div class="text-center" style="padding: 1rem; font-size: 2.5rem; font-weight: bold; color: #2196F3;">
+            {{ stats.active_today }}
+        </div>
+    </div>
+    <div class="card" style="flex: 1; min-width: 200px;">
+        <div class="card-header">Aktive Nutzer (7 Tage)</div>
+        <div class="text-center" style="padding: 1rem; font-size: 2.5rem; font-weight: bold; color: #4CAF50;">
+            {{ stats.active_week }}
+        </div>
+    </div>
+    <div class="card" style="flex: 1; min-width: 200px;">
+        <div class="card-header">Seitenaufrufe Heute</div>
+        <div class="text-center" style="padding: 1rem; font-size: 2.5rem; font-weight: bold; color: #FF9800;">
+            {{ stats.views_today }}
+        </div>
+    </div>
+    <div class="card" style="flex: 1; min-width: 200px;">
+        <div class="card-header">Aufgaben Heute</div>
+        <div class="text-center" style="padding: 1rem; font-size: 2.5rem; font-weight: bold; color: #9C27B0;">
+            {{ stats.tasks_today }}
+        </div>
+    </div>
+</div>
+
+<!-- Weekly Statistics -->
+<div class="flex gap-2 mb-2">
+    <div class="card" style="flex: 1;">
+        <div class="card-header">Diese Woche (7 Tage)</div>
+        <div style="padding: 1rem;">
+            <div style="margin-bottom: 0.5rem;">
+                <strong>Seitenaufrufe:</strong> {{ stats.views_week }}
+            </div>
+            <div style="margin-bottom: 0.5rem;">
+                <strong>Aufgaben abgeschlossen:</strong> {{ stats.tasks_week }}
+            </div>
+            <div style="margin-bottom: 0.5rem;">
+                <strong>Logins:</strong> {{ stats.logins_today }}
+            </div>
+        </div>
+    </div>
+
+    <div class="card" style="flex: 1;">
+        <div class="card-header">Aktivität nach Typ</div>
+        <div style="padding: 1rem;">
+            {% if stats.by_type %}
+                {% for event_type, count in stats.by_type.items() %}
+                    <div style="margin-bottom: 0.5rem;">
+                        <span class="badge badge-info">{{ event_type }}</span> {{ count }}
+                    </div>
+                {% endfor %}
+            {% else %}
+                <div class="text-muted">Keine Aktivität diese Woche</div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Most Active Students -->
+{% if stats.active_students %}
+<div class="card mb-2">
+    <div class="card-header">Aktivste Schüler (7 Tage)</div>
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Schüler</th>
+                <th style="width: 150px;">Anzahl Aktivitäten</th>
+                <th style="width: 150px;">Details</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for student in stats.active_students %}
+            <tr>
+                <td>{{ student.nachname }}, {{ student.vorname }}</td>
+                <td><span class="badge badge-primary">{{ student.event_count }}</span></td>
+                <td>
+                    <a href="{{ url_for('admin_student_activity', student_id=student.user_id) }}" class="btn btn-sm btn-secondary">
+                        Aktivitätslog ansehen
+                    </a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<!-- Popular Routes -->
+{% if stats.popular_routes %}
+<div class="card">
+    <div class="card-header">Beliebteste Seiten (7 Tage)</div>
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Seite</th>
+                <th style="width: 150px;">Aufrufe</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for route in stats.popular_routes %}
+            {% if route.route %}
+            <tr>
+                <td><code>{{ route.route }}</code></td>
+                <td><span class="badge badge-info">{{ route.count }}</span></td>
+            </tr>
+            {% endif %}
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+{% if deleted_count > 0 %}
+<div class="card mt-2" style="background-color: #f0f0f0;">
+    <small class="text-muted">🗑️ {{ deleted_count }} alte Aktivitätsprotokolle (älter als 210 Tage) wurden gelöscht.</small>
+</div>
+{% endif %}
+
+{% endblock %}
