@@ -1665,7 +1665,7 @@ def get_report_data_for_class(klasse_id, date_from=None, date_to=None):
     with db_session() as conn:
         # Get class info
         klasse = conn.execute(
-            "SELECT name, stufe, subject FROM klasse WHERE id = ?",
+            "SELECT id, name FROM klasse WHERE id = ?",
             (klasse_id,)
         ).fetchone()
 
@@ -1675,7 +1675,7 @@ def get_report_data_for_class(klasse_id, date_from=None, date_to=None):
         # Get all students in class with their task status
         students = get_students_in_klasse(klasse_id)
 
-        # For each student, get activity summary
+        # For each student, get activity summary and task progress
         student_data = []
         for student in students:
             summary = get_student_activity_summary(
@@ -1695,17 +1695,37 @@ def get_report_data_for_class(klasse_id, date_from=None, date_to=None):
                 (student['id'],)
             ).fetchone()
 
+            # Compute task progress
+            if current_task:
+                task_name = current_task['name']
+                # Get subtask progress
+                subtasks = get_student_subtask_progress(current_task['id'])
+                completed = sum(1 for s in subtasks if s['erledigt'])
+                total = len(subtasks)
+
+                # Get quiz status
+                quiz_attempts = get_quiz_attempts(current_task['id'])
+                quiz_passed = bool(quiz_attempts and quiz_attempts[-1]['bestanden']) if quiz_attempts else False
+
+                # Check if task is completed
+                is_completed = bool(current_task['abgeschlossen'])
+            else:
+                task_name = 'Keine Aufgabe'
+                completed = 0
+                total = 0
+                quiz_passed = False
+                is_completed = False
+
             student_data.append({
                 'id': student['id'],
                 'name': f"{student['nachname']}, {student['vorname']}",
                 'username': student['username'],
-                'task_name': current_task['task_name'] if current_task else 'Keine Aufgabe',
-                'task_order': current_task['task_order'] if current_task else 0,
-                'completed_subtasks': student.get('completed_subtasks', 0),
-                'total_subtasks': student.get('total_subtasks', 0),
-                'progress_percent': student.get('progress_percent', 0),
-                'quiz_passed': student.get('quiz_passed', False),
-                'is_completed': student.get('is_completed', False),
+                'task_name': task_name,
+                'completed_subtasks': completed,
+                'total_subtasks': total,
+                'progress_percent': int((completed / total * 100) if total > 0 else 0),
+                'quiz_passed': quiz_passed,
+                'is_completed': is_completed,
                 'login_days': summary['login_days'],
                 'tasks_completed': summary['tasks_completed'],
                 'last_activity': last_activity['last_seen'] if last_activity and last_activity['last_seen'] else None
@@ -1733,7 +1753,7 @@ def get_report_data_for_student(student_id, report_type='summary', date_from=Non
 
         # Get student's classes
         klassen = conn.execute(
-            """SELECT k.name, k.stufe, k.subject
+            """SELECT k.id, k.name
                FROM klasse k
                JOIN student_klasse sk ON k.id = sk.klasse_id
                WHERE sk.student_id = ?""",
@@ -1747,23 +1767,29 @@ def get_report_data_for_student(student_id, report_type='summary', date_from=Non
             date_to=date_to
         )
 
-        # Get current tasks for all classes
+        # Get current tasks for all classes with computed progress
         current_tasks = []
         for klasse in klassen:
-            task = conn.execute(
-                """SELECT t.name, t.order_num, st.completed_subtasks, st.total_subtasks,
-                          st.quiz_passed, st.is_completed, k.name as klasse_name
-                   FROM student_task st
-                   JOIN task t ON st.task_id = t.id
-                   JOIN klasse k ON st.klasse_id = k.id
-                   WHERE st.student_id = ? AND k.id = (
-                       SELECT id FROM klasse WHERE name = ? AND stufe = ? AND subject = ?
-                   )""",
-                (student_id, klasse['name'], klasse['stufe'], klasse['subject'])
-            ).fetchone()
+            task = get_student_task(student_id, klasse['id'])
 
             if task:
-                current_tasks.append(dict(task))
+                # Compute progress from subtasks
+                subtasks = get_student_subtask_progress(task['id'])
+                completed = sum(1 for s in subtasks if s['erledigt'])
+                total = len(subtasks)
+
+                # Get quiz status
+                quiz_attempts = get_quiz_attempts(task['id'])
+                quiz_passed = bool(quiz_attempts and quiz_attempts[-1]['bestanden']) if quiz_attempts else False
+
+                current_tasks.append({
+                    'name': task['name'],
+                    'klasse_name': klasse['name'],
+                    'completed_subtasks': completed,
+                    'total_subtasks': total,
+                    'quiz_passed': quiz_passed,
+                    'is_completed': bool(task['abgeschlossen'])
+                })
 
         result = {
             'student': student_dict,
@@ -1774,35 +1800,36 @@ def get_report_data_for_student(student_id, report_type='summary', date_from=Non
 
         # For complete report, add additional data
         if report_type == 'complete':
-            # Get activity timeline
+            # Get activity timeline (latest 100 events)
             result['activity_log'] = get_student_activity_log(
                 student_id,
-                date_from=date_from,
-                date_to=date_to,
                 limit=100
             )
 
             # Get attendance records
             result['attendance'] = conn.execute(
-                """SELECT u.date, k.name as klasse_name, u.anwesend, u.evaluation
-                   FROM student_unterricht u
-                   JOIN unterricht ut ON u.unterricht_id = ut.id
+                """SELECT ut.datum as date, k.name as klasse_name, us.anwesend,
+                          us.admin_selbststaendigkeit, us.admin_respekt,
+                          us.admin_fortschritt, us.admin_kommentar
+                   FROM unterricht_student us
+                   JOIN unterricht ut ON us.unterricht_id = ut.id
                    JOIN klasse k ON ut.klasse_id = k.id
-                   WHERE u.student_id = ?
-                   ORDER BY u.date DESC
+                   WHERE us.student_id = ?
+                   ORDER BY ut.datum DESC
                    LIMIT 50""",
                 (student_id,)
             ).fetchall()
             result['attendance'] = [dict(row) for row in result['attendance']]
 
-            # Get quiz attempts
+            # Get quiz attempts (must join through student_task)
             result['quiz_attempts'] = conn.execute(
-                """SELECT qa.timestamp, qa.score, qa.total_questions, qa.passed,
-                          t.name as task_name, k.name as klasse_name
+                """SELECT qa.timestamp, qa.punkte as score, qa.max_punkte as total_questions,
+                          qa.bestanden as passed, t.name as task_name, k.name as klasse_name
                    FROM quiz_attempt qa
-                   JOIN task t ON qa.task_id = t.id
-                   JOIN klasse k ON qa.klasse_id = k.id
-                   WHERE qa.student_id = ?
+                   JOIN student_task st ON qa.student_task_id = st.id
+                   JOIN task t ON st.task_id = t.id
+                   JOIN klasse k ON st.klasse_id = k.id
+                   WHERE st.student_id = ?
                    ORDER BY qa.timestamp DESC
                    LIMIT 20""",
                 (student_id,)

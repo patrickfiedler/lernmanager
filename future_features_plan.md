@@ -14,7 +14,7 @@ Implement remaining features and improvements from todo.md to enhance Lernmanage
 - **Dashboard schedule filter** - Commit `0560a52` (Phase 3)
 - **Class schedule system** - Implemented in student assessment improvements
 - **Usage analytics & activity logging** - Commit `7720a2a` (Phase 5)
-- **PDF progress reports** - Phase 6 (pending commit)
+- **PDF progress reports** - Commit `2183568` (Phase 6)
 
 ### 📋 Remaining Items
 

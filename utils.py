@@ -335,7 +335,7 @@ def generate_class_report_pdf(report_data, date_from=None, date_to=None):
         spaceAfter=12
     )
     elements.append(Paragraph(
-        f"Klassenbericht: {klasse['name']} - {klasse['stufe']} ({klasse['subject']})",
+        f"Klassenbericht: {klasse['name']}",
         title_style
     ))
 
@@ -509,10 +509,11 @@ def generate_student_report_pdf(report_data, report_type='summary'):
     )
     elements.append(Paragraph("Uebersicht", section_style))
 
-    # Summary data
+    # Summary data (tasks_completed is a list, get count)
+    tasks_count = len(summary['tasks_completed']) if isinstance(summary['tasks_completed'], list) else summary['tasks_completed']
     summary_data = [
         ['Aktive Lerntage', str(summary['login_days'])],
-        ['Aufgaben abgeschlossen', str(summary['tasks_completed'])],
+        ['Aufgaben abgeschlossen', str(tasks_count)],
         ['Quiz bestanden', str(summary['event_counts'].get('quiz_attempt', 0))],
         ['Dateien heruntergeladen', str(summary['event_counts'].get('file_download', 0))]
     ]
@@ -573,7 +574,8 @@ def generate_student_report_pdf(report_data, report_type='summary'):
         elements.append(PageBreak())
         elements.append(Paragraph("Aktivitaetsprotokoll", section_style))
 
-        activity_log = report_data.get('activity_log', {}).get('events', [])
+        # activity_log is a list directly, not a dict with 'events' key
+        activity_log = report_data.get('activity_log', [])
         if activity_log:
             activity_data = [['Datum', 'Aktivitaet', 'Details']]
             for event in activity_log[:50]:  # Limit to 50 events for PDF
@@ -696,7 +698,8 @@ def generate_student_self_report_pdf(report_data):
 
     # Build encouraging message based on data
     login_days = summary['login_days']
-    tasks_completed = summary['tasks_completed']
+    # tasks_completed is a list of task dicts, get count
+    tasks_completed_count = len(summary['tasks_completed']) if isinstance(summary['tasks_completed'], list) else summary['tasks_completed']
     quiz_passes = summary['event_counts'].get('quiz_attempt', 0)
 
     encouragement = ""
@@ -705,8 +708,8 @@ def generate_student_self_report_pdf(report_data):
     elif login_days > 0:
         encouragement = f"Du warst {login_days} Tage aktiv. "
 
-    if tasks_completed > 0:
-        encouragement += f"Du hast bereits {tasks_completed} Aufgabe{'n' if tasks_completed > 1 else ''} abgeschlossen. "
+    if tasks_completed_count > 0:
+        encouragement += f"Du hast bereits {tasks_completed_count} Aufgabe{'n' if tasks_completed_count > 1 else ''} abgeschlossen. "
 
     if not encouragement:
         encouragement = "Deine Lernreise hat begonnen. "
@@ -730,8 +733,8 @@ def generate_student_self_report_pdf(report_data):
     metrics_data = []
     if login_days > 0:
         metrics_data.append(['Aktive Lerntage', f"<b>{login_days}</b>"])
-    if tasks_completed > 0:
-        metrics_data.append(['Aufgaben abgeschlossen', f"<b>{tasks_completed}</b>"])
+    if tasks_completed_count > 0:
+        metrics_data.append(['Aufgaben abgeschlossen', f"<b>{tasks_completed_count}</b>"])
     if quiz_passes > 0:
         metrics_data.append(['Quiz bestanden', f"<b>{quiz_passes}</b>"])
 
