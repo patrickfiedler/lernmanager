@@ -1,0 +1,160 @@
+{% extends 'base.html' %}
+
+{% block title %}Fehlerprotokolle - Lernmanager{% endblock %}
+
+{% block content %}
+<div class="flex flex-between flex-center mb-2">
+    <h1>🐛 Fehlerprotokolle</h1>
+    <div>
+        <form method="POST" action="{{ url_for('admin_errors_clear') }}" style="display: inline;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-danger btn-sm" onclick="return confirm('Alle Fehlerprotokolle löschen?')">Alle löschen</button>
+        </form>
+    </div>
+</div>
+
+<!-- Statistics Cards -->
+<div class="flex gap-2 mb-2">
+    <div class="card" style="flex: 1;">
+        <div class="card-header">Heute (24h)</div>
+        <div class="text-center" style="padding: 1rem; font-size: 2rem; font-weight: bold;">
+            {{ stats.today }}
+        </div>
+    </div>
+    <div class="card" style="flex: 1;">
+        <div class="card-header">Diese Woche (7d)</div>
+        <div class="text-center" style="padding: 1rem; font-size: 2rem; font-weight: bold;">
+            {{ stats.week }}
+        </div>
+    </div>
+    <div class="card" style="flex: 1;">
+        <div class="card-header">Nach Stufe</div>
+        <div style="padding: 1rem;">
+            {% if stats.by_level %}
+                {% if stats.by_level.CRITICAL %}
+                    <div><span class="badge badge-danger">CRITICAL</span> {{ stats.by_level.CRITICAL }}</div>
+                {% endif %}
+                {% if stats.by_level.ERROR %}
+                    <div><span class="badge badge-warning">ERROR</span> {{ stats.by_level.ERROR }}</div>
+                {% endif %}
+                {% if stats.by_level.WARNING %}
+                    <div><span class="badge badge-secondary">WARNING</span> {{ stats.by_level.WARNING }}</div>
+                {% endif %}
+            {% else %}
+                <div class="text-muted">Keine Fehler</div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Filter and Count -->
+<div class="card mb-2">
+    <div class="flex flex-between flex-center">
+        <div>
+            <strong>{{ total_count }}</strong> Fehlerprotokoll(e)
+            {% if level_filter %}
+                <span class="badge badge-primary">Filter: {{ level_filter }}</span>
+            {% endif %}
+        </div>
+        <div>
+            <a href="{{ url_for('admin_errors') }}" class="btn btn-sm btn-secondary">Alle</a>
+            <a href="{{ url_for('admin_errors', level='CRITICAL') }}" class="btn btn-sm btn-danger">CRITICAL</a>
+            <a href="{{ url_for('admin_errors', level='ERROR') }}" class="btn btn-sm btn-warning">ERROR</a>
+            <a href="{{ url_for('admin_errors', level='WARNING') }}" class="btn btn-sm btn-secondary">WARNING</a>
+        </div>
+    </div>
+</div>
+
+<!-- Error Logs Table -->
+{% if logs %}
+<div class="card">
+    <table class="table">
+        <thead>
+            <tr>
+                <th style="width: 150px;">Zeitstempel</th>
+                <th style="width: 100px;">Stufe</th>
+                <th>Nachricht</th>
+                <th style="width: 100px;">Benutzer</th>
+                <th style="width: 150px;">Route</th>
+                <th style="width: 80px;">Methode</th>
+                <th style="width: 100px;"></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for log in logs %}
+            <tr>
+                <td style="font-size: 0.85rem;">{{ log.timestamp[:19] }}</td>
+                <td>
+                    {% if log.level == 'CRITICAL' %}
+                        <span class="badge badge-danger">{{ log.level }}</span>
+                    {% elif log.level == 'ERROR' %}
+                        <span class="badge badge-warning">{{ log.level }}</span>
+                    {% else %}
+                        <span class="badge badge-secondary">{{ log.level }}</span>
+                    {% endif %}
+                </td>
+                <td style="font-size: 0.9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 300px;">
+                    {{ log.message }}
+                </td>
+                <td>
+                    {% if log.user_id %}
+                        <span class="badge badge-info">{{ log.user_type }} #{{ log.user_id }}</span>
+                    {% else %}
+                        <span class="text-muted">-</span>
+                    {% endif %}
+                </td>
+                <td style="font-size: 0.85rem;">{{ log.route or '-' }}</td>
+                <td><span class="badge badge-light">{{ log.method or '-' }}</span></td>
+                <td>
+                    <button class="btn btn-sm btn-secondary" onclick="toggleTraceback({{ log.id }})">Details</button>
+                </td>
+            </tr>
+            <tr id="traceback-{{ log.id }}" style="display: none;">
+                <td colspan="7" style="background-color: #f5f5f5; padding: 1rem;">
+                    <div style="margin-bottom: 0.5rem;"><strong>URL:</strong> {{ log.url or 'N/A' }}</div>
+                    {% if log.traceback %}
+                        <div style="margin-bottom: 0.5rem;"><strong>Traceback:</strong></div>
+                        <pre style="background-color: #fff; padding: 1rem; border: 1px solid #ddd; overflow-x: auto; font-size: 0.8rem; margin: 0;">{{ log.traceback }}</pre>
+                    {% else %}
+                        <div class="text-muted">Kein Traceback verfügbar</div>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<!-- Pagination -->
+{% if total_pages > 1 %}
+<div class="card mt-2 text-center">
+    <div class="flex flex-center gap-1">
+        {% if page > 1 %}
+            <a href="{{ url_for('admin_errors', page=page-1, level=level_filter) }}" class="btn btn-sm btn-secondary">← Zurück</a>
+        {% endif %}
+        <span>Seite {{ page }} von {{ total_pages }}</span>
+        {% if page < total_pages %}
+            <a href="{{ url_for('admin_errors', page=page+1, level=level_filter) }}" class="btn btn-sm btn-secondary">Weiter →</a>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+{% else %}
+<div class="card text-center text-muted">
+    <p>Keine Fehlerprotokolle vorhanden. 🎉</p>
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+function toggleTraceback(logId) {
+    const row = document.getElementById('traceback-' + logId);
+    if (row.style.display === 'none') {
+        row.style.display = 'table-row';
+    } else {
+        row.style.display = 'none';
+    }
+}
+{% endblock %}

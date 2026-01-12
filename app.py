@@ -1,5 +1,6 @@
 import os
 import json
+import traceback
 from functools import wraps
 from datetime import date, datetime
 from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify, send_from_directory, abort, Response
@@ -633,6 +634,52 @@ def admin_passwort():
     return render_template('admin/passwort.html')
 
 
+# ============ Admin: Error Logs ============
+
+@app.route('/admin/errors')
+@admin_required
+def admin_errors():
+    """View error logs with pagination and filtering."""
+    # Trigger cleanup of old logs (30 days)
+    deleted_count = models.cleanup_old_error_logs(days=30)
+
+    # Get pagination parameters
+    page = request.args.get('page', 1, type=int)
+    per_page = 50
+    offset = (page - 1) * per_page
+
+    # Get filter parameter
+    level_filter = request.args.get('level', None)
+    if level_filter and level_filter.upper() not in ['ERROR', 'WARNING', 'CRITICAL']:
+        level_filter = None
+
+    # Get logs and stats
+    logs = models.get_error_logs(limit=per_page, offset=offset, level_filter=level_filter)
+    total_count = models.get_error_log_count(level_filter=level_filter)
+    stats = models.get_error_log_stats()
+
+    # Calculate pagination info
+    total_pages = (total_count + per_page - 1) // per_page
+
+    return render_template('admin/errors.html',
+                         logs=logs,
+                         stats=stats,
+                         page=page,
+                         total_pages=total_pages,
+                         total_count=total_count,
+                         level_filter=level_filter,
+                         deleted_count=deleted_count)
+
+
+@app.route('/admin/errors/clear', methods=['POST'])
+@admin_required
+def admin_errors_clear():
+    """Clear all error logs."""
+    count = models.clear_all_error_logs()
+    flash(f'{count} Fehlerprotokolle gelöscht.', 'success')
+    return redirect(url_for('admin_errors'))
+
+
 # ============ Admin: Unterricht (Lessons) ============
 
 @app.route('/admin/klasse/<int:klasse_id>/unterricht')
@@ -917,6 +964,108 @@ def student_selbstbewertung(unterricht_id):
     models.update_student_self_eval(unterricht_id, student_id, selbst_selbst, selbst_respekt)
     flash('Selbstbewertung gespeichert. ✅', 'success')
     return redirect(request.referrer or url_for('student_dashboard'))
+
+
+# ============ Error Handlers ============
+
+def get_current_user_info():
+    """Extract current user info from session for error logging."""
+    user_id = None
+    user_type = None
+
+    if 'admin_id' in session:
+        user_id = session['admin_id']
+        user_type = 'admin'
+    elif 'student_id' in session:
+        user_id = session['student_id']
+        user_type = 'student'
+
+    return user_id, user_type
+
+
+@app.errorhandler(400)
+def handle_bad_request(error):
+    """Handle 400 Bad Request errors."""
+    user_id, user_type = get_current_user_info()
+    models.log_error(
+        level='WARNING',
+        message=f'Bad Request: {str(error)}',
+        traceback=traceback.format_exc(),
+        user_id=user_id,
+        user_type=user_type,
+        route=request.endpoint,
+        method=request.method,
+        url=request.url
+    )
+    flash('Ungültige Anfrage.', 'warning')
+    return redirect(request.referrer or url_for('index'))
+
+
+@app.errorhandler(403)
+def handle_forbidden(error):
+    """Handle 403 Forbidden errors."""
+    user_id, user_type = get_current_user_info()
+    models.log_error(
+        level='WARNING',
+        message=f'Forbidden: {str(error)}',
+        traceback=None,
+        user_id=user_id,
+        user_type=user_type,
+        route=request.endpoint,
+        method=request.method,
+        url=request.url
+    )
+    flash('Zugriff verweigert.', 'danger')
+    return redirect(url_for('index'))
+
+
+@app.errorhandler(404)
+def handle_not_found(error):
+    """Handle 404 Not Found errors."""
+    # Don't log 404s to database (too noisy), just show error page
+    return render_template('error.html',
+                         error_code=404,
+                         error_message='Seite nicht gefunden'), 404
+
+
+@app.errorhandler(500)
+def handle_internal_error(error):
+    """Handle 500 Internal Server errors."""
+    user_id, user_type = get_current_user_info()
+    models.log_error(
+        level='ERROR',
+        message=f'Internal Server Error: {str(error)}',
+        traceback=traceback.format_exc(),
+        user_id=user_id,
+        user_type=user_type,
+        route=request.endpoint,
+        method=request.method,
+        url=request.url
+    )
+    flash('Ein interner Fehler ist aufgetreten. Der Fehler wurde protokolliert.', 'danger')
+    return redirect(url_for('index'))
+
+
+@app.errorhandler(Exception)
+def handle_exception(error):
+    """Handle all unhandled exceptions."""
+    # Skip 404 errors (handled separately)
+    if isinstance(error, Exception) and error.__class__.__name__ == 'NotFound':
+        return handle_not_found(error)
+
+    user_id, user_type = get_current_user_info()
+    models.log_error(
+        level='CRITICAL',
+        message=f'Unhandled Exception: {error.__class__.__name__}: {str(error)}',
+        traceback=traceback.format_exc(),
+        user_id=user_id,
+        user_type=user_type,
+        route=request.endpoint,
+        method=request.method,
+        url=request.url
+    )
+    flash('Ein unerwarteter Fehler ist aufgetreten. Der Fehler wurde protokolliert.', 'danger')
+    return redirect(url_for('index'))
 
 
 # ============ Initialize ============

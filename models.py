@@ -319,6 +319,26 @@ def init_db():
 
             CREATE INDEX IF NOT EXISTS idx_question_history_review
             ON game_question_history(student_id, next_review);
+
+            -- ============ Error Logging ============
+
+            -- Error log for tracking application errors
+            CREATE TABLE IF NOT EXISTS error_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                level TEXT NOT NULL,  -- ERROR, WARNING, CRITICAL
+                message TEXT NOT NULL,
+                traceback TEXT,
+                user_id INTEGER,
+                user_type TEXT,  -- 'admin' or 'student'
+                route TEXT,
+                method TEXT,
+                url TEXT
+            );
+
+            -- Index for efficient log retrieval and cleanup
+            CREATE INDEX IF NOT EXISTS idx_error_log_timestamp
+            ON error_log(timestamp DESC);
         ''')
 
 
@@ -1148,3 +1168,94 @@ def get_student_unterricht(student_id, klasse_id):
             ORDER BY u.datum DESC
         ''', (student_id, klasse_id)).fetchall()
         return [dict(r) for r in rows]
+
+
+# ============ Error Logging functions ============
+
+def log_error(level, message, traceback=None, user_id=None, user_type=None, route=None, method=None, url=None):
+    """Log an error to the database."""
+    try:
+        with db_session() as conn:
+            conn.execute('''
+                INSERT INTO error_log (level, message, traceback, user_id, user_type, route, method, url)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (level, message, traceback, user_id, user_type, route, method, url))
+    except Exception as e:
+        # If logging fails, print to stderr but don't crash
+        print(f"ERROR: Failed to log error to database: {e}", file=sys.stderr)
+
+
+def get_error_logs(limit=100, offset=0, level_filter=None):
+    """Get error logs with pagination and optional filtering."""
+    with db_session() as conn:
+        query = "SELECT * FROM error_log"
+        params = []
+
+        if level_filter:
+            query += " WHERE level = ?"
+            params.append(level_filter)
+
+        query += " ORDER BY timestamp DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+
+        rows = conn.execute(query, params).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_error_log_count(level_filter=None):
+    """Get total count of error logs."""
+    with db_session() as conn:
+        if level_filter:
+            row = conn.execute(
+                "SELECT COUNT(*) as count FROM error_log WHERE level = ?",
+                (level_filter,)
+            ).fetchone()
+        else:
+            row = conn.execute("SELECT COUNT(*) as count FROM error_log").fetchone()
+        return row['count'] if row else 0
+
+
+def get_error_log_stats():
+    """Get error statistics (today, this week, by level)."""
+    with db_session() as conn:
+        # Count by level
+        by_level = conn.execute('''
+            SELECT level, COUNT(*) as count
+            FROM error_log
+            GROUP BY level
+        ''').fetchall()
+
+        # Count today (last 24 hours)
+        today = conn.execute('''
+            SELECT COUNT(*) as count FROM error_log
+            WHERE timestamp >= datetime('now', '-1 day')
+        ''').fetchone()
+
+        # Count this week (last 7 days)
+        week = conn.execute('''
+            SELECT COUNT(*) as count FROM error_log
+            WHERE timestamp >= datetime('now', '-7 days')
+        ''').fetchone()
+
+        return {
+            'by_level': {row['level']: row['count'] for row in by_level},
+            'today': today['count'] if today else 0,
+            'week': week['count'] if week else 0
+        }
+
+
+def cleanup_old_error_logs(days=30):
+    """Delete error logs older than specified days."""
+    with db_session() as conn:
+        cursor = conn.execute(
+            "DELETE FROM error_log WHERE timestamp < datetime('now', ? || ' days')",
+            (f'-{days}',)
+        )
+        return cursor.rowcount
+
+
+def clear_all_error_logs():
+    """Clear all error logs."""
+    with db_session() as conn:
+        cursor = conn.execute("DELETE FROM error_log")
+        return cursor.rowcount
