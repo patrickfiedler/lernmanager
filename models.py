@@ -1119,7 +1119,7 @@ def toggle_student_subtask(student_task_id, subtask_id, erledigt):
 
         # If marking as complete, advance to next subtask
         if erledigt:
-            advance_to_next_subtask(student_task_id, subtask_id)
+            _advance_to_next_subtask_internal(conn, student_task_id, subtask_id)
 
 
 def set_current_subtask(student_task_id, subtask_id):
@@ -1136,6 +1136,66 @@ def set_current_subtask(student_task_id, subtask_id):
         )
 
 
+def _advance_to_next_subtask_internal(conn, student_task_id, current_subtask_id):
+    """Internal function to advance to the next incomplete subtask.
+
+    This function expects an existing database connection and does not manage transactions.
+
+    Args:
+        conn: Active database connection
+        student_task_id: The student_task ID
+        current_subtask_id: The subtask that was just completed
+    """
+    # Get the task_id and current order
+    st = conn.execute(
+        "SELECT task_id, current_subtask_id FROM student_task WHERE id = ?",
+        (student_task_id,)
+    ).fetchone()
+
+    if not st:
+        return
+
+    task_id = st['task_id']
+
+    # Get all subtasks ordered by reihenfolge
+    subtasks = conn.execute(
+        "SELECT id, reihenfolge FROM subtask WHERE task_id = ? ORDER BY reihenfolge",
+        (task_id,)
+    ).fetchall()
+
+    if not subtasks:
+        return
+
+    # Find next incomplete subtask
+    current_found = False
+    for sub in subtasks:
+        subtask_id = sub['id']
+
+        # Skip until we find the current subtask
+        if subtask_id == current_subtask_id:
+            current_found = True
+            continue
+
+        # After current, find first incomplete
+        if current_found:
+            completed = conn.execute(
+                "SELECT erledigt FROM student_subtask WHERE student_task_id = ? AND subtask_id = ?",
+                (student_task_id, subtask_id)
+            ).fetchone()
+
+            if not completed or not completed['erledigt']:
+                # Found next incomplete subtask
+                conn.execute(
+                    "UPDATE student_task SET current_subtask_id = ? WHERE id = ?",
+                    (subtask_id, student_task_id)
+                )
+                return
+
+    # If we get here, all remaining subtasks are complete
+    # Keep current_subtask_id pointing to the last one (or set to None to show all)
+    # For now, we'll leave it pointing to the current one
+
+
 def advance_to_next_subtask(student_task_id, current_subtask_id):
     """Advance to the next incomplete subtask after completing the current one.
 
@@ -1144,54 +1204,7 @@ def advance_to_next_subtask(student_task_id, current_subtask_id):
         current_subtask_id: The subtask that was just completed
     """
     with db_session() as conn:
-        # Get the task_id and current order
-        st = conn.execute(
-            "SELECT task_id, current_subtask_id FROM student_task WHERE id = ?",
-            (student_task_id,)
-        ).fetchone()
-
-        if not st:
-            return
-
-        task_id = st['task_id']
-
-        # Get all subtasks ordered by reihenfolge
-        subtasks = conn.execute(
-            "SELECT id, reihenfolge FROM subtask WHERE task_id = ? ORDER BY reihenfolge",
-            (task_id,)
-        ).fetchall()
-
-        if not subtasks:
-            return
-
-        # Find next incomplete subtask
-        current_found = False
-        for sub in subtasks:
-            subtask_id = sub['id']
-
-            # Skip until we find the current subtask
-            if subtask_id == current_subtask_id:
-                current_found = True
-                continue
-
-            # After current, find first incomplete
-            if current_found:
-                completed = conn.execute(
-                    "SELECT erledigt FROM student_subtask WHERE student_task_id = ? AND subtask_id = ?",
-                    (student_task_id, subtask_id)
-                ).fetchone()
-
-                if not completed or not completed['erledigt']:
-                    # Found next incomplete subtask
-                    conn.execute(
-                        "UPDATE student_task SET current_subtask_id = ? WHERE id = ?",
-                        (subtask_id, student_task_id)
-                    )
-                    return
-
-        # If we get here, all remaining subtasks are complete
-        # Keep current_subtask_id pointing to the last one (or set to None to show all)
-        # For now, we'll leave it pointing to the current one
+        _advance_to_next_subtask_internal(conn, student_task_id, current_subtask_id)
 
 
 def get_current_subtask(student_task_id):
