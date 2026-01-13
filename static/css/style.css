@@ -386,10 +386,12 @@ select.form-control {
 .subtask-toggle {
     position: relative;
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
     cursor: pointer;
     flex-shrink: 0;
+    gap: 0.25rem;
 }
 
 .subtask-toggle input {
@@ -397,6 +399,13 @@ select.form-control {
     opacity: 0;
     width: 0;
     height: 0;
+}
+
+.subtask-label {
+    font-size: 0.75rem;
+    color: var(--gray-600);
+    font-weight: 500;
+    user-select: none;
 }
 
 .subtask-checkmark {
