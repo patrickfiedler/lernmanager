@@ -142,7 +142,14 @@
     </div>
     {% endif %}
     {% endfor %}
-    {% if not klassen or not any(student_tasks.get(k.id) for k in klassen) %}
+    {% set has_tasks_with_subtasks = namespace(value=false) %}
+    {% for klasse in klassen %}
+        {% set task = student_tasks.get(klasse.id) %}
+        {% if task and task.subtasks %}
+            {% set has_tasks_with_subtasks.value = true %}
+        {% endif %}
+    {% endfor %}
+    {% if not klassen or not has_tasks_with_subtasks.value %}
     <p class="text-muted">Keine aktiven Aufgaben mit Teilaufgaben.</p>
     {% endif %}
 </div>
