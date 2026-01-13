@@ -11,7 +11,7 @@ echo
 echo "Test 1: Static CSS file"
 curl -w "Time: %{time_total}s, Size: %{size_download} bytes\n" \
      -o /dev/null -s \
-     http://localhost:8080/static/style.css
+     http://localhost:8080/static/css/style.css
 
 # Test 2: Login page
 echo "Test 2: Login page"

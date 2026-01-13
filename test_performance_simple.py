@@ -51,8 +51,8 @@ def main():
     base_url = "http://localhost:8080"
 
     endpoints = [
-        "/",                    # Login page
-        "/static/style.css",    # Static file (if exists)
+        "/",                       # Login page
+        "/static/css/style.css",   # Static CSS file
     ]
 
     print("=" * 60)
