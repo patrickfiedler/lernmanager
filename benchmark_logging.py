@@ -19,6 +19,18 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import models
 
 
+def test_database_connection():
+    """Test that database connection works (including encryption if enabled)."""
+    try:
+        with models.db_session() as conn:
+            # Try to read from a table to verify encryption key is correct
+            result = conn.execute('SELECT COUNT(*) FROM analytics_events').fetchone()
+            count = result[0]
+        return True, f"Database connection OK (found {count} analytics events)"
+    except Exception as e:
+        return False, f"Database connection FAILED: {e}"
+
+
 def benchmark_db_write(iterations=100):
     """Measure raw database INSERT + COMMIT time."""
     times = []
@@ -105,6 +117,30 @@ if __name__ == '__main__':
     print("Activity Logging Performance Benchmark")
     print("=" * 60)
 
+    # Check encryption status
+    print("\nDatabase Encryption:")
+    if models.USE_SQLCIPHER:
+        print(f"  Status: ENABLED (using sqlcipher3)")
+        print(f"  Key set: {'Yes' if models.SQLCIPHER_KEY else 'No'}")
+    else:
+        print(f"  Status: DISABLED (using standard sqlite3)")
+        if models.SQLCIPHER_KEY:
+            print(f"  Warning: SQLCIPHER_KEY is set but sqlcipher3 not installed")
+
+    # Test database connection first
+    print("\nTesting database connection...")
+    success, message = test_database_connection()
+    print(f"  {message}")
+
+    if not success:
+        print("\n❌ Cannot proceed with benchmark - database connection failed")
+        print("\nPossible causes:")
+        print("  - Incorrect SQLCIPHER_KEY environment variable")
+        print("  - Database file not found")
+        print("  - Database corruption")
+        print("\nPlease verify your configuration and try again.")
+        sys.exit(1)
+
     # Check SQLite settings
     settings = check_sqlite_settings()
 
@@ -112,13 +148,18 @@ if __name__ == '__main__':
     iterations = 100
     print(f"\nRunning {iterations} iterations...")
 
-    print("\n1. Benchmarking raw database INSERT + COMMIT...")
-    db_times = benchmark_db_write(iterations)
-    print_stats(db_times, "Raw Database Write")
+    try:
+        print("\n1. Benchmarking raw database INSERT + COMMIT...")
+        db_times = benchmark_db_write(iterations)
+        print_stats(db_times, "Raw Database Write")
 
-    print("\n2. Benchmarking log_analytics_event() function...")
-    log_times = benchmark_log_function(iterations)
-    print_stats(log_times, "log_analytics_event() Function")
+        print("\n2. Benchmarking log_analytics_event() function...")
+        log_times = benchmark_log_function(iterations)
+        print_stats(log_times, "log_analytics_event() Function")
+    except Exception as e:
+        print(f"\n❌ Benchmark failed: {e}")
+        print("\nThis may be due to database encryption or permissions.")
+        sys.exit(1)
 
     # Calculate overhead
     overhead = sum(log_times) - sum(db_times)
@@ -155,3 +196,9 @@ if __name__ == '__main__':
     if settings['journal_mode'] != 'wal':
         print("\n💡 OPTIMIZATION: Not using WAL (Write-Ahead Logging)")
         print("   WAL mode can improve write performance significantly")
+
+    # Note about encryption
+    if models.USE_SQLCIPHER:
+        print("\n📝 NOTE: Database encryption is enabled")
+        print("   Encryption adds ~1-2ms overhead but is important for security")
+        print("   Performance measurements include encryption overhead")
