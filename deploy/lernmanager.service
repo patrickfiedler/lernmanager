@@ -13,6 +13,8 @@ Environment="SECRET_KEY=CHANGE_ME_TO_RANDOM_STRING"
 Environment="FLASK_ENV=production"
 # Temporary directory for file uploads (Flask/Werkzeug needs this)
 Environment="TMPDIR=/opt/lernmanager/instance/tmp"
+# Python bytecode cache directory (improves startup time)
+Environment="PYTHONPYCACHEPREFIX=/opt/lernmanager/instance/tmp"
 # Optional: Database encryption key (requires sqlcipher3-binary)
 # Environment="SQLCIPHER_KEY=CHANGE_ME_TO_RANDOM_STRING"
 
