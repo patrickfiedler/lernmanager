@@ -51,13 +51,21 @@ def verify_password(stored_hash, password):
 
 
 def get_db():
-    """Get database connection."""
+    """Get database connection with optimized performance settings."""
     conn = sqlite3.connect(config.DATABASE)
     conn.row_factory = sqlite3.Row
     if USE_SQLCIPHER and SQLCIPHER_KEY:
         # Set encryption key - escape any double quotes in key
         safe_key = SQLCIPHER_KEY.replace('"', '""')
         conn.execute(f'PRAGMA key = "{safe_key}"')
+
+    # Performance optimizations for analytics logging
+    # WAL mode: Write-Ahead Logging improves write concurrency and reduces fsync calls
+    # synchronous=NORMAL: Safe with WAL mode, significantly faster than FULL
+    # Expected improvement: 84ms -> 10-20ms per request on production VPS
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
@@ -232,6 +240,7 @@ def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 klasse_id INTEGER NOT NULL,
                 datum DATE NOT NULL,
+                kommentar TEXT,
                 UNIQUE(klasse_id, datum),
                 FOREIGN KEY (klasse_id) REFERENCES klasse(id) ON DELETE CASCADE
             );
@@ -242,10 +251,10 @@ def init_db():
                 unterricht_id INTEGER NOT NULL,
                 student_id INTEGER NOT NULL,
                 anwesend INTEGER NOT NULL DEFAULT 1,
-                -- Admin evaluation
-                admin_selbststaendigkeit INTEGER DEFAULT 2,
-                admin_respekt INTEGER DEFAULT 2,
-                admin_fortschritt INTEGER DEFAULT 2,
+                -- Admin evaluation (ratings: '-', 'ok', '+')
+                admin_selbststaendigkeit TEXT DEFAULT 'ok',
+                admin_respekt TEXT DEFAULT 'ok',
+                admin_fortschritt TEXT DEFAULT 'ok',
                 admin_kommentar TEXT,
                 has_been_saved INTEGER DEFAULT 0,
                 -- Student self-evaluation
