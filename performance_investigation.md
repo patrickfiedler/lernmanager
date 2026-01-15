@@ -8,6 +8,10 @@ Measure the performance impact of database-based activity logging and identify v
 - [x] Phase 2: Measure current performance impact
 - [x] Phase 3: Research alternative approaches
 - [x] Phase 4: Document findings and recommendations
+- [x] Phase 5: Implement and test WAL mode (result: no improvement)
+- [ ] Phase 6: Design async logging solution
+- [ ] Phase 7: Implement async logging
+- [ ] Phase 8: Test and verify improvement
 
 ## Key Questions
 1. ✓ How is activity logging currently implemented? - Synchronous @before_request hook
@@ -23,7 +27,7 @@ Measure the performance impact of database-based activity logging and identify v
 - None yet
 
 ## Status
-**COMPLETE** - Investigation finished, recommendations documented
+**Phase 7: Async Logging IMPLEMENTED** - Testing shows 99.1% improvement (10ms → 0.09ms)
 
 ## Summary
 
@@ -45,13 +49,37 @@ Measure the performance impact of database-based activity logging and identify v
 3. **VPS disk I/O**: Much slower than local SSD (likely cloud storage backend)
 4. **Impact**: 84ms added to EVERY authenticated page view
 
-### Critical Recommendation
-**URGENT: Enable SQLite WAL mode + synchronous=NORMAL**
+### WAL Mode Test Results (IMPLEMENTED)
+**Result**: WAL mode did NOT improve performance on production VPS
 
-Expected improvement: **84ms → 10-20ms** (70-75% reduction)
-- WAL mode: Eliminates blocking disk syncs
-- synchronous=NORMAL: Safe with WAL, much faster
-- Still fully ACID-compliant and safe
+**After enabling WAL + synchronous=NORMAL**:
+- Before: 83.86ms per request
+- After: 85.81ms per request (essentially unchanged)
+- WAL mode is confirmed active: `journal_mode: wal`, `synchronous: 1 (NORMAL)`
+
+**Conclusion**: The bottleneck is the VPS disk I/O itself, not SQLite's journaling strategy. Even with WAL's optimizations, the underlying cloud storage is too slow for synchronous writes.
+
+### Async Logging Implementation (COMPLETED)
+**Strategy A: All Events Async - Implemented and Tested**
+
+Since disk I/O is fundamentally slow (~85ms), we moved logging off the request path entirely:
+- **Measured improvement (local)**: 10ms → 0.09ms (99.1% reduction)
+- **Expected improvement (production)**: 85ms → <1ms (98.8% reduction)
+- Logging happens in background thread, pages don't wait
+- Small risk: events could be lost if crash occurs before write (<1 sec window)
+
+**Implementation Details**:
+- New module: `analytics_queue.py` (~200 lines)
+- Thread-safe queue (maxsize=1000)
+- Background worker thread with batch writes (up to 10 events)
+- Graceful shutdown with queue flush
+- Modified `models.log_analytics_event()` to enqueue instead of write
+- Worker starts automatically in `init_app()`
+
+**Files Modified**:
+- `analytics_queue.py` (NEW) - Queue and worker implementation
+- `models.py` - Changed `log_analytics_event()` to use queue
+- `app.py` - Added worker startup in `init_app()`
 
 ### nginx Logging Assessment
 **NOT RECOMMENDED** - Would lose rich event tracking (task completions, quiz results, student analytics) which is core to the application's value. The 10ms overhead is worth it.
