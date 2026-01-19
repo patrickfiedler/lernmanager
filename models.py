@@ -376,6 +376,15 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_analytics_type
             ON analytics_events(event_type, timestamp DESC);
 
+            -- ============ App Settings ============
+
+            -- Global application settings (key-value store)
+            CREATE TABLE IF NOT EXISTS app_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+
             -- ============ Saved Reports ============
 
             -- Stored PDF reports for historical comparison
@@ -2122,3 +2131,67 @@ def get_report_data_for_student(student_id, report_type='summary', date_from=Non
             result['quiz_attempts'] = [dict(row) for row in result['quiz_attempts']]
 
         return result
+
+
+# ============ App Settings ============
+
+def get_setting(key, default=None):
+    """Get an application setting value.
+
+    Args:
+        key: Setting key name
+        default: Default value if setting doesn't exist
+
+    Returns:
+        Setting value as string, or default if not found
+    """
+    with db_session() as conn:
+        row = conn.execute(
+            "SELECT value FROM app_settings WHERE key = ?",
+            (key,)
+        ).fetchone()
+        return row['value'] if row else default
+
+
+def set_setting(key, value):
+    """Set an application setting value.
+
+    Args:
+        key: Setting key name
+        value: Setting value (will be converted to string)
+    """
+    with db_session() as conn:
+        conn.execute(
+            """INSERT INTO app_settings (key, value, updated_at)
+               VALUES (?, ?, CURRENT_TIMESTAMP)
+               ON CONFLICT(key) DO UPDATE SET
+                   value = excluded.value,
+                   updated_at = CURRENT_TIMESTAMP""",
+            (key, str(value))
+        )
+
+
+def get_bool_setting(key, default=False):
+    """Get a boolean setting value.
+
+    Args:
+        key: Setting key name
+        default: Default value if setting doesn't exist
+
+    Returns:
+        Boolean value
+    """
+    value = get_setting(key)
+    if value is None:
+        return default
+    return value.lower() in ('true', '1', 'yes', 'on')
+
+
+def set_bool_setting(key, value):
+    """Set a boolean setting value.
+
+    Args:
+        key: Setting key name
+        value: Boolean value
+    """
+    set_setting(key, 'true' if value else 'false')

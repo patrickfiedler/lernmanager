@@ -151,7 +151,26 @@ def admin_dashboard():
         if schedule and schedule['weekday'] == today_weekday:
             klassen_heute.append(klasse)
 
-    return render_template('admin/dashboard.html', klassen=klassen, tasks=tasks, klassen_heute=klassen_heute)
+    # Get page view logging setting
+    log_page_views = models.get_bool_setting('log_page_views', default=True)
+
+    return render_template('admin/dashboard.html', klassen=klassen, tasks=tasks,
+                          klassen_heute=klassen_heute, log_page_views=log_page_views)
+
+
+@app.route('/admin/settings', methods=['POST'])
+@admin_required
+def admin_update_settings():
+    """Update application settings."""
+    log_page_views = 'log_page_views' in request.form
+    models.set_bool_setting('log_page_views', log_page_views)
+
+    # Update cached value
+    app.config['LOG_PAGE_VIEWS'] = log_page_views
+
+    flash(f"Einstellung gespeichert: Seitenaufrufe protokollieren {'aktiviert' if log_page_views else 'deaktiviert'}",
+          'success')
+    return redirect(url_for('admin_dashboard'))
 
 
 # ============ Admin: Klassen ============
@@ -1484,17 +1503,18 @@ def log_analytics():
     else:
         return  # Don't log unauthenticated requests
 
-    # Log page view
-    models.log_analytics_event(
-        event_type='page_view',
-        user_id=user_id,
-        user_type=user_type,
-        metadata={
-            'route': request.endpoint,
-            'method': request.method,
-            'path': request.path
-        }
-    )
+    # Log page view (if enabled)
+    if app.config.get('LOG_PAGE_VIEWS', True):
+        models.log_analytics_event(
+            event_type='page_view',
+            user_id=user_id,
+            user_type=user_type,
+            metadata={
+                'route': request.endpoint,
+                'method': request.method,
+                'path': request.path
+            }
+        )
 
 
 # ============ Initialize ============
@@ -1511,6 +1531,10 @@ def init_app():
     from analytics_queue import start_worker
     start_worker()
     print("Analytics worker thread started")
+
+    # Load app settings into config (cached for performance)
+    app.config['LOG_PAGE_VIEWS'] = models.get_bool_setting('log_page_views', default=True)
+    print(f"Page view logging: {'enabled' if app.config['LOG_PAGE_VIEWS'] else 'disabled'}")
 
     # Create default admin if not exists
     if models.create_admin('admin', 'admin'):
