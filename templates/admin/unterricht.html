@@ -91,13 +91,13 @@
                 <td>
                     <div class="flex gap-05">
                         <select class="form-control" style="width: auto; min-width: 100px;" onchange="insertPredefinedComment(this, {{ student.student_id }})">
-                            <option value="">Schnelltext...</option>
-                            <option value="+ sehr konzentriert">+ sehr konzentriert</option>
+                            <option value="">+/-...</option>
                             <option value="+ fleißig">+ fleißig</option>
-                            <option value="- laut">- laut</option>
-                            <option value="+ sehr selbstständig">+ sehr selbstständig</option>
-                            <option value="- nicht selbstständig">- nicht selbstständig</option>
                             <option value="+ hilft anderen">+ hilft anderen</option>
+                            <option value="+ sehr konzentriert">+ sehr konzentriert</option>
+                            <option value="+ sehr selbstständig">+ sehr selbstständig</option>
+                            <option value="- laut">- laut</option>
+                            <option value="- nicht selbstständig">- nicht selbstständig</option>
                             <option value="- stört andere">- stört andere</option>
                         </select>
                         <input type="text" class="form-control" value="{{ student.admin_kommentar or '' }}"
