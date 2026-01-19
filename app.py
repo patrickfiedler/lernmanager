@@ -1131,6 +1131,10 @@ def student_klasse(klasse_id):
                         break
                 # Get completed subtasks for display
                 completed_subtasks = [st for st in all_subtasks if st['erledigt']]
+            else:
+                # Fallback: If current_subtask_id is set but subtask doesn't exist,
+                # show all subtasks (handles deleted subtasks or tasks with no subtasks)
+                subtasks = all_subtasks
         else:
             # Show all subtasks (backward compatible)
             subtasks = all_subtasks
