@@ -21,12 +21,53 @@ Implement remaining features and improvements from todo.md to enhance Lernmanage
 #### Features
 - [x] ~~Student progress reports as PDF (per class and per student)~~ - Phase 6 complete
 
-#### Improvements
-- [ ] Student view: show only current/first subtask
+#### Major Improvements (Researched & Planned)
+
+##### 1. Student Experience Redesign ⭐ **READY TO IMPLEMENT**
+- [x] Research and design complete
+- [x] Mockups created and approved (hybrid design)
+- [x] Implementation roadmap created (`student_redesign_roadmap.md`)
+- [ ] Implementation: Database schema (add `why_learn_this` field)
+- [ ] Implementation: Admin interface for new field
+- [ ] Implementation: Redesigned student task view
+- [ ] Implementation: Updated styling
+- [ ] Testing and deployment
+
+**Estimated effort:** 20-25 hours (3-4 full work days)
+**Impact:** High - transforms student engagement and clarity
+**Priority:** High - addresses core user feedback
+
+##### 2. Database Performance Optimization
+- [x] Research complete (`improvements_notes.md`)
+- [ ] Implementation: Request-level connection caching
+- [ ] Measurement: Profile current performance
+- [ ] Optional: Connection pooling if proven necessary
+
+**Recommendation:** Keep encryption, implement request-level caching
+**Estimated effort:** 2-4 hours
+**Impact:** Low-Medium - 2-4ms improvement per request
+**Priority:** Medium - quick win after student redesign
+
+##### 3. URL Improvements (Human-Friendly URLs)
+- [x] Research complete (`improvements_notes.md`)
+- [ ] Implementation: NOT RECOMMENDED
+
+**Recommendation:** Keep numeric IDs, improve UI with breadcrumbs
+**Reasoning:** Internal school app, migration risk not worth benefit
+**Alternative:** Improved breadcrumbs (included in student redesign)
+**Priority:** Low - handled by other improvements
+
+#### Other Improvements
+- [x] ~~Student view: show only current/first subtask~~ - Addressed in redesign
 - [ ] Student view: visual learning map of tasks
-- [ ] Admin: assign particular subtasks to classes/students
+- [x] ~~Admin: assign particular subtasks to classes/students~~ - Already implemented
 - [ ] Admin: add app URL to batch-imported student credentials
 - [ ] Admin: allow individual students to see all tasks (optional)
+- [ ] **Admin: curriculum alignment page** - Show how topics/tasks map to curriculum learning goals
+  - Display alignment between app content and official curriculum
+  - Helps teachers ensure coverage of required learning objectives
+  - Potentially show gaps or overlaps
+  - **Priority:** Medium - useful for planning and compliance
 
 ## Recommended Implementation Order
 

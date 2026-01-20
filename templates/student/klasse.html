@@ -3,182 +3,214 @@
 {% block title %}{{ klasse.name }} - Lernmanager{% endblock %}
 
 {% block content %}
-<div class="flex flex-between flex-center mb-2">
-    <h1>📁 {{ klasse.name }}</h1>
-    <a href="{{ url_for('student_dashboard') }}" class="btn btn-secondary">← Zurück</a>
+<!-- Breadcrumb Navigation -->
+<div class="breadcrumb-nav mb-2">
+    <a href="{{ url_for('student_dashboard') }}">Dashboard</a>
+    <span class="separator">›</span>
+    <span>{{ klasse.name }}</span>
 </div>
 
 {% if task %}
-<!-- Task Info -->
-<div class="card task-card {% if task.abgeschlossen %}complete{% elif task.kategorie == 'bonus' %}bonus{% endif %}">
-    <div class="card-header flex flex-between">
-        <span>📝 Aktuelle Aufgabe</span>
-        {% if task.abgeschlossen %}
-        <span class="badge badge-success">✅ Abgeschlossen</span>
-        {% endif %}
-    </div>
+<!-- Main Content Card (contains everything) -->
+<div class="content-card">
 
-    <h2>{{ task.name }}</h2>
-    {% if task.kategorie == 'bonus' %}
-    <span class="badge badge-warning mb-1">⭐ Bonusaufgabe</span>
-    {% endif %}
+    <!-- Topic Headline -->
+    <h1 class="topic-headline">{{ task.name }}</h1>
+    <div class="topic-meta">{{ task.fach }} · {{ task.stufe }}</div>
 
-    <p class="text-muted">{{ task.fach }} · {{ task.stufe }}</p>
-
-    {% if task.lernziel %}
-    <div class="mt-1 mb-1" style="background: #f0f9ff; padding: 0.75rem; border-radius: 0.375rem; border-left: 3px solid #0284c7;">
-        <strong>🎯 Lernziel:</strong>
-        <div class="markdown-content">{{ task.lernziel | markdown }}</div>
-    </div>
-    {% endif %}
-
-    {% if task.beschreibung %}
-    <div class="mt-1">
-        <strong>📋 Beschreibung:</strong>
-        <div class="markdown-content">{{ task.beschreibung | markdown }}</div>
-    </div>
-    {% endif %}
-</div>
-
-<!-- Subtasks -->
-<div id="teilaufgabe" class="card mt-2">
-    <div class="card-header flex flex-between">
-        <span>✅ Teilaufgaben</span>
-        {% if all_subtasks %}
-        <span id="progress-text" class="text-muted">{{ all_subtasks|selectattr('erledigt')|list|length }}/{{ all_subtasks|length }}</span>
-        {% endif %}
-    </div>
-
-    {% if current_subtask %}
-    <!-- Current subtask mode: show only current subtask -->
-    <div class="mb-1">
-        <p class="text-muted">Du arbeitest gerade an dieser Teilaufgabe:</p>
-    </div>
-
-    <div class="subtask-list-enhanced">
-        {% for sub in subtasks %}
-        <div class="subtask-card {% if sub.erledigt %}completed{% endif %}" data-subtask-id="{{ sub.id }}">
-            <div class="subtask-number">{{ sub.reihenfolge + 1 }}</div>
-            <div class="subtask-content markdown-content">
-                {{ sub.beschreibung | markdown }}
-            </div>
-            <label class="subtask-toggle">
-                <input type="checkbox" class="subtask-checkbox"
-                       {% if sub.erledigt %}checked{% endif %}
-                       {% if task.abgeschlossen %}disabled{% endif %}
-                       onchange="toggleSubtask({{ task.id }}, {{ sub.id }}, this.checked)">
-                <span class="subtask-checkmark"></span>
-                <span class="subtask-label">Erledigt</span>
-            </label>
+    <!-- Purpose Banner (Why learn this?) -->
+    {% if task.why_learn_this %}
+    <div class="purpose">
+        <div class="purpose-icon">💡</div>
+        <div>
+            <div class="purpose-label">Wofür brauchst du das?</div>
+            {{ task.why_learn_this }}
         </div>
-        {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Progress Section with Dots -->
+    {% if all_subtasks %}
+    <div class="progress-section">
+        <div class="progress-header">
+            <div class="progress-text" id="progress-text">
+                {{ all_subtasks|selectattr('erledigt')|list|length }} von {{ all_subtasks|length }} Aufgaben erledigt
+            </div>
+            <div class="progress-dots">
+                {% for sub in all_subtasks %}
+                <div class="dot {% if sub.erledigt %}completed{% elif current_subtask and sub.id == current_subtask.id %}current{% endif %}"
+                     data-subtask-index="{{ loop.index0 }}"></div>
+                {% endfor %}
+                {% if task.quiz_json %}
+                <div class="dot dot-quiz {% if task.quiz_bestanden %}completed{% endif %}"
+                     title="Quiz" data-is-quiz="true">?</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Success Banner (hidden initially, shown after completing task) -->
+    <div class="success-banner" id="success-banner" style="display: none;">
+        <span class="success-icon">✓</span>
+        <div>Gut gemacht! Aufgabe erledigt.</div>
     </div>
 
+    <!-- Current Task/Subtask -->
+    {% if current_subtask or subtasks %}
+    <div class="current-task">
+        {% if current_subtask %}
+        <!-- Show current subtask -->
+        <div class="task-badge">Aufgabe {{ current_subtask.reihenfolge + 1 }} von {{ all_subtasks|length }}</div>
+        {% elif subtasks %}
+        <!-- Legacy mode: show first uncompleted -->
+        {% set first_uncompleted = subtasks|rejectattr('erledigt')|list|first %}
+        {% if first_uncompleted %}
+        <div class="task-badge">Aktuelle Aufgabe</div>
+        {% endif %}
+        {% endif %}
+
+        <div class="task-content markdown-content">
+            {% if current_subtask %}
+            {{ current_subtask.beschreibung | markdown }}
+            {% elif subtasks %}
+            {% set first_uncompleted = subtasks|rejectattr('erledigt')|list|first %}
+            {% if first_uncompleted %}
+            {{ first_uncompleted.beschreibung | markdown }}
+            {% endif %}
+            {% endif %}
+        </div>
+
+        <!-- Checkbox to mark complete -->
+        {% set active_subtask = current_subtask or (subtasks|rejectattr('erledigt')|list|first) %}
+        {% if active_subtask and not task.abgeschlossen %}
+        <div class="task-complete" onclick="document.getElementById('subtask-checkbox-{{ active_subtask.id }}').click()">
+            <input type="checkbox"
+                   id="subtask-checkbox-{{ active_subtask.id }}"
+                   class="subtask-checkbox"
+                   {% if active_subtask.erledigt %}checked{% endif %}
+                   onchange="toggleSubtask({{ task.id }}, {{ active_subtask.id }}, this.checked)"
+                   onclick="event.stopPropagation()">
+            <label for="subtask-checkbox-{{ active_subtask.id }}">Als erledigt markieren</label>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Next Button (hidden initially, shown after marking complete) -->
+    <button class="action-button" id="next-button" style="display: none;" onclick="goToNextSubtask()">
+        Weiter zur nächsten Aufgabe →
+    </button>
+
+    <!-- Completed Subtasks (collapsible) -->
     {% if completed_subtasks %}
-    <details class="mt-1">
-        <summary style="cursor: pointer; color: #059669; font-weight: 500;">✓ {{ completed_subtasks|length }} Teilaufgabe(n) bereits erledigt</summary>
-        <div class="mt-1" style="padding-left: 1rem;">
+    <details class="completed-tasks-toggle mt-2">
+        <summary>✓ {{ completed_subtasks|length }} Aufgabe(n) bereits erledigt</summary>
+        <div class="completed-tasks-content">
             {% for sub in completed_subtasks %}
-            <div style="color: #6b7280; margin-bottom: 0.5rem;">
-                <span style="color: #059669;">✓</span> {{ sub.beschreibung[:80] }}{% if sub.beschreibung|length > 80 %}...{% endif %}
+            <div class="completed-task-item">
+                <span class="check-icon">✓</span>
+                <div class="completed-task-text">{{ sub.beschreibung[:100] }}{% if sub.beschreibung|length > 100 %}...{% endif %}</div>
             </div>
             {% endfor %}
         </div>
     </details>
     {% endif %}
 
-    <div class="mt-1">
-        <div class="progress-container">
-            <div class="progress-bar" id="progress-bar"
-                 style="width: {{ (all_subtasks|selectattr('erledigt')|list|length / all_subtasks|length * 100) if all_subtasks|length > 0 else 0 }}%;"></div>
-        </div>
-    </div>
-
-    {% elif subtasks %}
-    <!-- Legacy mode: show all subtasks -->
-    <div class="subtask-list-enhanced">
-        {% for sub in subtasks %}
-        <div class="subtask-card {% if sub.erledigt %}completed{% endif %}" data-subtask-id="{{ sub.id }}">
-            <div class="subtask-number">{{ loop.index }}</div>
-            <div class="subtask-content markdown-content">
-                {{ sub.beschreibung | markdown }}
-            </div>
-            <label class="subtask-toggle">
-                <input type="checkbox" class="subtask-checkbox"
-                       {% if sub.erledigt %}checked{% endif %}
-                       {% if task.abgeschlossen %}disabled{% endif %}
-                       onchange="toggleSubtask({{ task.id }}, {{ sub.id }}, this.checked)">
-                <span class="subtask-checkmark"></span>
-                <span class="subtask-label">Erledigt</span>
-            </label>
-        </div>
-        {% endfor %}
-    </div>
-
-    <div class="mt-1">
-        <div class="progress-container">
-            <div class="progress-bar" id="progress-bar"
-                 style="width: {{ (subtasks|selectattr('erledigt')|list|length / subtasks|length * 100) if subtasks|length > 0 else 0 }}%;"></div>
-        </div>
-    </div>
     {% else %}
-    <p class="text-muted">Keine Teilaufgaben definiert.</p>
+    <p class="text-muted">Keine Aufgaben definiert.</p>
     {% endif %}
-</div>
 
-<!-- Materials -->
-{% if materials %}
-<div class="card mt-2">
-    <div class="card-header">📎 Materialien</div>
-    <ul class="material-list">
-        {% for mat in materials %}
-        <li class="material-item">
-            {% if mat.typ == 'link' %}
-            <span class="material-icon">🔗</span>
-            <a href="{{ mat.pfad }}" target="_blank">{{ mat.beschreibung or mat.pfad }}</a>
-            {% else %}
-            <span class="material-icon">📄</span>
-            <a href="{{ url_for('download_material', material_id=mat.id) }}" target="_blank">{{ mat.beschreibung or mat.pfad }}</a>
+    <!-- Materials Section (collapsible, default open) -->
+    {% if materials %}
+    <details class="materials-toggle mt-2" open>
+        <summary>📎 Materialien</summary>
+        <div class="materials-content">
+            <ul class="material-list">
+                {% for mat in materials %}
+                <li class="material-item">
+                    {% if mat.typ == 'link' %}
+                    <span class="material-icon">🔗</span>
+                    <a href="{{ mat.pfad }}" target="_blank">{{ mat.beschreibung or mat.pfad }}</a>
+                    {% else %}
+                    <span class="material-icon">📄</span>
+                    <a href="{{ url_for('download_material', material_id=mat.id) }}" target="_blank">{{ mat.beschreibung or mat.pfad }}</a>
+                    {% endif %}
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+    </details>
+    {% endif %}
+
+    <!-- Quiz Section (if all subtasks complete) -->
+    {% if task.quiz_json %}
+    {% set all_complete = (all_subtasks|selectattr('erledigt')|list|length == all_subtasks|length) %}
+    {% if all_complete and not task.abgeschlossen %}
+    <div class="quiz-card mt-2">
+        <div class="quiz-header">❓ Quiz</div>
+        {% if quiz_attempts %}
+        <div class="quiz-attempts">
+            <p><strong>Bisherige Versuche:</strong></p>
+            {% for attempt in quiz_attempts[:3] %}
+            <div class="quiz-attempt">
+                {{ attempt.timestamp[:10] }}: {{ attempt.punkte }}/{{ attempt.max_punkte }} Punkte
+                {% if attempt.bestanden %}
+                <span class="badge badge-success">✅ Bestanden</span>
+                {% else %}
+                <span class="badge badge-danger">❌ Nicht bestanden</span>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        <a href="{{ url_for('student_quiz', student_task_id=task.id) }}" class="btn btn-primary mt-1">Quiz starten</a>
+        <p class="text-muted mt-1"><small>Du brauchst mindestens 80% richtige Antworten zum Bestehen.</small></p>
+    </div>
+    {% elif task.abgeschlossen %}
+    <div class="alert alert-success mt-2">
+        ✅ Quiz bestanden! Thema abgeschlossen.
+    </div>
+    {% endif %}
+    {% endif %}
+
+    <!-- Topic Description (expandable, at bottom) -->
+    <details class="topic-description-toggle mt-2">
+        <summary>Ausführliche Beschreibung</summary>
+        <div class="topic-description-content">
+            {% if task.lernziel %}
+            <div class="mb-1">
+                <strong>🎯 Lernziel:</strong>
+                <div class="markdown-content">{{ task.lernziel | markdown }}</div>
+            </div>
             {% endif %}
-        </li>
-        {% endfor %}
-    </ul>
-</div>
-{% endif %}
+            {% if task.beschreibung %}
+            <div>
+                <strong>📋 Beschreibung:</strong>
+                <div class="markdown-content">{{ task.beschreibung | markdown }}</div>
+            </div>
+            {% endif %}
+            {% if not task.lernziel and not task.beschreibung %}
+            <p class="text-muted">Keine zusätzlichen Informationen verfügbar.</p>
+            {% endif %}
+        </div>
+    </details>
 
-<!-- Quiz -->
-{% if task.quiz_json and not task.abgeschlossen %}
-<div class="card mt-2">
-    <div class="card-header">❓ Quiz</div>
-    {% if quiz_attempts %}
-    <p>Bisherige Versuche: {{ quiz_attempts|length }}</p>
-    {% for attempt in quiz_attempts[:3] %}
-    <p>
-        {{ attempt.timestamp[:10] }}: {{ attempt.punkte }}/{{ attempt.max_punkte }} Punkte
-        {% if attempt.bestanden %}<span class="badge badge-success">✅ Bestanden</span>{% else %}<span class="badge badge-danger">❌</span>{% endif %}
-    </p>
-    {% endfor %}
-    {% endif %}
-    <a href="{{ url_for('student_quiz', student_task_id=task.id) }}" class="btn btn-primary">Quiz starten</a>
-    <p class="text-muted mt-1">Du brauchst mindestens 80% richtige Antworten.</p>
 </div>
-{% elif task.quiz_json and task.abgeschlossen %}
-<div class="card mt-2">
-    <div class="card-header">❓ Quiz</div>
-    <p class="text-success">✅ Quiz bestanden!</p>
-</div>
-{% endif %}
 
 {% else %}
-<div class="card text-center text-muted">
-    <p>Keine Aufgabe zugewiesen.</p>
+<!-- No task assigned -->
+<div class="content-card text-center">
+    <p class="text-muted">Kein Thema zugewiesen.</p>
+    <a href="{{ url_for('student_dashboard') }}" class="btn btn-primary mt-1">← Zurück zum Dashboard</a>
 </div>
 {% endif %}
 {% endblock %}
 
 {% block scripts %}
+<script>
 function toggleSubtask(studentTaskId, subtaskId, checked) {
     const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+
     fetch(`/schueler/aufgabe/${studentTaskId}/teilaufgabe/${subtaskId}`, {
         method: 'POST',
         headers: {
@@ -187,29 +219,58 @@ function toggleSubtask(studentTaskId, subtaskId, checked) {
         },
         body: JSON.stringify({erledigt: checked})
     }).then(r => r.json()).then(data => {
-        // If marking as complete or task complete, reload and jump to subtasks
-        if (data.task_complete || checked) {
-            location.href = location.pathname + '#teilaufgabe';
+        if (checked) {
+            // Show success banner and next button
+            const successBanner = document.getElementById('success-banner');
+            const nextButton = document.getElementById('next-button');
+
+            if (successBanner) {
+                successBanner.style.display = 'flex';
+            }
+            if (nextButton) {
+                nextButton.style.display = 'inline-block';
+            }
+
+            // Update progress dot
+            const dots = document.querySelectorAll('.progress-dots .dot:not(.dot-quiz)');
+            const currentDot = document.querySelector('.progress-dots .dot.current');
+            if (currentDot) {
+                currentDot.classList.remove('current');
+                currentDot.classList.add('completed');
+            }
+
+            // Update progress text
+            updateProgressText();
+        } else {
+            // Unchecking - reload page to reset state
             location.reload();
-            return;
         }
-
-        // Update UI for unchecking only (no reload needed)
-        const item = document.querySelector(`[data-subtask-id="${subtaskId}"]`);
-        item.classList.remove('completed');
-
-        // Update progress
-        const completed = document.querySelectorAll('.subtask-card.completed').length;
-        const total = document.querySelectorAll('.subtask-card').length;
-        document.getElementById('progress-text').textContent = `${completed}/${total}`;
-        document.getElementById('progress-bar').style.width = `${completed/total*100}%`;
+    }).catch(err => {
+        console.error('Error toggling subtask:', err);
+        alert('Fehler beim Speichern. Bitte versuche es erneut.');
     });
 }
 
-// Smooth scroll to #teilaufgabe on page load if hash is present
+function updateProgressText() {
+    const dots = document.querySelectorAll('.progress-dots .dot:not(.dot-quiz)');
+    const completedDots = document.querySelectorAll('.progress-dots .dot.completed:not(.dot-quiz)');
+    const progressText = document.getElementById('progress-text');
+
+    if (progressText) {
+        progressText.textContent = `${completedDots.length} von ${dots.length} Aufgaben erledigt`;
+    }
+}
+
+function goToNextSubtask() {
+    // Reload page to show next subtask
+    // The backend will automatically show the next uncompleted subtask
+    location.reload();
+}
+
+// Smooth scroll to element on page load if hash is present
 window.addEventListener('DOMContentLoaded', function() {
-    if (window.location.hash === '#teilaufgabe') {
-        const element = document.getElementById('teilaufgabe');
+    if (window.location.hash) {
+        const element = document.querySelector(window.location.hash);
         if (element) {
             setTimeout(function() {
                 element.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -217,4 +278,5 @@ window.addEventListener('DOMContentLoaded', function() {
         }
     }
 });
+</script>
 {% endblock %}

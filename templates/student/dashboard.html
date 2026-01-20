@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 
-{% block title %}Meine Aufgaben - Lernmanager{% endblock %}
+{% block title %}Meine Themen - Lernmanager{% endblock %}
 
 {% block content %}
 <div class="flex flex-between flex-center mb-2">
@@ -27,7 +27,7 @@
         {% if task %}
             <h3>{{ task.name }}</h3>
             {% if task.kategorie == 'bonus' %}
-            <span class="badge badge-warning mb-1">⭐ Bonusaufgabe</span>
+            <span class="badge badge-warning mb-1">⭐ Bonusthema</span>
             {% endif %}
 
             <p class="text-muted mb-1">{{ task.fach }} · {{ task.stufe }}</p>
@@ -54,7 +54,7 @@
                 {% if task.abgeschlossen %}Details ansehen{% else %}Weiterarbeiten →{% endif %}
             </a>
         {% else %}
-            <p class="text-muted">Keine Aufgabe zugewiesen.</p>
+            <p class="text-muted">Kein Thema zugewiesen.</p>
         {% endif %}
     </div>
     {% endfor %}
