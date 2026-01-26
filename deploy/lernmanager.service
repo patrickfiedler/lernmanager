@@ -8,18 +8,14 @@ User=lernmanager
 Group=lernmanager
 WorkingDirectory=/opt/lernmanager
 
-# Generate secure keys: python3 -c "import secrets; print(secrets.token_hex(32))"
-Environment="SECRET_KEY=CHANGE_ME_TO_RANDOM_STRING"
-Environment="FLASK_ENV=production"
-# Enable HTTPS-only cookies after setting up SSL/TLS (certbot)
-# Uncomment the line below AFTER configuring HTTPS:
-# Environment="FORCE_HTTPS=true"
+# Load environment variables (including secrets) from file
+# This file is created during setup and persists across updates
+EnvironmentFile=/opt/lernmanager/.env
+
 # Temporary directory for file uploads (Flask/Werkzeug needs this)
 Environment="TMPDIR=/opt/lernmanager/instance/tmp"
 # Python bytecode cache directory (improves startup time)
 Environment="PYTHONPYCACHEPREFIX=/opt/lernmanager/instance/tmp"
-# Optional: Database encryption key (requires sqlcipher3-binary)
-# Environment="SQLCIPHER_KEY=CHANGE_ME_TO_RANDOM_STRING"
 
 ExecStart=/opt/lernmanager/venv/bin/python run.py
 Restart=always

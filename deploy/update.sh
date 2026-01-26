@@ -38,11 +38,12 @@ log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 log_step() { echo -e "\n${BLUE}=== $1 ===${NC}"; }
 
-# Variables for rollback
+# Variables for rollback and tracking
 CURRENT_COMMIT=""
 NEW_COMMIT=""
 DEPS_UPDATED=false
 SERVICE_UPDATED=false
+MIGRATIONS_RUN=false
 
 # Check if running as root
 check_root() {
@@ -74,12 +75,7 @@ rollback() {
         log_info "Restoring previous systemd service..."
         sudo -u "$APP_USER" git show "$CURRENT_COMMIT:deploy/lernmanager.service" > /tmp/lernmanager.service.rollback
 
-        # Preserve SECRET_KEY
-        if grep -q "SECRET_KEY=" "$SYSTEMD_SERVICE"; then
-            CURRENT_SECRET=$(grep "SECRET_KEY=" "$SYSTEMD_SERVICE" | sed -n 's/.*"\(.*\)".*/\1/p')
-            sed -i "s/CHANGE_ME_TO_RANDOM_STRING/$CURRENT_SECRET/" /tmp/lernmanager.service.rollback
-        fi
-
+        # No need to preserve secrets - they're in .env file!
         cp /tmp/lernmanager.service.rollback "$SYSTEMD_SERVICE"
         rm /tmp/lernmanager.service.rollback
         systemctl daemon-reload
@@ -111,7 +107,7 @@ main() {
     log_step "Lernmanager Deployment"
 
     # 1. Validate environment
-    log_step "Step 1/7: Validating Environment"
+    log_step "Step 1/8: Validating Environment"
     check_root
 
     if [ ! -d "$APP_DIR" ]; then
@@ -140,7 +136,7 @@ main() {
     log_info "Environment validated successfully"
 
     # 2. Pre-deployment snapshot
-    log_step "Step 2/7: Creating Pre-Deployment Snapshot"
+    log_step "Step 2/8: Creating Pre-Deployment Snapshot"
     cd "$APP_DIR"
 
     # Get current commit
@@ -156,7 +152,7 @@ main() {
     fi
 
     # 3. Pull latest code
-    log_step "Step 3/7: Pulling Latest Code"
+    log_step "Step 3/8: Pulling Latest Code"
 
     # Fix git ownership issue (required when running with sudo)
     log_info "Configuring git safe directory..."
@@ -212,7 +208,7 @@ main() {
     echo ""
 
     # 4. Update dependencies if requirements.txt changed
-    log_step "Step 4/7: Checking Dependencies"
+    log_step "Step 4/8: Checking Dependencies"
     if git diff --name-only "$CURRENT_COMMIT" "$NEW_COMMIT" | grep -q "^requirements.txt$"; then
         log_info "requirements.txt changed, updating dependencies..."
         sudo -u "$APP_USER" "$APP_DIR/venv/bin/pip" install --quiet -r "$APP_DIR/requirements.txt"
@@ -223,36 +219,12 @@ main() {
     fi
 
     # 5. Update systemd service if changed
-    log_step "Step 5/7: Checking Systemd Service"
+    log_step "Step 5/8: Checking Systemd Service"
     if git diff --name-only "$CURRENT_COMMIT" "$NEW_COMMIT" | grep -q "^deploy/lernmanager.service$"; then
         log_info "Systemd service file changed, updating..."
 
-        # Preserve SECRET_KEY and SQLCIPHER_KEY from current service
-        CURRENT_SECRET=""
-        CURRENT_SQLCIPHER=""
-
-        if grep -q "SECRET_KEY=" "$SYSTEMD_SERVICE"; then
-            CURRENT_SECRET=$(grep "SECRET_KEY=" "$SYSTEMD_SERVICE" | sed -n 's/.*"\(.*\)".*/\1/p')
-        fi
-
-        if grep -q "SQLCIPHER_KEY=" "$SYSTEMD_SERVICE"; then
-            CURRENT_SQLCIPHER=$(grep "SQLCIPHER_KEY=" "$SYSTEMD_SERVICE" | sed -n 's/.*"\(.*\)".*/\1/p')
-        fi
-
-        # Copy new service file
+        # Copy new service file (secrets are in .env, not in service file)
         cp "$APP_DIR/deploy/lernmanager.service" "$SYSTEMD_SERVICE"
-
-        # Restore secrets
-        if [ -n "$CURRENT_SECRET" ]; then
-            sed -i "s/CHANGE_ME_TO_RANDOM_STRING/$CURRENT_SECRET/" "$SYSTEMD_SERVICE"
-            log_info "SECRET_KEY preserved"
-        fi
-
-        if [ -n "$CURRENT_SQLCIPHER" ]; then
-            # Uncomment and set SQLCIPHER_KEY if it was previously set
-            sed -i "s/# Environment=\"SQLCIPHER_KEY=CHANGE_ME_TO_RANDOM_STRING\"/Environment=\"SQLCIPHER_KEY=$CURRENT_SQLCIPHER\"/" "$SYSTEMD_SERVICE"
-            log_info "SQLCIPHER_KEY preserved"
-        fi
 
         systemctl daemon-reload
         SERVICE_UPDATED=true
@@ -261,16 +233,75 @@ main() {
         log_info "No changes to systemd service"
     fi
 
-    # 6. Restart service
-    log_step "Step 6/7: Restarting Service"
+    # 6. Run database migrations if needed
+    log_step "Step 6/8: Checking Database Migrations"
+
+    # Check if any migration files changed in this deployment
+    MIGRATION_FILES_CHANGED=false
+    if git diff --name-only "$CURRENT_COMMIT" "$NEW_COMMIT" | grep -q "^migrate_.*\.py$"; then
+        MIGRATION_FILES_CHANGED=true
+        log_info "Migration files detected in deployment"
+    fi
+
+    # Check if any migration files exist in the repo
+    MIGRATION_COUNT=$(find "$APP_DIR" -maxdepth 1 -name "migrate_*.py" -type f | wc -l)
+
+    if [ "$MIGRATION_FILES_CHANGED" = true ] && [ "$MIGRATION_COUNT" -gt 0 ]; then
+        log_info "Running database migrations..."
+        echo ""
+        MIGRATIONS_RUN=true
+
+        # Export SQLCIPHER_KEY if it exists in .env (for encrypted databases)
+        if [ -f "$APP_DIR/.env" ] && grep -q "^SQLCIPHER_KEY=" "$APP_DIR/.env"; then
+            export $(grep "^SQLCIPHER_KEY=" "$APP_DIR/.env" | xargs)
+            log_info "SQLCIPHER_KEY loaded from environment"
+        fi
+
+        # Run all migration scripts (they're idempotent)
+        MIGRATION_ERRORS=0
+        for migration in "$APP_DIR"/migrate_*.py; do
+            if [ -f "$migration" ]; then
+                MIGRATION_NAME=$(basename "$migration")
+                log_info "Executing: $MIGRATION_NAME"
+
+                # Run migration as lernmanager user
+                if sudo -u "$APP_USER" "$APP_DIR/venv/bin/python" "$migration"; then
+                    log_info "✓ $MIGRATION_NAME completed"
+                else
+                    log_error "✗ $MIGRATION_NAME failed"
+                    MIGRATION_ERRORS=$((MIGRATION_ERRORS + 1))
+                fi
+                echo ""
+            fi
+        done
+
+        # Unset SQLCIPHER_KEY for security
+        unset SQLCIPHER_KEY
+
+        if [ $MIGRATION_ERRORS -gt 0 ]; then
+            log_error "$MIGRATION_ERRORS migration(s) failed"
+            log_error "Check the output above for details"
+            log_error "You may need to run migrations manually"
+            # Don't exit - let deployment continue, but warn
+        else
+            log_info "All migrations completed successfully"
+        fi
+    elif [ "$MIGRATION_COUNT" -eq 0 ]; then
+        log_info "No migration files found"
+    else
+        log_info "No new migrations in this deployment"
+    fi
+
+    # 7. Restart service
+    log_step "Step 7/8: Restarting Service"
     log_info "Restarting lernmanager service..."
     systemctl restart lernmanager
 
     log_info "Waiting for service to start..."
     sleep 3
 
-    # 7. Verify deployment
-    log_step "Step 7/7: Verifying Deployment"
+    # 8. Verify deployment
+    log_step "Step 8/8: Verifying Deployment"
 
     if systemctl is-active --quiet lernmanager; then
         log_info "✓ Service is active"
@@ -295,6 +326,7 @@ main() {
     echo "  New commit:       $NEW_COMMIT_SHORT"
     echo "  Dependencies:     $([ "$DEPS_UPDATED" = true ] && echo "Updated" || echo "No changes")"
     echo "  Service file:     $([ "$SERVICE_UPDATED" = true ] && echo "Updated" || echo "No changes")"
+    echo "  Migrations:       $([ "$MIGRATIONS_RUN" = true ] && echo "Executed" || echo "None needed")"
     echo "  Service status:   $(systemctl is-active lernmanager)"
     echo ""
     echo -e "${BLUE}Useful Commands:${NC}"

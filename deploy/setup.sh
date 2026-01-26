@@ -159,21 +159,39 @@ main() {
 
     log_info "SECRET_KEY generated (64 characters)"
 
-    # Save secret to file for reference
-    SECRET_FILE="$APP_DIR/.secrets"
-    echo "SECRET_KEY=$SECRET_KEY" > "$SECRET_FILE"
-    echo "Generated on: $(date)" >> "$SECRET_FILE"
-    chmod 600 "$SECRET_FILE"
-    chown root:root "$SECRET_FILE"
-    log_info "Secret saved to $SECRET_FILE (root access only)"
+    # Create .env file with secrets and configuration
+    ENV_FILE="$APP_DIR/.env"
+    log_info "Creating environment configuration file..."
+    cat > "$ENV_FILE" << EOF
+# Lernmanager Environment Configuration
+# Generated on: $(date)
+# WARNING: DO NOT commit this file to git!
+
+# Flask secret key (required for session management)
+SECRET_KEY=$SECRET_KEY
+
+# Production mode
+FLASK_ENV=production
+
+# HTTPS-only cookies (uncomment after setting up SSL/TLS with certbot)
+# FORCE_HTTPS=true
+
+# Database encryption key (optional, requires sqlcipher3-binary)
+# To enable encryption:
+# 1. Generate key: python3 -c "import secrets; print(secrets.token_hex(32))"
+# 2. Uncomment and set SQLCIPHER_KEY below
+# 3. Install package: pip install sqlcipher3-binary
+# SQLCIPHER_KEY=CHANGE_ME_TO_RANDOM_STRING
+EOF
+
+    chmod 600 "$ENV_FILE"
+    chown root:root "$ENV_FILE"
+    log_info "Environment file created at $ENV_FILE (root access only)"
 
     # 8. Configure systemd service
     log_step "Step 8/9: Configuring Systemd Service"
     log_info "Copying service file..."
     cp "$APP_DIR/deploy/lernmanager.service" "$SYSTEMD_SERVICE"
-
-    log_info "Injecting SECRET_KEY..."
-    sed -i "s/CHANGE_ME_TO_RANDOM_STRING/$SECRET_KEY/" "$SYSTEMD_SERVICE"
 
     log_info "Reloading systemd..."
     systemctl daemon-reload
@@ -227,10 +245,10 @@ main() {
     echo "  Password:        admin"
     echo "  ${RED}⚠ IMPORTANT: Change this password immediately after first login!${NC}"
     echo ""
-    echo -e "${BLUE}Secrets Stored In:${NC}"
-    echo "  File:            $SECRET_FILE"
+    echo -e "${BLUE}Configuration:${NC}"
+    echo "  Environment:     $ENV_FILE"
     echo "  Systemd service: $SYSTEMD_SERVICE"
-    echo "  ${YELLOW}Keep these secure! If lost, you'll need to regenerate them.${NC}"
+    echo "  ${YELLOW}Keep $ENV_FILE secure! It contains your SECRET_KEY.${NC}"
     echo ""
     echo -e "${BLUE}Next Steps:${NC}"
     echo "  1. Configure Nginx as reverse proxy (see deploy/nginx.conf)"
