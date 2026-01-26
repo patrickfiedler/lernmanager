@@ -20,9 +20,10 @@ app.secret_key = config.SECRET_KEY
 app.config['UPLOAD_FOLDER'] = config.UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = config.MAX_CONTENT_LENGTH
 
-# Secure cookie settings (for production with HTTPS)
-# These are set via environment to allow HTTP in development
-if os.environ.get('FLASK_ENV') == 'production':
+# Secure cookie settings
+# SESSION_COOKIE_SECURE: Only enable when FORCE_HTTPS is explicitly set
+# This prevents redirect loops when HTTPS isn't configured yet
+if os.environ.get('FORCE_HTTPS', '').lower() in ('true', '1', 'yes'):
     app.config['SESSION_COOKIE_SECURE'] = True  # Only send over HTTPS
 app.config['SESSION_COOKIE_HTTPONLY'] = True  # Prevent JavaScript access
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # CSRF protection
