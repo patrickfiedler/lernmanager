@@ -51,7 +51,7 @@
             {% endif %}
 
             <a href="{{ url_for('student_klasse', klasse_id=klasse.id) }}" class="btn btn-primary">
-                {% if task.abgeschlossen %}Details ansehen{% else %}Weiterarbeiten →{% endif %}
+                {% if task.abgeschlossen %}Details ansehen{% else %}Weiter lernen →{% endif %}
             </a>
         {% else %}
             <p class="text-muted">Kein Thema zugewiesen.</p>
