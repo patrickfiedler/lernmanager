@@ -106,8 +106,8 @@ trap 'rollback' ERR
 main() {
     log_step "Lernmanager Deployment"
 
-    # 1. Validate environment
-    log_step "Step 1/8: Validating Environment"
+    # 0. Self-update check (before anything else)
+    log_step "Step 0/8: Checking for update.sh changes"
     check_root
 
     if [ ! -d "$APP_DIR" ]; then
@@ -120,6 +120,31 @@ main() {
         log_error "$APP_DIR is not a git repository"
         exit 1
     fi
+
+    cd "$APP_DIR"
+
+    # Fetch latest changes
+    sudo -u "$APP_USER" git fetch origin main
+
+    # Check if update.sh has changed
+    if ! sudo -u "$APP_USER" git diff --quiet HEAD origin/main -- deploy/update.sh; then
+        log_warn "update.sh has been modified in the new version"
+        log_info "Updating update.sh and re-executing..."
+
+        # Pull the latest version
+        sudo -u "$APP_USER" git checkout origin/main -- deploy/update.sh
+
+        # Make it executable
+        chmod +x "$APP_DIR/deploy/update.sh"
+
+        log_info "Restarting with updated update.sh..."
+        exec "$APP_DIR/deploy/update.sh" "$@"
+    fi
+
+    log_info "update.sh is up to date"
+
+    # 1. Validate environment
+    log_step "Step 1/8: Validating Environment"
 
     if [ ! -f "$SYSTEMD_SERVICE" ]; then
         log_error "Systemd service file not found at $SYSTEMD_SERVICE"
@@ -251,10 +276,15 @@ main() {
         echo ""
         MIGRATIONS_RUN=true
 
-        # Export SQLCIPHER_KEY if it exists in .env (for encrypted databases)
+        # Load SQLCIPHER_KEY if it exists in .env (for encrypted databases)
+        # Note: .env is owned by root, only root can read it
+        SQLCIPHER_KEY=""
         if [ -f "$APP_DIR/.env" ] && grep -q "^SQLCIPHER_KEY=" "$APP_DIR/.env"; then
-            export $(grep "^SQLCIPHER_KEY=" "$APP_DIR/.env" | xargs)
-            log_info "SQLCIPHER_KEY loaded from environment"
+            # Extract the key value (we're running as root, so we can read it)
+            SQLCIPHER_KEY=$(grep "^SQLCIPHER_KEY=" "$APP_DIR/.env" | cut -d '=' -f2- | tr -d '"' | tr -d "'")
+            log_info "SQLCIPHER_KEY loaded from $APP_DIR/.env"
+        else
+            log_warn "No SQLCIPHER_KEY found in $APP_DIR/.env - database assumed unencrypted"
         fi
 
         # Run all migration scripts (they're idempotent)
@@ -264,19 +294,30 @@ main() {
                 MIGRATION_NAME=$(basename "$migration")
                 log_info "Executing: $MIGRATION_NAME"
 
-                # Run migration as lernmanager user
-                if sudo -u "$APP_USER" "$APP_DIR/venv/bin/python" "$migration"; then
-                    log_info "✓ $MIGRATION_NAME completed"
+                # Run migration as lernmanager user, passing SQLCIPHER_KEY through sudo
+                # Note: sudo -E preserves environment, but for security we explicitly pass only the key
+                if [ -n "$SQLCIPHER_KEY" ]; then
+                    if sudo -u "$APP_USER" SQLCIPHER_KEY="$SQLCIPHER_KEY" "$APP_DIR/venv/bin/python" "$migration"; then
+                        log_info "✓ $MIGRATION_NAME completed"
+                    else
+                        log_error "✗ $MIGRATION_NAME failed"
+                        MIGRATION_ERRORS=$((MIGRATION_ERRORS + 1))
+                    fi
                 else
-                    log_error "✗ $MIGRATION_NAME failed"
-                    MIGRATION_ERRORS=$((MIGRATION_ERRORS + 1))
+                    # No encryption key, run without it
+                    if sudo -u "$APP_USER" "$APP_DIR/venv/bin/python" "$migration"; then
+                        log_info "✓ $MIGRATION_NAME completed"
+                    else
+                        log_error "✗ $MIGRATION_NAME failed"
+                        MIGRATION_ERRORS=$((MIGRATION_ERRORS + 1))
+                    fi
                 fi
                 echo ""
             fi
         done
 
-        # Unset SQLCIPHER_KEY for security
-        unset SQLCIPHER_KEY
+        # Clear SQLCIPHER_KEY for security
+        SQLCIPHER_KEY=""
 
         if [ $MIGRATION_ERRORS -gt 0 ]; then
             log_error "$MIGRATION_ERRORS migration(s) failed"
