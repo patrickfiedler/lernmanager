@@ -3,26 +3,29 @@
 ## High Priority
 
 - ~~502 error when I try to upload a file~~ (Fixed - was database permissions issue)
-- ~~error logging functionality~~ (Complete - Phase 4)
+- ~~error logging functionality~~ (Complete - Phase 4, commit bd64505)
 - ~~Remove "Selbstbewertung pro Unterricht" from student page~~ (Complete - commit 4e64a18)
-- ~~student attendance and evaluation page -> completely rewrite this page~~ (Complete - new rating system with -, ok, +, pre-defined comments, lesson comments)
+- ~~student attendance and evaluation page -> completely rewrite this page~~ (Complete - commit c8e446f, new rating system with -, ok, +, pre-defined comments, lesson comments)
 - Code Review
 
 ## Features
 
-- ~~Logging functionality: track number of users and page views~~ (Complete - Phase 5)
-- ~~logging functionality #2: track student activities in action log~~ (Complete - Phase 5)
-- ~~Student progress reports as PDF file per class: human readable format for quick overview~~ (Complete - Phase 6)
-- ~~student progress reports as PDF file per student: information from class progress report + student's individual activity log~~ (Complete - Phase 6)
-- ~~Add regular class dates for each class (schedule)~~ (Complete - implemented in student assessment improvements)
+- ~~Logging functionality: track number of users and page views~~ (Complete - Phase 5, commit 7720a2a)
+- ~~logging functionality #2: track student activities in action log~~ (Complete - Phase 5, commit 7720a2a)
+- ~~Student progress reports as PDF file per class: human readable format for quick overview~~ (Complete - Phase 6, commit 2183568)
+- ~~student progress reports as PDF file per student: information from class progress report + student's individual activity log~~ (Complete - Phase 6, commit 2183568)
+- ~~Add regular class dates for each class (schedule)~~ (Complete - commit eea29d0, implemented in student assessment improvements)
 - add external API to upload log files from scan-folders.ps1 script -> major feature to track student progress from the files they create on the school computers
 - later: add AI enabled grading workflow -> needs lots of investigation and testing
+- **Admin: curriculum alignment page** - Show how topics/tasks map to curriculum learning goals, display alignment between app content and official curriculum, helps teachers ensure coverage of required learning objectives, potentially show gaps or overlaps (Priority: Medium - useful for planning and compliance)
 
 ## Improvements
 
-- ~~student view: show only the current (or the first) subtask of the active task~~ (Complete - see subtask_implementation_summary.md)
-- ~~admin view: assign particular subtasks to classes and to students~~ (Complete - see subtask_implementation_summary.md)
+- ~~student view: show only the current (or the first) subtask of the active task~~ (Complete - commit 9720b41, see subtask_implementation_summary.md)
+- ~~admin view: assign particular subtasks to classes and to students~~ (Complete - commit 9720b41, see subtask_implementation_summary.md)
 - ~~Add #teilaufgabe anchor to student page. If the page reloads after a subtask has been completed, jump to this anchor directly.~~ (Complete - commit 4e64a18)
+- ~~Student experience redesign: card-based layout, "Why learn this?" purpose banner, progress dots, collapsible sections~~ (Complete - commit 7253d66, hybrid mockup design implemented)
+- ~~Database performance optimization: request-level connection caching~~ (Complete - commit 721fbc9, comprehensive performance optimizations with Flask-Caching, HTTP caching headers, Gzip compression)
 - (low priority, optional) student view: show visual learning map of open tasks and how they connect to each other; for the moment only for informational purposes
 - admin view: when batch-importing students, add the url of the app to each line, along with username and password (either hardcode lernen.mrfiedler.de, or maybe read from configuration or HTML headers?)
 - admin view: allow individual students to see all available tasks, but default to the current behaviour (students see only the active task)
