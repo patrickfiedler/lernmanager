@@ -18,11 +18,11 @@ python benchmark_app.py
 ### On Your Server
 
 ```bash
-# Copy script to server (if not in repo)
-scp benchmark_app.py user@server:/opt/lernmanager/
-
-# Run on server
+# Run on server (script is in repo)
 ssh user@server 'cd /opt/lernmanager && ./venv/bin/python benchmark_app.py'
+
+# If using SQLCipher encryption (the script auto-detects this)
+ssh user@server 'cd /opt/lernmanager && source .env && ./venv/bin/python benchmark_app.py'
 ```
 
 ### Options
@@ -40,6 +40,17 @@ python benchmark_app.py --render-only
 # Show help
 python benchmark_app.py --help
 ```
+
+### SQLCipher Support
+
+The script automatically detects and uses SQLCipher if:
+- `SQLCIPHER_KEY` environment variable is set
+- `sqlcipher3-binary` package is installed
+
+The output will show:
+- `Encryption: Yes (SQLCipher)` - Using encrypted database
+- `Encryption: No (standard SQLite)` - Using unencrypted database
+- Warning if SQLCIPHER_KEY is set but package is missing
 
 ## What It Measures
 

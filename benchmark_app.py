@@ -9,10 +9,18 @@ This script simulates requests to different routes and measures:
 
 Run this on both your laptop and server to compare hardware performance.
 
+SQLCipher Support:
+    This script uses models.py which automatically detects and uses
+    sqlcipher3-binary if SQLCIPHER_KEY environment variable is set.
+    No special configuration needed.
+
 Usage:
     python benchmark_app.py
     python benchmark_app.py --iterations 100
     python benchmark_app.py --verbose
+
+    # With SQLCipher (encrypted database)
+    SQLCIPHER_KEY="your-key" python benchmark_app.py
 """
 
 import sys
@@ -270,7 +278,18 @@ def get_system_info():
         db_size = os.path.getsize(db_path) / 1024 / 1024  # MB
         print(f"Database:       {db_path}")
         print(f"Database size:  {db_size:.2f} MB")
-        print(f"Encryption:     {'Yes (SQLCipher)' if models.USE_SQLCIPHER else 'No (SQLite)'}")
+
+        # Show encryption status
+        if models.USE_SQLCIPHER:
+            print(f"Encryption:     Yes (SQLCipher)")
+            print(f"SQLCipher pkg:  sqlcipher3-binary")
+        else:
+            sqlcipher_key_set = os.environ.get('SQLCIPHER_KEY') is not None
+            if sqlcipher_key_set:
+                print(f"Encryption:     No (SQLCIPHER_KEY set but sqlcipher3-binary not installed)")
+                print(f"Warning:        Database is NOT encrypted! Install: pip install sqlcipher3-binary")
+            else:
+                print(f"Encryption:     No (standard SQLite)")
     else:
         print(f"Database:       {db_path} (not found)")
 
