@@ -211,6 +211,50 @@
 {% endblock %}
 
 {% block scripts %}
+// Unsaved changes tracking
+let initialBasicInfoState = '';
+let initialSubtasksState = '';
+let initialQuizState = '';
+
+function captureFormState(form) {
+    if (!form) return '';
+    const formData = new FormData(form);
+    const entries = Array.from(formData.entries()).sort((a, b) => {
+        const keyA = a[0];
+        const keyB = b[0];
+        if (keyA < keyB) return -1;
+        if (keyA > keyB) return 1;
+        return 0;
+    });
+    return JSON.stringify(entries);
+}
+
+function getBasicInfoForm() {
+    // First form with bearbeiten (edit) action - in Basic Info card
+    return document.querySelector('.card form[action*="/bearbeiten"]');
+}
+
+function getSubtasksForm() {
+    // Form with teilaufgaben (subtasks) action
+    return document.querySelector('form[action*="/teilaufgaben"]');
+}
+
+function getQuizForm() {
+    // Quiz form is inside a card with "Quiz" in the header, find it by the quiz_json textarea
+    const quizTextarea = document.querySelector('textarea[name="quiz_json"]');
+    return quizTextarea ? quizTextarea.closest('form') : null;
+}
+
+function hasUnsavedChanges() {
+    const currentBasicInfo = captureFormState(getBasicInfoForm());
+    const currentSubtasks = captureFormState(getSubtasksForm());
+    const currentQuiz = captureFormState(getQuizForm());
+
+    return (currentBasicInfo !== initialBasicInfoState) ||
+           (currentSubtasks !== initialSubtasksState) ||
+           (currentQuiz !== initialQuizState);
+}
+
 // Markdown preview for main fields
 function updatePreview(textareaId, previewId) {
     const text = document.getElementById(textareaId).value;
@@ -232,6 +276,66 @@ document.addEventListener('DOMContentLoaded', function() {
         updateSubtaskPreview(textarea);
     });
     renumberSubtasks();
+
+    // Capture initial form states
+    setTimeout(() => {
+        initialBasicInfoState = captureFormState(getBasicInfoForm());
+        initialSubtasksState = captureFormState(getSubtasksForm());
+        initialQuizState = captureFormState(getQuizForm());
+    }, 100);
+
+    // Add warning to material forms
+    const materialForms = document.querySelectorAll('form[action*="material-link"], form[action*="material-upload"]');
+    materialForms.forEach(form => {
+        form.addEventListener('submit', function(e) {
+            if (hasUnsavedChanges()) {
+                if (!confirm('⚠️ Du hast ungespeicherte Änderungen in den Grunddaten, Teilaufgaben oder im Quiz.\n\nWenn du jetzt Material hinzufügst, gehen diese Änderungen verloren.\n\nMöchtest du trotzdem fortfahren?')) {
+                    e.preventDefault();
+                }
+            }
+        });
+    });
+
+    // Warn before leaving page with unsaved changes
+    window.addEventListener('beforeunload', function(e) {
+        if (hasUnsavedChanges()) {
+            e.preventDefault();
+            e.returnValue = '';
+        }
+    });
+
+    // Update initial state after successful save
+    const basicInfoForm = getBasicInfoForm();
+    const subtasksForm = getSubtasksForm();
+    const quizForm = getQuizForm();
+
+    if (basicInfoForm) {
+        basicInfoForm.addEventListener('submit', function() {
+            console.log('Basic info form submitting - will update state');
+            // Clear unsaved changes flag on save
+            setTimeout(() => {
+                initialBasicInfoState = captureFormState(getBasicInfoForm());
+            }, 0);
+        });
+    }
+
+    if (subtasksForm) {
+        subtasksForm.addEventListener('submit', function() {
+            console.log('Subtasks form submitting - will update state');
+            setTimeout(() => {
+                initialSubtasksState = captureFormState(getSubtasksForm());
+            }, 0);
+        });
+    }
+
+    if (quizForm) {
+        quizForm.addEventListener('submit', function() {
+            console.log('Quiz form submitting - will update state');
+            setTimeout(() => {
+                initialQuizState = captureFormState(getQuizForm());
+            }, 0);
+        });
+    }
 });
 
 // Subtask management

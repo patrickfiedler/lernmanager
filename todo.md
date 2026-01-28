@@ -7,6 +7,9 @@
 - ~~Remove "Selbstbewertung pro Unterricht" from student page~~ (Complete - commit 4e64a18)
 - ~~student attendance and evaluation page -> completely rewrite this page~~ (Complete - commit c8e446f, new rating system with -, ok, +, pre-defined comments, lesson comments)
 - Code Review
+- Plan comprehensive simplification and testing of the admin interface: reason some options like visible tasks hidden behind too many submenus/subpages, some actions fail (moving students), ...
+- App needs more focus in the student view for the actual task and less visibility for nice-to-have but effectively less important information; also student dashboard does still not make it clear enough where learning actually starts (maybe skip dashboard and display current tasks directly?) -> based on common student feedback "What should I do?"
+- Investigate if the caching mechanism is actually worth it, considering many problems arose from caching and required cache-busting strategies to fix; maybe as short-term fix a simple option to enable or disable caching can be implemented? (only if low effort); this likely requires a comprehensive investigation of the app's behaviour
 
 ## UX/Accessibility Improvements
 **UX Audit:** `docs/archive/2026-01-27_ux_audit/`
@@ -37,9 +40,12 @@
 - admin view: when batch-importing students, add the url of the app to each line, along with username and password (either hardcode lernen.mrfiedler.de, or maybe read from configuration or HTML headers?)
 - admin view: allow individual students to see all available tasks, but default to the current behaviour (students see only the active task)
 - research a better way and place to implement student self-evaluation (was: student page, at bottom)
+- How can we show more than one active task to the student at any one time, i.e. to adapt to current special occasions like contests or short-term work sprints to improve marks? -> investigate
 - ~~in the student view (next to 0 von 8 Aufgaben erledigt) the current task should have a visible margin or shadow to visually mark where students are~~ (Complete - current dot has colored ring border)
 - make admin top menu responsive - becomes crowded at 960px width (half of 1920px screen)
 - replace timestamp URL parameter cache-busting with Cache-Control headers (cleaner, no URL pollution) - see frontend_patterns.md for implementation
+- make progress dots slightly larger (double) in desktop view
+- add favicon to the app
 
 
 ## Subtask Management Enhancements (Test 8 findings)
@@ -63,6 +69,7 @@
 - fix: consistently rename tasks -> topics and subtasks -> tasks (or their respective German equivalents for the frontend) throughout the whole app
 - fix: Make lesson comment saveable without saving student evaluation -> required in case a scheduled lesson does not take place
 - fix: current implementation does not treat compulsory and optional tasks differently, but it should -> there needs to be a clear setting in the task editor, and it should be obvious in the student view (maybe have yellow: open compulsory tasks, green: completed tasks, and rainbow colour spectrum for optional tasks)
+- ~~fix: adding a material in the task editor loses unsaved edits without warning~~ (Fixed - added unsaved changes detection and warning dialog)
 
 ## Notes
 
