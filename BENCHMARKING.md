@@ -18,12 +18,19 @@ python benchmark_app.py
 ### On Your Server
 
 ```bash
-# Run on server (script is in repo)
-ssh user@server 'cd /opt/lernmanager && ./venv/bin/python benchmark_app.py'
+# Recommended: Use helper script (auto-loads .env)
+ssh user@server 'cd /opt/lernmanager && sudo -u lernmanager ./run_benchmark.sh'
 
-# If using SQLCipher encryption (the script auto-detects this)
-ssh user@server 'cd /opt/lernmanager && source .env && ./venv/bin/python benchmark_app.py'
+# Or with options:
+ssh user@server 'cd /opt/lernmanager && sudo -u lernmanager ./run_benchmark.sh --iterations 50'
+
+# Alternative: Run directly with environment loaded
+ssh user@server 'cd /opt/lernmanager && sudo -u lernmanager bash -c "set -a; source .env; ./venv/bin/python benchmark_app.py"'
 ```
+
+**Important:** When running as a different user (e.g., with `sudo -u lernmanager`), the `.env` file is NOT automatically loaded. You must either:
+1. Use the `run_benchmark.sh` helper script (recommended - only extracts SQLCIPHER_KEY)
+2. Manually pass SQLCIPHER_KEY environment variable
 
 ### Options
 
@@ -126,8 +133,37 @@ But for a learning platform with ~30 students, most requests are first-time (not
 
 ## Next Steps
 
-1. Run benchmark on laptop: `python benchmark_app.py --iterations 50`
-2. Run benchmark on server: `ssh user@server 'cd /opt/lernmanager && ./venv/bin/python benchmark_app.py --iterations 50'`
-3. Compare results
-4. If server is significantly slower across ALL benchmarks → hardware limitation
-5. If server is slower only on specific operations → investigate those operations
+1. **Run benchmark on laptop:**
+   ```bash
+   python benchmark_app.py --iterations 50
+   ```
+
+2. **Run benchmark on server:**
+   ```bash
+   ssh user@server 'cd /opt/lernmanager && sudo -u lernmanager ./run_benchmark.sh --iterations 50'
+   ```
+
+3. **Compare results:**
+   - Look at the "Encryption" line to confirm SQLCipher is being used
+   - Compare database query times
+   - Compare template rendering times
+
+4. **Interpret:**
+   - If server is significantly slower across ALL benchmarks → hardware limitation
+   - If server is slower only on specific operations → investigate those operations
+
+## Troubleshooting
+
+**"Encryption: No (standard SQLite)" but database is encrypted:**
+- SQLCIPHER_KEY environment variable not set
+- Solution: Use `run_benchmark.sh` which extracts SQLCIPHER_KEY from .env
+- Manual alternative: `SQLCIPHER_KEY="your-key" python benchmark_app.py`
+
+**Permission denied reading .env:**
+- .env file is typically owned by root with restricted permissions
+- Run with sudo: `sudo -u lernmanager ./run_benchmark.sh`
+
+**Security note:**
+- `run_benchmark.sh` only extracts SQLCIPHER_KEY from .env
+- It does NOT export other sensitive variables (SECRET_KEY, etc.)
+- Safer than `source .env` which would expose all secrets
