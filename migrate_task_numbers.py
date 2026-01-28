@@ -2,7 +2,7 @@
 """
 Migration script to add 'number' field to tasks and extract numbers from existing task names.
 """
-import sqlite3
+import os
 import re
 import config
 
@@ -25,8 +25,26 @@ def main():
     print("Task Number Migration")
     print("=" * 60)
 
+    # Check if we're using SQLCipher
+    sqlcipher_key = os.environ.get('SQLCIPHER_KEY')
+    if sqlcipher_key:
+        print("✓ Using SQLCipher (encrypted database)")
+        try:
+            from sqlcipher3 import dbapi2 as sqlite3
+        except ImportError:
+            print("✗ sqlcipher3 not installed")
+            print("  Install with: pip install sqlcipher3-binary")
+            import sys
+            sys.exit(1)
+    else:
+        print("✓ Using standard SQLite (unencrypted database)")
+        import sqlite3
+
     # Connect to database
     conn = sqlite3.connect(config.DATABASE)
+    if sqlcipher_key:
+        conn.execute(f"PRAGMA key = '{sqlcipher_key}'")
+        print("✓ Encryption key set")
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 

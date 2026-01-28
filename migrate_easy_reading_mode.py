@@ -23,9 +23,10 @@ def migrate():
     if sqlcipher_key:
         print("✓ Using SQLCipher (encrypted database)")
         try:
-            from pysqlcipher3 import dbapi2 as sqlite3
+            from sqlcipher3 import dbapi2 as sqlite3
         except ImportError:
-            print("✗ pysqlcipher3 not installed")
+            print("✗ sqlcipher3 not installed")
+            print("  Install with: pip install sqlcipher3-binary")
             sys.exit(1)
     else:
         print("✓ Using standard SQLite (unencrypted database)")

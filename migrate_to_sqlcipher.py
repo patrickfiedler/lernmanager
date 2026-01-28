@@ -49,6 +49,18 @@ def migrate():
         print(f"ERROR: Source database not found: {SOURCE_DB}")
         sys.exit(1)
 
+    # Check if source database is already encrypted
+    try:
+        test_conn = sqlite3.connect(SOURCE_DB)
+        test_conn.execute("SELECT 1 FROM sqlite_master LIMIT 1")
+        test_conn.close()
+    except sqlite3.DatabaseError as e:
+        print(f"Database appears to be already encrypted (or corrupted).")
+        print(f"Error: {e}")
+        print("This migration only works on unencrypted databases.")
+        print("If your database is already encrypted, no migration is needed.")
+        sys.exit(0)
+
     if os.path.exists(ENCRYPTED_DB):
         print(f"WARNING: Encrypted database already exists: {ENCRYPTED_DB}")
         response = input("Overwrite? (y/N): ").strip().lower()
