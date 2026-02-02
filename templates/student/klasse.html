@@ -299,11 +299,10 @@ function toggleSubtask(studentTaskId, subtaskId, checked) {
             // Update progress text
             updateProgressText();
         } else {
-            // Unchecking - reload page to reset state (with cache-busting)
+            // Unchecking - reload page to reset state (to reset state)
             // Preserve current subtask_id parameter to stay on same task
             setTimeout(() => {
                 const url = new URL(window.location);
-                url.searchParams.set('_t', Date.now());
                 // Note: subtask_id already in URL, so it's preserved
                 window.location.href = url.toString();
             }, 100);
@@ -340,7 +339,6 @@ function goToNextSubtask(currentIndex) {
         const nextSubtaskId = subtaskIds[currentIndex + 1];
         const url = new URL(window.location);
         url.searchParams.set('subtask_id', nextSubtaskId);
-        url.searchParams.set('_t', Date.now());
         window.location.href = url.toString();
     } else {
         // On last subtask - check if there's a quiz
@@ -357,7 +355,6 @@ function goToPrevSubtask(currentIndex) {
         const prevSubtaskId = subtaskIds[currentIndex - 1];
         const url = new URL(window.location);
         url.searchParams.set('subtask_id', prevSubtaskId);
-        url.searchParams.set('_t', Date.now());
         window.location.href = url.toString();
     }
 }
@@ -366,7 +363,6 @@ function navigateToSubtask(subtaskId) {
     // Navigate to specific subtask by clicking its dot
     const url = new URL(window.location);
     url.searchParams.set('subtask_id', subtaskId);
-    url.searchParams.set('_t', Date.now());
     window.location.href = url.toString();
 }
 

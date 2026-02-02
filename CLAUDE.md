@@ -86,28 +86,8 @@ Student-class is many-to-many. Each student has one active task per class. Tasks
 ### Template Block Structure
 Jinja2 templates use `{% block scripts %}` and `{% block content %}` inheritance. The base template wraps `scripts` block with `<script>` tags. Never add additional `<script>` tags inside the block - this creates nested tags and breaks JavaScript execution.
 
-### Browser Caching After AJAX Save
-When saving via AJAX and reloading to show updated data, use cache-busting to prevent stale data: `window.location.href = url + '?_t=' + Date.now()` instead of `location.reload()`. This forces fresh data fetch.
-
 ### Unsaved Changes Detection
 When tracking form state with `beforeunload` event listener, always update `initialState` after successful save and before reload to prevent false unsaved changes warnings.
-
-### Static File Caching Strategy
-Flask serves static files (CSS, JS) with aggressive browser caching. Changes to CSS/JS files may not appear even after CTRL+F5.
-
-**Solution**: Add version parameter to static file URLs in templates:
-```html
-<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=YYYYMMDDNN">
-```
-
-**When to increment version**:
-- After any CSS or JS file changes
-- Use date + sequence number format (e.g., `?v=2026012702`)
-- Update version in both `base.html` and `login.html`
-
-**Note**: Future improvement tracked in todo.md - replace with proper Cache-Control headers for cleaner solution.
-
-**See**: `frontend_patterns.md` for detailed patterns and examples
 
 ### Subtask Visibility and Task Assignment
 When editing subtasks via `models.update_subtasks()`, be aware of cascading effects:

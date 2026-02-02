@@ -2,7 +2,7 @@
 
 ## High Priority
 
-- **Merge remove-caching branch to main and deploy to server** - Performance analysis complete (see benchmark_analysis_2026-01-28.md), caching adds complexity without meaningful benefit, AES-NI hardware acceleration already optimal
+- ~~Merge remove-caching branch to main and deploy to server~~ (Complete - merged, caching removed)
 - ~~502 error when I try to upload a file~~ (Fixed - was database permissions issue)
 - ~~error logging functionality~~ (Complete - Phase 4, commit bd64505)
 - ~~Remove "Selbstbewertung pro Unterricht" from student page~~ (Complete - commit 4e64a18)
@@ -10,7 +10,8 @@
 - Code Review
 - Plan comprehensive simplification and testing of the admin interface: reason some options like visible tasks hidden behind too many submenus/subpages, some actions fail (moving students), ...
 - App needs more focus in the student view for the actual task and less visibility for nice-to-have but effectively less important information; also student dashboard does still not make it clear enough where learning actually starts (maybe skip dashboard and display current tasks directly?) -> based on common student feedback "What should I do?"
-- ~~Investigate if the caching mechanism is actually worth it~~ (Complete - see caching_investigation.md, benchmark_analysis_2026-01-28.md; recommendation: remove caching; testing on remove-caching branch)
+- ~~Investigate if the caching mechanism is actually worth it~~ (Complete - removed all caching, see caching_investigation.md)
+- Investigate Claude Code and/or Claude API support for task editing and rewriting/rearranging existing content to match restructuring to topic->task->subtask schema with smaller subtask units -> compare respective UX Tier 3 goals
 
 ## UX/Accessibility Improvements
 **UX Audit:** `docs/archive/2026-01-27_ux_audit/`
@@ -48,6 +49,7 @@
 - make admin top menu responsive - becomes crowded at 960px width (half of 1920px screen)
 - make progress dots slightly larger (double) in desktop view
 - add favicon to the app
+- change workflow from task→task→task→...→quiz to task→quiz→task→quiz→task→...; or allow for such workflows where appropriate → relates to student-facing usability, clarity and actionability
 
 
 ## Subtask Management Enhancements (Test 8 findings)

@@ -366,7 +366,6 @@ function saveSettings() {
                 console.log('Reloading page now');
                 // Add timestamp to URL to force fresh reload (bypass cache)
                 const url = new URL(window.location);
-                url.searchParams.set('_t', Date.now());
                 window.location.href = url.toString();
             }, 500);
         } else {
@@ -406,9 +405,8 @@ function resetToClassDefault() {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            // Reload page with cache-busting to show updated settings
+            // Reload page to reset state to show updated settings
             const url = new URL(window.location);
-            url.searchParams.set('_t', Date.now());
             window.location.href = url.toString();
         } else {
             alert('Fehler: ' + data.message);

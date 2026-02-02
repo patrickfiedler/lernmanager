@@ -7,9 +7,6 @@ from datetime import datetime, timedelta
 from werkzeug.security import generate_password_hash, check_password_hash
 import config
 
-# Cache instance (set by app.py after initialization)
-cache = None
-
 # SQLCipher support: Use encrypted database if SQLCIPHER_KEY is set
 SQLCIPHER_KEY = os.environ.get('SQLCIPHER_KEY')
 USE_SQLCIPHER = False
@@ -536,18 +533,9 @@ def verify_student(username, password):
 
 def get_all_klassen():
     """Get all classes."""
-    # Cache for 5 minutes if cache is available
-    if cache:
-        cached = cache.get('all_klassen')
-        if cached is not None:
-            return cached
-
     with db_session() as conn:
         rows = conn.execute("SELECT * FROM klasse ORDER BY name").fetchall()
         result = [dict(r) for r in rows]
-
-    if cache:
-        cache.set('all_klassen', result, timeout=300)
     return result
 
 
@@ -566,19 +554,9 @@ def delete_klasse(klasse_id):
 
 def get_klasse(klasse_id):
     """Get a class by ID."""
-    # Cache for 5 minutes if cache is available
-    cache_key = f'klasse_{klasse_id}'
-    if cache:
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
-
     with db_session() as conn:
         row = conn.execute("SELECT * FROM klasse WHERE id = ?", (klasse_id,)).fetchone()
         result = dict(row) if row else None
-
-    if cache and result:
-        cache.set(cache_key, result, timeout=300)
     return result
 
 
@@ -750,13 +728,6 @@ def reset_student_password(student_id, new_password):
 
 def get_students_in_klasse(klasse_id):
     """Get all students in a class."""
-    # Cache for 2 minutes if cache is available (medium volatility - students added/removed occasionally)
-    cache_key = f'students_klasse_{klasse_id}'
-    if cache:
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
-
     with db_session() as conn:
         rows = conn.execute('''
             SELECT s.*, st.task_id, t.name as task_name, st.abgeschlossen, st.manuell_abgeschlossen
@@ -768,27 +739,14 @@ def get_students_in_klasse(klasse_id):
             ORDER BY s.nachname, s.vorname
         ''', (klasse_id, klasse_id)).fetchall()
         result = [dict(r) for r in rows]
-
-    if cache:
-        cache.set(cache_key, result, timeout=120)
     return result
 
 
 def get_student(student_id):
     """Get a student by ID."""
-    # Cache for 2 minutes if cache is available (student data rarely changes)
-    cache_key = f'student_{student_id}'
-    if cache:
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
-
     with db_session() as conn:
         row = conn.execute("SELECT * FROM student WHERE id = ?", (student_id,)).fetchone()
         result = dict(row) if row else None
-
-    if cache and result:
-        cache.set(cache_key, result, timeout=120)
     return result
 
 
@@ -796,20 +754,10 @@ def update_student_setting(student_id, setting_name, value):
     """Update a student setting (UX Tier 1: Easy Reading Mode)."""
     with db_session() as conn:
         conn.execute(f"UPDATE student SET {setting_name} = ? WHERE id = ?", (value, student_id))
-    # Clear cache
-    if cache:
-        cache.delete(f'student_{student_id}')
 
 
 def get_student_klassen(student_id):
     """Get all classes a student belongs to."""
-    # Cache for 2 minutes if cache is available (class membership rarely changes)
-    cache_key = f'student_klassen_{student_id}'
-    if cache:
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
-
     with db_session() as conn:
         rows = conn.execute('''
             SELECT k.* FROM klasse k
@@ -818,9 +766,6 @@ def get_student_klassen(student_id):
             ORDER BY k.name
         ''', (student_id,)).fetchall()
         result = [dict(r) for r in rows]
-
-    if cache:
-        cache.set(cache_key, result, timeout=120)
     return result
 
 
@@ -848,21 +793,12 @@ def is_student_task_owner(student_id, student_task_id):
 
 def get_all_tasks():
     """Get all tasks."""
-    # Cache for 5 minutes if cache is available (stable data)
-    if cache:
-        cached = cache.get('all_tasks')
-        if cached is not None:
-            return cached
-
     with db_session() as conn:
         rows = conn.execute('''
             SELECT * FROM task
             ORDER BY fach, stufe, number, name
         ''').fetchall()
         result = [dict(r) for r in rows]
-
-    if cache:
-        cache.set('all_tasks', result, timeout=300)
     return result
 
 
@@ -1429,13 +1365,6 @@ def reset_subtask_visibility_to_class_default(student_id, task_id):
 
 def get_student_task(student_id, klasse_id):
     """Get student's current task for a class."""
-    # Cache for 1 minute if cache is available (high volatility - tasks assigned/completed frequently)
-    cache_key = f'student_task_{student_id}_{klasse_id}'
-    if cache:
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
-
     with db_session() as conn:
         row = conn.execute('''
             SELECT st.*, t.name, t.beschreibung, t.lernziel, t.fach, t.stufe, t.kategorie, t.quiz_json, t.why_learn_this
@@ -1444,21 +1373,11 @@ def get_student_task(student_id, klasse_id):
             WHERE st.student_id = ? AND st.klasse_id = ?
         ''', (student_id, klasse_id)).fetchone()
         result = dict(row) if row else None
-
-    if cache and result:
-        cache.set(cache_key, result, timeout=60)
     return result
 
 
 def get_student_subtask_progress(student_task_id):
     """Get subtask completion status for a student's task."""
-    # Cache for 30 seconds if cache is available (changes when student marks subtasks complete)
-    cache_key = f'student_subtask_progress_{student_task_id}'
-    if cache:
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
-
     with db_session() as conn:
         rows = conn.execute('''
             SELECT sub.*, COALESCE(ss.erledigt, 0) as erledigt
@@ -1469,9 +1388,6 @@ def get_student_subtask_progress(student_task_id):
             ORDER BY sub.reihenfolge
         ''', (student_task_id, student_task_id)).fetchall()
         result = [dict(r) for r in rows]
-
-    if cache:
-        cache.set(cache_key, result, timeout=30)
     return result
 
 
