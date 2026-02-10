@@ -1662,6 +1662,15 @@ def handle_not_found(error):
                          error_message='Seite nicht gefunden'), 404
 
 
+@app.errorhandler(405)
+def handle_method_not_allowed(error):
+    """Handle 405 Method Not Allowed errors (usually bots probing the server)."""
+    # Don't log 405s to database (too noisy from bots), just show error page
+    return render_template('error.html',
+                         error_code=405,
+                         error_message='Methode nicht erlaubt'), 405
+
+
 @app.errorhandler(500)
 def handle_internal_error(error):
     """Handle 500 Internal Server errors."""
@@ -1683,9 +1692,11 @@ def handle_internal_error(error):
 @app.errorhandler(Exception)
 def handle_exception(error):
     """Handle all unhandled exceptions."""
-    # Skip 404 errors (handled separately)
+    # Skip errors handled by dedicated handlers
     if isinstance(error, Exception) and error.__class__.__name__ == 'NotFound':
         return handle_not_found(error)
+    if isinstance(error, Exception) and error.__class__.__name__ == 'MethodNotAllowed':
+        return handle_method_not_allowed(error)
 
     user_id, user_type = get_current_user_info()
     models.log_error(
