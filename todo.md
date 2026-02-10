@@ -11,7 +11,14 @@
 - Plan comprehensive simplification and testing of the admin interface: reason some options like visible tasks hidden behind too many submenus/subpages, some actions fail (moving students), ...
 - App needs more focus in the student view for the actual task and less visibility for nice-to-have but effectively less important information; also student dashboard does still not make it clear enough where learning actually starts (maybe skip dashboard and display current tasks directly?) -> based on common student feedback "What should I do?"
 - ~~Investigate if the caching mechanism is actually worth it~~ (Complete - removed all caching, see caching_investigation.md)
-- Investigate Claude Code and/or Claude API support for task editing and rewriting/rearranging existing content to match restructuring to topic->task->subtask schema with smaller subtask units -> compare respective UX Tier 3 goals
+- ~~Investigate Claude Code and/or Claude API support for task editing and rewriting/rearranging existing content~~ (Complete - JSON export/import workflow implemented, content restructuring in progress as separate project)
+
+## Learning Paths & Quiz Evolution (Researched 2026-02-07)
+See `docs/research/2026-02-07_learning_paths_and_quiz_evolution.md`
+- Learning paths: Wanderweg/Bergweg/Gipfelweg difficulty system with mountain visualization
+- Per-task quizzes: add quiz_json to subtask table, quiz after each Aufgabe
+- New question types: true/false (free), fill-blank, matching, ordering, short answer
+- LLM grading: Claude Haiku API for free-text answers, anonymized, rate-limited, ~$1/class
 
 ## UX/Accessibility Improvements
 **UX Audit:** `docs/archive/2026-01-27_ux_audit/`
@@ -27,7 +34,7 @@
 - ~~student progress reports as PDF file per student: information from class progress report + student's individual activity log~~ (Complete - Phase 6, commit 2183568)
 - ~~Add regular class dates for each class (schedule)~~ (Complete - commit eea29d0, implemented in student assessment improvements)
 - add external API to upload log files from scan-folders.ps1 script -> major feature to track student progress from the files they create on the school computers
-- later: add AI enabled grading workflow -> needs lots of investigation and testing
+- LLM-based grading with Claude Haiku API for free-text answers (fill-blank, short answer, matching) -> see `docs/research/2026-02-07_learning_paths_and_quiz_evolution.md`
 - **Admin: curriculum alignment page** - Show how topics/tasks map to curriculum learning goals, display alignment between app content and official curriculum, helps teachers ensure coverage of required learning objectives, potentially show gaps or overlaps (Priority: Medium - useful for planning and compliance)
 
 ## Improvements
@@ -49,7 +56,7 @@
 - make admin top menu responsive - becomes crowded at 960px width (half of 1920px screen)
 - make progress dots slightly larger (double) in desktop view
 - add favicon to the app
-- change workflow from task→task→task→...→quiz to task→quiz→task→quiz→task→...; or allow for such workflows where appropriate → relates to student-facing usability, clarity and actionability
+- ~~change workflow from task→task→task→...→quiz to task→quiz→task→quiz→task→...~~ (Planned - per-task quizzes, see `docs/research/2026-02-07_learning_paths_and_quiz_evolution.md`)
 
 
 ## Subtask Management Enhancements (Test 8 findings)
@@ -74,6 +81,16 @@
 - fix: Make lesson comment saveable without saving student evaluation -> required in case a scheduled lesson does not take place
 - fix: current implementation does not treat compulsory and optional tasks differently, but it should -> there needs to be a clear setting in the task editor, and it should be obvious in the student view (maybe have yellow: open compulsory tasks, green: completed tasks, and rainbow colour spectrum for optional tasks)
 - ~~fix: adding a material in the task editor loses unsaved edits without warning~~ (Fixed - added unsaved changes detection and warning dialog)
+
+## DSGVO / Datenschutz
+See `docs/research/2026-02-07_learning_paths_and_quiz_evolution.md` (Section 5)
+- Rechtsgrundlage: Bildungsauftrag (Art. 6 Abs. 1 lit. e), keine Einwilligung nötig
+- Informationsschreiben (Entwurf): `docs/vorlagen/informationsschreiben_lernmanager.md`
+- [ ] Informationsschreiben vom DSB der Schule prüfen lassen
+- [ ] Verarbeitungsverzeichnis aktualisieren
+- [ ] Genehmigung der Schulleitung einholen
+- [ ] AV-Vertrag mit VPS-Hoster prüfen/abschließen
+- [ ] Landesspezifische Schuldatenschutzverordnung prüfen
 
 ## Notes
 

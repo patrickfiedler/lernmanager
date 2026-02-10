@@ -7,6 +7,11 @@ from datetime import datetime, timedelta
 from werkzeug.security import generate_password_hash, check_password_hash
 import config
 
+# Terminology mapping (UI German → Database English):
+#   Thema (topic)       → task table
+#   Aufgabe (task)      → subtask table
+#   Schüler-Thema       → student_task table
+
 # SQLCipher support: Use encrypted database if SQLCIPHER_KEY is set
 SQLCIPHER_KEY = os.environ.get('SQLCIPHER_KEY')
 USE_SQLCIPHER = False

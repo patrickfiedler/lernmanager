@@ -340,7 +340,29 @@ Examples:
         print(f"Loading: {args.file}")
         data = load_task_json(args.file)
 
-        # Validate
+        # Support bulk export format: {"tasks": [...]}
+        if 'tasks' in data and isinstance(data['tasks'], list):
+            print(f"Bulk format detected: {len(data['tasks'])} tasks\n")
+            results = {"imported": [], "skipped": [], "failed": []}
+            for task_data in data['tasks']:
+                wrapped = {'task': task_data}
+                try:
+                    validate_task_structure(wrapped)
+                    task_id = import_task(wrapped, dry_run=args.dry_run)
+                    if task_id:
+                        results["imported"].append((task_data['name'], task_id))
+                        print(f"  Imported: {task_data['name']} (ID: {task_id})")
+                    else:
+                        results["skipped"].append(task_data['name'])
+                        if not args.dry_run:
+                            print(f"  Skipped: {task_data['name']}")
+                except ValidationError as e:
+                    results["failed"].append((task_data.get('name', '?'), str(e)))
+                    print(f"  Failed: {task_data.get('name', '?')}: {e}")
+            print(f"\nImported: {len(results['imported'])}, Skipped: {len(results['skipped'])}, Failed: {len(results['failed'])}")
+            return 0 if not results["failed"] else 1
+
+        # Single task format: {"task": {...}}
         print("Validating structure...")
         validate_task_structure(data)
         print("Validation passed!")
