@@ -136,7 +136,7 @@ function loadSubtasks(taskId) {
 
     // Fetch subtasks for this task
     const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
-    fetch(`/admin/aufgabe/${taskId}/teilaufgaben`, {
+    fetch(`/admin/thema/${taskId}/aufgaben`, {
         headers: {
             'X-CSRFToken': csrfToken
         }

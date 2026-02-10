@@ -265,7 +265,7 @@ function toggleSubtask(studentTaskId, subtaskId, checked) {
         checkbox.disabled = true;
     }
 
-    fetch(`/schueler/aufgabe/${studentTaskId}/teilaufgabe/${subtaskId}`, {
+    fetch(`/schueler/thema/${studentTaskId}/aufgabe/${subtaskId}`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -368,7 +368,7 @@ function navigateToSubtask(subtaskId) {
 
 function navigateToQuiz() {
     // Navigate to quiz page
-    window.location.href = `/schueler/aufgabe/{{ task.id }}/quiz`;
+    window.location.href = `/schueler/thema/{{ task.id }}/quiz`;
 }
 
 // Keyboard navigation for progress dots (WCAG 2.1 keyboard accessibility)
