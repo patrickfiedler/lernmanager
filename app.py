@@ -751,7 +751,17 @@ def download_material(material_id):
             }
         )
 
-        # Serve the file from the protected uploads directory
+        # In production, let nginx serve the file directly (X-Accel-Redirect)
+        # This frees the Python thread immediately instead of streaming bytes
+        if not app.debug and request.headers.get('X-Forwarded-For'):
+            import mimetypes
+            content_type = mimetypes.guess_type(material['pfad'])[0] or 'application/octet-stream'
+            response = Response('')
+            response.headers['X-Accel-Redirect'] = f'/protected-files/{material["pfad"]}'
+            response.headers['Content-Type'] = content_type
+            return response
+
+        # Development fallback: serve directly through Flask
         return send_from_directory(
             config.UPLOAD_FOLDER,
             material['pfad'],

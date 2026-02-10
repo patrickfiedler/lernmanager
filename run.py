@@ -25,9 +25,9 @@ if __name__ == '__main__':
         app,
         host='0.0.0.0',
         port=8080,
-        threads=8,                    # Number of worker threads (increased from 4)
+        threads=16,                   # Worker threads (handles concurrent class access)
         channel_timeout=120,          # Timeout for connections (2 minutes)
         recv_bytes=65536,             # 64KB receive buffer (for uploads)
-        send_bytes=65536,             # 64KB send buffer
+        send_bytes=262144,            # 256KB send buffer (faster large file responses)
         max_request_body_size=67108864  # 64MB (matches Flask's MAX_CONTENT_LENGTH)
     )
