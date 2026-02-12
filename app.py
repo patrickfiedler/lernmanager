@@ -12,6 +12,7 @@ import markdown as md
 
 import config
 import models
+import llm_grading
 from utils import generate_username, generate_password, allowed_file, generate_credentials_pdf, generate_student_self_report_pdf
 
 app = Flask(__name__)
@@ -561,7 +562,8 @@ def admin_thema_detail(task_id):
     materials = models.get_materials(task_id)
     all_tasks = models.get_all_tasks()
     voraussetzungen = models.get_task_voraussetzungen(task_id)
-    return render_template('admin/aufgabe_detail.html', task=task, subtasks=subtasks, materials=materials, all_tasks=all_tasks, voraussetzungen=voraussetzungen, subjects=config.SUBJECTS, levels=config.LEVELS)
+    material_assignments = models.get_material_subtask_assignments(task_id)
+    return render_template('admin/aufgabe_detail.html', task=task, subtasks=subtasks, materials=materials, all_tasks=all_tasks, voraussetzungen=voraussetzungen, subjects=config.SUBJECTS, levels=config.LEVELS, material_assignments=material_assignments)
 
 
 @app.route('/admin/thema/<int:task_id>/bearbeiten', methods=['POST'])
@@ -713,6 +715,31 @@ def admin_material_loeschen(material_id):
         flash('Fehler beim Löschen des Materials.', 'danger')
 
     return redirect(request.referrer or url_for('admin_themen'))
+
+
+@app.route('/admin/thema/<int:task_id>/material-zuordnung', methods=['POST'])
+@admin_required
+def admin_material_zuordnung(task_id):
+    """Save material-to-Aufgabe assignments from checkbox table."""
+    subtasks = models.get_subtasks(task_id)
+    materials = models.get_materials(task_id)
+    subtask_ids = [s['id'] for s in subtasks]
+
+    for material in materials:
+        mid = material['id']
+        # Collect checked subtask IDs for this material
+        checked = request.form.getlist(f'mat_{mid}[]')
+        checked_ids = [int(x) for x in checked if x]
+
+        # If all subtasks are checked (or "alle" is checked), clear assignments
+        alle_checked = request.form.get(f'mat_{mid}_alle')
+        if alle_checked or set(checked_ids) == set(subtask_ids):
+            models.set_material_subtask_assignments(mid, [])
+        else:
+            models.set_material_subtask_assignments(mid, checked_ids)
+
+    flash('Material-Zuordnung gespeichert. ✅', 'success')
+    return redirect(url_for('admin_thema_detail', task_id=task_id))
 
 
 @app.route('/material/<int:material_id>/download')
@@ -1359,7 +1386,6 @@ def student_klasse(klasse_id):
     if task:
         # Get ALL subtasks with completion status
         all_subtasks = models.get_student_subtask_progress(task['id'])
-        materials = models.get_materials(task['task_id'])
         quiz_attempts = models.get_quiz_attempts(task['id'])  # topic-level only (subtask_id IS NULL)
 
         # Check if topic quiz was passed
@@ -1395,6 +1421,12 @@ def student_klasse(klasse_id):
         elif subtasks:
             # Default to first visible subtask
             current_subtask = subtasks[0]
+
+        # Load materials filtered by current Aufgabe
+        if current_subtask:
+            materials = models.get_materials_for_subtask(task['task_id'], current_subtask['id'])
+        else:
+            materials = models.get_materials(task['task_id'])
 
         # Q5A: Calculate completed based on VISIBLE subtasks only
         completed_subtasks = [st for st in subtasks if st['erledigt']]
@@ -1504,33 +1536,52 @@ def student_quiz(student_task_id, subtask_id=None):
     if request.method == 'POST':
         # Grade the quiz using the mapping from hidden fields
         punkte = 0
-        max_punkte = len(quiz['questions'])
         antworten = {}
 
         # Get the question order mapping (shuffled index -> original index)
+        # Length may be less than quiz['questions'] if LLM questions were filtered on GET
         question_order = json.loads(request.form.get('question_order', '[]'))
+        max_punkte = len(question_order) if question_order else len(quiz['questions'])
 
-        for shuffled_idx in range(len(quiz['questions'])):
+        for shuffled_idx in range(max_punkte):
             # Map shuffled question index to original
             original_q_idx = question_order[shuffled_idx] if question_order else shuffled_idx
             question = quiz['questions'][original_q_idx]
+            qtype = question.get('type', 'multiple_choice')
 
-            # Get answer mapping for this question (shuffled answer index -> original answer index)
-            answer_map = json.loads(request.form.get(f'answer_map_{shuffled_idx}', '[]'))
+            if qtype == 'fill_blank':
+                student_text = request.form.get(f'q{shuffled_idx}', '').strip()
+                if not student_text:
+                    antworten[str(original_q_idx)] = {"text": "", "correct": False, "feedback": "Keine Antwort.", "source": "empty"}
+                elif student_text.lower() in [a.lower() for a in question['answers']]:
+                    punkte += 1
+                    antworten[str(original_q_idx)] = {"text": student_text, "correct": True, "feedback": "Richtig!", "source": "match"}
+                else:
+                    result = llm_grading.grade_answer(question['text'], ', '.join(question['answers']), student_text, student_id)
+                    if result['correct']:
+                        punkte += 1
+                    antworten[str(original_q_idx)] = {"text": student_text, **result}
 
-            # Get submitted answers (these are shuffled indices)
-            submitted = request.form.getlist(f'q{shuffled_idx}')
-            submitted_shuffled = [int(x) for x in submitted]
+            elif qtype == 'short_answer':
+                student_text = request.form.get(f'q{shuffled_idx}', '').strip()
+                if not student_text:
+                    antworten[str(original_q_idx)] = {"text": "", "correct": False, "feedback": "Keine Antwort.", "source": "empty"}
+                else:
+                    result = llm_grading.grade_answer(question['text'], question['rubric'], student_text, student_id)
+                    if result['correct']:
+                        punkte += 1
+                    antworten[str(original_q_idx)] = {"text": student_text, **result}
 
-            # Map submitted shuffled indices back to original indices
-            submitted_original = [answer_map[i] for i in submitted_shuffled] if answer_map else submitted_shuffled
-
-            correct = question['correct']
-            antworten[str(original_q_idx)] = submitted_original
-
-            # Check if answer is correct (all correct options selected, no incorrect ones)
-            if set(submitted_original) == set(correct):
-                punkte += 1
+            else:
+                # Multiple choice (default) — existing logic
+                answer_map = json.loads(request.form.get(f'answer_map_{shuffled_idx}', '[]'))
+                submitted = request.form.getlist(f'q{shuffled_idx}')
+                submitted_shuffled = [int(x) for x in submitted]
+                submitted_original = [answer_map[i] for i in submitted_shuffled] if answer_map else submitted_shuffled
+                correct = question['correct']
+                antworten[str(original_q_idx)] = submitted_original
+                if set(submitted_original) == set(correct):
+                    punkte += 1
 
         attempt_id, bestanden = models.save_quiz_attempt(
             student_task_id, punkte, max_punkte, json.dumps(antworten), subtask_id=subtask_id
@@ -1571,9 +1622,10 @@ def student_quiz(student_task_id, subtask_id=None):
             'questions': [
                 {
                     'question': q['text'],
-                    'answers': q['options'],
-                    'correct': q['correct'],
-                    'image': q.get('image')
+                    'answers': q.get('options', []),
+                    'correct': q.get('correct', []),
+                    'image': q.get('image'),
+                    'type': q.get('type', 'multiple_choice')
                 }
                 for q in quiz['questions']
             ]
@@ -1595,7 +1647,15 @@ def student_quiz(student_task_id, subtask_id=None):
                                subtask_id=subtask_id,
                                klasse_id=klasse_id)
 
-    # GET: Shuffle questions and answers for display
+    # GET: Filter out LLM questions if rate limit exceeded
+    llm_available = models.check_llm_rate_limit(student_id)
+    if not llm_available:
+        quiz['questions'] = [q for q in quiz['questions'] if q.get('type', 'multiple_choice') == 'multiple_choice']
+        if not quiz['questions']:
+            flash('Du hast dein Quiz-Limit erreicht. Versuche es später erneut.', 'warning')
+            return redirect(url_for('student_klasse', klasse_id=klasse_id) if klasse_id else url_for('student_dashboard'))
+
+    # Shuffle questions and answers for display
     import random as quiz_random
 
     # Create shuffled question order (list of original indices in shuffled order)
@@ -1608,20 +1668,31 @@ def student_quiz(student_task_id, subtask_id=None):
 
     for original_idx in question_order:
         q = quiz['questions'][original_idx]
+        qtype = q.get('type', 'multiple_choice')
 
-        # Create shuffled answer order (JSON uses 'options' for answers)
-        options = q['options']
-        answer_order = list(range(len(options)))
-        quiz_random.shuffle(answer_order)
-        answer_maps.append(answer_order)
-
-        # Build shuffled question (template expects 'question' and 'answers')
-        shuffled_q = {
-            'question': q['text'],
-            'answers': [options[i] for i in answer_order],
-            'correct': q['correct'],  # Keep original for reference (not used in template)
-            'image': q.get('image')
-        }
+        if qtype in ('fill_blank', 'short_answer'):
+            # Text questions: no answer shuffling needed
+            answer_maps.append([])
+            shuffled_q = {
+                'question': q['text'],
+                'answers': [],
+                'correct': [],
+                'image': q.get('image'),
+                'type': qtype
+            }
+        else:
+            # Multiple choice: shuffle answer options
+            options = q['options']
+            answer_order = list(range(len(options)))
+            quiz_random.shuffle(answer_order)
+            answer_maps.append(answer_order)
+            shuffled_q = {
+                'question': q['text'],
+                'answers': [options[i] for i in answer_order],
+                'correct': q['correct'],
+                'image': q.get('image'),
+                'type': 'multiple_choice'
+            }
         shuffled_questions.append(shuffled_q)
 
     shuffled_quiz = {'questions': shuffled_questions}

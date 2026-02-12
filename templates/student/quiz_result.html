@@ -40,9 +40,24 @@
         <img src="{{ question.image }}" alt="Bild zur Frage {{ loop.index }}" class="quiz-question-image">
         {% endif %}
         {% set q_idx = loop.index0|string %}
-        {% set user_answers = antworten.get(q_idx, []) %}
+        {% set user_answer = antworten.get(q_idx, []) %}
+
+        {% if question.type in ['fill_blank', 'short_answer'] %}
+        {# Free-text answer with LLM feedback #}
+        {% if user_answer is mapping %}
+        <div class="quiz-option selected {% if user_answer.correct %}text-success{% else %}text-danger{% endif %}" style="border-left: 4px solid {% if user_answer.correct %}var(--success-color, #28a745){% else %}var(--danger-color, #dc3545){% endif %}; padding-left: 1rem;">
+            <strong>Deine Antwort:</strong> {{ user_answer.text or '(keine Antwort)' }}
+        </div>
+        {% if user_answer.feedback %}
+        <div class="quiz-option" style="border-left: 4px solid {% if user_answer.source == 'fallback' %}var(--warning-color, #ffc107){% else %}var(--info-color, #17a2b8){% endif %}; padding-left: 1rem; background: {% if user_answer.source == 'fallback' %}#fff8e1{% else %}#e8f4fd{% endif %};">
+            💬 {{ user_answer.feedback }}
+        </div>
+        {% endif %}
+        {% endif %}
+        {% else %}
+        {# Multiple choice (default) — show selected options #}
         {% for answer in question.answers %}
-        {% set was_selected = loop.index0 in user_answers %}
+        {% set was_selected = loop.index0 in user_answer %}
         <div class="quiz-option {% if was_selected %}selected{% endif %}">
             {% if was_selected %}●{% else %}○{% endif %}
             {% if answer is mapping %}
@@ -53,6 +68,7 @@
             {% endif %}
         </div>
         {% endfor %}
+        {% endif %}
     </div>
     {% endfor %}
 </div>

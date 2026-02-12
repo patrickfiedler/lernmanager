@@ -1533,13 +1533,19 @@ tr.unsaved-row td {
     transform: rotate(90deg);
 }
 
+.materials-toggle[open] summary,
+.topic-description-toggle[open] summary {
+    border-bottom: none;
+    border-radius: 0.5rem 0.5rem 0 0;
+}
+
 .materials-content,
 .topic-description-content {
-    margin-top: 1.5rem;
     padding: 1.25rem;
     background: var(--gray-50);
-    border-radius: 0.5rem;
+    border-radius: 0 0 0.5rem 0.5rem;
     border: 1px solid var(--gray-200);
+    border-top: none;
 }
 
 /* Quiz Card */

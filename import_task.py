@@ -116,16 +116,27 @@ def validate_task_structure(data):
                     continue
                 if 'text' not in q or not q['text']:
                     errors.append(f"Question {i+1} missing 'text'")
-                if 'options' not in q or not isinstance(q['options'], list):
-                    errors.append(f"Question {i+1} missing or invalid 'options'")
-                elif len(q['options']) < 2:
-                    errors.append(f"Question {i+1} needs at least 2 options")
-                if 'correct' not in q or not isinstance(q['correct'], list):
-                    errors.append(f"Question {i+1} missing or invalid 'correct'")
-                elif 'options' in q and isinstance(q['options'], list):
-                    for idx in q.get('correct', []):
-                        if not isinstance(idx, int) or idx < 0 or idx >= len(q['options']):
-                            errors.append(f"Question {i+1} has invalid correct index: {idx}")
+
+                qtype = q.get('type', 'multiple_choice')
+                if qtype == 'fill_blank':
+                    if 'answers' not in q or not isinstance(q['answers'], list) or not q['answers']:
+                        errors.append(f"Question {i+1} (fill_blank) missing or empty 'answers' list")
+                elif qtype == 'short_answer':
+                    if 'rubric' not in q or not q['rubric']:
+                        errors.append(f"Question {i+1} (short_answer) missing 'rubric'")
+                elif qtype == 'multiple_choice':
+                    if 'options' not in q or not isinstance(q['options'], list):
+                        errors.append(f"Question {i+1} missing or invalid 'options'")
+                    elif len(q['options']) < 2:
+                        errors.append(f"Question {i+1} needs at least 2 options")
+                    if 'correct' not in q or not isinstance(q['correct'], list):
+                        errors.append(f"Question {i+1} missing or invalid 'correct'")
+                    elif 'options' in q and isinstance(q['options'], list):
+                        for idx in q.get('correct', []):
+                            if not isinstance(idx, int) or idx < 0 or idx >= len(q['options']):
+                                errors.append(f"Question {i+1} has invalid correct index: {idx}")
+                else:
+                    errors.append(f"Question {i+1} has unknown type '{qtype}'")
 
     if errors:
         raise ValidationError("\n".join(errors))
@@ -205,22 +216,33 @@ def import_task(task_data, dry_run=False):
             else:
                 print(f"  Warning: Prerequisite '{v_name}' not found, skipping")
 
-    # Create subtasks
+    # Create subtasks and track position -> ID mapping
     subtasks = task.get('subtasks', [])
+    subtask_id_by_position = {}
     for i, sub in enumerate(subtasks):
         reihenfolge = sub.get('reihenfolge', i)
         estimated_minutes = sub.get('estimated_minutes')
-        models.create_subtask(task_id, sub['beschreibung'], reihenfolge, estimated_minutes)
+        sub_id = models.create_subtask(task_id, sub['beschreibung'], reihenfolge, estimated_minutes)
+        subtask_id_by_position[reihenfolge] = sub_id
 
-    # Create materials
+    # Create materials and restore subtask assignments
     materials = task.get('materials', [])
     for mat in materials:
-        models.create_material(
+        mat_id = models.create_material(
             task_id,
             mat['typ'],
             mat['pfad'],
             mat.get('beschreibung', '')
         )
+        # Restore per-Aufgabe assignments if present
+        if mat.get('subtask_indices'):
+            assigned_ids = [
+                subtask_id_by_position[pos]
+                for pos in mat['subtask_indices']
+                if pos in subtask_id_by_position
+            ]
+            if assigned_ids:
+                models.set_material_subtask_assignments(mat_id, assigned_ids)
 
     return task_id
 

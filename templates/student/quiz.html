@@ -33,6 +33,13 @@
         {% if question.image %}
         <img src="{{ question.image }}" alt="Bild zur Frage {{ loop.index }}" class="quiz-question-image">
         {% endif %}
+
+        {% if question.type == 'fill_blank' %}
+        <input type="text" name="q{{ loop.index0 }}" class="form-control" placeholder="Antwort eingeben..." autocomplete="off">
+        {% elif question.type == 'short_answer' %}
+        <textarea name="q{{ loop.index0 }}" class="form-control" rows="3" placeholder="Antwort in eigenen Worten..."></textarea>
+        {% else %}
+        {# Multiple choice (default) #}
         {% for answer in question.answers %}
         <label class="quiz-option">
             <input type="checkbox" name="q{{ loop.index0 - 1 }}" value="{{ loop.index0 }}"
@@ -48,6 +55,7 @@
         {% if question.correct|length > 1 %}
         <p class="text-muted mt-1">💡 Mehrere Antworten können richtig sein.</p>
         {% endif %}
+        {% endif %}
     </div>
     {% endfor %}
 
@@ -56,7 +64,7 @@
 {% endblock %}
 
 {% block scripts %}
-// Fix for question indexing
+// Fix checkbox name indexing (only for multiple-choice questions)
 document.querySelectorAll('.quiz-question').forEach((q, idx) => {
     q.querySelectorAll('input[type="checkbox"]').forEach(input => {
         input.name = 'q' + idx;

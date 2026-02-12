@@ -154,6 +154,55 @@
     </ul>
     {% endif %}
 
+    {% if materials and subtasks %}
+    <!-- Material-Aufgabe Assignment Table -->
+    <form method="POST" action="{{ url_for('admin_material_zuordnung', task_id=task.id) }}" class="mb-2">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <h4 class="mb-1">📋 Zuordnung zu Aufgaben</h4>
+        <small class="text-muted mb-1" style="display: block;">Welche Materialien sollen bei welchen Aufgaben angezeigt werden? Keine Auswahl = überall sichtbar.</small>
+        <div style="overflow-x: auto;">
+            <table class="table" style="min-width: auto;">
+                <thead>
+                    <tr>
+                        <th>Material</th>
+                        {% for st in subtasks %}
+                        <th style="text-align: center; min-width: 40px;" title="{{ st.beschreibung[:60] }}">{{ loop.index }}</th>
+                        {% endfor %}
+                        <th style="text-align: center; min-width: 50px;">Alle</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for mat in materials %}
+                    {% set assigned = material_assignments.get(mat.id, []) %}
+                    {% set is_all = (assigned | length) == 0 %}
+                    <tr>
+                        <td>
+                            {% if mat.typ == 'link' %}🔗{% else %}📄{% endif %}
+                            {{ mat.beschreibung or mat.pfad }}
+                        </td>
+                        {% for st in subtasks %}
+                        <td style="text-align: center;">
+                            <input type="checkbox" name="mat_{{ mat.id }}[]" value="{{ st.id }}"
+                                   data-mat-id="{{ mat.id }}"
+                                   onchange="handleAssignmentChange({{ mat.id }})"
+                                   {% if is_all or st.id in assigned %}checked{% endif %}>
+                        </td>
+                        {% endfor %}
+                        <td style="text-align: center;">
+                            <input type="checkbox" name="mat_{{ mat.id }}_alle"
+                                   data-mat-alle="{{ mat.id }}"
+                                   onchange="toggleAllForMaterial({{ mat.id }})"
+                                   {% if is_all %}checked{% endif %}>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <button type="submit" class="btn btn-primary">Zuordnung speichern</button>
+    </form>
+    {% endif %}
+
     <div class="grid grid-2">
         <div>
             <h4 class="mb-1">🔗 Link hinzufügen</h4>
@@ -349,6 +398,20 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 });
+
+// Material-Aufgabe assignment helpers
+function toggleAllForMaterial(matId) {
+    const alleCheckbox = document.querySelector(`[data-mat-alle="${matId}"]`);
+    const checkboxes = document.querySelectorAll(`[data-mat-id="${matId}"]`);
+    checkboxes.forEach(cb => cb.checked = alleCheckbox.checked);
+}
+
+function handleAssignmentChange(matId) {
+    const checkboxes = document.querySelectorAll(`[data-mat-id="${matId}"]`);
+    const alleCheckbox = document.querySelector(`[data-mat-alle="${matId}"]`);
+    const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+    alleCheckbox.checked = allChecked;
+}
 
 // Subtask management
 function addSubtask() {

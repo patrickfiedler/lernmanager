@@ -205,6 +205,17 @@ def init_db():
                 FOREIGN KEY (task_id) REFERENCES task(id) ON DELETE CASCADE
             );
 
+            -- Material-Subtask assignments (per-Aufgabe material visibility)
+            -- No rows for a material = visible for ALL Aufgaben (backward compatible)
+            CREATE TABLE IF NOT EXISTS material_subtask (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                material_id INTEGER NOT NULL,
+                subtask_id INTEGER NOT NULL,
+                UNIQUE(material_id, subtask_id),
+                FOREIGN KEY (material_id) REFERENCES material(id) ON DELETE CASCADE,
+                FOREIGN KEY (subtask_id) REFERENCES subtask(id) ON DELETE CASCADE
+            );
+
             -- Student task assignment (per class)
             CREATE TABLE IF NOT EXISTS student_task (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -413,6 +424,20 @@ def init_db():
             -- Index for efficient retrieval by student
             CREATE INDEX IF NOT EXISTS idx_saved_reports_student
             ON saved_reports(student_id, date_generated DESC);
+
+            -- ============ LLM Usage Tracking ============
+
+            CREATE TABLE IF NOT EXISTS llm_usage (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_id INTEGER NOT NULL,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                question_type TEXT NOT NULL,
+                tokens_used INTEGER DEFAULT 0,
+                FOREIGN KEY (student_id) REFERENCES student(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_llm_usage_student_time
+            ON llm_usage(student_id, timestamp);
         ''')
 
 
@@ -953,7 +978,11 @@ def export_task_to_dict(task_id):
         subtasks = get_subtasks(task_id)
         materials = get_materials(task_id)
         task_voraussetzungen = get_task_voraussetzungen(task_id)
-        
+        material_assignments = get_material_subtask_assignments(task_id)
+
+        # Build subtask ID -> reihenfolge lookup
+        subtask_id_to_pos = {s['id']: s['reihenfolge'] for s in subtasks}
+
         subtasks_data = []
         for subtask in subtasks:
             st_data = {
@@ -964,14 +993,22 @@ def export_task_to_dict(task_id):
             if subtask.get('quiz_json'):
                 st_data['quiz'] = json.loads(subtask['quiz_json'])
             subtasks_data.append(st_data)
-            
+
         materials_data = []
         for material in materials:
-            materials_data.append({
+            mat_data = {
                 'typ': material['typ'],
                 'pfad': material['pfad'],
                 'beschreibung': material['beschreibung']
-            })
+            }
+            # Include subtask_indices if material has specific assignments
+            assigned_subtask_ids = material_assignments.get(material['id'])
+            if assigned_subtask_ids:
+                mat_data['subtask_indices'] = sorted(
+                    subtask_id_to_pos[sid] for sid in assigned_subtask_ids
+                    if sid in subtask_id_to_pos
+                )
+            materials_data.append(mat_data)
             
         if (task['quiz_json']):
             quiz_data = json.loads(task['quiz_json'])
@@ -1147,9 +1184,29 @@ def update_subtasks(task_id, subtasks_list, estimated_minutes_list=None, quiz_js
             key = (row['klasse_id'], row['student_id'], row['reihenfolge'])
             visibility_by_position[key] = (row['enabled'], row['set_by_admin_id'])
 
-        # Step 2: Delete old visibility records and subtasks
+        # Step 1b: Save material-subtask assignments by position
+        old_mat_assignments = conn.execute("""
+            SELECT ms.material_id, s.reihenfolge
+            FROM material_subtask ms
+            JOIN subtask s ON ms.subtask_id = s.id
+            WHERE s.task_id = ?
+        """, (task_id,)).fetchall()
+
+        # {material_id: set(reihenfolge)}
+        mat_assignments_by_position = {}
+        for row in old_mat_assignments:
+            mid = row['material_id']
+            if mid not in mat_assignments_by_position:
+                mat_assignments_by_position[mid] = set()
+            mat_assignments_by_position[mid].add(row['reihenfolge'])
+
+        # Step 2: Delete old visibility records, material assignments, and subtasks
         conn.execute("""
             DELETE FROM subtask_visibility
+            WHERE subtask_id IN (SELECT id FROM subtask WHERE task_id = ?)
+        """, (task_id,))
+        conn.execute("""
+            DELETE FROM material_subtask
             WHERE subtask_id IN (SELECT id FROM subtask WHERE task_id = ?)
         """, (task_id,))
         conn.execute("DELETE FROM subtask WHERE task_id = ?", (task_id,))
@@ -1193,6 +1250,15 @@ def update_subtasks(task_id, subtasks_list, estimated_minutes_list=None, quiz_js
                     INSERT INTO subtask_visibility (subtask_id, klasse_id, student_id, enabled, set_by_admin_id)
                     VALUES (?, ?, ?, ?, ?)
                 """, (new_subtask_id, klasse_id, student_id, enabled, admin_id))
+
+        # Step 4b: Restore material-subtask assignments for matching positions
+        for material_id, old_positions in mat_assignments_by_position.items():
+            for old_pos in old_positions:
+                if old_pos in new_subtask_ids_by_position:
+                    conn.execute(
+                        "INSERT INTO material_subtask (material_id, subtask_id) VALUES (?, ?)",
+                        (material_id, new_subtask_ids_by_position[old_pos])
+                    )
 
         # Step 5: Fix orphaned current_subtask_id references
         if first_new_subtask_id is not None:
@@ -1238,6 +1304,62 @@ def delete_material(material_id):
     """Delete a material."""
     with db_session() as conn:
         conn.execute("DELETE FROM material WHERE id = ?", (material_id,))
+
+
+def get_materials_for_subtask(task_id, subtask_id):
+    """Get materials visible for a specific Aufgabe.
+
+    A material is visible if:
+    - It has NO rows in material_subtask (= visible everywhere, backward compatible)
+    - OR it has a row linking it to this specific subtask
+    """
+    with db_session() as conn:
+        rows = conn.execute('''
+            SELECT m.* FROM material m WHERE m.task_id = ?
+            AND (
+                NOT EXISTS (SELECT 1 FROM material_subtask ms WHERE ms.material_id = m.id)
+                OR
+                EXISTS (SELECT 1 FROM material_subtask ms WHERE ms.material_id = m.id AND ms.subtask_id = ?)
+            )
+        ''', (task_id, subtask_id)).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_material_subtask_assignments(task_id):
+    """Get material-to-subtask assignments for a task.
+
+    Returns: dict {material_id: set(subtask_ids)}
+    Empty set = visible everywhere (no specific assignments).
+    """
+    with db_session() as conn:
+        rows = conn.execute('''
+            SELECT ms.material_id, ms.subtask_id
+            FROM material_subtask ms
+            JOIN material m ON ms.material_id = m.id
+            WHERE m.task_id = ?
+        ''', (task_id,)).fetchall()
+
+        assignments = {}
+        for row in rows:
+            mid = row['material_id']
+            if mid not in assignments:
+                assignments[mid] = set()
+            assignments[mid].add(row['subtask_id'])
+        return assignments
+
+
+def set_material_subtask_assignments(material_id, subtask_ids):
+    """Set which Aufgaben a material is assigned to.
+
+    Empty list = visible everywhere (clears all assignments).
+    """
+    with db_session() as conn:
+        conn.execute("DELETE FROM material_subtask WHERE material_id = ?", (material_id,))
+        for sid in subtask_ids:
+            conn.execute(
+                "INSERT INTO material_subtask (material_id, subtask_id) VALUES (?, ?)",
+                (material_id, sid)
+            )
 
 
 # ============ Student Task functions ============
@@ -2683,3 +2805,27 @@ def set_bool_setting(key, value):
         value: Boolean value
     """
     set_setting(key, 'true' if value else 'false')
+
+
+# ============ LLM Usage Tracking ============
+
+def check_llm_rate_limit(student_id):
+    """Check if student is within their hourly LLM call limit.
+
+    Returns True if calls are allowed, False if rate limit exceeded.
+    """
+    with db_session() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) as cnt FROM llm_usage WHERE student_id = ? AND timestamp > datetime('now', '-1 hour')",
+            (student_id,)
+        ).fetchone()
+        return row['cnt'] < config.LLM_MAX_CALLS_PER_STUDENT_PER_HOUR
+
+
+def record_llm_usage(student_id, question_type, tokens_used=0):
+    """Record an LLM API call for rate limiting and monitoring."""
+    with db_session() as conn:
+        conn.execute(
+            "INSERT INTO llm_usage (student_id, question_type, tokens_used) VALUES (?, ?, ?)",
+            (student_id, question_type, tokens_used)
+        )

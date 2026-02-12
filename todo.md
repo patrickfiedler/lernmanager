@@ -35,7 +35,7 @@ See `docs/research/2026-02-07_learning_paths_and_quiz_evolution.md`
 - ~~Add regular class dates for each class (schedule)~~ (Complete - commit eea29d0, implemented in student assessment improvements)
 - ~~Auto-attendance from student login data~~ (Complete - auto-fills Unterricht page from analytics_events logins, button + CLI + cron)
 - add external API to upload log files from scan-folders.ps1 script -> major feature to track student progress from the files they create on the school computers
-- LLM-based grading with Claude Haiku API for free-text answers (fill-blank, short answer, matching) -> see `docs/research/2026-02-07_learning_paths_and_quiz_evolution.md`
+- ~~LLM-based grading with Claude Haiku API for free-text answers (fill-blank, short answer)~~ (Complete - `llm_grading.py`, Anthropic + Ollama backend, rate limiting, fallback)
 - **Admin: curriculum alignment page** - Show how topics/tasks map to curriculum learning goals, display alignment between app content and official curriculum, helps teachers ensure coverage of required learning objectives, potentially show gaps or overlaps (Priority: Medium - useful for planning and compliance)
 
 ## Improvements
@@ -58,7 +58,7 @@ See `docs/research/2026-02-07_learning_paths_and_quiz_evolution.md`
 - ~~make progress dots slightly larger (double) in desktop view~~ (Complete - doubled from 0.75rem to 1.5rem, scaled ring + quiz dot)
 - ~~add favicon to the app~~ (Complete - commit 67e1a21)
 - ~~change workflow from task→task→task→...→quiz to task→quiz→task→quiz→task→...~~ (Complete - per-Aufgabe quizzes with configurable blocking, image support)
-- move materials from Thema level to Aufgabe level (currently materials are per-topic, should be per-subtask)
+- ~~move materials from Thema level to Aufgabe level~~ (Complete - per-Aufgabe material assignments via checkbox table, backward compatible)
 
 
 ## Subtask Management Enhancements (Test 8 findings)
