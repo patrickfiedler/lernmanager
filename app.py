@@ -46,6 +46,23 @@ def markdown_filter(text):
     return Markup(html)
 
 
+# ============ Helpers ============
+
+def validate_quiz_json(raw):
+    """Validate and return quiz JSON string, or None if empty. Raises ValueError on invalid JSON."""
+    if not raw or not raw.strip():
+        return None
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise ValueError(f'Quiz-JSON ist ungültig: {e}')
+    if not isinstance(data, dict) or 'questions' not in data:
+        raise ValueError('Quiz-JSON muss ein Objekt mit "questions" sein, z.B. {"questions": [...]}')
+    if not isinstance(data['questions'], list) or not data['questions']:
+        raise ValueError('Quiz-JSON "questions" muss eine nicht-leere Liste sein.')
+    return raw.strip()
+
+
 # ============ Auth Decorators ============
 
 def admin_required(f):
@@ -569,6 +586,12 @@ def admin_thema_detail(task_id):
 @app.route('/admin/thema/<int:task_id>/bearbeiten', methods=['POST'])
 @admin_required
 def admin_thema_bearbeiten(task_id):
+    try:
+        quiz_json = validate_quiz_json(request.form.get('quiz_json'))
+    except ValueError as e:
+        flash(str(e), 'danger')
+        return redirect(url_for('admin_thema_detail', task_id=task_id))
+
     models.update_task(
         task_id=task_id,
         name=request.form['name'],
@@ -577,7 +600,7 @@ def admin_thema_bearbeiten(task_id):
         fach=request.form['fach'],
         stufe=request.form['stufe'],
         kategorie=request.form['kategorie'],
-        quiz_json=request.form.get('quiz_json') or None,
+        quiz_json=quiz_json,
         number=int(request.form.get('number', 0)),
         why_learn_this=request.form.get('why_learn_this') or None,
         subtask_quiz_required=1 if request.form.get('subtask_quiz_required') else 0
@@ -609,6 +632,15 @@ def admin_thema_aufgaben(task_id):
         subtasks_list = request.form.getlist('subtasks[]')
         estimated_minutes_list = request.form.getlist('estimated_minutes[]')
         quiz_json_list = request.form.getlist('quiz_json[]')
+
+        # Validate all subtask quiz JSONs before saving
+        for i, qj in enumerate(quiz_json_list):
+            try:
+                validate_quiz_json(qj)
+            except ValueError as e:
+                flash(f'Aufgabe {i+1} Quiz-JSON: {e}', 'danger')
+                return redirect(url_for('admin_thema_detail', task_id=task_id))
+
         models.update_subtasks(task_id, subtasks_list, estimated_minutes_list, quiz_json_list)
         flash('Aufgaben aktualisiert.', 'success')
         return redirect(url_for('admin_thema_detail', task_id=task_id))
