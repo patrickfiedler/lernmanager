@@ -1197,6 +1197,17 @@ def admin_unterricht_datum(klasse_id, datum):
                            students=students, lesson_comment=lesson_comment)
 
 
+@app.route('/admin/klasse/<int:klasse_id>/unterricht/<datum>/auto-attendance', methods=['POST'])
+@admin_required
+def admin_auto_attendance(klasse_id, datum):
+    """Auto-fill attendance from student login data."""
+    klasse = models.get_klasse(klasse_id)
+    if not klasse:
+        return jsonify({'error': 'Klasse nicht gefunden'}), 404
+    result = models.auto_fill_attendance(klasse_id, datum)
+    return jsonify(result)
+
+
 @app.route('/admin/klasse/<int:klasse_id>/unterricht/<datum>/next')
 @admin_required
 def admin_unterricht_next(klasse_id, datum):
@@ -1775,6 +1786,18 @@ def log_analytics():
 
 
 # ============ Initialize ============
+
+@app.cli.command('auto-attendance')
+def cli_auto_attendance():
+    """Auto-fill attendance for all classes scheduled today."""
+    init_app()
+    results = models.auto_fill_all_scheduled_today()
+    if not results:
+        print("No classes scheduled today.")
+        return
+    for r in results:
+        print(f"{r['klasse_name']}: {r['present']} present, {r['absent']} absent, {r['skipped']} skipped")
+
 
 def init_app():
     """Initialize the application."""

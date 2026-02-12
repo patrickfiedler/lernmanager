@@ -33,6 +33,7 @@ See `docs/research/2026-02-07_learning_paths_and_quiz_evolution.md`
 - ~~Student progress reports as PDF file per class: human readable format for quick overview~~ (Complete - Phase 6, commit 2183568)
 - ~~student progress reports as PDF file per student: information from class progress report + student's individual activity log~~ (Complete - Phase 6, commit 2183568)
 - ~~Add regular class dates for each class (schedule)~~ (Complete - commit eea29d0, implemented in student assessment improvements)
+- ~~Auto-attendance from student login data~~ (Complete - auto-fills Unterricht page from analytics_events logins, button + CLI + cron)
 - add external API to upload log files from scan-folders.ps1 script -> major feature to track student progress from the files they create on the school computers
 - LLM-based grading with Claude Haiku API for free-text answers (fill-blank, short answer, matching) -> see `docs/research/2026-02-07_learning_paths_and_quiz_evolution.md`
 - **Admin: curriculum alignment page** - Show how topics/tasks map to curriculum learning goals, display alignment between app content and official curriculum, helps teachers ensure coverage of required learning objectives, potentially show gaps or overlaps (Priority: Medium - useful for planning and compliance)

@@ -1804,6 +1804,102 @@ def get_student_unterricht(student_id, klasse_id):
         return [dict(r) for r in rows]
 
 
+# ============ Auto-Attendance from Login Data ============
+
+def auto_fill_attendance(klasse_id, datum):
+    """Auto-fill attendance by cross-referencing student logins with lesson date.
+
+    Checks analytics_events for student login events on the given date.
+    Only updates students where has_been_saved=0 (untouched defaults).
+    Sets has_been_saved=2 to mark as auto-filled.
+
+    Returns dict with counts: {present, absent, skipped}
+    """
+    unterricht_id = create_or_get_unterricht(klasse_id, datum)
+
+    with db_session() as conn:
+        # Get all students with untouched attendance (has_been_saved=0)
+        unsaved = conn.execute('''
+            SELECT us.student_id
+            FROM unterricht_student us
+            WHERE us.unterricht_id = ? AND us.has_been_saved = 0
+        ''', (unterricht_id,)).fetchall()
+
+        skipped = conn.execute('''
+            SELECT COUNT(*) as cnt FROM unterricht_student
+            WHERE unterricht_id = ? AND has_been_saved != 0
+        ''', (unterricht_id,)).fetchone()['cnt']
+
+        present = 0
+        absent = 0
+
+        for row in unsaved:
+            student_id = row['student_id']
+
+            # Check if student logged in on this date (school hours window)
+            start = f"{datum} 07:30:00"
+            end = f"{datum} 16:00:00"
+            logged_in = conn.execute('''
+                SELECT COUNT(*) as cnt FROM analytics_events
+                WHERE user_id = ? AND user_type = 'student'
+                  AND event_type = 'login'
+                  AND timestamp BETWEEN ? AND ?
+            ''', (student_id, start, end)).fetchone()['cnt'] > 0
+                
+
+            if logged_in:
+                conn.execute('''
+                    UPDATE unterricht_student
+                    SET anwesend = 1, has_been_saved = 2
+                    WHERE unterricht_id = ? AND student_id = ?
+                ''', (unterricht_id, student_id))
+                present += 1
+            else:
+                conn.execute('''
+                    UPDATE unterricht_student
+                    SET anwesend = 0,
+                        admin_kommentar = ?,
+                        has_been_saved = 2
+                    WHERE unterricht_id = ? AND student_id = ?
+                ''', (f'Automatisch: Keine Anmeldung am {datum}',
+                      unterricht_id, student_id))
+                absent += 1
+
+    return {'present': present, 'absent': absent, 'skipped': skipped}
+
+
+def auto_fill_all_scheduled_today():
+    """Auto-fill attendance for all classes scheduled today.
+
+    Queries class_schedule for today's weekday, then calls
+    auto_fill_attendance() for each matching class.
+
+    Returns list of dicts: [{klasse_id, klasse_name, present, absent, skipped}, ...]
+    """
+    today = datetime.now().date()
+    today_weekday = today.weekday()  # 0=Monday, 6=Sunday
+    datum = today.isoformat()
+
+    with db_session() as conn:
+        scheduled = conn.execute('''
+            SELECT cs.klasse_id, k.name
+            FROM class_schedule cs
+            JOIN klasse k ON cs.klasse_id = k.id
+            WHERE cs.weekday = ?
+        ''', (today_weekday,)).fetchall()
+
+    results = []
+    for row in scheduled:
+        counts = auto_fill_attendance(row['klasse_id'], datum)
+        results.append({
+            'klasse_id': row['klasse_id'],
+            'klasse_name': row['name'],
+            **counts
+        })
+
+    return results
+
+
 # ============ Error Logging functions ============
 
 def log_error(level, message, traceback=None, user_id=None, user_type=None, route=None, method=None, url=None):

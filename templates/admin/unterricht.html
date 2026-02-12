@@ -20,8 +20,10 @@
 </div>
 
 {% if students %}
-{# Calculate state based on has_been_saved #}
-{% set saved_count = students|selectattr('has_been_saved', 'equalto', 1)|list|length %}
+{# Calculate state based on has_been_saved: 0=untouched, 1=manual, 2=auto-filled #}
+{% set saved_count = students|selectattr('has_been_saved', 'greaterthan', 0)|list|length %}
+{% set auto_count = students|selectattr('has_been_saved', 'equalto', 2)|list|length %}
+{% set unsaved_count = students|selectattr('has_been_saved', 'equalto', 0)|list|length %}
 {% set total_count = students|length %}
 {% if saved_count == 0 %}
     {% set table_state = 'no-data' %}
@@ -31,6 +33,10 @@
     {% set table_state = 'partial' %}
     {% set state_message = '⚠️ Es gibt nicht gespeicherte Änderungen' %}
     {% set state_class = 'alert-warning-light' %}
+{% elif auto_count > 0 %}
+    {% set table_state = 'auto' %}
+    {% set state_message = '🤖 Anwesenheit automatisch erfasst (' ~ auto_count ~ ' von ' ~ total_count ~ ')' %}
+    {% set state_class = 'alert-auto-light' %}
 {% else %}
     {% set table_state = 'complete' %}
     {% set state_message = '✅ Alle Daten für diesen Tag gespeichert' %}
@@ -112,7 +118,12 @@
     </table>
     <div class="flex gap-1 flex-between flex-center" style="padding: 1rem; background: var(--gray-50); border-top: 1px solid var(--gray-200);">
         <span id="unsaved-count"></span>
-        <button id="save-btn" class="btn btn-primary" onclick="saveAll()" disabled>💾 Speichern</button>
+        <div class="flex gap-1">
+            {% if unsaved_count > 0 %}
+            <button id="auto-btn" class="btn btn-secondary" onclick="autoFillAttendance()">🤖 Auto-Anwesenheit</button>
+            {% endif %}
+            <button id="save-btn" class="btn btn-primary" onclick="saveAll()" disabled>💾 Speichern</button>
+        </div>
     </div>
 </div>
 
@@ -172,6 +183,19 @@ tr.unsaved-row td {
     color: #065f46;
     font-weight: 500;
 }
+
+.alert-auto-light {
+    padding: 1rem;
+    background: #e0e7ff;
+    border-left: 4px solid #6366f1;
+    color: #3730a3;
+    font-weight: 500;
+}
+
+/* Auto-filled row indicator */
+tr[data-saved="2"] {
+    box-shadow: inset 4px 0 0 #6366f1;
+}
 </style>
 {% endblock %}
 
@@ -207,10 +231,15 @@ function updateUnsavedCount() {
         countDisplay.textContent = '';
 
         // Check if this is initial load (no data saved yet)
-        const savedRows = document.querySelectorAll('tr[data-saved="1"]').length;
+        const manualRows = document.querySelectorAll('tr[data-saved="1"]').length;
+        const autoRows = document.querySelectorAll('tr[data-saved="2"]').length;
+        const savedRows = manualRows + autoRows;
         if (savedRows === 0) {
             statusMessage.textContent = '📝 Neue Unterrichtsstunde - Standardwerte werden angezeigt (alle anwesend, Bewertung "ok")';
             statusMessage.className = 'alert-info-light';
+        } else if (autoRows > 0 && manualRows === 0) {
+            statusMessage.textContent = `🤖 Anwesenheit automatisch erfasst (${autoRows} Schüler)`;
+            statusMessage.className = 'alert-auto-light';
         } else {
             statusMessage.textContent = '✅ Alle Daten für diesen Tag gespeichert';
             statusMessage.className = 'alert-success-light';
@@ -382,6 +411,27 @@ function setRating(btn, studentId, field, value) {
 
 function updateComment(input, studentId) {
     markAsChanged(studentId);
+}
+
+async function autoFillAttendance() {
+    const btn = document.getElementById('auto-btn');
+    btn.innerHTML = '🤖 Wird geladen...';
+    btn.disabled = true;
+
+    try {
+        const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+        const response = await fetch(`/admin/klasse/{{ klasse.id }}/unterricht/{{ datum }}/auto-attendance`, {
+            method: 'POST',
+            headers: {'X-CSRFToken': csrfToken}
+        });
+        const result = await response.json();
+        btn.innerHTML = `🤖 ${result.present} anwesend, ${result.absent} abwesend`;
+        setTimeout(() => location.reload(), 1500);
+    } catch (error) {
+        alert('Fehler bei der automatischen Anwesenheit.');
+        btn.innerHTML = '🤖 Auto-Anwesenheit';
+        btn.disabled = false;
+    }
 }
 
 function insertPredefinedComment(select, studentId) {
