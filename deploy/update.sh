@@ -261,59 +261,57 @@ main() {
     # 6. Run database migrations if needed
     log_step "Step 6/8: Checking Database Migrations"
 
-    # Check if any migration files changed in this deployment
-    MIGRATION_FILES_CHANGED=false
-    if git diff --name-only "$CURRENT_COMMIT" "$NEW_COMMIT" | grep -q "^migrate_.*\.py$"; then
-        MIGRATION_FILES_CHANGED=true
-        log_info "Migration files detected in deployment"
-    fi
+    # Track completed migrations in a simple text file (one filename per line)
+    MIGRATIONS_DONE_FILE="$APP_DIR/data/migrations_done.txt"
+    touch "$MIGRATIONS_DONE_FILE"
+    chown "$APP_USER:$APP_USER" "$MIGRATIONS_DONE_FILE"
 
-    # Check if any migration files exist in the repo
-    MIGRATION_COUNT=$(find "$APP_DIR" -maxdepth 1 -name "migrate_*.py" -type f | wc -l)
+    # Find migration scripts not yet recorded as done
+    PENDING_MIGRATIONS=()
+    for migration in "$APP_DIR"/migrate_*.py; do
+        if [ -f "$migration" ]; then
+            MIGRATION_NAME=$(basename "$migration")
+            if ! grep -qxF "$MIGRATION_NAME" "$MIGRATIONS_DONE_FILE"; then
+                PENDING_MIGRATIONS+=("$migration")
+            fi
+        fi
+    done
 
-    if [ "$MIGRATION_FILES_CHANGED" = true ] && [ "$MIGRATION_COUNT" -gt 0 ]; then
-        log_info "Running database migrations..."
+    if [ ${#PENDING_MIGRATIONS[@]} -gt 0 ]; then
+        log_info "${#PENDING_MIGRATIONS[@]} pending migration(s) found"
         echo ""
         MIGRATIONS_RUN=true
 
         # Load SQLCIPHER_KEY if it exists in .env (for encrypted databases)
-        # Note: .env is owned by root, only root can read it
         SQLCIPHER_KEY=""
         if [ -f "$APP_DIR/.env" ] && grep -q "^SQLCIPHER_KEY=" "$APP_DIR/.env"; then
-            # Extract the key value (we're running as root, so we can read it)
             SQLCIPHER_KEY=$(grep "^SQLCIPHER_KEY=" "$APP_DIR/.env" | cut -d '=' -f2- | tr -d '"' | tr -d "'")
             log_info "SQLCIPHER_KEY loaded from $APP_DIR/.env"
         else
             log_warn "No SQLCIPHER_KEY found in $APP_DIR/.env - database assumed unencrypted"
         fi
 
-        # Run all migration scripts (they're idempotent)
+        # Run only pending migrations
         MIGRATION_ERRORS=0
-        for migration in "$APP_DIR"/migrate_*.py; do
-            if [ -f "$migration" ]; then
-                MIGRATION_NAME=$(basename "$migration")
-                log_info "Executing: $MIGRATION_NAME"
+        for migration in "${PENDING_MIGRATIONS[@]}"; do
+            MIGRATION_NAME=$(basename "$migration")
+            log_info "Executing: $MIGRATION_NAME"
 
-                # Run migration as lernmanager user, passing SQLCIPHER_KEY through sudo
-                # Note: sudo -E preserves environment, but for security we explicitly pass only the key
-                if [ -n "$SQLCIPHER_KEY" ]; then
-                    if sudo -u "$APP_USER" SQLCIPHER_KEY="$SQLCIPHER_KEY" "$APP_DIR/venv/bin/python" "$migration"; then
-                        log_info "✓ $MIGRATION_NAME completed"
-                    else
-                        log_error "✗ $MIGRATION_NAME failed"
-                        MIGRATION_ERRORS=$((MIGRATION_ERRORS + 1))
-                    fi
-                else
-                    # No encryption key, run without it
-                    if sudo -u "$APP_USER" "$APP_DIR/venv/bin/python" "$migration"; then
-                        log_info "✓ $MIGRATION_NAME completed"
-                    else
-                        log_error "✗ $MIGRATION_NAME failed"
-                        MIGRATION_ERRORS=$((MIGRATION_ERRORS + 1))
-                    fi
-                fi
-                echo ""
+            # Run migration as lernmanager user, passing SQLCIPHER_KEY if set
+            if [ -n "$SQLCIPHER_KEY" ]; then
+                MIGRATION_CMD="sudo -u $APP_USER SQLCIPHER_KEY=\"$SQLCIPHER_KEY\" $APP_DIR/venv/bin/python $migration"
+            else
+                MIGRATION_CMD="sudo -u $APP_USER $APP_DIR/venv/bin/python $migration"
             fi
+
+            if eval "$MIGRATION_CMD"; then
+                log_info "✓ $MIGRATION_NAME completed"
+                echo "$MIGRATION_NAME" >> "$MIGRATIONS_DONE_FILE"
+            else
+                log_error "✗ $MIGRATION_NAME failed"
+                MIGRATION_ERRORS=$((MIGRATION_ERRORS + 1))
+            fi
+            echo ""
         done
 
         # Clear SQLCIPHER_KEY for security
@@ -323,14 +321,11 @@ main() {
             log_error "$MIGRATION_ERRORS migration(s) failed"
             log_error "Check the output above for details"
             log_error "You may need to run migrations manually"
-            # Don't exit - let deployment continue, but warn
         else
             log_info "All migrations completed successfully"
         fi
-    elif [ "$MIGRATION_COUNT" -eq 0 ]; then
-        log_info "No migration files found"
     else
-        log_info "No new migrations in this deployment"
+        log_info "No pending migrations"
     fi
 
     # 7. Restart service
