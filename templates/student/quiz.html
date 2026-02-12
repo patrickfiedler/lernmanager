@@ -1,19 +1,25 @@
 {% extends 'base.html' %}
 
-{% block title %}Quiz: {{ task.name }} - Lernmanager{% endblock %}
+{% block title %}{% if subtask_id %}Aufgaben-Quiz{% else %}Quiz{% endif %}: {{ task.name }} - Lernmanager{% endblock %}
 
 {% block content %}
 <div class="flex flex-between flex-center mb-2">
-    <h1>❓ Quiz: {{ task.name }}</h1>
+    <h1>❓ {% if subtask_id %}Aufgaben-Quiz{% else %}Quiz: {{ task.name }}{% endif %}</h1>
+    {% if subtask_id and klasse_id %}
+    <a href="{{ url_for('student_klasse', klasse_id=klasse_id) }}" class="btn btn-secondary">← Abbrechen</a>
+    {% else %}
     <a href="{{ url_for('student_dashboard') }}" class="btn btn-secondary">← Abbrechen</a>
+    {% endif %}
 </div>
 
 <div class="card mb-2">
+    {% if not subtask_id %}
     <p><strong>🎯 Lernziel:</strong> {{ task.lernziel or 'Nicht angegeben' }}</p>
-    <p class="text-muted">Du brauchst mindestens 80% richtige Antworten, um das Quiz zu bestehen.</p>
+    {% endif %}
+    <p class="text-muted">Du brauchst mindestens 70% richtige Antworten, um das Quiz zu bestehen.</p>
 </div>
 
-<form method="POST" action="{{ url_for('student_quiz', student_task_id=student_task_id) }}">
+<form method="POST" action="{{ url_for('student_quiz', student_task_id=student_task_id, subtask_id=subtask_id) }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <!-- Hidden fields for question/answer order mapping -->
     <input type="hidden" name="question_order" value="{{ question_order }}">
@@ -24,11 +30,19 @@
     {% for question in quiz.questions %}
     <div class="quiz-question">
         <h4>Frage {{ loop.index }}: {{ question.question }}</h4>
+        {% if question.image %}
+        <img src="{{ question.image }}" alt="Bild zur Frage {{ loop.index }}" class="quiz-question-image">
+        {% endif %}
         {% for answer in question.answers %}
         <label class="quiz-option">
             <input type="checkbox" name="q{{ loop.index0 - 1 }}" value="{{ loop.index0 }}"
                    {% if question.correct|length == 1 %}onclick="uncheckOthers(this)"{% endif %}>
+            {% if answer is mapping %}
+            <span>{{ answer.text }}</span>
+            {% if answer.image %}<img src="{{ answer.image }}" alt="{{ answer.text }}" class="quiz-option-image">{% endif %}
+            {% else %}
             <span>{{ answer }}</span>
+            {% endif %}
         </label>
         {% endfor %}
         {% if question.correct|length > 1 %}

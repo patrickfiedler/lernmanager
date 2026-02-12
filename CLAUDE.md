@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Lernmanager is a German-language learning progress tracker for schools. It allows teachers (admins) to manage classes, students, and learning tasks, while students can track their progress on assigned tasks, complete subtasks, and take quizzes.
+Lernmanager is a German-language learning progress tracker for schools. It allows teachers (admins) to manage classes, students, and learning topics (Themen), while students can track their progress on assigned tasks (Aufgaben), complete them with quizzes, and take topic-level quizzes.
 
 **Repository**: https://github.com/patrickfiedler/lernmanager
 
@@ -38,20 +38,21 @@ pip install -r requirements.txt
 - `utils.py` - Username/password generators for student accounts.
 
 ### Database Schema (SQLite)
-Key tables: `admin`, `klasse` (class), `student`, `task` (learning task with optional quiz), `subtask`, `material` (links/files), `student_task` (per-class assignment), `unterricht` (lesson attendance/evaluation).
+Key tables: `admin`, `klasse` (class), `student`, `task` (Thema/topic with optional topic-level quiz), `subtask` (Aufgabe/task with optional per-task quiz), `material` (links/files), `student_task` (per-class assignment), `quiz_attempt` (quiz results), `unterricht` (lesson attendance/evaluation).
 
-Student-class is many-to-many. Each student has one active task per class. Tasks can have subtasks and quizzes (JSON in `quiz_json` column).
+Student-class is many-to-many. Each student has one active topic per class. Topics have tasks (subtasks) with optional quizzes (JSON in `quiz_json` column on both `task` and `subtask` tables).
 
 ### Template Structure
 - `templates/admin/` - Teacher interface (class/student/task management, lesson tracking)
 - `templates/student/` - Student interface (task progress, quiz taking, self-evaluation)
 
 ### Data Flow
-1. Admin creates classes and tasks with subtasks/materials/quizzes
+1. Admin creates classes and topics (Themen) with tasks (Aufgaben)/materials/quizzes
 2. Admin adds students to classes (batch input: "Nachname, Vorname" per line)
-3. Admin assigns tasks to individual students or entire classes
-4. Students complete subtasks and take quizzes (80% to pass)
-5. Task auto-completes when all subtasks done + quiz passed (or admin manual override)
+3. Admin assigns topics to individual students or entire classes
+4. Students complete tasks: finish task → take per-task quiz (if any, 70% to pass) → next task
+5. After all tasks done: take topic-level quiz (if any, 70% to pass)
+6. Topic auto-completes when all visible tasks done + all quizzes passed (or admin manual override)
 
 ## Deployment
 
@@ -76,10 +77,22 @@ Student-class is many-to-many. Each student has one active task per class. Tasks
 
 ## Conventions
 
-- German terminology in code: Klasse (class), Schüler (student), Aufgabe (task), Teilaufgabe (subtask)
+### Terminology (IMPORTANT)
+The UI was renamed but the database tables keep the old names. Always use the correct mapping:
+
+| UI (German) | UI (English) | DB table | DB parent |
+|-------------|-------------|----------|-----------|
+| Thema | Topic | `task` | — |
+| Aufgabe | Task | `subtask` | `task_id` |
+| Schüler-Thema | Student Topic | `student_task` | — |
+
+In commit messages and docs, use the **UI terminology** (Thema/topic, Aufgabe/task). In code, the DB names (`task`, `subtask`) are used.
+
+- German terminology in UI: Klasse (class), Schüler (student), Thema (topic), Aufgabe (task)
 - Student usernames are auto-generated (adjective+animal, e.g., "happypanda")
 - Student passwords follow cvcvcvnn pattern (e.g., "bacado42")
 - Quiz JSON format: `{"questions": [{"text": "...", "options": ["..."], "correct": [0, 1]}]}`
+- Quiz images (optional): `"image": "/path/to/img.png"` on questions, `{"text": "...", "image": "..."}` for options
 
 ## Common Issues and Solutions
 

@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 
-{% block title %}{{ klasse.name }} - Lernmanager{% endblock %}
+{% block title %}{% if task %}{{ task.name }} - {% endif %}Lernmanager{% endblock %}
 
 {% block content %}
 <!-- Breadcrumb Navigation -->
@@ -38,19 +38,22 @@
             </div>
             <div class="progress-dots" role="group" aria-label="Aufgabenfortschritt">
                 {% for sub in subtasks %}
-                <div class="dot {% if sub.erledigt %}completed {% endif %}{% if current_subtask and sub.id == current_subtask.id %}current{% endif %}"
+                {% set has_quiz = sub.quiz_json %}
+                {% set quiz_passed = subtask_quiz_status.get(sub.id, false) %}
+                {% set is_partial = sub.erledigt and has_quiz and not quiz_passed %}
+                <div class="dot {% if sub.erledigt and not is_partial %}completed {% endif %}{% if is_partial %}partial {% endif %}{% if current_subtask and sub.id == current_subtask.id %}current{% endif %}"
                      role="button"
                      tabindex="0"
-                     aria-label="Aufgabe {{ loop.index }}: {{ sub.beschreibung[:50] }}{% if sub.beschreibung|length > 50 %}...{% endif %}{% if sub.erledigt %} - Erledigt{% endif %}"
+                     aria-label="Aufgabe {{ loop.index }}: {{ sub.beschreibung[:50] }}{% if sub.beschreibung|length > 50 %}...{% endif %}{% if sub.erledigt and not is_partial %} - Erledigt{% elif is_partial %} - Quiz ausstehend{% endif %}"
                      {% if current_subtask and sub.id == current_subtask.id %}aria-current="true"{% endif %}
                      data-subtask-index="{{ loop.index0 }}"
                      data-subtask-id="{{ sub.id }}"
                      onclick="navigateToSubtask({{ sub.id }})"
                      onkeydown="handleDotKeydown(event, {{ sub.id }})"
-                     title="Aufgabe {{ loop.index }}: {{ sub.beschreibung[:30] }}{% if sub.beschreibung|length > 30 %}...{% endif %}"></div>
+                     title="Aufgabe {{ loop.index }}: {{ sub.beschreibung[:30] }}{% if sub.beschreibung|length > 30 %}...{% endif %}{% if is_partial %} (Quiz ausstehend){% endif %}"></div>
                 {% endfor %}
                 {% if task.quiz_json %}
-                <div class="dot dot-quiz {% if task.quiz_bestanden %}completed{% endif %}"
+                <div class="dot dot-quiz {% if quiz_bestanden %}completed{% endif %}"
                      role="button"
                      tabindex="0"
                      aria-label="Quiz{% if task.quiz_bestanden %} - Bestanden{% endif %}"
@@ -109,6 +112,16 @@
                        onchange="toggleSubtask({{ task.id }}, {{ active_subtask.id }}, this.checked)"
                        onclick="event.stopPropagation()">
                 <label for="subtask-checkbox-{{ active_subtask.id }}">Ich habe das geschafft! ✓</label>
+            </div>
+            {% endif %}
+
+            <!-- Subtask Quiz Card (shown when subtask done but quiz pending) -->
+            {% if active_subtask and active_subtask.erledigt and active_subtask.quiz_json and not subtask_quiz_status.get(active_subtask.id, false) and task.subtask_quiz_required %}
+            <div class="quiz-card mt-1">
+                <div class="quiz-header">❓ Aufgaben-Quiz</div>
+                <p>Beantworte die Fragen, bevor du zur nächsten Aufgabe weitergehst.</p>
+                <a href="{{ url_for('student_quiz', student_task_id=task.id, subtask_id=active_subtask.id) }}" class="btn btn-primary">Quiz starten</a>
+                <p class="text-muted mt-1"><small>Du brauchst mindestens 70% richtige Antworten zum Bestehen.</small></p>
             </div>
             {% endif %}
 
@@ -213,7 +226,7 @@
         </div>
         {% endif %}
         <a href="{{ url_for('student_quiz', student_task_id=task.id) }}" class="btn btn-primary mt-1">Quiz starten</a>
-        <p class="text-muted mt-1"><small>Du brauchst mindestens 80% richtige Antworten zum Bestehen.</small></p>
+        <p class="text-muted mt-1"><small>Du brauchst mindestens 70% richtige Antworten zum Bestehen.</small></p>
     </div>
     {% elif task.abgeschlossen %}
     <div class="alert alert-success mt-2">
@@ -280,6 +293,12 @@ function toggleSubtask(studentTaskId, subtaskId, checked) {
         return response.json();
     })
     .then(data => {
+        if (data.show_quiz && data.quiz_url) {
+            // Subtask quiz pending — redirect to quiz page
+            window.location.href = data.quiz_url;
+            return;
+        }
+
         if (checked) {
             // Show success banner
             const successBanner = document.getElementById('success-banner');
@@ -291,8 +310,6 @@ function toggleSubtask(studentTaskId, subtaskId, checked) {
             const dots = document.querySelectorAll('.progress-dots .dot:not(.dot-quiz)');
             const currentDot = document.querySelector('.progress-dots .dot.current');
             if (currentDot) {
-                // Keep 'current' class, just add 'completed' class too
-                // Both classes together = green dot with border ring
                 currentDot.classList.add('completed');
             }
 

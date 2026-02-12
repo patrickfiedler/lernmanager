@@ -142,7 +142,9 @@ def init_db():
                 fach TEXT NOT NULL,
                 stufe TEXT NOT NULL,
                 kategorie TEXT NOT NULL DEFAULT 'pflicht',  -- pflicht/bonus
-                quiz_json TEXT  -- JSON format for quiz questions
+                quiz_json TEXT,  -- JSON format for quiz questions (topic-level)
+                why_learn_this TEXT,
+                subtask_quiz_required INTEGER DEFAULT 1  -- 1=must pass subtask quizzes, 0=optional
             );
 
             -- Task prerequisites (many-to-many)
@@ -188,6 +190,8 @@ def init_db():
                 task_id INTEGER NOT NULL,
                 beschreibung TEXT NOT NULL,
                 reihenfolge INTEGER NOT NULL DEFAULT 0,
+                estimated_minutes INTEGER,
+                quiz_json TEXT,  -- per-subtask quiz JSON
                 FOREIGN KEY (task_id) REFERENCES task(id) ON DELETE CASCADE
             );
 
@@ -232,6 +236,7 @@ def init_db():
             CREATE TABLE IF NOT EXISTS quiz_attempt (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 student_task_id INTEGER NOT NULL,
+                subtask_id INTEGER,  -- NULL = topic quiz, set = subtask quiz
                 punkte INTEGER NOT NULL,
                 max_punkte INTEGER NOT NULL,
                 bestanden INTEGER NOT NULL,
@@ -824,13 +829,18 @@ def create_task(name, beschreibung, lernziel, fach, stufe, kategorie, quiz_json=
         return cursor.lastrowid
 
 
-def update_task(task_id, name, beschreibung, lernziel, fach, stufe, kategorie, quiz_json=None, number=0, why_learn_this=None):
+def update_task(task_id, name, beschreibung, lernziel, fach, stufe, kategorie, quiz_json=None, number=0, why_learn_this=None, subtask_quiz_required=None):
     """Update a task."""
     with db_session() as conn:
         conn.execute('''
             UPDATE task SET name=?, number=?, beschreibung=?, lernziel=?, fach=?, stufe=?,
             kategorie=?, quiz_json=?, why_learn_this=? WHERE id=?
         ''', (name, number, beschreibung, lernziel, fach, stufe, kategorie, quiz_json, why_learn_this, task_id))
+        if subtask_quiz_required is not None:
+            conn.execute(
+                "UPDATE task SET subtask_quiz_required = ? WHERE id = ?",
+                (subtask_quiz_required, task_id)
+            )
 
 
 def delete_task(task_id):
@@ -946,11 +956,14 @@ def export_task_to_dict(task_id):
         
         subtasks_data = []
         for subtask in subtasks:
-            subtasks_data.append({
+            st_data = {
                 'beschreibung': subtask['beschreibung'],
                 'reihenfolge': subtask['reihenfolge'],
                 'estimated_minutes': subtask['estimated_minutes']
-            })
+            }
+            if subtask.get('quiz_json'):
+                st_data['quiz'] = json.loads(subtask['quiz_json'])
+            subtasks_data.append(st_data)
             
         materials_data = []
         for material in materials:
@@ -1101,12 +1114,24 @@ def delete_subtask(subtask_id):
         conn.execute("DELETE FROM subtask WHERE id = ?", (subtask_id,))
 
 
-def update_subtasks(task_id, subtasks_list, estimated_minutes_list=None):
-    """Replace all subtasks for a task (UX Tier 1: now includes time estimates).
+def update_subtasks(task_id, subtasks_list, estimated_minutes_list=None, quiz_json_list=None):
+    """Replace all subtasks for a task.
 
     Preserves visibility settings by matching subtask order/position.
+    Orphans quiz_attempt records by setting subtask_id=NULL before deleting old subtasks.
     """
     with db_session() as conn:
+        # Step 0: Orphan quiz_attempt subtask references before deleting subtasks
+        old_subtask_ids = [r['id'] for r in conn.execute(
+            "SELECT id FROM subtask WHERE task_id = ?", (task_id,)
+        ).fetchall()]
+        if old_subtask_ids:
+            placeholders = ','.join('?' * len(old_subtask_ids))
+            conn.execute(f"""
+                UPDATE quiz_attempt SET subtask_id = NULL
+                WHERE subtask_id IN ({placeholders})
+            """, old_subtask_ids)
+
         # Step 1: Save visibility settings by order (reihenfolge), not ID
         old_visibility = conn.execute("""
             SELECT sv.klasse_id, sv.student_id, sv.enabled, sv.set_by_admin_id, s.reihenfolge
@@ -1144,9 +1169,15 @@ def update_subtasks(task_id, subtasks_list, estimated_minutes_list=None):
                     except (ValueError, AttributeError):
                         estimated_minutes = None
 
+                # Get quiz_json if provided
+                subtask_quiz = None
+                if quiz_json_list and i < len(quiz_json_list):
+                    qj = quiz_json_list[i].strip() if quiz_json_list[i] else ''
+                    subtask_quiz = qj if qj else None
+
                 cursor = conn.execute(
-                    "INSERT INTO subtask (task_id, beschreibung, reihenfolge, estimated_minutes) VALUES (?, ?, ?, ?)",
-                    (task_id, beschreibung.strip(), i, estimated_minutes)
+                    "INSERT INTO subtask (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json) VALUES (?, ?, ?, ?, ?)",
+                    (task_id, beschreibung.strip(), i, estimated_minutes, subtask_quiz)
                 )
                 new_subtask_id = cursor.lastrowid
                 new_subtask_ids_by_position[i] = new_subtask_id
@@ -1471,7 +1502,7 @@ def get_student_task(student_id, klasse_id):
     """Get student's current task for a class."""
     with db_session() as conn:
         row = conn.execute('''
-            SELECT st.*, t.name, t.beschreibung, t.lernziel, t.fach, t.stufe, t.kategorie, t.quiz_json, t.why_learn_this
+            SELECT st.*, t.name, t.beschreibung, t.lernziel, t.fach, t.stufe, t.kategorie, t.quiz_json, t.why_learn_this, t.subtask_quiz_required
             FROM student_task st
             JOIN task t ON st.task_id = t.id
             WHERE st.student_id = ? AND st.klasse_id = ?
@@ -1496,16 +1527,47 @@ def get_student_subtask_progress(student_task_id):
 
 
 def toggle_student_subtask(student_task_id, subtask_id, erledigt):
-    """Toggle a subtask completion for a student."""
+    """Toggle a subtask completion for a student.
+
+    Returns dict with 'quiz_pending': True if a subtask quiz must be passed before advancing.
+    """
+    result = {'quiz_pending': False, 'subtask_id': subtask_id}
     with db_session() as conn:
         conn.execute('''
             INSERT OR REPLACE INTO student_subtask (student_task_id, subtask_id, erledigt)
             VALUES (?, ?, ?)
         ''', (student_task_id, subtask_id, 1 if erledigt else 0))
 
-        # If marking as complete, advance to next subtask
+        # If marking as complete, check if subtask has a quiz that blocks advancement
         if erledigt:
+            subtask_row = conn.execute(
+                "SELECT quiz_json FROM subtask WHERE id = ?", (subtask_id,)
+            ).fetchone()
+            st_row = conn.execute(
+                "SELECT task_id FROM student_task WHERE id = ?", (student_task_id,)
+            ).fetchone()
+            task_row = conn.execute(
+                "SELECT subtask_quiz_required FROM task WHERE id = ?", (st_row['task_id'],)
+            ).fetchone() if st_row else None
+
+            has_subtask_quiz = subtask_row and subtask_row['quiz_json']
+            quiz_required = task_row and task_row['subtask_quiz_required']
+
+            if has_subtask_quiz and quiz_required:
+                # Check if quiz already passed
+                quiz_passed = conn.execute('''
+                    SELECT 1 FROM quiz_attempt
+                    WHERE student_task_id = ? AND subtask_id = ? AND bestanden = 1
+                    LIMIT 1
+                ''', (student_task_id, subtask_id)).fetchone()
+
+                if not quiz_passed:
+                    result['quiz_pending'] = True
+                    return result
+
             _advance_to_next_subtask_internal(conn, student_task_id, subtask_id)
+
+    return result
 
 
 def set_current_subtask(student_task_id, subtask_id):
@@ -1525,14 +1587,8 @@ def set_current_subtask(student_task_id, subtask_id):
 def _advance_to_next_subtask_internal(conn, student_task_id, current_subtask_id):
     """Internal function to advance to the next incomplete subtask.
 
-    This function expects an existing database connection and does not manage transactions.
-
-    Args:
-        conn: Active database connection
-        student_task_id: The student_task ID
-        current_subtask_id: The subtask that was just completed
+    A subtask is "incomplete" if: not erledigt, OR has a required quiz that hasn't been passed.
     """
-    # Get the task_id and current order
     st = conn.execute(
         "SELECT task_id, current_subtask_id FROM student_task WHERE id = ?",
         (student_task_id,)
@@ -1543,35 +1599,53 @@ def _advance_to_next_subtask_internal(conn, student_task_id, current_subtask_id)
 
     task_id = st['task_id']
 
-    # Get all subtasks ordered by reihenfolge
+    # Check if subtask quizzes are required for this task
+    task_row = conn.execute(
+        "SELECT subtask_quiz_required FROM task WHERE id = ?", (task_id,)
+    ).fetchone()
+    quiz_required = task_row and task_row['subtask_quiz_required']
+
     subtasks = conn.execute(
-        "SELECT id, reihenfolge FROM subtask WHERE task_id = ? ORDER BY reihenfolge",
+        "SELECT id, reihenfolge, quiz_json FROM subtask WHERE task_id = ? ORDER BY reihenfolge",
         (task_id,)
     ).fetchall()
 
     if not subtasks:
         return
 
-    # Find first incomplete subtask (from the beginning, not just after current)
     for sub in subtasks:
         subtask_id = sub['id']
 
-        # Check if this subtask is complete
+        # Check if checkbox is ticked
         completed = conn.execute(
             "SELECT erledigt FROM student_subtask WHERE student_task_id = ? AND subtask_id = ?",
             (student_task_id, subtask_id)
         ).fetchone()
 
         if not completed or not completed['erledigt']:
-            # Found first incomplete subtask
+            # Not even checked off yet
             conn.execute(
                 "UPDATE student_task SET current_subtask_id = ? WHERE id = ?",
                 (subtask_id, student_task_id)
             )
             return
 
-    # If we get here, all subtasks are complete
-    # Check if task should be marked complete (all subtasks done + quiz passed or no quiz)
+        # Checked off, but does it have a required quiz that hasn't been passed?
+        if quiz_required and sub['quiz_json']:
+            quiz_passed = conn.execute('''
+                SELECT 1 FROM quiz_attempt
+                WHERE student_task_id = ? AND subtask_id = ? AND bestanden = 1
+                LIMIT 1
+            ''', (student_task_id, subtask_id)).fetchone()
+            if not quiz_passed:
+                # Stay on this subtask — quiz still pending
+                conn.execute(
+                    "UPDATE student_task SET current_subtask_id = ? WHERE id = ?",
+                    (subtask_id, student_task_id)
+                )
+                return
+
+    # All subtasks truly complete — check task completion
     check_task_completion(student_task_id)
 
 
@@ -1618,12 +1692,12 @@ def mark_task_complete(student_task_id, manual=False):
 
 
 def check_task_completion(student_task_id):
-    """Check if task should be marked complete (all VISIBLE subtasks + quiz passed).
+    """Check if task should be marked complete.
 
-    Q5A Implementation: Only counts visible subtasks for completion.
+    Complete = all visible subtasks erledigt + all required subtask quizzes passed
+               + topic quiz passed (or no topic quiz).
     """
     with db_session() as conn:
-        # Get student_id, klasse_id, task_id for visibility check
         student_task_info = conn.execute('''
             SELECT student_id, klasse_id, task_id FROM student_task WHERE id = ?
         ''', (student_task_id,)).fetchone()
@@ -1635,83 +1709,105 @@ def check_task_completion(student_task_id):
         klasse_id = student_task_info['klasse_id']
         task_id = student_task_info['task_id']
 
+        # Get task settings
+        task_info = conn.execute(
+            "SELECT quiz_json, subtask_quiz_required FROM task WHERE id = ?", (task_id,)
+        ).fetchone()
+
         # Q5A: Get visible subtasks for this student
         visible_subtasks = get_visible_subtasks_for_student(student_id, klasse_id, task_id)
         visible_subtask_ids = [s['id'] for s in visible_subtasks]
 
-        if not visible_subtask_ids:
-            # No visible subtasks - consider complete if quiz passed (or no quiz)
-            pass
-        else:
-            # Check only VISIBLE subtasks completed
+        if visible_subtask_ids:
             placeholders = ','.join('?' * len(visible_subtask_ids))
-            subtasks = conn.execute(f'''
-                SELECT COUNT(*) as total,
-                       SUM(CASE WHEN COALESCE(ss.erledigt, 0) = 1 THEN 1 ELSE 0 END) as completed
+            subtask_rows = conn.execute(f'''
+                SELECT sub.id, sub.quiz_json, COALESCE(ss.erledigt, 0) as erledigt
                 FROM subtask sub
                 LEFT JOIN student_subtask ss ON sub.id = ss.subtask_id AND ss.student_task_id = ?
                 WHERE sub.id IN ({placeholders})
-            ''', [student_task_id] + visible_subtask_ids).fetchone()
+            ''', [student_task_id] + visible_subtask_ids).fetchall()
 
-            if subtasks['total'] > 0 and subtasks['total'] != subtasks['completed']:
-                return False
+            quiz_required = task_info and task_info['subtask_quiz_required']
 
-        # Check quiz passed (traditional method)
-        quiz_passed = conn.execute('''
-            SELECT bestanden FROM quiz_attempt
-            WHERE student_task_id = ? AND bestanden = 1
-            LIMIT 1
-        ''', (student_task_id,)).fetchone()
-
-        # Get task to check if it has a quiz
-        task_info = conn.execute('''
-            SELECT t.quiz_json, st.student_id FROM task t
-            JOIN student_task st ON t.id = st.task_id
-            WHERE st.id = ?
-        ''', (student_task_id,)).fetchone()
-
-        has_quiz = task_info and task_info['quiz_json']
-
-        if has_quiz and not quiz_passed:
-            # Check if quiz passed via game mode
-            import json
-            quiz = json.loads(task_info['quiz_json'])
-            total_questions = len(quiz.get('questions', []))
-
-            if total_questions > 0:
-                game_correct = conn.execute('''
-                    SELECT COUNT(*) as count FROM game_task_progress
-                    WHERE student_task_id = ? AND answered_correctly = 1
-                ''', (student_task_id,)).fetchone()
-
-                if game_correct['count'] < total_questions:
+            for sub in subtask_rows:
+                if not sub['erledigt']:
                     return False
+                # Check subtask quiz if required
+                if quiz_required and sub['quiz_json']:
+                    quiz_passed = conn.execute('''
+                        SELECT 1 FROM quiz_attempt
+                        WHERE student_task_id = ? AND subtask_id = ? AND bestanden = 1
+                        LIMIT 1
+                    ''', (student_task_id, sub['id'])).fetchone()
+                    if not quiz_passed:
+                        return False
+
+        # Check topic-level quiz (filter: subtask_id IS NULL)
+        has_topic_quiz = task_info and task_info['quiz_json']
+        if has_topic_quiz:
+            topic_quiz_passed = conn.execute('''
+                SELECT 1 FROM quiz_attempt
+                WHERE student_task_id = ? AND subtask_id IS NULL AND bestanden = 1
+                LIMIT 1
+            ''', (student_task_id,)).fetchone()
+
+            if not topic_quiz_passed:
+                # Check if quiz passed via game mode
+                import json
+                quiz = json.loads(task_info['quiz_json'])
+                total_questions = len(quiz.get('questions', []))
+
+                if total_questions > 0:
+                    game_correct = conn.execute('''
+                        SELECT COUNT(*) as count FROM game_task_progress
+                        WHERE student_task_id = ? AND answered_correctly = 1
+                    ''', (student_task_id,)).fetchone()
+
+                    if game_correct['count'] < total_questions:
+                        return False
 
         return True
 
 
 # ============ Quiz functions ============
 
-def save_quiz_attempt(student_task_id, punkte, max_punkte, antworten_json):
-    """Save a quiz attempt."""
+def save_quiz_attempt(student_task_id, punkte, max_punkte, antworten_json, subtask_id=None):
+    """Save a quiz attempt. subtask_id=None means topic-level quiz."""
     # UX Tier 1: Reduced threshold from 80% to 70% to reduce anxiety
     bestanden = (punkte / max_punkte) >= 0.7 if max_punkte > 0 else False
     with db_session() as conn:
         cursor = conn.execute('''
-            INSERT INTO quiz_attempt (student_task_id, punkte, max_punkte, bestanden, antworten_json)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (student_task_id, punkte, max_punkte, 1 if bestanden else 0, antworten_json))
+            INSERT INTO quiz_attempt (student_task_id, subtask_id, punkte, max_punkte, bestanden, antworten_json)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (student_task_id, subtask_id, punkte, max_punkte, 1 if bestanden else 0, antworten_json))
         return cursor.lastrowid, bestanden
 
 
-def get_quiz_attempts(student_task_id):
-    """Get all quiz attempts for a student task."""
+def get_quiz_attempts(student_task_id, subtask_id=None):
+    """Get quiz attempts. subtask_id=None returns topic-level only; pass a value for subtask quiz."""
     with db_session() as conn:
-        rows = conn.execute('''
-            SELECT * FROM quiz_attempt WHERE student_task_id = ?
-            ORDER BY timestamp DESC
-        ''', (student_task_id,)).fetchall()
+        if subtask_id is not None:
+            rows = conn.execute('''
+                SELECT * FROM quiz_attempt WHERE student_task_id = ? AND subtask_id = ?
+                ORDER BY timestamp DESC
+            ''', (student_task_id, subtask_id)).fetchall()
+        else:
+            rows = conn.execute('''
+                SELECT * FROM quiz_attempt WHERE student_task_id = ? AND subtask_id IS NULL
+                ORDER BY timestamp DESC
+            ''', (student_task_id,)).fetchall()
         return [dict(r) for r in rows]
+
+
+def has_passed_subtask_quiz(student_task_id, subtask_id):
+    """Returns True if any quiz_attempt for this student_task + subtask has bestanden=1."""
+    with db_session() as conn:
+        row = conn.execute('''
+            SELECT 1 FROM quiz_attempt
+            WHERE student_task_id = ? AND subtask_id = ? AND bestanden = 1
+            LIMIT 1
+        ''', (student_task_id, subtask_id)).fetchone()
+        return row is not None
 
 
 # ============ Lesson functions ============

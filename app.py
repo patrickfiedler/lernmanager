@@ -577,7 +577,8 @@ def admin_thema_bearbeiten(task_id):
         kategorie=request.form['kategorie'],
         quiz_json=request.form.get('quiz_json') or None,
         number=int(request.form.get('number', 0)),
-        why_learn_this=request.form.get('why_learn_this') or None
+        why_learn_this=request.form.get('why_learn_this') or None,
+        subtask_quiz_required=1 if request.form.get('subtask_quiz_required') else 0
     )
     # Handle multiple prerequisites
     voraussetzung_ids = request.form.getlist('voraussetzungen')
@@ -602,10 +603,11 @@ def admin_thema_aufgaben(task_id):
         subtasks = models.get_subtasks(task_id)
         return jsonify(subtasks)
     else:
-        # POST: update subtasks (UX Tier 1: now includes time estimates)
+        # POST: update subtasks (includes time estimates and per-subtask quizzes)
         subtasks_list = request.form.getlist('subtasks[]')
         estimated_minutes_list = request.form.getlist('estimated_minutes[]')
-        models.update_subtasks(task_id, subtasks_list, estimated_minutes_list)
+        quiz_json_list = request.form.getlist('quiz_json[]')
+        models.update_subtasks(task_id, subtasks_list, estimated_minutes_list, quiz_json_list)
         flash('Aufgaben aktualisiert.', 'success')
         return redirect(url_for('admin_thema_detail', task_id=task_id))
 
@@ -1351,11 +1353,22 @@ def student_klasse(klasse_id):
     materials = []
     quiz_attempts = []
 
+    subtask_quiz_status = {}  # {subtask_id: True/False} for subtasks with quizzes
+    quiz_bestanden = False
+
     if task:
         # Get ALL subtasks with completion status
         all_subtasks = models.get_student_subtask_progress(task['id'])
         materials = models.get_materials(task['task_id'])
-        quiz_attempts = models.get_quiz_attempts(task['id'])
+        quiz_attempts = models.get_quiz_attempts(task['id'])  # topic-level only (subtask_id IS NULL)
+
+        # Check if topic quiz was passed
+        quiz_bestanden = any(a['bestanden'] for a in quiz_attempts)
+
+        # Compute subtask quiz pass status for progress dots
+        for st in all_subtasks:
+            if st.get('quiz_json'):
+                subtask_quiz_status[st['id']] = models.has_passed_subtask_quiz(task['id'], st['id'])
 
         # NEW: Get visible subtasks based on visibility rules (Q5A, Q6A)
         visible_subtask_ids = [s['id'] for s in models.get_visible_subtasks_for_student(
@@ -1399,7 +1412,9 @@ def student_klasse(klasse_id):
                            current_subtask=current_subtask,
                            materials=materials,
                            quiz_attempts=quiz_attempts,
-                           unterricht=unterricht)
+                           unterricht=unterricht,
+                           subtask_quiz_status=subtask_quiz_status,
+                           quiz_bestanden=quiz_bestanden)
 
 
 @app.route('/schueler/thema/<int:student_task_id>/aufgabe/<int:subtask_id>', methods=['POST'])
@@ -1412,7 +1427,7 @@ def student_toggle_subtask(student_task_id, subtask_id):
         return jsonify({'status': 'error', 'message': 'Unauthorized'}), 403
 
     erledigt = request.json.get('erledigt', False)
-    models.toggle_student_subtask(student_task_id, subtask_id, erledigt)
+    toggle_result = models.toggle_student_subtask(student_task_id, subtask_id, erledigt)
 
     # Log subtask completion
     if erledigt:
@@ -1425,6 +1440,11 @@ def student_toggle_subtask(student_task_id, subtask_id):
                 'subtask_id': subtask_id
             }
         )
+
+    # If subtask quiz is pending, tell the JS to redirect
+    if toggle_result.get('quiz_pending'):
+        quiz_url = url_for('student_quiz', student_task_id=student_task_id, subtask_id=subtask_id)
+        return jsonify({'status': 'ok', 'task_complete': False, 'show_quiz': True, 'quiz_url': quiz_url})
 
     # Check if task should be auto-completed
     if models.check_task_completion(student_task_id):
@@ -1442,15 +1462,16 @@ def student_toggle_subtask(student_task_id, subtask_id):
 
 
 @app.route('/schueler/thema/<int:student_task_id>/quiz', methods=['GET', 'POST'])
+@app.route('/schueler/thema/<int:student_task_id>/aufgabe-quiz/<int:subtask_id>', methods=['GET', 'POST'])
 @student_required
-def student_quiz(student_task_id):
+def student_quiz(student_task_id, subtask_id=None):
     student_id = session['student_id']
     student = models.get_student(student_id)
 
     with models.db_session() as conn:
         # Verify this task belongs to the student
         task_row = conn.execute('''
-            SELECT st.*, t.name, t.quiz_json
+            SELECT st.*, t.name, t.quiz_json, st.klasse_id
             FROM student_task st
             JOIN task t ON st.task_id = t.id
             WHERE st.id = ? AND st.student_id = ?
@@ -1461,12 +1482,24 @@ def student_quiz(student_task_id):
             return redirect(url_for('student_dashboard'))
 
         task = dict(task_row)
+        klasse_id = task['klasse_id']
 
-    if not task['quiz_json']:
-        flash('Dieses Thema hat kein Quiz.', 'warning')
-        return redirect(url_for('student_dashboard'))
+        # Load quiz JSON: from subtask or from topic
+        if subtask_id:
+            subtask_row = conn.execute(
+                "SELECT quiz_json FROM subtask WHERE id = ?", (subtask_id,)
+            ).fetchone()
+            if not subtask_row or not subtask_row['quiz_json']:
+                flash('Diese Aufgabe hat kein Quiz.', 'warning')
+                return redirect(url_for('student_klasse', klasse_id=klasse_id))
+            quiz_json_str = subtask_row['quiz_json']
+        else:
+            if not task['quiz_json']:
+                flash('Dieses Thema hat kein Quiz.', 'warning')
+                return redirect(url_for('student_dashboard'))
+            quiz_json_str = task['quiz_json']
 
-    quiz = json.loads(task['quiz_json'])
+    quiz = json.loads(quiz_json_str)
 
     if request.method == 'POST':
         # Grade the quiz using the mapping from hidden fields
@@ -1500,7 +1533,7 @@ def student_quiz(student_task_id):
                 punkte += 1
 
         attempt_id, bestanden = models.save_quiz_attempt(
-            student_task_id, punkte, max_punkte, json.dumps(antworten)
+            student_task_id, punkte, max_punkte, json.dumps(antworten), subtask_id=subtask_id
         )
 
         # Log quiz attempt
@@ -1510,6 +1543,7 @@ def student_quiz(student_task_id):
             user_type='student',
             metadata={
                 'student_task_id': student_task_id,
+                'subtask_id': subtask_id,
                 'punkte': punkte,
                 'max_punkte': max_punkte,
                 'bestanden': bestanden,
@@ -1517,10 +1551,14 @@ def student_quiz(student_task_id):
             }
         )
 
+        # After passing subtask quiz: advance to next subtask + check completion
+        if subtask_id and bestanden:
+            models.advance_to_next_subtask(student_task_id, subtask_id)
+
         # Check task completion
         if models.check_task_completion(student_task_id):
             models.mark_task_complete(student_task_id)
-            # Log task completion (if not already logged from subtask completion)
+            # Log task completion
             models.log_analytics_event(
                 event_type='task_complete',
                 user_id=student_id,
@@ -1534,14 +1572,15 @@ def student_quiz(student_task_id):
                 {
                     'question': q['text'],
                     'answers': q['options'],
-                    'correct': q['correct']
+                    'correct': q['correct'],
+                    'image': q.get('image')
                 }
                 for q in quiz['questions']
             ]
         }
 
         # Get previous quiz attempts for improvement tracking (UX Tier 1)
-        all_attempts = models.get_quiz_attempts(student_task_id)
+        all_attempts = models.get_quiz_attempts(student_task_id, subtask_id=subtask_id)
         previous_attempt = all_attempts[1] if len(all_attempts) > 1 else None
 
         return render_template('student/quiz_result.html',
@@ -1552,7 +1591,9 @@ def student_quiz(student_task_id):
                                max_punkte=max_punkte,
                                bestanden=bestanden,
                                antworten=antworten,
-                               previous_attempt=previous_attempt)
+                               previous_attempt=previous_attempt,
+                               subtask_id=subtask_id,
+                               klasse_id=klasse_id)
 
     # GET: Shuffle questions and answers for display
     import random as quiz_random
@@ -1578,7 +1619,8 @@ def student_quiz(student_task_id):
         shuffled_q = {
             'question': q['text'],
             'answers': [options[i] for i in answer_order],
-            'correct': q['correct']  # Keep original for reference (not used in template)
+            'correct': q['correct'],  # Keep original for reference (not used in template)
+            'image': q.get('image')
         }
         shuffled_questions.append(shuffled_q)
 
@@ -1590,7 +1632,9 @@ def student_quiz(student_task_id):
                            quiz=shuffled_quiz,
                            student_task_id=student_task_id,
                            question_order=json.dumps(question_order),
-                           answer_maps=[json.dumps(m) for m in answer_maps])
+                           answer_maps=[json.dumps(m) for m in answer_maps],
+                           subtask_id=subtask_id,
+                           klasse_id=klasse_id)
 
 
 @app.route('/schueler/unterricht/<int:unterricht_id>/selbstbewertung', methods=['POST'])

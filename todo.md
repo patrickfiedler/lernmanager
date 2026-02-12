@@ -54,10 +54,11 @@ See `docs/research/2026-02-07_learning_paths_and_quiz_evolution.md`
 - research a better way and place to implement student self-evaluation (was: student page, at bottom)
 - How can we show more than one active task to the student at any one time, i.e. to adapt to current special occasions like contests or short-term work sprints to improve marks? -> investigate
 - ~~in the student view (next to 0 von 8 Aufgaben erledigt) the current task should have a visible margin or shadow to visually mark where students are~~ (Complete - current dot has colored ring border)
-- make admin top menu responsive - becomes crowded at 960px width (half of 1920px screen)
-- make progress dots slightly larger (double) in desktop view
-- add favicon to the app
-- ~~change workflow from task→task→task→...→quiz to task→quiz→task→quiz→task→...~~ (Planned - per-task quizzes, see `docs/research/2026-02-07_learning_paths_and_quiz_evolution.md`)
+- ~~make admin top menu responsive - becomes crowded at 960px width (half of 1920px screen)~~ (Complete - responsive hamburger menu, commit 67e1a21)
+- ~~make progress dots slightly larger (double) in desktop view~~ (Complete - doubled from 0.75rem to 1.5rem, scaled ring + quiz dot)
+- ~~add favicon to the app~~ (Complete - commit 67e1a21)
+- ~~change workflow from task→task→task→...→quiz to task→quiz→task→quiz→task→...~~ (Complete - per-Aufgabe quizzes with configurable blocking, image support)
+- move materials from Thema level to Aufgabe level (currently materials are per-topic, should be per-subtask)
 
 
 ## Subtask Management Enhancements (Test 8 findings)
@@ -78,7 +79,7 @@ See `docs/research/2026-02-07_learning_paths_and_quiz_evolution.md`
 
 - ~~Fix task sorting: should be 1-2-3-10, not 1-10-2-3 (alphabetical vs numerical)~~ (Fixed)
 - ~~Class assessment: make it obvious if data has been saved for a day (currently unclear - shows default 2/3 points for all dates)~~ (Fixed in student assessment improvements)
-- fix: consistently rename tasks -> topics and subtasks -> tasks (or their respective German equivalents for the frontend) throughout the whole app
+- ~~fix: consistently rename tasks -> topics and subtasks -> tasks (or their respective German equivalents for the frontend) throughout the whole app~~ (Complete - commits d2fb1f0, 27e1a90: Aufgabe→Thema, Teilaufgabe→Aufgabe)
 - fix: Make lesson comment saveable without saving student evaluation -> required in case a scheduled lesson does not take place
 - fix: current implementation does not treat compulsory and optional tasks differently, but it should -> there needs to be a clear setting in the task editor, and it should be obvious in the student view (maybe have yellow: open compulsory tasks, green: completed tasks, and rainbow colour spectrum for optional tasks)
 - ~~fix: adding a material in the task editor loses unsaved edits without warning~~ (Fixed - added unsaved changes detection and warning dialog)
