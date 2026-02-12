@@ -120,6 +120,62 @@ nav .nav-links {
     align-items: center;
 }
 
+/* Hamburger menu (admin nav, CSS-only toggle) */
+#nav-toggle {
+    display: none;
+}
+
+.nav-hamburger {
+    display: none;
+}
+
+@media (max-width: 960px) {
+    .nav-hamburger {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-size: 1.5rem;
+        cursor: pointer;
+        padding: 0.25rem 0.5rem;
+        user-select: none;
+    }
+
+    .nav-hamburger .hamburger-close {
+        display: none;
+    }
+
+    #nav-toggle:checked ~ .nav-hamburger .hamburger-icon {
+        display: none;
+    }
+
+    #nav-toggle:checked ~ .nav-hamburger .hamburger-close {
+        display: inline;
+    }
+
+    nav .nav-content {
+        flex-wrap: wrap;
+    }
+
+    #nav-toggle ~ .nav-links {
+        display: none;
+        width: 100%;
+        flex-direction: column;
+        padding-top: 0.75rem;
+        gap: 0;
+    }
+
+    #nav-toggle:checked ~ .nav-links {
+        display: flex;
+    }
+
+    #nav-toggle ~ .nav-links a,
+    #nav-toggle ~ .nav-links span {
+        padding: 0.625rem 0;
+        border-top: 1px solid rgba(255, 255, 255, 0.15);
+    }
+}
+
 /* Cards */
 .card {
     background: white;
@@ -1130,14 +1186,14 @@ tr.unsaved-row td {
 /* Progress Dots */
 .progress-dots {
     display: flex;
-    gap: 0.5rem;
+    gap: 0.75rem;
     align-items: center;
     flex-wrap: wrap;
 }
 
 .dot {
-    width: 0.75rem;
-    height: 0.75rem;
+    width: 1.5rem;
+    height: 1.5rem;
     border-radius: 50%;
     background: #d1d5db;  /* Gray for incomplete */
     transition: all 0.2s;
@@ -1169,27 +1225,27 @@ tr.unsaved-row td {
 .dot.current:not(.completed) {
     background: #3b82f6;  /* Blue */
     transform: scale(1.2);
-    box-shadow: 0 0 0 2px white, 0 0 0 3px #3b82f6;  /* Blue ring */
+    box-shadow: 0 0 0 3px white, 0 0 0 5px #3b82f6;  /* Blue ring */
 }
 
 /* Current completed: green with green ring */
 .dot.current.completed {
     background: #10b981;  /* Green */
     transform: scale(1.2);
-    box-shadow: 0 0 0 2px white, 0 0 0 3px #10b981;  /* Green ring */
+    box-shadow: 0 0 0 3px white, 0 0 0 5px #10b981;  /* Green ring */
 }
 
 /* Quiz dot (special styling) */
 .dot.dot-quiz {
     background: #f59e0b;
     color: white;
-    font-size: 0.625rem;
+    font-size: 0.875rem;
     font-weight: 700;
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 1rem;
-    height: 1rem;
+    width: 1.75rem;
+    height: 1.75rem;
 }
 
 .dot.dot-quiz.completed {
