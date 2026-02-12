@@ -126,8 +126,8 @@ main() {
     # Fetch latest changes
     sudo -u "$APP_USER" git fetch origin main
 
-    # Check if update.sh has changed
-    if ! sudo -u "$APP_USER" git diff --quiet HEAD origin/main -- deploy/update.sh; then
+    # Check if update.sh has changed (skip if we already self-updated)
+    if [ "${SELF_UPDATED:-}" != "1" ] && ! sudo -u "$APP_USER" git diff --quiet HEAD origin/main -- deploy/update.sh; then
         log_warn "update.sh has been modified in the new version"
         log_info "Updating update.sh and re-executing..."
 
@@ -138,7 +138,7 @@ main() {
         chmod +x "$APP_DIR/deploy/update.sh"
 
         log_info "Restarting with updated update.sh..."
-        exec "$APP_DIR/deploy/update.sh" "$@"
+        exec env SELF_UPDATED=1 "$APP_DIR/deploy/update.sh" "$@"
     fi
 
     log_info "update.sh is up to date"
