@@ -3,21 +3,12 @@
 {% block title %}{% if task %}{{ task.name }} - {% endif %}Lernmanager{% endblock %}
 
 {% block content %}
-<!-- Breadcrumb Navigation -->
-<div class="breadcrumb-nav mb-2">
-    <a href="{{ url_for('student_dashboard') }}">Dashboard</a>
-    <span class="separator">›</span>
-    <span>{{ klasse.name }}</span>
-</div>
-
 {% if task %}
 <!-- Main Content Card (contains everything) -->
 <div class="content-card">
 
     <!-- Topic Headline -->
     <h1 class="topic-headline">{{ task.name }}</h1>
-    <div class="topic-meta">{{ task.fach }} · {{ task.stufe }}</div>
-
     <!-- Purpose Banner (Why learn this?) -->
     {% if task.why_learn_this %}
     <div class="purpose">
@@ -29,7 +20,7 @@
     </div>
     {% endif %}
 
-    <!-- Progress Section with Dots (Q5A: based on visible subtasks only) -->
+    <!-- Progress Section with Dots -->
     {% if subtasks %}
     <div class="progress-section">
         <div class="progress-header">
@@ -40,27 +31,37 @@
                 {% for sub in subtasks %}
                 {% set has_quiz = sub.quiz_json %}
                 {% set quiz_passed = subtask_quiz_status.get(sub.id, false) %}
-                {% set is_partial = sub.erledigt and has_quiz and not quiz_passed %}
-                <div class="dot {% if sub.erledigt and not is_partial %}completed {% endif %}{% if is_partial %}partial {% endif %}{% if current_subtask and sub.id == current_subtask.id %}current{% endif %}"
+                <div class="dot dot-subtask {% if sub.erledigt %}completed {% endif %}{% if current_subtask and sub.id == current_subtask.id %}current{% endif %}"
                      role="button"
                      tabindex="0"
-                     aria-label="Aufgabe {{ loop.index }}: {{ sub.beschreibung[:50] }}{% if sub.beschreibung|length > 50 %}...{% endif %}{% if sub.erledigt and not is_partial %} - Erledigt{% elif is_partial %} - Quiz ausstehend{% endif %}"
+                     aria-label="Aufgabe {{ loop.index }}: {{ sub.beschreibung[:50] }}{% if sub.beschreibung|length > 50 %}...{% endif %}{% if sub.erledigt %} - Erledigt{% endif %}"
                      {% if current_subtask and sub.id == current_subtask.id %}aria-current="true"{% endif %}
-                     data-subtask-index="{{ loop.index0 }}"
-                     data-subtask-id="{{ sub.id }}"
-                     onclick="navigateToSubtask({{ sub.id }})"
-                     onkeydown="handleDotKeydown(event, {{ sub.id }})"
-                     title="Aufgabe {{ loop.index }}: {{ sub.beschreibung[:30] }}{% if sub.beschreibung|length > 30 %}...{% endif %}{% if is_partial %} (Quiz ausstehend){% endif %}"></div>
+                     data-subtask-position="{{ loop.index }}"
+                     onclick="navigateToSubtask({{ loop.index }})"
+                     onkeydown="handleDotKeydown(event)"
+                     title="Aufgabe {{ loop.index }}: {{ sub.beschreibung[:30] }}{% if sub.beschreibung|length > 30 %}...{% endif %}"></div>
+                {% if has_quiz %}
+                <div class="dot dot-subtask-quiz {% if quiz_passed %}completed{% elif sub.erledigt %}available{% endif %}"
+                     role="button"
+                     tabindex="0"
+                     aria-label="Quiz zu Aufgabe {{ loop.index }}{% if quiz_passed %} - Bestanden{% elif sub.erledigt %} - Verfügbar{% else %} - Gesperrt{% endif %}"
+                     data-quiz-position="{{ loop.index }}"
+                     data-quiz-passed="{{ 'true' if quiz_passed else 'false' }}"
+                     data-quiz-available="{{ 'true' if sub.erledigt else 'false' }}"
+                     onclick="navigateToSubtaskQuiz({{ loop.index }}, {{ 'true' if quiz_passed else 'false' }}, {{ 'true' if sub.erledigt else 'false' }})"
+                     onkeydown="handleDotKeydown(event)"
+                     title="Quiz zu Aufgabe {{ loop.index }}{% if quiz_passed %} (bestanden){% elif sub.erledigt %} (verfügbar){% endif %}">?</div>
+                {% endif %}
                 {% endfor %}
                 {% if task.quiz_json %}
                 <div class="dot dot-quiz {% if quiz_bestanden %}completed{% endif %}"
                      role="button"
                      tabindex="0"
-                     aria-label="Quiz{% if task.quiz_bestanden %} - Bestanden{% endif %}"
-                     title="Quiz"
+                     aria-label="Abschlussquiz{% if quiz_bestanden %} - Bestanden{% endif %}"
+                     title="Abschlussquiz"
                      data-is-quiz="true"
-                     onclick="navigateToQuiz()"
-                     onkeydown="handleQuizKeydown(event)">?</div>
+                     onclick="navigateToQuiz({{ 'true' if quiz_bestanden else 'false' }})"
+                     onkeydown="handleDotKeydown(event)">?</div>
                 {% endif %}
             </div>
         </div>
@@ -90,8 +91,6 @@
                 <div class="task-badge">Aufgabe {{ current_index + 1 }} von {{ subtasks|length }}</div>
                 {% if active_subtask.estimated_minutes %}
                 <div class="task-badge time-estimate">⏱️ ~{{ active_subtask.estimated_minutes }} Min</div>
-                {% else %}
-                <div class="task-badge time-estimate">⏱️ ~15-30 Min</div>
                 {% endif %}
             </div>
             {% endif %}
@@ -109,7 +108,7 @@
                        id="subtask-checkbox-{{ active_subtask.id }}"
                        class="subtask-checkbox"
                        {% if active_subtask.erledigt %}checked{% endif %}
-                       onchange="toggleSubtask({{ task.id }}, {{ active_subtask.id }}, this.checked)"
+                       onchange="toggleSubtask({{ current_index + 1 }}, this.checked)"
                        onclick="event.stopPropagation()">
                 <label for="subtask-checkbox-{{ active_subtask.id }}">Ich habe das geschafft! ✓</label>
             </div>
@@ -120,7 +119,7 @@
             <div class="quiz-card mt-1">
                 <div class="quiz-header">❓ Aufgaben-Quiz</div>
                 <p>Beantworte die Fragen, bevor du zur nächsten Aufgabe weitergehst.</p>
-                <a href="{{ url_for('student_quiz', student_task_id=task.id, subtask_id=active_subtask.id) }}" class="btn btn-primary">Quiz starten</a>
+                <a href="{{ url_for('student_quiz_subtask', slug=task.name|slugify, position=current_index + 1) }}" class="btn btn-primary">Quiz starten</a>
             </div>
             {% endif %}
 
@@ -224,7 +223,7 @@
             {% endfor %}
         </div>
         {% endif %}
-        <a href="{{ url_for('student_quiz', student_task_id=task.id) }}" class="btn btn-primary mt-1">Quiz starten</a>
+        <a href="{{ url_for('student_quiz', slug=task.name|slugify) }}" class="btn btn-primary mt-1">Quiz starten</a>
     </div>
     {% elif task.abgeschlossen %}
     <div class="alert alert-success mt-2">
@@ -267,16 +266,17 @@
 {% endblock %}
 
 {% block scripts %}
-function toggleSubtask(studentTaskId, subtaskId, checked) {
+const topicSlug = '{{ task.name|slugify }}';
+const subtaskCount = {{ subtasks|length }};
+
+function toggleSubtask(position, checked) {
     const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
 
     // Disable checkbox during request
-    const checkbox = document.getElementById(`subtask-checkbox-${subtaskId}`);
-    if (checkbox) {
-        checkbox.disabled = true;
-    }
+    const checkboxes = document.querySelectorAll('.subtask-checkbox');
+    checkboxes.forEach(cb => cb.disabled = true);
 
-    fetch(`/schueler/thema/${studentTaskId}/aufgabe/${subtaskId}`, {
+    fetch(`/schueler/thema/${topicSlug}/aufgabe/${position}`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -292,51 +292,40 @@ function toggleSubtask(studentTaskId, subtaskId, checked) {
     })
     .then(data => {
         if (data.show_quiz && data.quiz_url) {
-            // Subtask quiz pending — redirect to quiz page
             window.location.href = data.quiz_url;
             return;
         }
 
         if (checked) {
-            // Show success banner
             const successBanner = document.getElementById('success-banner');
             if (successBanner) {
                 successBanner.style.display = 'flex';
             }
 
             // Update progress dot
-            const dots = document.querySelectorAll('.progress-dots .dot:not(.dot-quiz)');
             const currentDot = document.querySelector('.progress-dots .dot.current');
             if (currentDot) {
                 currentDot.classList.add('completed');
             }
 
-            // Update progress text
             updateProgressText();
         } else {
-            // Unchecking - reload page to reset state (to reset state)
-            // Preserve current subtask_id parameter to stay on same task
+            // Unchecking - reload page to reset state
             setTimeout(() => {
-                const url = new URL(window.location);
-                // Note: subtask_id already in URL, so it's preserved
-                window.location.href = url.toString();
+                window.location.href = window.location.href;
             }, 100);
         }
     })
     .catch(err => {
         console.error('Error toggling subtask:', err);
-        // Re-enable and reset checkbox on error
-        if (checkbox) {
-            checkbox.disabled = false;
-            checkbox.checked = !checked;  // Revert to previous state
-        }
+        checkboxes.forEach(cb => cb.disabled = false);
         alert(`Fehler beim Speichern: ${err.message}\nBitte versuche es erneut oder lade die Seite neu.`);
     });
 }
 
 function updateProgressText() {
-    const dots = document.querySelectorAll('.progress-dots .dot:not(.dot-quiz)');
-    const completedDots = document.querySelectorAll('.progress-dots .dot.completed:not(.dot-quiz)');
+    const dots = document.querySelectorAll('.progress-dots .dot.dot-subtask');
+    const completedDots = document.querySelectorAll('.progress-dots .dot.dot-subtask.completed');
     const progressText = document.getElementById('progress-text');
 
     if (progressText) {
@@ -344,80 +333,56 @@ function updateProgressText() {
     }
 }
 
-// Navigation: Build subtask ID array from template
-const subtaskIds = [{% for sub in subtasks %}{{ sub.id }}{% if not loop.last %}, {% endif %}{% endfor %}];
-const completedIds = new Set([{% for sub in completed_subtasks %}{{ sub.id }}{% if not loop.last %}, {% endif %}{% endfor %}]);
-
 function goToNextSubtask(currentIndex) {
-    // Navigate to next subtask in sequence (handles gaps in numbering)
-    if (currentIndex < subtaskIds.length - 1) {
-        const nextSubtaskId = subtaskIds[currentIndex + 1];
+    if (currentIndex < subtaskCount - 1) {
         const url = new URL(window.location);
-        url.searchParams.set('subtask_id', nextSubtaskId);
+        url.searchParams.set('aufgabe', currentIndex + 2);
         window.location.href = url.toString();
     } else {
-        // On last subtask - check if there's a quiz
         const quizDot = document.querySelector('.dot-quiz');
         if (quizDot) {
-            navigateToQuiz();
+            navigateToQuiz(false);
         }
     }
 }
 
 function goToPrevSubtask(currentIndex) {
-    // Navigate to previous subtask in sequence
     if (currentIndex > 0) {
-        const prevSubtaskId = subtaskIds[currentIndex - 1];
         const url = new URL(window.location);
-        url.searchParams.set('subtask_id', prevSubtaskId);
+        url.searchParams.set('aufgabe', currentIndex);
         window.location.href = url.toString();
     }
 }
 
-function navigateToSubtask(subtaskId) {
-    // Navigate to specific subtask by clicking its dot
+function navigateToSubtask(position) {
     const url = new URL(window.location);
-    url.searchParams.set('subtask_id', subtaskId);
+    url.searchParams.set('aufgabe', position);
     window.location.href = url.toString();
 }
 
-function navigateToQuiz() {
-    // Navigate to quiz page
-    window.location.href = `/schueler/thema/{{ task.id }}/quiz`;
-}
-
-// Keyboard navigation for progress dots (WCAG 2.1 keyboard accessibility)
-function handleDotKeydown(event, subtaskId) {
-    // Enter or Space = click the dot
-    if (event.key === 'Enter' || event.key === ' ') {
-        event.preventDefault();
-        navigateToSubtask(subtaskId);
-    }
-    // Arrow keys = navigate between dots
-    else if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
-        event.preventDefault();
-        const dots = Array.from(document.querySelectorAll('.progress-dots .dot'));
-        const currentIndex = dots.indexOf(event.target);
-
-        let nextIndex;
-        if (event.key === 'ArrowLeft') {
-            nextIndex = currentIndex > 0 ? currentIndex - 1 : dots.length - 1;
-        } else {
-            nextIndex = currentIndex < dots.length - 1 ? currentIndex + 1 : 0;
-        }
-
-        dots[nextIndex].focus();
+function navigateToQuiz(passed) {
+    if (passed) {
+        window.location.href = `/schueler/thema/${topicSlug}/quiz-ergebnis`;
+    } else {
+        window.location.href = `/schueler/thema/${topicSlug}/quiz`;
     }
 }
 
-function handleQuizKeydown(event) {
-    // Enter or Space = navigate to quiz
+function navigateToSubtaskQuiz(position, passed, available) {
+    if (passed) {
+        window.location.href = `/schueler/thema/${topicSlug}/aufgabe-${position}/quiz-ergebnis`;
+    } else if (available) {
+        window.location.href = `/schueler/thema/${topicSlug}/aufgabe-${position}/quiz`;
+    }
+    // locked (not available) — do nothing
+}
+
+// Keyboard navigation for all dots (WCAG 2.1)
+function handleDotKeydown(event) {
     if (event.key === 'Enter' || event.key === ' ') {
         event.preventDefault();
-        navigateToQuiz();
-    }
-    // Arrow keys = navigate to adjacent dots
-    else if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+        event.target.click();
+    } else if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
         event.preventDefault();
         const dots = Array.from(document.querySelectorAll('.progress-dots .dot'));
         const currentIndex = dots.indexOf(event.target);

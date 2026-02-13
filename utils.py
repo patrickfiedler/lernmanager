@@ -1,4 +1,16 @@
+import re
 import random
+import unicodedata
+
+
+def slugify(text):
+    """Convert text to URL-friendly slug. Handles German umlauts."""
+    text = text.replace('ä', 'ae').replace('ö', 'oe').replace('ü', 'ue').replace('ß', 'ss')
+    text = text.replace('Ä', 'Ae').replace('Ö', 'Oe').replace('Ü', 'Ue')
+    text = unicodedata.normalize('NFKD', text)
+    text = text.encode('ascii', 'ignore').decode('ascii').lower()
+    text = re.sub(r'[^a-z0-9]+', '-', text).strip('-')
+    return text
 
 # English adjectives (at least one per letter A-Z)
 ADJECTIVES = [

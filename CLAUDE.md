@@ -19,11 +19,6 @@ python app.py
 python run.py
 ```
 
-### Docker
-```bash
-docker compose up --build
-```
-
 ### Dependencies
 ```bash
 pip install -r requirements.txt
@@ -34,13 +29,14 @@ pip install -r requirements.txt
 ### Core Files
 - `app.py` - Flask application with all routes. Two user types: admin (teachers) and student. Uses session-based auth with `@admin_required` and `@student_required` decorators.
 - `models.py` - SQLite database layer with raw SQL queries. Uses `db_session()` context manager for transactions.
-- `config.py` - Configuration constants (database path, upload settings, subjects/levels).
-- `utils.py` - Username/password generators for student accounts.
+- `config.py` - Configuration constants (database path, upload settings, subjects/levels, LLM grading settings).
+- `utils.py` - Username/password generators for student accounts, `slugify()` for URL-friendly topic slugs.
+- `llm_grading.py` - LLM-based grading for free-text quiz answers (`fill_blank`, `short_answer`). Supports Anthropic cloud and local Ollama. Rate-limited, with automatic fallback on errors.
 
 ### Database Schema (SQLite)
-Key tables: `admin`, `klasse` (class), `student`, `task` (Thema/topic with optional topic-level quiz), `subtask` (Aufgabe/task with optional per-task quiz), `material` (links/files), `student_task` (per-class assignment), `quiz_attempt` (quiz results), `unterricht` (lesson attendance/evaluation).
+Key tables: `admin`, `klasse` (class), `student`, `student_klasse` (many-to-many), `task` (Thema/topic with optional topic-level quiz), `subtask` (Aufgabe/task with optional per-task quiz), `material` (links/files), `student_task` (per-class assignment, has `current_subtask_id`), `student_subtask` (per-task completion), `subtask_visibility` (per-student/class task visibility), `quiz_attempt` (quiz results), `unterricht` (lesson attendance/evaluation), `analytics_events` (activity logging), `llm_usage` (LLM rate limiting).
 
-Student-class is many-to-many. Each student has one active topic per class. Topics have tasks (subtasks) with optional quizzes (JSON in `quiz_json` column on both `task` and `subtask` tables).
+Each student has one active topic per class. Topics have tasks (subtasks) with optional quizzes (JSON in `quiz_json` column on both `task` and `subtask` tables).
 
 ### Template Structure
 - `templates/admin/` - Teacher interface (class/student/task management, lesson tracking)
@@ -91,8 +87,45 @@ In commit messages and docs, use the **UI terminology** (Thema/topic, Aufgabe/ta
 - German terminology in UI: Klasse (class), Schüler (student), Thema (topic), Aufgabe (task)
 - Student usernames are auto-generated (adjective+animal, e.g., "happypanda")
 - Student passwords follow cvcvcvnn pattern (e.g., "bacado42")
-- Quiz JSON format: `{"questions": [{"text": "...", "options": ["..."], "correct": [0, 1]}]}`
+- Quiz JSON format supports three question types:
+  - Multiple choice (default): `{"text": "...", "options": ["..."], "correct": [0, 1]}`
+  - Fill-in-blank: `{"type": "fill_blank", "text": "Die Hauptstadt ist ___.", "answers": ["Berlin", "berlin"]}`
+  - Short answer (LLM-graded): `{"type": "short_answer", "text": "Erkläre...", "rubric": "Key concepts..."}`
 - Quiz images (optional): `"image": "/path/to/img.png"` on questions, `{"text": "...", "image": "..."}` for options
+
+### Student URL Structure (Slug-Based)
+
+Student-facing routes use human-readable slugs instead of numeric DB IDs. Slugs are computed on-the-fly via `slugify(task['name'])` — not stored in the DB.
+
+| URL pattern | Route function | Purpose |
+|-------------|---------------|---------|
+| `/schueler` | `student_dashboard` | Dashboard |
+| `/schueler/thema/<slug>` | `student_klasse` | Topic view (was `/schueler/klasse/<id>`) |
+| `/schueler/thema/<slug>?aufgabe=<pos>` | (same) | Specific task by 1-based position (was `?subtask_id=<id>`) |
+| `/schueler/thema/<slug>/aufgabe/<pos>` | `student_toggle_subtask` | POST: toggle task completion |
+| `/schueler/thema/<slug>/quiz` | `student_quiz` | Topic-level quiz |
+| `/schueler/thema/<slug>/aufgabe-<pos>/quiz` | `student_quiz_subtask` | Per-task quiz |
+| `/schueler/thema/<slug>/quiz-ergebnis` | `student_quiz_result` | View topic quiz result |
+| `/schueler/thema/<slug>/aufgabe-<pos>/quiz-ergebnis` | `student_quiz_result_subtask` | View task quiz result |
+
+**Key helpers in `app.py`:**
+- `_resolve_student_topic(student_id, slug)` → resolves slug to `(task, klasse)` by iterating student's classes
+- `_resolve_subtask_by_position(subtasks, position)` → returns subtask at 1-based position
+- `_handle_quiz(...)` → shared GET/POST quiz logic for both topic and subtask quizzes
+- `_build_display_quiz(quiz)` → transforms quiz JSON (`text`/`options`) to template format (`question`/`answers`)
+
+**Jinja2 filter:** `{{ task.name|slugify }}` available in all templates for generating slug URLs.
+
+**When adding new student routes:** Use slug/position pattern, resolve to numeric IDs internally for DB operations. Never expose `student_task.id`, `subtask.id`, or `klasse.id` in student-facing URLs.
+
+### Progress Dots and Quiz Dots
+
+The task page shows progress dots: `[task] [?] [task] [task] [?] [topic-quiz?]`
+
+- **Task dots** (`.dot.dot-subtask`): gray (incomplete), green (completed), blue ring (current)
+- **Subtask quiz dots** (`.dot.dot-subtask-quiz`): smaller (1.25rem), gray (locked — task not done), amber `.available` (task done, quiz not passed), green `.completed` (passed)
+- **Topic quiz dot** (`.dot.dot-quiz`): amber (available), green (passed)
+- Progress text ("X von Y Aufgaben erledigt") counts only `.dot-subtask` elements, not quiz dots
 
 ## Common Issues and Solutions
 

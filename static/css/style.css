@@ -1079,24 +1079,6 @@ tr.unsaved-row td {
    Based on hybrid mockup design
    ============================================ */
 
-/* Breadcrumb Navigation */
-.breadcrumb-nav {
-    font-size: 0.875rem;
-    color: var(--gray-500);
-}
-
-.breadcrumb-nav a {
-    color: var(--gray-500);
-    text-decoration: none;
-}
-
-.breadcrumb-nav a:hover {
-    color: var(--gray-900);
-}
-
-.breadcrumb-nav .separator {
-    margin: 0 0.5rem;
-}
 
 /* Main Content Card */
 .content-card {
@@ -1122,14 +1104,6 @@ tr.unsaved-row td {
     margin-bottom: 0.5rem;
 }
 
-.topic-meta {
-    font-size: 0.875rem;
-    color: var(--gray-500);
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    margin-bottom: 1.5rem;
-}
 
 /* Purpose Banner */
 .purpose {
@@ -1252,15 +1226,25 @@ tr.unsaved-row td {
     background: #10b981;
 }
 
-/* Partial: subtask done but quiz pending (amber/yellow) */
-.dot.partial {
+/* Subtask quiz dot (smaller than task dots) */
+.dot.dot-subtask-quiz {
+    width: 1.25rem;
+    height: 1.25rem;
+    background: #d1d5db;
+    color: white;
+    font-size: 0.7rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.dot.dot-subtask-quiz.available {
     background: #f59e0b;
 }
 
-.dot.partial.current {
-    background: #f59e0b;
-    transform: scale(1.2);
-    box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.3);
+.dot.dot-subtask-quiz.completed {
+    background: #10b981;
 }
 
 /* Quiz images */
@@ -1842,5 +1826,11 @@ tr.unsaved-row td {
 
     .dot.dot-quiz {
         font-size: 1rem;  /* Scale quiz text with dot size */
+    }
+
+    .dot.dot-subtask-quiz {
+        width: 36px;
+        height: 36px;
+        font-size: 0.85rem;
     }
 }

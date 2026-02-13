@@ -27,10 +27,11 @@
         <span class="badge badge-warning mb-1">⭐ Bonusthema</span>
         {% endif %}
 
-        <p class="text-muted mb-1">{{ task.fach }} · {{ task.stufe }}</p>
-
-        {% if task.lernziel %}
-        <div class="mb-1"><strong>🎯 Lernziel:</strong> <span class="markdown-content">{{ task.lernziel | markdown }}</span></div>
+        {% if task.next_task_preview %}
+        <div class="mb-1 text-muted">📝 Nächste Aufgabe: {{ task.next_task_preview }}</div>
+        {% elif task.abgeschlossen %}
+        {% else %}
+        <div class="mb-1 text-muted">📝 Alle Aufgaben erledigt</div>
         {% endif %}
 
         <!-- Progress -->
@@ -47,7 +48,7 @@
         </div>
         {% endif %}
 
-        <a href="{{ url_for('student_klasse', klasse_id=klasse.id) }}" class="btn btn-primary">
+        <a href="{{ url_for('student_klasse', slug=task.name|slugify) }}" class="btn btn-primary">
             {% if task.abgeschlossen %}Details ansehen{% else %}Weiter lernen →{% endif %}
         </a>
         {% else %}

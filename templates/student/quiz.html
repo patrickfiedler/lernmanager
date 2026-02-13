@@ -1,19 +1,15 @@
 {% extends 'base.html' %}
 
-{% block title %}{% if subtask_id %}Aufgaben-Quiz{% else %}Quiz{% endif %}: {{ task.name }} - Lernmanager{% endblock %}
+{% block title %}{% if position %}Aufgaben-Quiz{% else %}Quiz{% endif %}: {{ task.name }} - Lernmanager{% endblock %}
 
 {% block content %}
 <div class="flex flex-between flex-center mb-2">
-    <h1>❓ {% if subtask_id %}Aufgaben-Quiz{% else %}Quiz: {{ task.name }}{% endif %}</h1>
-    {% if subtask_id and klasse_id %}
-    <a href="{{ url_for('student_klasse', klasse_id=klasse_id) }}" class="btn btn-secondary">← Abbrechen</a>
-    {% else %}
-    <a href="{{ url_for('student_dashboard') }}" class="btn btn-secondary">← Abbrechen</a>
-    {% endif %}
+    <h1>❓ {% if position %}Aufgaben-Quiz{% else %}Quiz: {{ task.name }}{% endif %}</h1>
+    <a href="{{ url_for('student_klasse', slug=slug) }}" class="btn btn-secondary">← Abbrechen</a>
 </div>
 
 <div class="card mb-2">
-    {% if not subtask_id %}
+    {% if not position %}
     <p><strong>🎯 Lernziel:</strong> {{ task.lernziel or 'Nicht angegeben' }}</p>
     {% endif %}
     {% set total = quiz.questions|length %}
@@ -21,7 +17,7 @@
     <p class="text-muted">Du brauchst mindestens {{ min_richtig }} von {{ total }} richtigen Antworten, um das Quiz zu bestehen.</p>
 </div>
 
-<form method="POST" action="{{ url_for('student_quiz', student_task_id=student_task_id, subtask_id=subtask_id) }}">
+<form method="POST" action="{% if position %}{{ url_for('student_quiz_subtask', slug=slug, position=position) }}{% else %}{{ url_for('student_quiz', slug=slug) }}{% endif %}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <!-- Hidden fields for question/answer order mapping -->
     <input type="hidden" name="question_order" value="{{ question_order }}">
