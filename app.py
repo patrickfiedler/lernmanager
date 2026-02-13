@@ -1098,6 +1098,26 @@ def admin_passwort():
     return render_template('admin/passwort.html')
 
 
+# ============ Admin: Quiz Answer Review ============
+
+@app.route('/admin/quiz-antworten')
+@admin_required
+def admin_quiz_antworten():
+    """Review text-based quiz answers (fill_blank, short_answer)."""
+    filter_mode = request.args.get('filter', 'review')
+    klasse_id = request.args.get('klasse_id', type=int)
+    only_fallback = (filter_mode == 'review')
+
+    answers = models.get_text_quiz_answers(klasse_id=klasse_id, only_fallback=only_fallback)
+    klassen = models.get_all_klassen()
+
+    return render_template('admin/quiz_antworten.html',
+                         answers=answers,
+                         klassen=klassen,
+                         filter_mode=filter_mode,
+                         klasse_id=klasse_id)
+
+
 # ============ Admin: Error Logs ============
 
 @app.route('/admin/errors')

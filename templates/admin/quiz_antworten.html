@@ -1,0 +1,91 @@
+{% extends 'base.html' %}
+
+{% block title %}Quiz-Prüfung - Lernmanager{% endblock %}
+
+{% block content %}
+<h1>Quiz-Prüfung</h1>
+
+<!-- Filter -->
+<div class="card mb-2">
+    <form method="GET" class="flex flex-between flex-center gap-1">
+        <div class="flex gap-1 flex-center">
+            <label for="filter"><strong>Anzeige:</strong></label>
+            <select name="filter" id="filter">
+                <option value="review" {{ 'selected' if filter_mode == 'review' }}>Zur Prüfung (Fallback)</option>
+                <option value="all" {{ 'selected' if filter_mode == 'all' }}>Alle Textantworten</option>
+            </select>
+            <label for="klasse_id"><strong>Klasse:</strong></label>
+            <select name="klasse_id" id="klasse_id">
+                <option value="">Alle Klassen</option>
+                {% for k in klassen %}
+                    <option value="{{ k.id }}" {{ 'selected' if klasse_id == k.id }}>{{ k.name }}</option>
+                {% endfor %}
+            </select>
+            <button type="submit" class="btn btn-primary btn-sm">Filtern</button>
+        </div>
+        <div>
+            <strong>{{ answers|length }}</strong> Antwort(en)
+        </div>
+    </form>
+</div>
+
+<!-- Answers Table -->
+{% if answers %}
+<div class="card">
+    <table class="table">
+        <thead>
+            <tr>
+                <th style="width: 130px;">Datum</th>
+                <th>Schüler</th>
+                <th>Klasse</th>
+                <th>Thema / Aufgabe</th>
+                <th>Frage</th>
+                <th>Antwort</th>
+                <th style="width: 80px;">Quelle</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for a in answers %}
+            <tr>
+                <td style="font-size: 0.85rem;">{{ a.timestamp[:16] }}</td>
+                <td>{{ a.student_name }}</td>
+                <td>{{ a.klasse_name }}</td>
+                <td>
+                    {{ a.task_name }}{% if a.subtask_name %} / {{ a.subtask_name }}{% endif %}
+                </td>
+                <td style="font-size: 0.9rem;">{{ a.question_text }}</td>
+                <td>
+                    {% if a.correct %}
+                        <span title="Richtig">&#x2705;</span>
+                    {% else %}
+                        <span title="Falsch">&#x274C;</span>
+                    {% endif %}
+                    {{ a.student_answer }}
+                    {% if a.feedback %}
+                        <div style="font-size: 0.8rem; color: #666; margin-top: 0.25rem;">{{ a.feedback }}</div>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if a.source == 'fallback' %}
+                        <span class="badge badge-warning">Fallback</span>
+                    {% elif a.source == 'llm' %}
+                        <span class="badge badge-info">LLM</span>
+                    {% elif a.source == 'match' %}
+                        <span class="badge badge-success">Treffer</span>
+                    {% elif a.source == 'empty' %}
+                        <span class="badge badge-danger">Leer</span>
+                    {% else %}
+                        <span class="badge badge-secondary">{{ a.source }}</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="card text-center text-muted">
+    <p>Keine Textantworten gefunden.</p>
+</div>
+{% endif %}
+{% endblock %}

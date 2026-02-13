@@ -1932,6 +1932,98 @@ def has_passed_subtask_quiz(student_task_id, subtask_id):
         return row is not None
 
 
+def get_text_quiz_answers(klasse_id=None, only_fallback=False):
+    """Get all text-based quiz answers (fill_blank, short_answer) for admin review.
+
+    Returns flat list of dicts, one per text answer (not per attempt).
+    Filters: klasse_id narrows to one class, only_fallback shows ungraded answers only.
+    """
+    with db_session() as conn:
+        sql = '''
+            SELECT qa.id as attempt_id, qa.timestamp, qa.antworten_json,
+                   qa.subtask_id, qa.student_task_id,
+                   s.vorname, s.nachname, s.id as student_id,
+                   k.name as klasse_name, k.id as klasse_id,
+                   t.name as task_name, t.quiz_json as task_quiz_json,
+                   sub.beschreibung as subtask_name, sub.quiz_json as subtask_quiz_json
+            FROM quiz_attempt qa
+            JOIN student_task st ON qa.student_task_id = st.id
+            JOIN student s ON st.student_id = s.id
+            JOIN klasse k ON st.klasse_id = k.id
+            JOIN task t ON st.task_id = t.id
+            LEFT JOIN subtask sub ON qa.subtask_id = sub.id
+            WHERE qa.antworten_json IS NOT NULL
+        '''
+        params = []
+        if klasse_id:
+            sql += ' AND k.id = ?'
+            params.append(klasse_id)
+        sql += ' ORDER BY qa.timestamp DESC LIMIT 500'
+
+        rows = conn.execute(sql, params).fetchall()
+
+    results = []
+    for row in rows:
+        row = dict(row)
+        try:
+            antworten = json.loads(row['antworten_json'])
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+        # Determine which quiz JSON to use for question lookup
+        if row['subtask_id'] and row['subtask_quiz_json']:
+            quiz_json_str = row['subtask_quiz_json']
+        elif row['task_quiz_json']:
+            quiz_json_str = row['task_quiz_json']
+        else:
+            quiz_json_str = None
+
+        try:
+            quiz = json.loads(quiz_json_str) if quiz_json_str else None
+        except (json.JSONDecodeError, TypeError):
+            quiz = None
+
+        questions = quiz.get('questions', []) if quiz else []
+
+        for q_idx_str, answer in antworten.items():
+            # Skip MC answers (stored as lists)
+            if not isinstance(answer, dict) or 'text' not in answer:
+                continue
+
+            source = answer.get('source', '')
+            if only_fallback and source != 'fallback':
+                continue
+
+            # Look up question text by index
+            try:
+                q_idx = int(q_idx_str)
+                question = questions[q_idx] if q_idx < len(questions) else None
+            except (ValueError, IndexError):
+                question = None
+
+            question_text = question.get('text', '?') if question else '(Frage nicht mehr verfügbar)'
+            question_type = question.get('type', 'fill_blank') if question else '?'
+
+            results.append({
+                'attempt_id': row['attempt_id'],
+                'timestamp': row['timestamp'],
+                'student_name': f"{row['vorname']} {row['nachname']}",
+                'student_id': row['student_id'],
+                'klasse_name': row['klasse_name'],
+                'klasse_id': row['klasse_id'],
+                'task_name': row['task_name'],
+                'subtask_name': row['subtask_name'],
+                'question_text': question_text,
+                'question_type': question_type,
+                'student_answer': answer.get('text', ''),
+                'correct': answer.get('correct', False),
+                'feedback': answer.get('feedback', ''),
+                'source': source,
+            })
+
+    return results
+
+
 # ============ Lesson functions ============
 
 def create_or_get_unterricht(klasse_id, datum):
