@@ -60,7 +60,7 @@ def _call_llm(question_text, expected_or_rubric, student_answer):
         return None
     text = response.content[0].text.strip()
     if not text:
-        print(f"LLM grading: empty text in response (stop_reason={response.stop_reason})", file=sys.stderr)
+        print(f"LLM grading: empty response (stop_reason={response.stop_reason})", file=sys.stderr)
         return None
 
     # Strip markdown code fences (LLMs often wrap JSON in ```json ... ```)
@@ -69,12 +69,9 @@ def _call_llm(question_text, expected_or_rubric, student_answer):
         text = text.rsplit('```', 1)[0]  # remove trailing ```
         text = text.strip()
 
-    print(f"LLM grading response: {text[:200]}", file=sys.stderr)
-
     # Parse JSON — if it fails, the answer can't be graded
     result = json.loads(text)
     if "correct" not in result or "feedback" not in result:
-        print(f"LLM grading: response missing 'correct' or 'feedback' keys", file=sys.stderr)
         return None
     return {"correct": bool(result["correct"]), "feedback": str(result["feedback"])}
 
