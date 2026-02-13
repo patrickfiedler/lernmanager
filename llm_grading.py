@@ -5,6 +5,7 @@ Only question text, rubric, and student answer are sent to the API — never any
 """
 
 import json
+import sys
 import config
 import models
 
@@ -83,9 +84,11 @@ def grade_answer(question_text, expected_or_rubric, student_answer, student_id=N
     try:
         llm_response = _call_llm(question_text, expected_or_rubric, student_answer)
         if llm_response is None:
+            print("LLM grading: response was not valid JSON", file=sys.stderr)
             return FALLBACK_RESULT
         models.record_llm_usage(student_id, 'llm_grading', 0)
         llm_response["source"] = "llm"
         return llm_response
-    except Exception:
+    except Exception as e:
+        print(f"LLM grading error: {type(e).__name__}: {e}", file=sys.stderr)
         return FALLBACK_RESULT
