@@ -1,0 +1,146 @@
+{
+  "description": "Per-Aufgabe quizzes for topic '3 - Bilder und Pixel verstehen'. Each entry maps to a subtask by reihenfolge. Paste each quiz_json into the subtask quiz field in the admin interface.",
+
+  "subtask_quizzes": [
+    {
+      "reihenfolge": 0,
+      "aufgabe": "Teilaufgabe 1: Pixel entdecken",
+      "quiz": {
+        "questions": [
+          {
+            "text": "Wofür steht das Wort 'Pixel'?",
+            "type": "fill_blank",
+            "answers": ["Picture Element", "picture element", "Bildpunkt", "bildpunkt", "Bildelement", "bildelement"]
+          },
+          {
+            "text": "Was passiert, wenn man ein digitales Bild sehr stark vergrößert?",
+            "options": [
+              "Das Bild wird automatisch schärfer",
+              "Man sieht die einzelnen Pixel als kleine Quadrate",
+              "Das Bild bekommt mehr Farben",
+              "Die Datei wird größer"
+            ],
+            "correct": [1]
+          },
+          {
+            "text": "Erkläre mit eigenen Worten: Was ist ein Pixel?",
+            "type": "short_answer",
+            "rubric": "Ein Pixel ist der kleinste Bildpunkt eines digitalen Bildes. Es ist ein kleines Quadrat mit einer einzigen Farbe. Viele Pixel nebeneinander ergeben ein Bild."
+          }
+        ]
+      }
+    },
+    {
+      "reihenfolge": 1,
+      "aufgabe": "Teilaufgabe 2: Eigenes Pixel-Bild erstellen",
+      "quiz": {
+        "questions": [
+          {
+            "text": "Ein Pixel-Bild hat die Größe 16x16. Wie viele Pixel hat es insgesamt?",
+            "type": "fill_blank",
+            "answers": ["256", "256 Pixel"]
+          },
+          {
+            "text": "Welche Aussagen über Pixel-Art stimmen?",
+            "options": [
+              "Pixel-Art besteht aus sichtbaren, großen Pixeln",
+              "Pixel-Art kann nur schwarz-weiß sein",
+              "Mehr Pixel machen Pixel-Art detaillierter",
+              "Pixel-Art braucht immer eine Kamera"
+            ],
+            "correct": [0, 2]
+          },
+          {
+            "text": "Was ist der Unterschied zwischen einem 16x16 und einem 32x32 Pixel-Bild? Was sind Vor- und Nachteile?",
+            "type": "short_answer",
+            "rubric": "32x32 hat mehr Pixel (1024 statt 256), dadurch mehr Details möglich und glattere Formen. Nachteil: mehr Aufwand beim Zeichnen, größere Datei. 16x16 ist einfacher und schneller, aber kantiger und weniger detailliert."
+          }
+        ]
+      }
+    },
+    {
+      "reihenfolge": 2,
+      "aufgabe": "Teilaufgabe 3: Bildgröße und Auflösung",
+      "quiz": {
+        "questions": [
+          {
+            "text": "Was bedeutet 'Auflösung' bei einem digitalen Bild?",
+            "options": [
+              "Wie schnell das Bild geladen wird",
+              "Wie viele Pixel das Bild hat (Breite x Höhe)",
+              "Wie groß die Datei ist",
+              "Wie alt das Bild ist"
+            ],
+            "correct": [1]
+          },
+          {
+            "text": "Ein Bild hat 1920 Pixel Breite und 1080 Pixel Höhe. Wie viele Pixel hat es insgesamt?",
+            "type": "fill_blank",
+            "answers": ["2073600", "2.073.600", "2073600 Pixel", "2.073.600 Pixel"]
+          },
+          {
+            "text": "Warum hat ein Bild mit mehr Pixeln meistens auch eine größere Datei?",
+            "type": "short_answer",
+            "rubric": "Jedes Pixel speichert Farbinformationen. Mehr Pixel bedeuten mehr Daten, die gespeichert werden müssen, deshalb wird die Datei größer."
+          }
+        ]
+      }
+    },
+    {
+      "reihenfolge": 3,
+      "aufgabe": "Teilaufgabe 4: Bilder bearbeiten",
+      "quiz": {
+        "questions": [
+          {
+            "text": "Was bedeutet 'Zuschneiden' eines Bildes?",
+            "type": "fill_blank",
+            "answers": ["Einen Ausschnitt auswählen", "einen Ausschnitt auswählen", "Ränder entfernen", "ränder entfernen", "Ausschnitt wählen", "Teile des Bildes entfernen", "Bild auf einen Ausschnitt verkleinern"]
+          },
+          {
+            "text": "Warum sollte man vor dem Bearbeiten immer eine Kopie vom Original machen?",
+            "type": "short_answer",
+            "rubric": "Damit man das Originalbild noch hat, falls bei der Bearbeitung etwas schief geht oder das Ergebnis nicht gefällt. Man kann dann nochmal von vorne anfangen."
+          },
+          {
+            "text": "Welches Dateiformat eignet sich am besten, wenn man ein bearbeitetes Bild ohne Qualitätsverlust speichern möchte?",
+            "options": [
+              "PNG",
+              "JPG",
+              "GIF",
+              "TXT"
+            ],
+            "correct": [0]
+          }
+        ]
+      }
+    },
+    {
+      "reihenfolge": 4,
+      "aufgabe": "Teilaufgabe 5: Filter und Effekte",
+      "quiz": {
+        "questions": [
+          {
+            "text": "Was macht ein Weichzeichnen-Filter mit einem Bild?",
+            "options": [
+              "Er macht das Bild schärfer",
+              "Er macht das Bild unscharf und weicher",
+              "Er macht das Bild schwarz-weiß",
+              "Er dreht das Bild"
+            ],
+            "correct": [1]
+          },
+          {
+            "text": "Nenne zwei verschiedene Filter, die du in Paint.NET oder GIMP ausprobiert hast, und beschreibe kurz, was sie mit dem Bild machen.",
+            "type": "short_answer",
+            "rubric": "Zwei verschiedene Filter nennen (z.B. Schwarzweiß, Weichzeichnen, Ölgemälde, Leuchten, Sepia, Schärfen) und jeweils kurz beschreiben was der Filter bewirkt."
+          },
+          {
+            "text": "Filter verändern die ___ eines Bildes nach bestimmten Regeln.",
+            "type": "fill_blank",
+            "answers": ["Pixel", "pixel", "Bildpunkte", "bildpunkte"]
+          }
+        ]
+      }
+    }
+  ]
+}
