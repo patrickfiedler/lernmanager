@@ -121,7 +121,6 @@
                 <div class="quiz-header">❓ Aufgaben-Quiz</div>
                 <p>Beantworte die Fragen, bevor du zur nächsten Aufgabe weitergehst.</p>
                 <a href="{{ url_for('student_quiz', student_task_id=task.id, subtask_id=active_subtask.id) }}" class="btn btn-primary">Quiz starten</a>
-                <p class="text-muted mt-1"><small>Du brauchst mindestens 70% richtige Antworten zum Bestehen.</small></p>
             </div>
             {% endif %}
 
@@ -226,7 +225,6 @@
         </div>
         {% endif %}
         <a href="{{ url_for('student_quiz', student_task_id=task.id) }}" class="btn btn-primary mt-1">Quiz starten</a>
-        <p class="text-muted mt-1"><small>Du brauchst mindestens 70% richtige Antworten zum Bestehen.</small></p>
     </div>
     {% elif task.abgeschlossen %}
     <div class="alert alert-success mt-2">

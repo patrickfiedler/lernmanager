@@ -86,7 +86,7 @@
         <div class="form-group">
             <label>
                 <input type="checkbox" name="subtask_quiz_required" value="1" {% if task.subtask_quiz_required %}checked{% endif %}>
-                Aufgaben-Quiz muss bestanden werden (70%) bevor nächste Aufgabe freigeschaltet wird
+                Aufgaben-Quiz muss bestanden werden (ca. 70%) bevor nächste Aufgabe freigeschaltet wird
             </label>
         </div>
         <input type="hidden" name="quiz_json" value="{{ task.quiz_json or '' }}">

@@ -1895,8 +1895,9 @@ def check_task_completion(student_task_id):
 
 def save_quiz_attempt(student_task_id, punkte, max_punkte, antworten_json, subtask_id=None):
     """Save a quiz attempt. subtask_id=None means topic-level quiz."""
-    # UX Tier 1: Reduced threshold from 80% to 70% to reduce anxiety
-    bestanden = (punkte / max_punkte) >= 0.7 if max_punkte > 0 else False
+    # Pass threshold: floor(70%) of max points, minimum 1
+    min_punkte = max(1, int(max_punkte * 0.7)) if max_punkte > 0 else 1
+    bestanden = punkte >= min_punkte if max_punkte > 0 else False
     with db_session() as conn:
         cursor = conn.execute('''
             INSERT INTO quiz_attempt (student_task_id, subtask_id, punkte, max_punkte, bestanden, antworten_json)

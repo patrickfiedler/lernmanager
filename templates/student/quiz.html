@@ -16,7 +16,9 @@
     {% if not subtask_id %}
     <p><strong>🎯 Lernziel:</strong> {{ task.lernziel or 'Nicht angegeben' }}</p>
     {% endif %}
-    <p class="text-muted">Du brauchst mindestens 70% richtige Antworten, um das Quiz zu bestehen.</p>
+    {% set total = quiz.questions|length %}
+    {% set min_richtig = [1, (total * 0.7)|int]|max %}
+    <p class="text-muted">Du brauchst mindestens {{ min_richtig }} von {{ total }} richtigen Antworten, um das Quiz zu bestehen.</p>
 </div>
 
 <form method="POST" action="{{ url_for('student_quiz', student_task_id=student_task_id, subtask_id=subtask_id) }}">

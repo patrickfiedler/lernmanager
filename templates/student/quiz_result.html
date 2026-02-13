@@ -11,7 +11,8 @@
     <h1>💪 Fast geschafft!</h1>
     <p style="font-size: 1.5rem;">Du hast {{ punkte }} von {{ max_punkte }} Punkten erreicht.</p>
     {% set prozent = ((punkte / max_punkte) * 100)|int %}
-    <p>Du brauchst mindestens 70% ({{ (max_punkte * 0.7)|round(0, 'ceil')|int }} Punkte) zum Bestehen.</p>
+    {% set min_richtig = [1, (max_punkte * 0.7)|int]|max %}
+    <p>Du brauchst mindestens {{ min_richtig }} von {{ max_punkte }} richtigen Antworten zum Bestehen.</p>
 
     {% if previous_attempt %}
         {% set previous_prozent = ((previous_attempt.punkte / previous_attempt.max_punkte) * 100)|int %}
@@ -60,19 +61,20 @@
         {% for answer in question.answers %}
         {% set was_selected = loop.index0 in user_answer %}
         {% set is_correct_option = loop.index0 in question.correct %}
-        <div class="quiz-option {% if was_selected %}selected{% endif %}" style="{% if was_selected and is_correct_option %}border-left: 4px solid #28a745; background: #e8f5e9;{% elif was_selected and not is_correct_option %}border-left: 4px solid #dc3545; background: #fde8e8;{% elif is_correct_option %}border-left: 4px solid #28a745; opacity: 0.7;{% endif %} padding-left: 1rem;">
-            {% if was_selected and is_correct_option %}✅{% elif was_selected and not is_correct_option %}❌{% elif is_correct_option %}✅{% else %}○{% endif %}
+        <div class="quiz-option" style="border-left: 4px solid {% if was_selected and is_correct_option %}var(--success-color, #28a745){% elif was_selected and not is_correct_option %}var(--danger-color, #dc3545){% elif is_correct_option %}var(--success-color, #28a745){% else %}var(--gray-200, #e5e7eb){% endif %}; padding-left: 1rem; {% if was_selected and is_correct_option %}background: #e8f5e9;{% elif was_selected and not is_correct_option %}background: #fde8e8;{% elif is_correct_option %}background: #e8f5e9; opacity: 0.7;{% endif %}">
+            {% if is_correct_option %}✅{% elif was_selected %}❌{% endif %}
             {% if answer is mapping %}
             <span>{{ answer.text }}</span>
             {% if answer.image %}<img src="{{ answer.image }}" alt="{{ answer.text }}" class="quiz-option-image">{% endif %}
             {% else %}
             <span>{{ answer }}</span>
             {% endif %}
+            {% if was_selected %}<span style="margin-left: auto; font-size: 0.8rem; color: {% if is_correct_option %}var(--success-color, #28a745){% else %}var(--danger-color, #dc3545){% endif %}; font-weight: 500;">Deine Antwort</span>{% endif %}
         </div>
         {% endfor %}
-        <p style="margin-top: 0.5rem; font-weight: bold;" class="{% if is_correct %}text-success{% else %}text-danger{% endif %}">
-            {% if is_correct %}✅ Richtig!{% else %}❌ Leider falsch.{% endif %}
-        </p>
+        <div class="quiz-option" style="border-left: 4px solid var(--info-color, #17a2b8); padding-left: 1rem; background: #e8f4fd;">
+            💬 {% if is_correct %}Richtig!{% else %}Leider falsch.{% endif %}
+        </div>
         {% endif %}
     </div>
     {% endfor %}
