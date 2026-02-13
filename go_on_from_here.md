@@ -1,27 +1,29 @@
 # Lernmanager - Current State (2026-02-13)
 
-## Latest Session (2026-02-13) — Cleanup & Push
+## Latest Session (2026-02-13) — Topic Progression Plan + Format Docs
 
-All changes pushed to origin. No migration needed, no new dependencies.
+### Designed (not yet implemented)
+- **Topic auto-progression & sidequests** — full plan at `~/.claude/plans/fuzzy-wiggling-unicorn.md`
+  - Class-wide topic queue (admin defines order, students self-advance)
+  - Student clicks "Start next topic" after completing current one
+  - Sidequests: unlimited extra topics alongside primary, assigned by admin
+  - Schema migration needed: drop UNIQUE on student_task, add `rolle` column, new `topic_queue` table
+  - Backward compatible: classes without a queue work as before
 
-### Commits Pushed
-- `c2305c0` fix: harmonize quiz result display and use floor-based pass threshold
-- `d4ac08e` feat: support subtask quizzes in import/export, add JSON format docs
-- `bce06d0` feat: declutter student view, add quiz dots, use slug-based URLs
-- `ba281e0` chore: add favicon
-- `25c41eb` chore: add project docs, migration scripts, and test data
+### Curriculum spec integrated
+- **`docs/2026-02-13_lernmanager_curriculum_spec.md`** — from content planning project. Defines learning paths (Wanderweg/Bergweg/Gipfeltour), graded artifacts, spaced repetition.
+- **`todo.md`** — added structured checklists for: learning paths (DB schema, import, student UI, progress tracking), graded artifacts, spaced repetition
+- **`docs/task_json_format.md`** — added learning paths section, `path`/`path_model`/`graded_artifact` fields, updated subtask field reference, updated example JSON to use new format (h3 headings, section markers, path fields). Removed old PFLICHT/FREIWILLIG pattern.
+- **`CLAUDE.md`** — added "Content Formatting" + "Learning Paths" subsections under Conventions
 
-### Cleanup Done
-- Deleted 7 temp files (debug scripts, screenshots, temp exports, obsolete docs)
-- Committed docs/, migration scripts, and test data
-
-### Not Yet Done
+### Still Pending
 - **Deploy to server** — run `update.sh` on the server
 - **Manual testing** — slug URLs, quiz dots, subtask toggle flow need browser testing
+- No commits made this session — all doc changes are uncommitted
 
 ## Previous Sessions
 
-- **2026-02-13 (earlier)**: Student view improvements (slug URLs, quiz dots, declutter), admin quiz answer review page
+- **2026-02-13 (earlier)**: Cleanup & push, student view improvements (slug URLs, quiz dots, declutter), admin quiz answer review page
 - **2026-02-12**: Per-Aufgabe materials, per-Aufgabe quizzes, LLM-graded quizzes, auto-attendance
 - **2026-02-10**: Bug fixes + performance
 - **2026-02-07**: Research — learning paths, quiz evolution, DSGVO
@@ -33,6 +35,9 @@ Task content is being restructured outside the app using the JSON export/import 
 
 ## Key References
 
-- **Architecture & conventions:** `CLAUDE.md` (student URL structure, quiz dots, terminology)
-- **Open tasks:** `todo.md` (High Priority: code review, admin simplification)
+- **Architecture & conventions:** `CLAUDE.md` (student URL structure, quiz dots, terminology, content formatting, learning paths)
+- **Curriculum spec:** `docs/2026-02-13_lernmanager_curriculum_spec.md` (learning paths, graded artifacts, spaced repetition)
+- **Content format spec:** `docs/task_json_format.md` (JSON structure, markdown formatting, learning paths fields)
+- **Open tasks:** `todo.md` (learning paths checklist, graded artifacts, spaced repetition, topic progression plan)
+- **Topic progression plan:** `~/.claude/plans/fuzzy-wiggling-unicorn.md`
 - **Quiz evolution research:** `docs/research/2026-02-07_learning_paths_and_quiz_evolution.md`

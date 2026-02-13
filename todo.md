@@ -8,10 +8,11 @@
 ## Bugs
 
 - fix: Make lesson comment saveable without saving student evaluation -> required in case a scheduled lesson does not take place
-- fix: current implementation does not treat compulsory and optional tasks differently, but it should -> clear setting in task editor, obvious in student view (yellow: open compulsory, green: completed, rainbow: optional)
+- ~~fix: compulsory vs optional tasks~~ → superseded by learning paths (path determines required vs. optional)
 
 ## Features
 
+- **Topic auto-progression & sidequests** — plan ready, see `~/.claude/plans/fuzzy-wiggling-unicorn.md`. Topic queue per class, student clicks "Next" to advance, unlimited sidequests. Requires schema migration (drop UNIQUE on student_task, add rolle column, new topic_queue table).
 - add external API to upload log files from scan-folders.ps1 script -> track student progress from files created on school computers
 - **Admin: curriculum alignment page** - Show how topics/tasks map to curriculum learning goals, gaps/overlaps (Priority: Medium)
 
@@ -24,7 +25,7 @@
 - Admin: batch-import students should include app URL with credentials (hardcode or read from config/headers)
 - Admin: allow individual students to see all available tasks (default: only active task)
 - Research better place for student self-evaluation (was: student page bottom)
-- Multiple active tasks per student for contests/short-term work sprints → investigate
+- ~~Multiple active tasks per student for contests/short-term work sprints~~ → covered by topic progression/sidequest plan
 
 ## Subtask Management Enhancements
 
@@ -32,10 +33,71 @@
 - Add "Manage Subtasks" link to admin class detail page
 - Show warning on class subtask config if students have individual overrides
 
-## Learning Paths (Researched, Not Started)
+## Learning Paths (Spec Ready)
 
-See `docs/research/2026-02-07_learning_paths_and_quiz_evolution.md`
-- Learning paths: Wanderweg/Bergweg/Gipfelweg difficulty system with mountain visualization
+Spec: `docs/2026-02-13_lernmanager_curriculum_spec.md`
+Research: `docs/research/2026-02-07_learning_paths_and_quiz_evolution.md`
+
+Three cumulative paths: 🟢 Wanderweg (foundational) ⊂ 🔵 Bergweg (full curriculum) ⊂ ⭐ Gipfeltour (everything).
+Per-task `path` field = lowest path that includes it. Per-task `path_model`: `skip` (lower paths skip) or `depth` (all paths do it, different grading expectations).
+
+### DB Schema
+- [ ] Add `path TEXT` and `path_model TEXT DEFAULT 'skip'` columns to `subtask` table
+- [ ] Add `lernpfad TEXT` to `student` table (student's chosen path, default: `bergweg`)
+- [ ] Migration script for existing data (set all existing subtasks to `path='wanderweg'`)
+
+### Import
+- [ ] `import_task.py`: validate + store `path` and `path_model` fields
+- [ ] `import_task.py`: validate + store `graded_artifact` field (see Graded Artifacts below)
+- [ ] Update `docs/task_json_format.md` field reference tables
+
+### Student UI — Path Selection
+- [ ] Path selection UI (onboarding or settings): student picks Wanderweg/Bergweg/Gipfeltour
+- [ ] Allow upgrading path mid-unit (never downgrading)
+- [ ] Show current path on dashboard
+
+### Student UI — Task Display
+- [ ] Show path markers (🟢/🔵/⭐) on each task dot and in task view
+- [ ] Non-required tasks styled as optional (dimmed, labeled "optional für deinen Weg") — NOT hidden
+- [ ] All tasks always visible regardless of path
+
+### Progress Tracking
+- [ ] `check_task_completion()`: only count path-required tasks for completion
+- [ ] Synthesis quiz: unlock after all required tasks for student's path are done
+- [ ] Progress dots/text: "X von Y" counts only required tasks for student's path
+- [ ] Dashboard progress bar: reflect path-based progress
+
+### Interaction with Existing Features
+- **Learning paths take precedence over task visibility.** If a student has a path set, the path determines required/optional. Admin visibility settings (`subtask_visibility`) are overrides for special cases only.
+- If nothing else is configured, the student's path is the default — no manual visibility setup needed.
+- Students must be able to switch paths easily. Switching path overrides any existing visibility settings.
+- Topic queue (auto-progression plan) and prerequisites can coexist — queue sets class schedule, prerequisites act as guards.
+
+## Graded Artifacts (Spec Ready)
+
+Spec: `docs/2026-02-13_lernmanager_curriculum_spec.md` (Section 3)
+
+Some tasks produce graded digital artifacts (documents, images, Scratch projects). ~20 total across the curriculum.
+
+- [ ] Add `graded_artifact_json TEXT` column to `subtask` table (JSON with `keyword`, `format`, `rubric`)
+- [ ] Student UI: display artifact keyword and accepted formats
+- [ ] Student UI: display grade when available
+- [ ] External API endpoint to receive grades from collection/grading script (overlaps with scan-folders.ps1 API todo)
+- [ ] Admin UI: view/override artifact grades
+
+## Spaced Repetition (Spec Ready)
+
+Spec: `docs/2026-02-13_lernmanager_curriculum_spec.md` (Section 4.3)
+
+Weekly synthesis quiz (~5 questions) drawn from completed task/topic quiz pools. Low-stakes reinforcement.
+
+- [ ] DB: track question exposure history per student (table: `spaced_repetition_history` or similar)
+- [ ] Algorithm: draw from recently completed tasks, prioritize previously incorrect answers
+- [ ] New student route + template for weekly quiz
+- [ ] Dashboard prompt: "Wochenquiz verfügbar" when due
+
+## New Question Types (Future)
+
 - New question types: true/false, matching, ordering
 
 ## UX/Accessibility

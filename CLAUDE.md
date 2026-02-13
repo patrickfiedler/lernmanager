@@ -93,6 +93,33 @@ In commit messages and docs, use the **UI terminology** (Thema/topic, Aufgabe/ta
   - Short answer (LLM-graded): `{"type": "short_answer", "text": "Erkläre...", "rubric": "Key concepts..."}`
 - Quiz images (optional): `"image": "/path/to/img.png"` on questions, `{"text": "...", "image": "..."}` for options
 
+### Content Formatting
+
+**Markdown rendering** (`app.py`, `markdown_filter`): All text fields are rendered as Markdown with extensions `nl2br` (single `\n` = `<br>`), `fenced_code`, `tables`, `sane_lists`.
+
+**Subtask descriptions** follow a structured format:
+- `### Title` (h3 heading — the page uses h1 for the topic name)
+- Emoji section markers: `🎯 Ziel:`, `📋 Aufgabe:`, `💡 Tipp:`, `✅ Fertig wenn:`
+- Numbered lists for work steps, standard markdown `-` for sub-items
+
+**Full format spec**: `docs/task_json_format.md` — also serves as a Claude prompt for generating new content.
+
+### Learning Paths (Planned, not yet implemented)
+
+Curriculum spec: `docs/2026-02-13_lernmanager_curriculum_spec.md`
+
+Three cumulative difficulty paths per student: 🟢 Wanderweg (foundational) ⊂ 🔵 Bergweg (full curriculum) ⊂ ⭐ Gipfeltour (everything).
+
+- Each subtask has a `path` field (`wanderweg`/`bergweg`/`gipfeltour`) = lowest path that includes it
+- `path_model`: `skip` (lower paths skip task entirely) or `depth` (all paths do it, different grading expectations)
+- **All tasks are visible** to all students — non-required tasks are styled as optional, NOT hidden
+- **Learning paths take precedence over `subtask_visibility`**: path is the default; visibility settings are admin overrides for special cases only. Switching paths overrides visibility.
+- Progress completion depends on student's chosen path
+- Graded artifacts: some tasks produce graded files (`graded_artifact` field with `keyword`, `format`, `rubric`)
+- Spaced repetition: weekly quiz from completed question pools (not yet designed)
+
+**DB changes needed** (not yet migrated): `path` + `path_model` on `subtask`, `lernpfad` on `student`, `graded_artifact_json` on `subtask`. See `todo.md` for full checklist.
+
 ### Student URL Structure (Slug-Based)
 
 Student-facing routes use human-readable slugs instead of numeric DB IDs. Slugs are computed on-the-fly via `slugify(task['name'])` — not stored in the DB.

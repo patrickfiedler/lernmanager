@@ -49,9 +49,10 @@ Thema (task)
     "subtask_quiz_required": true,
     "subtasks": [
       {
-        "beschreibung": "**Pixel entdecken:** Öffne ein beliebiges Bild am Computer und zoome stark hinein (400% oder mehr). Was siehst du? Notiere deine Beobachtung.",
+        "beschreibung": "### Pixel entdecken\n\n🎯 Ziel: Du verstehst, was Pixel sind und kannst sie sehen.\n\n📋 Aufgabe:\n1. Öffne ein beliebiges Bild am Computer\n2. Zoome stark hinein (400% oder mehr)\n3. Notiere deine Beobachtung\n\n✅ Fertig wenn: Du hast Pixel gesehen und erklärt was sie sind",
         "reihenfolge": 0,
         "estimated_minutes": 15,
+        "path": "wanderweg",
         "quiz": {
           "questions": [
             {
@@ -68,33 +69,28 @@ Thema (task)
                 "Die Datei wird größer"
               ],
               "correct": [1]
-            },
-            {
-              "text": "Erkläre mit eigenen Worten: Was ist ein Pixel?",
-              "type": "short_answer",
-              "rubric": "Ein Pixel ist der kleinste Bildpunkt eines digitalen Bildes. Es ist ein kleines Quadrat mit einer einzigen Farbe. Viele Pixel nebeneinander ergeben ein Bild."
             }
           ]
         }
       },
       {
-        "beschreibung": "**Bildgröße und Auflösung:** Recherchiere: Was bedeutet Auflösung? Berechne, wie viele Pixel ein Full-HD-Bild (1920×1080) hat.",
+        "beschreibung": "### EVA-Prinzip\n\n🎯 Ziel: Du verstehst das Eingabe-Verarbeitung-Ausgabe-Prinzip.\n\n📋 Aufgabe:\n1. Recherchiere das EVA-Prinzip\n2. Finde 3 Beispiele aus dem Alltag\n3. Erstelle ein Schaubild\n\n✅ Fertig wenn: Dein Schaubild zeigt 3 EVA-Beispiele",
         "reihenfolge": 1,
-        "estimated_minutes": 20,
-        "quiz": {
-          "questions": [
-            {
-              "text": "Ein Bild hat 1920 Pixel Breite und 1080 Pixel Höhe. Wie viele Pixel hat es insgesamt?",
-              "type": "fill_blank",
-              "answers": ["2073600", "2.073.600"]
-            }
-          ]
-        }
+        "estimated_minutes": 45,
+        "path": "bergweg",
+        "path_model": "skip"
       },
       {
-        "beschreibung": "**Bilder bearbeiten:** Öffne ein Foto in Paint.NET oder GIMP. Schneide es zu, ändere die Größe und speichere es als PNG.",
+        "beschreibung": "### Computer-Steckbrief\n\n🎯 Ziel: Du kannst ein Dokument über deinen Computer erstellen.\n\n📋 Aufgabe:\n1. Erstelle ein Textdokument mit Infos über deinen Computer\n2. Beschreibe Hardware und Software\n\nFür eine bessere Note: Ergänze EVA-Beispiele und Netzwerk-Infos.\nFür die beste Note: Füge persönliche Reflexion und Zusatzwissen hinzu.\n\n✅ Fertig wenn: Dein Steckbrief hat mindestens 4 Abschnitte",
         "reihenfolge": 2,
-        "estimated_minutes": 25
+        "estimated_minutes": 45,
+        "path": "wanderweg",
+        "path_model": "depth",
+        "graded_artifact": {
+          "keyword": "computer-steckbrief",
+          "format": [".docx", ".odt"],
+          "rubric": "Prüfe: (1) Pflichtabschnitte vorhanden? (2) Detaillierte Beschreibungen? (3) EVA-Beispiele, Tabellen? (4) Persönliche Reflexion? Vergib Note 1–4."
+        }
       }
     ],
     "materials": [
@@ -143,10 +139,23 @@ Thema (task)
 
 | Feld | Pflicht | Typ | Beschreibung |
 |------|---------|-----|--------------|
-| `beschreibung` | ja | string | Arbeitsauftrag. Markdown erlaubt. Beginne mit `**Titel:**` |
+| `beschreibung` | ja | string | Arbeitsauftrag. Markdown (siehe Formatierung). Beginne mit `### Titel` |
 | `reihenfolge` | nein | integer | Position (0-basiert, Default: Index in der Liste) |
 | `estimated_minutes` | nein | integer | Geschätzte Bearbeitungszeit in Minuten |
+| `path` | ja | string | Niedrigster Lernpfad: `wanderweg`, `bergweg` oder `gipfeltour` |
+| `path_model` | nein | string | `skip` (Default): niedrigere Pfade überspringen. `depth`: alle Pfade, unterschiedliche Erwartungen |
+| `graded_artifact` | nein | object | Bewertetes Artefakt (siehe unten) |
 | `quiz` | nein | object | Quiz für diese Aufgabe (siehe Quiz-Format) |
+
+### Bewertetes Artefakt (graded_artifact)
+
+Nur bei Aufgaben, die ein bewertetes digitales Produkt erzeugen (Dokument, Bild, Scratch-Projekt).
+
+| Feld | Pflicht | Typ | Beschreibung |
+|------|---------|-----|--------------|
+| `keyword` | ja | string | Eindeutiger Bezeichner, muss im Dateinamen vorkommen |
+| `format` | ja | array | Akzeptierte Dateiendungen, z.B. `[".docx", ".odt"]` |
+| `rubric` | ja | string | Bewertungskriterien für KI-Bewertung (Note 1–4) |
 
 ### Material
 
@@ -156,6 +165,31 @@ Thema (task)
 | `pfad` | ja | string | URL oder Dateipfad |
 | `beschreibung` | nein | string | Kurzbeschreibung des Materials |
 | `subtask_indices` | nein | array | Zuordnung zu Aufgaben (Liste von `reihenfolge`-Werten). Ohne Angabe: Material ist bei allen Aufgaben sichtbar. |
+
+## Lernpfade (Learning Paths)
+
+Drei kumulative Schwierigkeitsstufen. Jeder Schüler wählt einen Pfad. Alle Aufgaben sind sichtbar, aber nur die des gewählten Pfads sind Pflicht. **Lernpfade sind der Standard** — ohne weitere Konfiguration bestimmt der Pfad, welche Aufgaben Pflicht sind. Schüler können ihren Pfad jederzeit einfach wechseln; der Pfad überschreibt eventuelle manuelle Sichtbarkeitseinstellungen.
+
+| Pfad | Emoji | Anteil | Beschreibung |
+|------|-------|--------|--------------|
+| `wanderweg` | 🟢 🥾 | ~49% | Grundlagen. Reicht zum Bestehen. |
+| `bergweg` | 🔵 ⛰️ | ~87% | Voller Lehrplan. Empfohlener Pfad. |
+| `gipfeltour` | ⭐ 🏔️ | 100% | Alles. Für maximale Tiefe. |
+
+### Regeln
+
+- **Kumulativ:** Bergweg enthält alle Wanderweg-Aufgaben. Gipfeltour enthält alle Bergweg-Aufgaben.
+- **`path`-Feld** = der niedrigste Pfad, der diese Aufgabe enthält.
+- **`path_model: "skip"`** (Default): Niedrigere Pfade überspringen diese Aufgabe komplett.
+- **`path_model: "depth"`**: Alle Pfade machen diese Aufgabe, aber mit unterschiedlichen Erwartungen. Die Aufgabenbeschreibung enthält gestufte Kriterien ("Für eine bessere Note:", "Für die beste Note:").
+
+### Beispiel
+
+```json
+{"path": "wanderweg"}                          // Alle Pfade machen diese Aufgabe
+{"path": "bergweg", "path_model": "skip"}      // Wanderweg überspringt, Bergweg + Gipfeltour machen es
+{"path": "wanderweg", "path_model": "depth"}   // Alle machen es, Bewertung je nach Pfad unterschiedlich
+```
 
 ## Quiz-Format
 
@@ -213,12 +247,116 @@ Schüler bestehen ein Quiz, wenn sie ca. 70% der Fragen richtig beantworten (abg
 - `rubric`: Bewertungskriterium für die KI-Bewertung. Beschreibe die erwarteten Kernpunkte der Antwort.
 - Die Bewertung erfolgt automatisch per KI (Claude Haiku). Bei Ausfall: Punkt wird gegeben + Hinweis auf Lehrerprüfung.
 
+## Kodierung und Markdown-Formatierung
+
+### Kodierung
+
+- **JSON-Dateien müssen UTF-8 kodiert sein** (ohne BOM)
+- Alle Textfelder (`beschreibung`, `lernziel`, `why_learn_this`, Quiz-Texte) unterstützen UTF-8 einschließlich Emojis
+
+### Unterstütztes Markdown
+
+Die App rendert alle Textfelder als Markdown mit folgenden Erweiterungen:
+
+| Feature | Syntax | Ergebnis |
+|---------|--------|----------|
+| **Fett** | `**Text**` | Fettschrift |
+| *Kursiv* | `*Text*` | Kursiv |
+| Zeilenumbruch | Einfaches `\n` | `<br>` (Zeilenumbruch) |
+| Nummerierte Liste | `1. Schritt eins` | Nummerierte Liste |
+| Aufzählung | `- Punkt eins` | Aufzählung mit Punkt |
+| Tabelle | `\| A \| B \|` | HTML-Tabelle |
+| Überschrift | `## Titel` | Überschrift (h2) |
+| Link | `[Text](URL)` | Klickbarer Link |
+| Code | `` `code` `` | Inline-Code |
+| Codeblock | ` ```code``` ` | Code-Block |
+| Zitat | `> Text` | Eingerücktes Zitat |
+| Trennlinie | `---` | Horizontale Linie |
+
+**Wichtig:** Einfache Zeilenumbrüche (`\n`) werden als `<br>` gerendert. Du brauchst KEINE doppelten Leerzeilen oder zwei Leerzeichen am Zeilenende für Zeilenumbrüche. Schreibe einfach natürlich — jede neue Zeile wird im Browser als Zeilenumbruch angezeigt.
+
+**Hinweis zu Listen:** Verwende Standard-Markdown (`-` oder `1.`) statt Unicode-Bullets (`•`). Markdown-Listen werden als semantisches HTML (`<ul>`, `<ol>`) gerendert und sind besser eingerückt.
+
+### Aufgaben-Format (subtask `beschreibung`)
+
+Jede Aufgabe folgt einer einheitlichen Struktur mit Emoji-Abschnittsmarkern:
+
+```
+### Titel der Aufgabe
+
+🎯 Ziel: Kurze Beschreibung, was der Schüler lernt/kann.
+
+📋 Aufgabe:
+1. Erster Schritt
+2. Zweiter Schritt
+   - Unterpunkt
+   - Unterpunkt
+3. Dritter Schritt
+
+💡 Tipp: Hilfreicher Hinweis für den Schüler
+💡 Tipp: Noch ein Hinweis
+
+✅ Fertig wenn: Klares Kriterium, wann die Aufgabe als erledigt gilt
+```
+
+#### Abschnittsmarker
+
+| Marker | Zweck | Pflicht? |
+|--------|-------|----------|
+| `🎯 Ziel:` | Was der Schüler nach dieser Aufgabe kann | Ja |
+| `📋 Aufgabe:` | Konkrete Arbeitsschritte (nummerierte Liste) | Ja |
+| `💡 Tipp:` | Hilfreiche Hinweise (beliebig viele) | Optional |
+| `✅ Fertig wenn:` | Eindeutiges Erledigungskriterium | Ja |
+
+Die Marker werden in der App automatisch **fettgedruckt** gerendert.
+
+#### Titelzeile
+
+- Erste Zeile ist der Titel als `###`-Überschrift (h3), da die Seite `<h1>` für das Thema verwendet
+- Keine Nummerierung nötig (die Position ergibt sich aus `reihenfolge`)
+
+#### Beispiel einer vollständigen Aufgabe
+
+```json
+{
+  "beschreibung": "### Pixel entdecken\n\n🎯 Ziel: Du verstehst, was Pixel sind und kannst sie sehen.\n\n📋 Aufgabe:\n1. Öffne ein beliebiges Bild am Computer\n2. Zoome stark hinein (400% oder mehr)\n   - Windows: Strg + Mausrad\n   - Paint: Ansicht → Zoom → 800%\n3. Mache einen Screenshot vom vergrößerten Bild\n4. Erkläre mit eigenen Worten: Was ist ein Pixel?\n\n💡 Tipp: Pixel = Picture Element = Bildpunkt\n💡 Tipp: Ein Pixel ist wie ein kleines Quadrat mit einer Farbe\n\n✅ Fertig wenn: Du hast Pixel fotografiert und erklärt was sie sind",
+  "reihenfolge": 1,
+  "estimated_minutes": 15
+}
+```
+
+### Themen-Beschreibung (`beschreibung` des Themas)
+
+Freier Text, der das Thema überblicksartig vorstellt. Kürzere, motivierende Sprache:
+
+```
+Wie entstehen Bilder auf dem Bildschirm? 🖼️
+
+Jedes Bild am Computer besteht aus winzig kleinen Punkten — den Pixeln.
+In dieser Aufgabe entdeckst du, wie digitale Bilder funktionieren!
+
+🎯 Du lernst:
+- Was sind Pixel?
+- Wie speichert ein Computer Bilder?
+- Wie kann man Bilder bearbeiten?
+
+⏱️ Zeit: 5 Wochen (5 Schulstunden)
+```
+
+### Allgemeine Formatierungsregeln
+
+1. **Sprache:** Deutsch, Du-Anrede, altersgerecht für die jeweilige Stufe
+2. **Emojis:** Sparsam und gezielt einsetzen (Abschnittsmarker, Materialbeschreibungen)
+3. **Länge:** Aufgaben-Beschreibungen ca. 10–25 Zeilen, nicht länger
+4. **Arbeitsschritte:** Immer als nummerierte Liste, immer konkret und handlungsorientiert
+5. **Ein Fertig-Kriterium:** Schüler muss wissen, wann die Aufgabe erledigt ist
+
 ## Richtlinien für gute Inhalte
 
 ### Aufgaben (subtasks)
 
 - Formuliere klare, handlungsorientierte Arbeitsaufträge
-- Beginne mit einem fettgedruckten Titel: `**Pixel entdecken:**`
+- Verwende das oben beschriebene Aufgaben-Format mit Abschnittsmarkern
 - Beschreibe konkret, was Schüler tun sollen
 - Schätze die Bearbeitungszeit realistisch ein (10–30 Minuten pro Aufgabe)
 - Ordne 3–8 Aufgaben pro Thema an
@@ -263,7 +401,8 @@ python import_task.py --list
 
 ## Hinweise
 
+- **JSON muss UTF-8 kodiert sein** (siehe Abschnitt "Kodierung und Markdown-Formatierung")
 - Duplikate (gleicher Name + Fach + Stufe) werden automatisch übersprungen
 - `voraussetzungen` verweisen auf Themen-Namen — das referenzierte Thema muss bereits importiert sein
 - Materialien vom Typ `datei` können nur manuell über die Admin-Oberfläche hochgeladen werden; im JSON nur `link` verwenden
-- Das JSON muss UTF-8 kodiert sein
+- **Dieses Dokument als Claude-Prompt:** Gib diese Datei als Kontext an Claude, wenn du neue Themen erstellen lässt. Claude kann das JSON-Format und die Formatierungsrichtlinien direkt als Vorlage verwenden.
