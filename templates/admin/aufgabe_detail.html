@@ -54,11 +54,19 @@
             </div>
         </div>
         <div class="form-group">
-            <label>Lernziel <small class="text-muted">(Markdown)</small></label>
+            <label>Lernziel (Lehrkraft) <small class="text-muted">(Markdown) — „Die SuS können…"</small></label>
             <div class="markdown-editor">
                 <textarea name="lernziel" id="lernziel" class="form-control" rows="3" oninput="updatePreview('lernziel', 'preview-lernziel')">{{ task.lernziel or '' }}</textarea>
                 <div class="markdown-preview markdown-content" id="preview-lernziel"></div>
             </div>
+        </div>
+        <div class="form-group">
+            <label>Lernziel (Schüler) <small class="text-muted">(Markdown, optional) — „Du lernst…"</small></label>
+            <div class="markdown-editor">
+                <textarea name="lernziel_schueler" id="lernziel_schueler" class="form-control" rows="3" oninput="updatePreview('lernziel_schueler', 'preview-lernziel-schueler')">{{ task.lernziel_schueler or '' }}</textarea>
+                <div class="markdown-preview markdown-content" id="preview-lernziel-schueler"></div>
+            </div>
+            <small class="text-muted">Wenn leer, sehen Schüler das Lehrkraft-Lernziel.</small>
         </div>
         <div class="form-group">
             <label>Beschreibung <small class="text-muted">(Markdown)</small></label>
@@ -243,6 +251,7 @@
         <input type="hidden" name="stufe" value="{{ task.stufe }}">
         <input type="hidden" name="kategorie" value="{{ task.kategorie }}">
         <input type="hidden" name="lernziel" value="{{ task.lernziel or '' }}">
+        <input type="hidden" name="lernziel_schueler" value="{{ task.lernziel_schueler or '' }}">
         <input type="hidden" name="beschreibung" value="{{ task.beschreibung or '' }}">
         {% for v in voraussetzungen %}
         <input type="hidden" name="voraussetzungen" value="{{ v.id }}">
@@ -331,6 +340,7 @@ function updateSubtaskPreview(textarea) {
 // Initialize all previews on page load
 document.addEventListener('DOMContentLoaded', function() {
     updatePreview('lernziel', 'preview-lernziel');
+    updatePreview('lernziel_schueler', 'preview-lernziel-schueler');
     updatePreview('beschreibung', 'preview-beschreibung');
     // Initialize subtask previews
     document.querySelectorAll('.subtask-textarea').forEach(textarea => {

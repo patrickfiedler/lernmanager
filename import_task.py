@@ -215,7 +215,8 @@ def import_task(task_data, dry_run=False):
         kategorie=task.get('kategorie', 'pflicht'),
         quiz_json=quiz_json,
         number=task.get('number', 0),
-        why_learn_this=task.get('why_learn_this')
+        why_learn_this=task.get('why_learn_this'),
+        lernziel_schueler=task.get('lernziel_schueler')
     )
 
     # Handle prerequisites (by name lookup)
@@ -235,7 +236,8 @@ def import_task(task_data, dry_run=False):
                           task.get('lernziel', ''), task['fach'], task['stufe'],
                           task.get('kategorie', 'pflicht'), quiz_json,
                           task.get('number', 0), task.get('why_learn_this'),
-                          subtask_quiz_required=1 if task['subtask_quiz_required'] else 0)
+                          subtask_quiz_required=1 if task['subtask_quiz_required'] else 0,
+                          lernziel_schueler=task.get('lernziel_schueler'))
 
     # Create subtasks and track position -> ID mapping
     subtasks = task.get('subtasks', [])

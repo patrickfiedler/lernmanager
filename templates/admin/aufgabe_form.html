@@ -47,8 +47,13 @@
         </div>
 
         <div class="form-group">
-            <label for="lernziel">Lernziel</label>
+            <label for="lernziel">Lernziel (Lehrkraft) <small class="text-muted">„Die SuS können…"</small></label>
             <textarea id="lernziel" name="lernziel" class="form-control" rows="2">{{ task.lernziel if task else '' }}</textarea>
+        </div>
+        <div class="form-group">
+            <label for="lernziel_schueler">Lernziel (Schüler) <small class="text-muted">optional — „Du lernst…"</small></label>
+            <textarea id="lernziel_schueler" name="lernziel_schueler" class="form-control" rows="2">{{ task.lernziel_schueler if task else '' }}</textarea>
+            <small class="text-muted">Wenn leer, sehen Schüler das Lehrkraft-Lernziel.</small>
         </div>
 
         <div class="form-group">

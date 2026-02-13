@@ -1,44 +1,60 @@
 # Lernmanager - Current State (2026-02-13)
 
-## Latest Session (2026-02-13) — Admin Simplification Analysis + Phase 0 Cleanup
+## Latest Session (2026-02-13) — Phase 1 Done, Phase 2 In Progress
 
-### Admin simplification analysis
-- **`docs/2026-02-13_admin_simplification_analysis.md`** — identified that learning paths eliminate the need for manual subtask visibility management, the legacy `current_subtask_id` system, and the "redirect to config" workflow
-- Combined plan updated: `~/.claude/plans/fuzzy-wiggling-unicorn.md` — admin simplification woven into phases 2–5
+### Phase 1: Combined Migration (DONE)
+- **`migrate_paths_and_progression.py`** — written and tested on dev DB
+  - `subtask`: +path, +path_model, +graded_artifact_json (80 existing subtasks set to `path='wanderweg'`)
+  - `student`: +lernpfad (default: bergweg)
+  - `student_task`: recreated — dropped UNIQUE(student_id, klasse_id), dropped current_subtask_id, added rolle (24 rows preserved)
+  - New `topic_queue` table created
+- **`init_db()`** updated in models.py to match new schema
+- Commit `b3acd80`: Phase 0 cleanup (committed this session)
+- **20 pre-existing FK violations** found (orphaned student_task rows referencing deleted topics) — not caused by migration, harmless test data
 
-### Phase 0 cleanup (done)
-- **Removed `current_subtask_id` admin system** — `admin_schueler_aufgabe_setzen()` route, `set_current_subtask()` and `get_current_subtask()` model functions, "Aktuelle Aufgabe verwalten" card from student detail page, `loadSubtasksForStudent()` JS, subtask dropdown from individual topic assignment
-- **Removed 7 debug prints** from visibility management routes
-- **Moved raw SQL** from `admin_aufgaben_verwaltung_speichern()` into model functions (`clear_student_subtask_visibility_override()`, `set_subtask_visibility_for_student()`)
-- **Added `subtask_visibility` table** to `init_db()` (was only in migration script)
-- Student detail page: 245 → ~148 lines (removed ~100 lines of dead UI + JS)
+### Phase 2: Shared Model Foundation (IN PROGRESS)
+Completed so far:
+- **`get_student_task()`** — added `AND abgeschlossen=0 AND rolle='primary' LIMIT 1`
+- **`get_all_student_tasks()`** — NEW function, returns all rows (active + completed, all roles) for slug resolution
+- **`get_students_in_klasse()`** — added `AND st.abgeschlossen=0 AND st.rolle='primary'` to LEFT JOIN
+- **`_resolve_student_topic()`** (app.py) — now uses `get_all_student_tasks()` to search all student_task rows
+- **`_advance_to_next_subtask_internal()`** — removed `current_subtask_id` references (SELECT and UPDATE)
 
-### Combined plan (updated, not yet implemented)
-- **Learning paths + topic progression + sidequests + admin simplification** — `~/.claude/plans/fuzzy-wiggling-unicorn.md`
-  - Phase 1: Combined migration (subtask: path/path_model/graded_artifact, student: lernpfad, student_task: drop UNIQUE + rolle + drop current_subtask_id, new topic_queue table)
-  - Phase 2: Shared model foundation (INSERT instead of REPLACE, get_all_student_tasks, remove dead code)
-  - Phase 3: Learning paths + admin visibility overhaul (path UI, completion logic, remove visibility management pages, simplify student detail page, simplify topic assignment)
-  - Phase 4: Topic progression (queue, "click next", admin queue UI)
-  - Phase 5: Sidequests + final admin polish (nav cleanup)
+### WAITING FOR HUMAN INPUT
+- **`assign_task_to_student()`** has a `TODO(human)` placeholder — user needs to implement the core assignment logic (3 steps: deactivate existing primary, skip duplicates, INSERT new row)
+- After that: `assign_task_to_klasse()` needs same pattern applied
+- Then: verify app still works, commit Phase 2
 
-### Next Step
-- **Implement Phase 1** of the combined plan: write `migrate_paths_and_progression.py` (add path/path_model/graded_artifact to subtask, lernpfad to student, drop UNIQUE + add rolle + drop current_subtask_id on student_task, create topic_queue table, update init_db)
-- Read the full plan at `~/.claude/plans/fuzzy-wiggling-unicorn.md` before starting
+### Still TODO for Phase 2
+- [ ] Human implements `assign_task_to_student()` body
+- [ ] Update `assign_task_to_klasse()` with same pattern (loop over students)
+- [ ] Verify app starts and basic flows work
+- [ ] Commit Phase 2
 
-### Still Pending
-- **Deploy to server** — run `update.sh` on the server (1 unpushed commit + uncommitted changes)
-- **Manual testing** — slug URLs, quiz dots, subtask toggle flow need browser testing
-- **Uncommitted changes:** app.py, models.py, templates/admin/schueler_detail.html, go_on_from_here.md, todo.md, docs/2026-02-13_admin_simplification_analysis.md (new)
+### Uncommitted changes
+- `app.py` — `_resolve_student_topic()` uses `get_all_student_tasks()`
+- `models.py` — Phase 2 model changes + init_db schema updates
+- `templates/admin/schueler_detail.html` — Phase 0 cleanup (already committed)
+- `migrate_paths_and_progression.py` — new migration script
+- `go_on_from_here.md`, `todo.md`
+- `docs/2026-02-13_admin_simplification_analysis.md`
 
-### Important: `current_subtask_id` still in DB schema
-- The column still exists in `init_db()` and in the live database — will be dropped in Phase 1 migration
-- `_advance_to_next_subtask_internal()` still writes to it (harmless, will be cleaned up in Phase 2)
-- `assign_task_to_student()` and `assign_task_to_klasse()` still reference it in INSERT statements — will be cleaned up in Phase 2
+### Deploy to server
+- 2 unpushed commits + uncommitted Phase 2 changes
+- Run `update.sh` on server after Phase 2 is committed
+- Must run `migrate_paths_and_progression.py` on server BEFORE deploying code
+
+## Combined Plan (Phases 3–5 not yet started)
+- **`~/.claude/plans/fuzzy-wiggling-unicorn.md`** — full 5-phase plan
+- Phase 3: Learning paths + admin visibility overhaul
+- Phase 4: Topic progression (queue, "click next", admin queue UI)
+- Phase 5: Sidequests + final admin polish
 
 ## Previous Sessions
 
-- **2026-02-13 (earlier)**: Topic progression plan, format docs, curriculum spec, learning paths spec in CLAUDE.md
-- **2026-02-13 (earlier)**: Cleanup & push, student view improvements (slug URLs, quiz dots, declutter), admin quiz answer review page
+- **2026-02-13 (earlier)**: Admin simplification analysis, Phase 0 cleanup (removed current_subtask_id admin system, debug prints, raw SQL)
+- **2026-02-13 (earlier)**: Topic progression plan, format docs, curriculum spec, learning paths spec
+- **2026-02-13 (earlier)**: Cleanup & push, student view improvements (slug URLs, quiz dots, declutter)
 - **2026-02-12**: Per-Aufgabe materials, per-Aufgabe quizzes, LLM-graded quizzes, auto-attendance
 - **2026-02-10**: Bug fixes + performance
 - **2026-02-07**: Research — learning paths, quiz evolution, DSGVO

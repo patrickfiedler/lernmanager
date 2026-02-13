@@ -112,7 +112,8 @@ def init_db():
                 nachname TEXT NOT NULL,
                 vorname TEXT NOT NULL,
                 username TEXT UNIQUE NOT NULL,
-                password_hash TEXT NOT NULL
+                password_hash TEXT NOT NULL,
+                lernpfad TEXT DEFAULT 'bergweg'  -- wanderweg/bergweg/gipfeltour
             );
 
             -- Student-Class relationship (many-to-many)
@@ -139,6 +140,7 @@ def init_db():
                 number INTEGER DEFAULT 0,
                 beschreibung TEXT,
                 lernziel TEXT,
+                lernziel_schueler TEXT,  -- student-facing version: "Du lernst..."
                 fach TEXT NOT NULL,
                 stufe TEXT NOT NULL,
                 kategorie TEXT NOT NULL DEFAULT 'pflicht',  -- pflicht/bonus
@@ -192,6 +194,9 @@ def init_db():
                 reihenfolge INTEGER NOT NULL DEFAULT 0,
                 estimated_minutes INTEGER,
                 quiz_json TEXT,  -- per-subtask quiz JSON
+                path TEXT,  -- wanderweg/bergweg/gipfeltour (lowest path that includes this task)
+                path_model TEXT DEFAULT 'skip',  -- skip: lower paths skip; depth: all paths do it
+                graded_artifact_json TEXT,  -- JSON: {keyword, format, rubric}
                 FOREIGN KEY (task_id) REFERENCES task(id) ON DELETE CASCADE
             );
 
@@ -217,6 +222,7 @@ def init_db():
             );
 
             -- Student task assignment (per class)
+            -- No UNIQUE: students can have multiple topics per class (primary + sidequests)
             CREATE TABLE IF NOT EXISTS student_task (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 student_id INTEGER NOT NULL,
@@ -224,12 +230,10 @@ def init_db():
                 task_id INTEGER NOT NULL,
                 abgeschlossen INTEGER NOT NULL DEFAULT 0,
                 manuell_abgeschlossen INTEGER NOT NULL DEFAULT 0,
-                current_subtask_id INTEGER,
-                UNIQUE(student_id, klasse_id),
+                rolle TEXT NOT NULL DEFAULT 'primary',  -- primary/sidequest
                 FOREIGN KEY (student_id) REFERENCES student(id) ON DELETE CASCADE,
                 FOREIGN KEY (klasse_id) REFERENCES klasse(id) ON DELETE CASCADE,
-                FOREIGN KEY (task_id) REFERENCES task(id) ON DELETE CASCADE,
-                FOREIGN KEY (current_subtask_id) REFERENCES subtask(id) ON DELETE SET NULL
+                FOREIGN KEY (task_id) REFERENCES task(id) ON DELETE CASCADE
             );
 
             -- Student sub-task completion
@@ -288,6 +292,17 @@ def init_db():
 
             CREATE INDEX IF NOT EXISTS idx_sv_context
             ON subtask_visibility(subtask_id, klasse_id, student_id);
+
+            -- Topic queue (ordered topic sequence per class)
+            CREATE TABLE IF NOT EXISTS topic_queue (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                klasse_id INTEGER NOT NULL,
+                task_id INTEGER NOT NULL,
+                position INTEGER NOT NULL,
+                UNIQUE(klasse_id, task_id),
+                FOREIGN KEY (klasse_id) REFERENCES klasse(id) ON DELETE CASCADE,
+                FOREIGN KEY (task_id) REFERENCES task(id) ON DELETE CASCADE
+            );
 
             -- Lessons (Unterricht)
             CREATE TABLE IF NOT EXISTS unterricht (
@@ -472,57 +487,6 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_llm_usage_student_time
             ON llm_usage(student_id, timestamp);
         ''')
-
-
-def migrate_add_current_subtask():
-    """Migration: Add current_subtask_id column to student_task table if it doesn't exist."""
-    with db_session() as conn:
-        # Check if column already exists
-        cursor = conn.execute("PRAGMA table_info(student_task)")
-        columns = [row[1] for row in cursor.fetchall()]
-
-        if 'current_subtask_id' not in columns:
-            # Add the column
-            conn.execute("ALTER TABLE student_task ADD COLUMN current_subtask_id INTEGER")
-
-            # For existing student_task records, set current_subtask_id to the first incomplete subtask
-            # or the first subtask if all are complete or none exist
-            student_tasks = conn.execute("SELECT id, task_id FROM student_task").fetchall()
-
-            for st in student_tasks:
-                student_task_id = st['id']
-                task_id = st['task_id']
-
-                # Get all subtasks for this task, ordered by reihenfolge
-                subtasks = conn.execute(
-                    "SELECT id FROM subtask WHERE task_id = ? ORDER BY reihenfolge",
-                    (task_id,)
-                ).fetchall()
-
-                if not subtasks:
-                    # No subtasks, leave current_subtask_id as NULL
-                    continue
-
-                # Find first incomplete subtask
-                first_incomplete = None
-                for sub in subtasks:
-                    subtask_id = sub['id']
-                    completed = conn.execute(
-                        "SELECT erledigt FROM student_subtask WHERE student_task_id = ? AND subtask_id = ?",
-                        (student_task_id, subtask_id)
-                    ).fetchone()
-
-                    if not completed or not completed['erledigt']:
-                        first_incomplete = subtask_id
-                        break
-
-                # If all complete or none started, use first subtask
-                current_subtask = first_incomplete if first_incomplete else subtasks[0]['id']
-
-                conn.execute(
-                    "UPDATE student_task SET current_subtask_id = ? WHERE id = ?",
-                    (current_subtask, student_task_id)
-                )
 
 
 def create_admin(username, password):
@@ -795,13 +759,14 @@ def reset_student_password(student_id, new_password):
 
 
 def get_students_in_klasse(klasse_id):
-    """Get all students in a class."""
+    """Get all students in a class with their active primary topic."""
     with db_session() as conn:
         rows = conn.execute('''
             SELECT s.*, st.task_id, t.name as task_name, st.abgeschlossen, st.manuell_abgeschlossen
             FROM student s
             JOIN student_klasse sk ON s.id = sk.student_id
             LEFT JOIN student_task st ON s.id = st.student_id AND st.klasse_id = ?
+                AND st.abgeschlossen = 0 AND st.rolle = 'primary'
             LEFT JOIN task t ON st.task_id = t.id
             WHERE sk.klasse_id = ?
             ORDER BY s.nachname, s.vorname
@@ -877,23 +842,23 @@ def get_task(task_id):
         return dict(row) if row else None
 
 
-def create_task(name, beschreibung, lernziel, fach, stufe, kategorie, quiz_json=None, number=0, why_learn_this=None):
+def create_task(name, beschreibung, lernziel, fach, stufe, kategorie, quiz_json=None, number=0, why_learn_this=None, lernziel_schueler=None):
     """Create a new task."""
     with db_session() as conn:
         cursor = conn.execute(
-            "INSERT INTO task (name, number, beschreibung, lernziel, fach, stufe, kategorie, quiz_json, why_learn_this) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (name, number, beschreibung, lernziel, fach, stufe, kategorie, quiz_json, why_learn_this)
+            "INSERT INTO task (name, number, beschreibung, lernziel, lernziel_schueler, fach, stufe, kategorie, quiz_json, why_learn_this) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (name, number, beschreibung, lernziel, lernziel_schueler, fach, stufe, kategorie, quiz_json, why_learn_this)
         )
         return cursor.lastrowid
 
 
-def update_task(task_id, name, beschreibung, lernziel, fach, stufe, kategorie, quiz_json=None, number=0, why_learn_this=None, subtask_quiz_required=None):
+def update_task(task_id, name, beschreibung, lernziel, fach, stufe, kategorie, quiz_json=None, number=0, why_learn_this=None, subtask_quiz_required=None, lernziel_schueler=None):
     """Update a task."""
     with db_session() as conn:
         conn.execute('''
-            UPDATE task SET name=?, number=?, beschreibung=?, lernziel=?, fach=?, stufe=?,
+            UPDATE task SET name=?, number=?, beschreibung=?, lernziel=?, lernziel_schueler=?, fach=?, stufe=?,
             kategorie=?, quiz_json=?, why_learn_this=? WHERE id=?
-        ''', (name, number, beschreibung, lernziel, fach, stufe, kategorie, quiz_json, why_learn_this, task_id))
+        ''', (name, number, beschreibung, lernziel, lernziel_schueler, fach, stufe, kategorie, quiz_json, why_learn_this, task_id))
         if subtask_quiz_required is not None:
             conn.execute(
                 "UPDATE task SET subtask_quiz_required = ? WHERE id = ?",
@@ -1058,6 +1023,7 @@ def export_task_to_dict(task_id):
             'number': task['number'],
             'beschreibung': task['beschreibung'],
             'lernziel': task['lernziel'],
+            'lernziel_schueler': task.get('lernziel_schueler'),
             'fach': task['fach'],
             'stufe': task['stufe'],
             'kategorie': task['kategorie'],
@@ -1246,7 +1212,6 @@ def update_subtasks(task_id, subtasks_list, estimated_minutes_list=None, quiz_js
         conn.execute("DELETE FROM subtask WHERE task_id = ?", (task_id,))
 
         # Step 3: Create new subtasks and track their IDs by position
-        first_new_subtask_id = None
         new_subtask_ids_by_position = {}
 
         for i, beschreibung in enumerate(subtasks_list):
@@ -1273,9 +1238,6 @@ def update_subtasks(task_id, subtasks_list, estimated_minutes_list=None, quiz_js
                 new_subtask_id = cursor.lastrowid
                 new_subtask_ids_by_position[i] = new_subtask_id
 
-                if first_new_subtask_id is None:
-                    first_new_subtask_id = new_subtask_id
-
         # Step 4: Restore visibility settings for matching positions
         for (klasse_id, student_id, old_position), (enabled, admin_id) in visibility_by_position.items():
             if old_position in new_subtask_ids_by_position:
@@ -1294,12 +1256,6 @@ def update_subtasks(task_id, subtasks_list, estimated_minutes_list=None, quiz_js
                         (material_id, new_subtask_ids_by_position[old_pos])
                     )
 
-        # Step 5: Fix orphaned current_subtask_id references
-        if first_new_subtask_id is not None:
-            conn.execute(
-                "UPDATE student_task SET current_subtask_id = ? WHERE task_id = ?",
-                (first_new_subtask_id, task_id)
-            )
 
 
 # ============ Material functions ============
@@ -1398,68 +1354,55 @@ def set_material_subtask_assignments(material_id, subtask_ids):
 
 # ============ Student Task functions ============
 
-def assign_task_to_student(student_id, klasse_id, task_id, subtask_id=None, admin_id=None):
-    """Assign a task to a student in a class.
+def assign_task_to_student(student_id, klasse_id, task_id, rolle='primary'):
+    """Assign a topic to a student in a class.
+
+    History-preserving: completes existing active primary (if any) before inserting.
+    No auto-visibility — learning paths handle which tasks are required/optional.
 
     Args:
         student_id: The student ID
         klasse_id: The class ID
         task_id: The task ID to assign
-        subtask_id: Optional specific subtask to set as current (default: first subtask)
-        admin_id: Admin making the assignment (for visibility audit trail)
+        rolle: 'primary' (main topic) or 'sidequest'
     """
     with db_session() as conn:
-        # Get first subtask if subtask_id not provided
-        if subtask_id is None:
-            first_subtask = conn.execute(
-                "SELECT id FROM subtask WHERE task_id = ? ORDER BY reihenfolge LIMIT 1",
-                (task_id,)
-            ).fetchone()
-            subtask_id = first_subtask['id'] if first_subtask else None
+        # 1. Complete any existing active primary for this student+class
+        if rolle == 'primary':
+            conn.execute(
+                "UPDATE student_task SET abgeschlossen = 1 WHERE student_id = ? AND klasse_id = ? AND abgeschlossen = 0 AND rolle = 'primary'",
+                (student_id, klasse_id)
+            )
 
-        # Use INSERT OR REPLACE to update existing assignment
-        conn.execute('''
-            INSERT OR REPLACE INTO student_task (student_id, klasse_id, task_id, abgeschlossen, manuell_abgeschlossen, current_subtask_id)
-            VALUES (?, ?, ?, 0, 0, ?)
-        ''', (student_id, klasse_id, task_id, subtask_id))
+        # 2. Skip if this exact topic is already active
+        duplicate = conn.execute(
+            "SELECT COUNT(*) as count FROM student_task WHERE student_id = ? AND klasse_id = ? AND task_id = ? AND rolle = ? AND abgeschlossen = 0",
+            (student_id, klasse_id, task_id, rolle)
+        ).fetchone()
 
-    # Auto-enable all subtasks so the student can see them
-    subtasks = get_subtasks(task_id)
-    for subtask in subtasks:
-        set_subtask_visibility_for_student(student_id, subtask['id'], True, admin_id)
+        if duplicate['count'] >= 1:
+            return
 
-def assign_task_to_klasse(klasse_id, task_id, subtask_id=None, admin_id=None):
-    """Assign a task to all students in a class.
+        # 3. Insert new assignment
+        conn.execute(
+            "INSERT INTO student_task (student_id, klasse_id, task_id, rolle, abgeschlossen, manuell_abgeschlossen) VALUES (?, ?, ?, ?, 0, 0)",
+            (student_id, klasse_id, task_id, rolle)
+        )
+        
 
-    Args:
-        klasse_id: The class ID
-        task_id: The task ID to assign
-        subtask_id: Optional specific subtask to set as current for all students (default: first subtask)
-        admin_id: Admin making the assignment (for visibility audit trail)
+def assign_task_to_klasse(klasse_id, task_id, rolle='primary'):
+    """Assign a topic to all students in a class.
+
+    Delegates to assign_task_to_student() for each student (DRY).
     """
     with db_session() as conn:
-        # Get first subtask if subtask_id not provided
-        if subtask_id is None:
-            first_subtask = conn.execute(
-                "SELECT id FROM subtask WHERE task_id = ? ORDER BY reihenfolge LIMIT 1",
-                (task_id,)
-            ).fetchone()
-            subtask_id = first_subtask['id'] if first_subtask else None
-
         students = conn.execute(
             "SELECT student_id FROM student_klasse WHERE klasse_id = ?",
             (klasse_id,)
         ).fetchall()
-        for s in students:
-            conn.execute('''
-                INSERT OR REPLACE INTO student_task (student_id, klasse_id, task_id, abgeschlossen, manuell_abgeschlossen, current_subtask_id)
-                VALUES (?, ?, ?, 0, 0, ?)
-            ''', (s['student_id'], klasse_id, task_id, subtask_id))
 
-    # Auto-enable all subtasks for the whole class
-    subtasks = get_subtasks(task_id)
-    for subtask in subtasks:
-        set_subtask_visibility_for_class(klasse_id, subtask['id'], True, admin_id)
+    for s in students:
+        assign_task_to_student(s['student_id'], klasse_id, task_id, rolle)
 
 
 # ============================================================================
@@ -1664,15 +1607,34 @@ def reset_subtask_visibility_to_class_default(student_id, task_id):
 
 
 def get_student_task(student_id, klasse_id):
-    """Get student's current task for a class."""
+    """Get student's active primary topic for a class."""
     with db_session() as conn:
         row = conn.execute('''
             SELECT st.*, t.name, t.beschreibung, t.lernziel, t.fach, t.stufe, t.kategorie, t.quiz_json, t.why_learn_this, t.subtask_quiz_required
             FROM student_task st
             JOIN task t ON st.task_id = t.id
             WHERE st.student_id = ? AND st.klasse_id = ?
+              AND st.abgeschlossen = 0 AND st.rolle = 'primary'
+            LIMIT 1
         ''', (student_id, klasse_id)).fetchone()
         result = dict(row) if row else None
+    return result
+
+
+def get_all_student_tasks(student_id, klasse_id):
+    """Get all student_task rows (active + completed, all roles) for a class.
+
+    Used by slug resolution — a student might view a completed topic's quiz results.
+    """
+    with db_session() as conn:
+        rows = conn.execute('''
+            SELECT st.*, t.name, t.beschreibung, t.lernziel, t.fach, t.stufe, t.kategorie, t.quiz_json, t.why_learn_this, t.subtask_quiz_required
+            FROM student_task st
+            JOIN task t ON st.task_id = t.id
+            WHERE st.student_id = ? AND st.klasse_id = ?
+            ORDER BY st.abgeschlossen ASC, st.id DESC
+        ''', (student_id, klasse_id)).fetchall()
+        result = [dict(r) for r in rows]
     return result
 
 
@@ -1737,12 +1699,13 @@ def toggle_student_subtask(student_task_id, subtask_id, erledigt):
 
 
 def _advance_to_next_subtask_internal(conn, student_task_id, current_subtask_id):
-    """Internal function to advance to the next incomplete subtask.
+    """Check if all subtasks are complete and trigger task completion if so.
 
     A subtask is "incomplete" if: not erledigt, OR has a required quiz that hasn't been passed.
+    Called after a subtask is completed or a quiz is passed.
     """
     st = conn.execute(
-        "SELECT task_id, current_subtask_id FROM student_task WHERE id = ?",
+        "SELECT task_id FROM student_task WHERE id = ?",
         (student_task_id,)
     ).fetchone()
 
@@ -1775,12 +1738,7 @@ def _advance_to_next_subtask_internal(conn, student_task_id, current_subtask_id)
         ).fetchone()
 
         if not completed or not completed['erledigt']:
-            # Not even checked off yet
-            conn.execute(
-                "UPDATE student_task SET current_subtask_id = ? WHERE id = ?",
-                (subtask_id, student_task_id)
-            )
-            return
+            return  # Still incomplete
 
         # Checked off, but does it have a required quiz that hasn't been passed?
         if quiz_required and sub['quiz_json']:
@@ -1790,12 +1748,7 @@ def _advance_to_next_subtask_internal(conn, student_task_id, current_subtask_id)
                 LIMIT 1
             ''', (student_task_id, subtask_id)).fetchone()
             if not quiz_passed:
-                # Stay on this subtask — quiz still pending
-                conn.execute(
-                    "UPDATE student_task SET current_subtask_id = ? WHERE id = ?",
-                    (subtask_id, student_task_id)
-                )
-                return
+                return  # Quiz still pending
 
     # All subtasks truly complete — check task completion
     check_task_completion(student_task_id)

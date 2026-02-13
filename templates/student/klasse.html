@@ -236,10 +236,11 @@
     <details class="topic-description-toggle mt-2">
         <summary>Ausführliche Beschreibung</summary>
         <div class="topic-description-content">
-            {% if task.lernziel %}
+            {% set lz = task.lernziel_schueler or task.lernziel %}
+            {% if lz %}
             <div class="mb-1">
                 <strong>🎯 Lernziel:</strong>
-                <div class="markdown-content">{{ task.lernziel | markdown }}</div>
+                <div class="markdown-content">{{ lz | markdown }}</div>
             </div>
             {% endif %}
             {% if task.beschreibung %}
@@ -248,7 +249,7 @@
                 <div class="markdown-content">{{ task.beschreibung | markdown }}</div>
             </div>
             {% endif %}
-            {% if not task.lernziel and not task.beschreibung %}
+            {% if not lz and not task.beschreibung %}
             <p class="text-muted">Keine zusätzlichen Informationen verfügbar.</p>
             {% endif %}
         </div>

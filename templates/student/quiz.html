@@ -10,7 +10,7 @@
 
 <div class="card mb-2">
     {% if not position %}
-    <p><strong>🎯 Lernziel:</strong> {{ task.lernziel or 'Nicht angegeben' }}</p>
+    <p><strong>🎯 Lernziel:</strong> {{ task.lernziel_schueler or task.lernziel or 'Nicht angegeben' }}</p>
     {% endif %}
     {% set total = quiz.questions|length %}
     {% set min_richtig = [1, (total * 0.7)|int]|max %}

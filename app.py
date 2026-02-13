@@ -70,12 +70,17 @@ def validate_quiz_json(raw):
 
 
 def _resolve_student_topic(student_id, slug):
-    """Find student_task matching topic slug. Returns (task, klasse) or (None, None)."""
+    """Find student_task matching topic slug. Returns (task, klasse) or (None, None).
+
+    Searches all student_task rows (active + completed, all roles) so students
+    can still view completed topics' quiz results and history.
+    """
     klassen = models.get_student_klassen(student_id)
     for klasse in klassen:
-        task = models.get_student_task(student_id, klasse['id'])
-        if task and slugify(task['name']) == slug:
-            return task, klasse
+        tasks = models.get_all_student_tasks(student_id, klasse['id'])
+        for task in tasks:
+            if slugify(task['name']) == slug:
+                return task, klasse
     return None, None
 
 
@@ -363,15 +368,9 @@ def admin_klasse_schueler_hinzufuegen(klasse_id):
 @admin_required
 def admin_klasse_thema_zuweisen(klasse_id):
     task_id = request.form['task_id']
-    subtask_id = request.form.get('subtask_id')
     if task_id:
-        # Convert to int, handle empty string for subtask_id
-        subtask_id_int = int(subtask_id) if subtask_id and subtask_id.strip() else None
-        models.assign_task_to_klasse(klasse_id, int(task_id), subtask_id_int, admin_id=session['admin_id'])
-
-        # Q1A: Interrupt workflow - redirect to subtask configuration
-        flash('Thema zugewiesen. Bitte wähle nun die sichtbaren Aufgaben. ✅', 'success')
-        return redirect(url_for('admin_aufgaben_verwaltung_klasse', klasse_id=klasse_id, task_id=task_id))
+        models.assign_task_to_klasse(klasse_id, int(task_id))
+        flash('Thema zugewiesen. ✅', 'success')
 
     return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id))
 
@@ -442,15 +441,9 @@ def admin_schueler_verschieben(student_id):
 def admin_schueler_thema_zuweisen(student_id):
     klasse_id = request.form['klasse_id']
     task_id = request.form['task_id']
-    subtask_id = request.form.get('subtask_id')
     if klasse_id and task_id:
-        # Convert to int, handle empty string for subtask_id
-        subtask_id_int = int(subtask_id) if subtask_id and subtask_id.strip() else None
-        models.assign_task_to_student(student_id, int(klasse_id), int(task_id), subtask_id_int, admin_id=session['admin_id'])
-        if subtask_id_int:
-            flash('Thema und Aufgabe zugewiesen. ✅', 'success')
-        else:
-            flash('Thema zugewiesen. ✅', 'success')
+        models.assign_task_to_student(student_id, int(klasse_id), int(task_id))
+        flash('Thema zugewiesen. ✅', 'success')
     return redirect(url_for('admin_schueler_detail', student_id=student_id))
 
 
@@ -566,7 +559,8 @@ def admin_thema_neu():
             stufe=request.form['stufe'],
             kategorie=request.form['kategorie'],
             number=int(request.form.get('number', 0)),
-            why_learn_this=request.form.get('why_learn_this') or None
+            why_learn_this=request.form.get('why_learn_this') or None,
+            lernziel_schueler=request.form.get('lernziel_schueler') or None
         )
         # Handle multiple prerequisites
         voraussetzung_ids = request.form.getlist('voraussetzungen')
@@ -614,7 +608,8 @@ def admin_thema_bearbeiten(task_id):
         quiz_json=quiz_json,
         number=int(request.form.get('number', 0)),
         why_learn_this=request.form.get('why_learn_this') or None,
-        subtask_quiz_required=1 if request.form.get('subtask_quiz_required') else 0
+        subtask_quiz_required=1 if request.form.get('subtask_quiz_required') else 0,
+        lernziel_schueler=request.form.get('lernziel_schueler') or None
     )
     # Handle multiple prerequisites
     voraussetzung_ids = request.form.getlist('voraussetzungen')
@@ -2041,7 +2036,6 @@ def init_app():
     os.makedirs(os.path.join(os.path.dirname(config.UPLOAD_FOLDER), 'tmp'), exist_ok=True)  # instance/tmp
     os.makedirs(os.path.dirname(config.DATABASE), exist_ok=True)  # data/
     models.init_db()
-    models.migrate_add_current_subtask()
 
     # Start async analytics worker thread
     from analytics_queue import start_worker
