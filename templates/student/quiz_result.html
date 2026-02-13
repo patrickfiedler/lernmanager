@@ -55,11 +55,13 @@
         {% endif %}
         {% endif %}
         {% else %}
-        {# Multiple choice (default) — show selected options #}
+        {# Multiple choice — show correct/incorrect per option #}
+        {% set is_correct = (user_answer|sort == question.correct|sort) %}
         {% for answer in question.answers %}
         {% set was_selected = loop.index0 in user_answer %}
-        <div class="quiz-option {% if was_selected %}selected{% endif %}">
-            {% if was_selected %}●{% else %}○{% endif %}
+        {% set is_correct_option = loop.index0 in question.correct %}
+        <div class="quiz-option {% if was_selected %}selected{% endif %}" style="{% if was_selected and is_correct_option %}border-left: 4px solid #28a745; background: #e8f5e9;{% elif was_selected and not is_correct_option %}border-left: 4px solid #dc3545; background: #fde8e8;{% elif is_correct_option %}border-left: 4px solid #28a745; opacity: 0.7;{% endif %} padding-left: 1rem;">
+            {% if was_selected and is_correct_option %}✅{% elif was_selected and not is_correct_option %}❌{% elif is_correct_option %}✅{% else %}○{% endif %}
             {% if answer is mapping %}
             <span>{{ answer.text }}</span>
             {% if answer.image %}<img src="{{ answer.image }}" alt="{{ answer.text }}" class="quiz-option-image">{% endif %}
@@ -68,6 +70,9 @@
             {% endif %}
         </div>
         {% endfor %}
+        <p style="margin-top: 0.5rem; font-weight: bold;" class="{% if is_correct %}text-success{% else %}text-danger{% endif %}">
+            {% if is_correct %}✅ Richtig!{% else %}❌ Leider falsch.{% endif %}
+        </p>
         {% endif %}
     </div>
     {% endfor %}
