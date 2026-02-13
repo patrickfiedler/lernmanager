@@ -63,7 +63,13 @@ def _call_llm(question_text, expected_or_rubric, student_answer):
         print(f"LLM grading: empty text in response (stop_reason={response.stop_reason})", file=sys.stderr)
         return None
 
-    print(f"LLM grading raw response: {text[:200]}", file=sys.stderr)
+    # Strip markdown code fences (LLMs often wrap JSON in ```json ... ```)
+    if text.startswith('```'):
+        text = text.split('\n', 1)[-1]  # remove first line (```json)
+        text = text.rsplit('```', 1)[0]  # remove trailing ```
+        text = text.strip()
+
+    print(f"LLM grading response: {text[:200]}", file=sys.stderr)
 
     # Parse JSON — if it fails, the answer can't be graded
     result = json.loads(text)
