@@ -256,6 +256,39 @@ def init_db():
                 FOREIGN KEY (student_task_id) REFERENCES student_task(id) ON DELETE CASCADE
             );
 
+            -- Subtask visibility (per-class and per-student overrides)
+            CREATE TABLE IF NOT EXISTS subtask_visibility (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                subtask_id INTEGER NOT NULL,
+                klasse_id INTEGER,
+                student_id INTEGER,
+                enabled INTEGER DEFAULT 1,
+                set_by_admin_id INTEGER,
+                set_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (subtask_id) REFERENCES subtask(id) ON DELETE CASCADE,
+                FOREIGN KEY (klasse_id) REFERENCES klasse(id) ON DELETE CASCADE,
+                FOREIGN KEY (student_id) REFERENCES student(id) ON DELETE CASCADE,
+                FOREIGN KEY (set_by_admin_id) REFERENCES admin(id),
+                CHECK (
+                    (klasse_id IS NOT NULL AND student_id IS NULL) OR
+                    (klasse_id IS NULL AND student_id IS NOT NULL)
+                )
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_sv_subtask
+            ON subtask_visibility(subtask_id);
+
+            CREATE INDEX IF NOT EXISTS idx_sv_klasse
+            ON subtask_visibility(klasse_id)
+            WHERE klasse_id IS NOT NULL;
+
+            CREATE INDEX IF NOT EXISTS idx_sv_student
+            ON subtask_visibility(student_id)
+            WHERE student_id IS NOT NULL;
+
+            CREATE INDEX IF NOT EXISTS idx_sv_context
+            ON subtask_visibility(subtask_id, klasse_id, student_id);
+
             -- Lessons (Unterricht)
             CREATE TABLE IF NOT EXISTS unterricht (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1578,6 +1611,15 @@ def set_subtask_visibility_for_student(student_id, subtask_id, enabled, admin_id
         ''', (subtask_id, student_id, 1 if enabled else 0, admin_id))
 
 
+def clear_student_subtask_visibility_override(student_id, subtask_id):
+    """Remove a student-specific visibility override, reverting to class default."""
+    with db_session() as conn:
+        conn.execute(
+            'DELETE FROM subtask_visibility WHERE student_id = ? AND subtask_id = ?',
+            (student_id, subtask_id)
+        )
+
+
 def bulk_set_subtask_visibility(klasse_id=None, student_id=None, subtask_ids=None, enabled=True, admin_id=None):
     """Bulk set visibility for multiple subtasks.
 
@@ -1693,19 +1735,6 @@ def toggle_student_subtask(student_task_id, subtask_id, erledigt):
     return result
 
 
-def set_current_subtask(student_task_id, subtask_id):
-    """Set the current subtask for a student's task.
-
-    Args:
-        student_task_id: The student_task ID
-        subtask_id: The subtask ID to set as current (or None to show all)
-    """
-    with db_session() as conn:
-        conn.execute(
-            "UPDATE student_task SET current_subtask_id = ? WHERE id = ?",
-            (subtask_id, student_task_id)
-        )
-
 
 def _advance_to_next_subtask_internal(conn, student_task_id, current_subtask_id):
     """Internal function to advance to the next incomplete subtask.
@@ -1782,21 +1811,6 @@ def advance_to_next_subtask(student_task_id, current_subtask_id):
     with db_session() as conn:
         _advance_to_next_subtask_internal(conn, student_task_id, current_subtask_id)
 
-
-def get_current_subtask(student_task_id):
-    """Get the current subtask for a student's task.
-
-    Returns:
-        dict with subtask info, or None if no current subtask set
-    """
-    with db_session() as conn:
-        row = conn.execute('''
-            SELECT sub.*
-            FROM student_task st
-            JOIN subtask sub ON st.current_subtask_id = sub.id
-            WHERE st.id = ?
-        ''', (student_task_id,)).fetchone()
-        return dict(row) if row else None
 
 
 def mark_task_complete(student_task_id, manual=False):

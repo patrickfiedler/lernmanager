@@ -85,7 +85,7 @@
                 {% endfor %}
             </select>
             <label>Thema:</label>
-            <select name="task_id" id="student-task-select" class="form-control" style="flex: 1;" required onchange="loadSubtasksForStudent(this.value)">
+            <select name="task_id" id="student-task-select" class="form-control" style="flex: 1;" required>
                 <option value="">-- Thema wählen --</option>
                 {% for task in tasks %}
                 <option value="{{ task.id }}">{{ task.fach }} ({{ task.stufe }}): {{ task.name }}</option>
@@ -93,66 +93,9 @@
             </select>
             <button type="submit" class="btn btn-primary">Zuweisen</button>
         </div>
-        <div id="student-subtask-selector" style="display: none;">
-            <label class="text-muted">Aufgabe (optional):</label>
-            <select name="subtask_id" id="student-subtask-select" class="form-control">
-                <option value="">Alle Aufgaben zeigen</option>
-            </select>
-            <small class="text-muted">Wähle eine spezifische Aufgabe, um nur diese für den Schüler zu zeigen.</small>
-        </div>
     </form>
 </div>
 
-<!-- Manage Current Subtask -->
-<div class="card mt-2">
-    <div class="card-header">🎯 Aktuelle Aufgabe verwalten</div>
-    {% for klasse in klassen %}
-    {% set task = student_tasks.get(klasse.id) %}
-    {% if task and task.subtasks %}
-    <div class="mb-2" style="padding: 1rem; background: #f9fafb; border-radius: 0.375rem;">
-        <div class="flex flex-between flex-center mb-1">
-            <strong>{{ klasse.name }}: {{ task.name }}</strong>
-            {% if task.current_subtask %}
-            <span class="badge badge-primary">Filter aktiv</span>
-            {% else %}
-            <span class="badge badge-secondary">Alle sichtbar</span>
-            {% endif %}
-        </div>
-        <form method="POST" action="{{ url_for('admin_schueler_aufgabe_setzen', student_id=student.id) }}">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <input type="hidden" name="klasse_id" value="{{ klasse.id }}">
-            <div class="flex gap-1">
-                <select name="subtask_id" class="form-control" style="flex: 1;">
-                    <option value="">Alle Aufgaben zeigen</option>
-                    {% for sub in task.subtasks %}
-                    <option value="{{ sub.id }}" {% if task.current_subtask and task.current_subtask.id == sub.id %}selected{% endif %}>
-                        {{ loop.index }}. {{ sub.beschreibung[:60] }}{% if sub.beschreibung|length > 60 %}...{% endif %}
-                        {% if sub.erledigt %}✓{% endif %}
-                    </option>
-                    {% endfor %}
-                </select>
-                <button type="submit" class="btn btn-secondary">Aktualisieren</button>
-            </div>
-            {% if task.current_subtask %}
-            <small class="text-muted">Aktuell: Aufgabe {{ loop.index }} sichtbar</small>
-            {% else %}
-            <small class="text-muted">Alle {{ task.subtasks|length }} Aufgaben sichtbar</small>
-            {% endif %}
-        </form>
-    </div>
-    {% endif %}
-    {% endfor %}
-    {% set has_tasks_with_subtasks = namespace(value=false) %}
-    {% for klasse in klassen %}
-        {% set task = student_tasks.get(klasse.id) %}
-        {% if task and task.subtasks %}
-            {% set has_tasks_with_subtasks.value = true %}
-        {% endif %}
-    {% endfor %}
-    {% if not klassen or not has_tasks_with_subtasks.value %}
-    <p class="text-muted">Keine aktiven Themen mit Aufgaben.</p>
-    {% endif %}
-</div>
 
 <!-- Subtask Visibility Management -->
 <div class="card mt-2">
@@ -203,43 +146,3 @@
 {% endif %}
 {% endblock %}
 
-{% block scripts %}
-function loadSubtasksForStudent(taskId) {
-    const subtaskSelector = document.getElementById('student-subtask-selector');
-    const subtaskSelect = document.getElementById('student-subtask-select');
-
-    if (!taskId) {
-        subtaskSelector.style.display = 'none';
-        return;
-    }
-
-    // Fetch subtasks for this task
-    const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
-    fetch(`/admin/thema/${taskId}/aufgaben`, {
-        headers: {
-            'X-CSRFToken': csrfToken
-        }
-    })
-    .then(r => r.json())
-    .then(subtasks => {
-        // Clear existing options
-        subtaskSelect.innerHTML = '<option value="">Alle Aufgaben zeigen</option>';
-
-        if (subtasks.length > 0) {
-            subtasks.forEach((sub, index) => {
-                const option = document.createElement('option');
-                option.value = sub.id;
-                option.textContent = `${index + 1}. ${sub.beschreibung.substring(0, 60)}${sub.beschreibung.length > 60 ? '...' : ''}`;
-                subtaskSelect.appendChild(option);
-            });
-            subtaskSelector.style.display = 'block';
-        } else {
-            subtaskSelector.style.display = 'none';
-        }
-    })
-    .catch(err => {
-        console.error('Failed to load subtasks:', err);
-        subtaskSelector.style.display = 'none';
-    });
-}
-{% endblock %}

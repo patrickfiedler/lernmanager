@@ -392,14 +392,7 @@ def admin_schueler_detail(student_id):
     # Get current tasks for each class
     student_tasks = {}
     for klasse in klassen:
-        task = models.get_student_task(student_id, klasse['id'])
-        if task:
-            # Get all subtasks and current subtask
-            subtasks = models.get_student_subtask_progress(task['id'])
-            task['subtasks'] = subtasks
-            current_subtask = models.get_current_subtask(task['id'])
-            task['current_subtask'] = current_subtask
-        student_tasks[klasse['id']] = task
+        student_tasks[klasse['id']] = models.get_student_task(student_id, klasse['id'])
 
     return render_template('admin/schueler_detail.html',
                            student=student,
@@ -460,27 +453,6 @@ def admin_schueler_thema_zuweisen(student_id):
             flash('Thema zugewiesen. ✅', 'success')
     return redirect(url_for('admin_schueler_detail', student_id=student_id))
 
-
-@app.route('/admin/schueler/<int:student_id>/aufgabe-setzen', methods=['POST'])
-@admin_required
-def admin_schueler_aufgabe_setzen(student_id):
-    """Update the current subtask for a student's task."""
-    klasse_id = request.form['klasse_id']
-    subtask_id = request.form.get('subtask_id')
-
-    if klasse_id:
-        student_task = models.get_student_task(student_id, int(klasse_id))
-        if student_task:
-            # Convert to int, handle empty string for subtask_id
-            subtask_id_int = int(subtask_id) if subtask_id and subtask_id.strip() else None
-            models.set_current_subtask(student_task['id'], subtask_id_int)
-            if subtask_id_int:
-                flash('Aktuelle Aufgabe aktualisiert. ✅', 'success')
-            else:
-                flash('Aufgaben-Filter entfernt (alle Aufgaben sichtbar). ✅', 'success')
-        else:
-            flash('Schüler hat kein Thema in dieser Klasse.', 'warning')
-    return redirect(url_for('admin_schueler_detail', student_id=student_id))
 
 
 @app.route('/admin/schueler/<int:student_id>/klasse/<int:klasse_id>/abschliessen', methods=['POST'])
@@ -923,8 +895,6 @@ def admin_aufgaben_verwaltung_schueler(student_id):
         task_id = request.args.get('task_id', type=int)
         klasse_id = request.args.get('klasse_id', type=int)
 
-        print(f"DEBUG: student_id={student_id}, task_id={task_id}, klasse_id={klasse_id}", flush=True)
-
         if not task_id or not klasse_id:
             flash('Thema oder Klasse nicht angegeben.', 'danger')
             return redirect(url_for('admin_schueler_detail', student_id=student_id))
@@ -934,23 +904,18 @@ def admin_aufgaben_verwaltung_schueler(student_id):
         klasse = models.get_klasse(klasse_id)
         task = models.get_task(task_id)
 
-        print(f"DEBUG: student={student}, klasse={klasse}, task={task}", flush=True)
-
         if not student or not klasse or not task:
             flash('Schüler, Klasse oder Thema nicht gefunden.', 'danger')
             return redirect(url_for('admin_schueler_detail', student_id=student_id))
 
         # Get all subtasks for this task
         subtasks = models.get_subtasks(task_id)
-        print(f"DEBUG: subtasks count={len(subtasks)}", flush=True)
 
         # Get class visibility settings (for left column - Q2B)
         class_visibility = models.get_subtask_visibility_settings(klasse_id=klasse_id, task_id=task_id)
-        print(f"DEBUG: class_visibility={class_visibility}", flush=True)
 
         # Get student visibility settings (for right column - Q2B)
         student_visibility = models.get_subtask_visibility_settings(student_id=student_id, task_id=task_id)
-        print(f"DEBUG: student_visibility={student_visibility}", flush=True)
 
         return render_template('admin/teilaufgaben_verwaltung.html',
                                context='student',
@@ -996,35 +961,18 @@ def admin_aufgaben_verwaltung_speichern():
 
         elif context == 'student':
             # Save student-specific overrides (only when different from class default)
-            # First, get class visibility settings to compare
             class_visibility = models.get_subtask_visibility_settings(klasse_id=klasse_id, task_id=task_id)
 
-            print(f"DEBUG SAVE: Received subtask_settings={subtask_settings}", flush=True)
-            print(f"DEBUG SAVE: class_visibility={class_visibility}", flush=True)
+            for subtask_id_str, enabled in subtask_settings.items():
+                subtask_id = int(subtask_id_str)
+                class_enabled = class_visibility.get(subtask_id, {}).get('enabled', False)
 
-            with models.db_session() as conn:
-                for subtask_id_str, enabled in subtask_settings.items():
-                    subtask_id = int(subtask_id_str)
-                    class_enabled = class_visibility.get(subtask_id, {}).get('enabled', False)
-
-                    if enabled == class_enabled:
-                        # Matches class default - remove any student override
-                        conn.execute('''
-                            DELETE FROM subtask_visibility
-                            WHERE student_id = ? AND subtask_id = ?
-                        ''', (student_id, subtask_id))
-                    else:
-                        # Differs from class default - create/update student override
-                        # Delete existing first
-                        conn.execute('''
-                            DELETE FROM subtask_visibility
-                            WHERE student_id = ? AND subtask_id = ?
-                        ''', (student_id, subtask_id))
-                        # Insert new override
-                        conn.execute('''
-                            INSERT INTO subtask_visibility (subtask_id, student_id, enabled, set_by_admin_id)
-                            VALUES (?, ?, ?, ?)
-                        ''', (subtask_id, student_id, 1 if enabled else 0, admin_id))
+                if enabled == class_enabled:
+                    # Matches class default - remove any student override
+                    models.clear_student_subtask_visibility_override(student_id, subtask_id)
+                else:
+                    # Differs from class default - create/update student override
+                    models.set_subtask_visibility_for_student(student_id, subtask_id, enabled, admin_id)
 
             return jsonify({'success': True, 'message': 'Einstellungen für den Schüler gespeichert.'})
 
