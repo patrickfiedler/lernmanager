@@ -40,6 +40,45 @@ def load_task_json(filepath):
     return data
 
 
+def _validate_quiz(quiz, prefix="Quiz"):
+    """Validate quiz JSON structure. Returns list of error strings."""
+    errors = []
+    if 'questions' not in quiz:
+        errors.append(f"{prefix} missing 'questions' array")
+    elif not isinstance(quiz['questions'], list):
+        errors.append(f"{prefix} questions must be a list")
+    else:
+        for i, q in enumerate(quiz['questions']):
+            label = f"{prefix} question {i+1}"
+            if not isinstance(q, dict):
+                errors.append(f"{label} must be an object")
+                continue
+            if 'text' not in q or not q['text']:
+                errors.append(f"{label} missing 'text'")
+
+            qtype = q.get('type', 'multiple_choice')
+            if qtype == 'fill_blank':
+                if 'answers' not in q or not isinstance(q['answers'], list) or not q['answers']:
+                    errors.append(f"{label} (fill_blank) missing or empty 'answers' list")
+            elif qtype == 'short_answer':
+                if 'rubric' not in q or not q['rubric']:
+                    errors.append(f"{label} (short_answer) missing 'rubric'")
+            elif qtype == 'multiple_choice':
+                if 'options' not in q or not isinstance(q['options'], list):
+                    errors.append(f"{label} missing or invalid 'options'")
+                elif len(q['options']) < 2:
+                    errors.append(f"{label} needs at least 2 options")
+                if 'correct' not in q or not isinstance(q['correct'], list):
+                    errors.append(f"{label} missing or invalid 'correct'")
+                elif 'options' in q and isinstance(q['options'], list):
+                    for idx in q.get('correct', []):
+                        if not isinstance(idx, int) or idx < 0 or idx >= len(q['options']):
+                            errors.append(f"{label} has invalid correct index: {idx}")
+            else:
+                errors.append(f"{label} has unknown type '{qtype}'")
+    return errors
+
+
 def validate_task_structure(data):
     """Validate required fields are present and valid."""
     errors = []
@@ -84,8 +123,11 @@ def validate_task_structure(data):
             for i, sub in enumerate(task['subtasks']):
                 if not isinstance(sub, dict):
                     errors.append(f"Subtask {i+1} must be an object")
-                elif 'beschreibung' not in sub or not sub['beschreibung']:
+                    continue
+                if 'beschreibung' not in sub or not sub['beschreibung']:
                     errors.append(f"Subtask {i+1} missing 'beschreibung'")
+                if 'quiz' in sub and sub['quiz']:
+                    errors.extend(_validate_quiz(sub['quiz'], f"Subtask {i+1} quiz"))
 
     # Validate materials
     if 'materials' in task:
@@ -102,41 +144,9 @@ def validate_task_structure(data):
                 if 'pfad' not in mat or not mat['pfad']:
                     errors.append(f"Material {i+1} missing 'pfad'")
 
-    # Validate quiz
+    # Validate topic-level quiz
     if 'quiz' in task and task['quiz']:
-        quiz = task['quiz']
-        if 'questions' not in quiz:
-            errors.append("Quiz missing 'questions' array")
-        elif not isinstance(quiz['questions'], list):
-            errors.append("Quiz questions must be a list")
-        else:
-            for i, q in enumerate(quiz['questions']):
-                if not isinstance(q, dict):
-                    errors.append(f"Question {i+1} must be an object")
-                    continue
-                if 'text' not in q or not q['text']:
-                    errors.append(f"Question {i+1} missing 'text'")
-
-                qtype = q.get('type', 'multiple_choice')
-                if qtype == 'fill_blank':
-                    if 'answers' not in q or not isinstance(q['answers'], list) or not q['answers']:
-                        errors.append(f"Question {i+1} (fill_blank) missing or empty 'answers' list")
-                elif qtype == 'short_answer':
-                    if 'rubric' not in q or not q['rubric']:
-                        errors.append(f"Question {i+1} (short_answer) missing 'rubric'")
-                elif qtype == 'multiple_choice':
-                    if 'options' not in q or not isinstance(q['options'], list):
-                        errors.append(f"Question {i+1} missing or invalid 'options'")
-                    elif len(q['options']) < 2:
-                        errors.append(f"Question {i+1} needs at least 2 options")
-                    if 'correct' not in q or not isinstance(q['correct'], list):
-                        errors.append(f"Question {i+1} missing or invalid 'correct'")
-                    elif 'options' in q and isinstance(q['options'], list):
-                        for idx in q.get('correct', []):
-                            if not isinstance(idx, int) or idx < 0 or idx >= len(q['options']):
-                                errors.append(f"Question {i+1} has invalid correct index: {idx}")
-                else:
-                    errors.append(f"Question {i+1} has unknown type '{qtype}'")
+        errors.extend(_validate_quiz(task['quiz'], "Topic quiz"))
 
     if errors:
         raise ValidationError("\n".join(errors))
@@ -181,10 +191,13 @@ def import_task(task_data, dry_run=False):
             print(f"  Lernziel: {task['lernziel'][:50]}...")
         if task.get('voraussetzungen'):
             print(f"  Voraussetzungen: {', '.join(task['voraussetzungen'])}")
-        print(f"  Subtasks: {len(task.get('subtasks', []))}")
+        subtasks = task.get('subtasks', [])
+        subtasks_with_quiz = sum(1 for s in subtasks if s.get('quiz'))
+        print(f"  Subtasks: {len(subtasks)} ({subtasks_with_quiz} with quiz)")
+        print(f"  Subtask quiz required: {task.get('subtask_quiz_required', True)}")
         print(f"  Materials: {len(task.get('materials', []))}")
         if task.get('quiz'):
-            print(f"  Quiz questions: {len(task['quiz'].get('questions', []))}")
+            print(f"  Topic quiz questions: {len(task['quiz'].get('questions', []))}")
         return None
 
     # Prepare quiz JSON
@@ -216,13 +229,22 @@ def import_task(task_data, dry_run=False):
             else:
                 print(f"  Warning: Prerequisite '{v_name}' not found, skipping")
 
+    # Set subtask_quiz_required if specified (default is 1/true in DB)
+    if 'subtask_quiz_required' in task:
+        models.update_task(task_id, task['name'], task['beschreibung'],
+                          task.get('lernziel', ''), task['fach'], task['stufe'],
+                          task.get('kategorie', 'pflicht'), quiz_json,
+                          task.get('number', 0), task.get('why_learn_this'),
+                          subtask_quiz_required=1 if task['subtask_quiz_required'] else 0)
+
     # Create subtasks and track position -> ID mapping
     subtasks = task.get('subtasks', [])
     subtask_id_by_position = {}
     for i, sub in enumerate(subtasks):
         reihenfolge = sub.get('reihenfolge', i)
         estimated_minutes = sub.get('estimated_minutes')
-        sub_id = models.create_subtask(task_id, sub['beschreibung'], reihenfolge, estimated_minutes)
+        sub_quiz_json = json.dumps(sub['quiz'], ensure_ascii=False) if sub.get('quiz') else None
+        sub_id = models.create_subtask(task_id, sub['beschreibung'], reihenfolge, estimated_minutes, sub_quiz_json)
         subtask_id_by_position[reihenfolge] = sub_id
 
     # Create materials and restore subtask assignments

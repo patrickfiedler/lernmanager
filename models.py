@@ -1029,10 +1029,11 @@ def export_task_to_dict(task_id):
             'stufe': task['stufe'],
             'kategorie': task['kategorie'],
             'why_learn_this': task['why_learn_this'],
+            'subtask_quiz_required': bool(task.get('subtask_quiz_required', 1)),
             'subtasks': subtasks_data,
             'materials': materials_data,
             'quiz': quiz_data,
-            'voraussetzungen': voraussetzungen_data          
+            'voraussetzungen': voraussetzungen_data
         }
         return data
           
@@ -1135,12 +1136,12 @@ def get_subtasks(task_id):
         return [dict(r) for r in rows]
 
 
-def create_subtask(task_id, beschreibung, reihenfolge=0, estimated_minutes=None):
+def create_subtask(task_id, beschreibung, reihenfolge=0, estimated_minutes=None, quiz_json=None):
     """Create a subtask."""
     with db_session() as conn:
         cursor = conn.execute(
-            "INSERT INTO subtask (task_id, beschreibung, reihenfolge, estimated_minutes) VALUES (?, ?, ?, ?)",
-            (task_id, beschreibung, reihenfolge, estimated_minutes)
+            "INSERT INTO subtask (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json) VALUES (?, ?, ?, ?, ?)",
+            (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json)
         )
         return cursor.lastrowid
 
