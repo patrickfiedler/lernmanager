@@ -44,11 +44,13 @@
 - Added `hidden INTEGER DEFAULT 0` to subtask table
 - Already run on dev DB
 
-### Deploy to server
-- Run `deploy/update.sh` — it auto-discovers and runs pending migrations in order:
-  1. `migrate_001_paths_and_progression.py`
-  2. `migrate_002_add_lernziel_schueler.py`
-  3. `migrate_003_add_hidden.py`
+### Migration scripts renamed (commit 333cea5)
+- Prefixed with 001/002/003 so `deploy/update.sh` runs them in correct alphabetical order
+- No manual SQLCIPHER_KEY handling needed — update.sh reads it from `.env`
+
+### Deployed to production (2026-02-14)
+- Migrations run successfully: `migrate_001`, `migrate_002`, `migrate_003`
+- Server running on latest commit (333cea5)
 
 ### Next Steps
 - **Phase 4: Topic Progression** — topic queue, auto-assign next topic

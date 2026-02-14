@@ -47,7 +47,7 @@
         {# Free-text answer with LLM feedback #}
         {% if user_answer is mapping %}
         <div class="quiz-option selected {% if user_answer.correct %}text-success{% else %}text-danger{% endif %}" style="border-left: 4px solid {% if user_answer.correct %}var(--success-color, #28a745){% else %}var(--danger-color, #dc3545){% endif %}; padding-left: 1rem;">
-            <strong>Deine Antwort:</strong> {{ user_answer.text or '(keine Antwort)' }}
+            {% if user_answer.correct %}✅{% else %}❌{% endif %} <strong>Deine Antwort:</strong> {{ user_answer.text or '(keine Antwort)' }}
         </div>
         {% if user_answer.feedback %}
         <div class="quiz-option" style="border-left: 4px solid {% if user_answer.source == 'fallback' %}var(--warning-color, #ffc107){% else %}var(--info-color, #17a2b8){% endif %}; padding-left: 1rem; background: {% if user_answer.source == 'fallback' %}#fff8e1{% else %}#e8f4fd{% endif %};">
