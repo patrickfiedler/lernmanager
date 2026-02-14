@@ -40,17 +40,15 @@
 - `schueler_detail.html`: removed visibility card, added path badge
 - `klasse_detail.html`: removed subtask dropdown + loadSubtasks() JS, simplified to one dropdown + submit
 
-**Migration: `migrate_add_hidden.py`**
+**Migration: `migrate_003_add_hidden.py`**
 - Added `hidden INTEGER DEFAULT 0` to subtask table
 - Already run on dev DB
 
 ### Deploy to server
-- Multiple unpushed commits on main
-- Must run ALL migrations on server BEFORE deploying code:
-  1. `python migrate_paths_and_progression.py`
-  2. `python migrate_add_lernziel_schueler.py`
-  3. `python migrate_add_hidden.py`
-- Then `deploy/update.sh`
+- Run `deploy/update.sh` — it auto-discovers and runs pending migrations in order:
+  1. `migrate_001_paths_and_progression.py`
+  2. `migrate_002_add_lernziel_schueler.py`
+  3. `migrate_003_add_hidden.py`
 
 ### Next Steps
 - **Phase 4: Topic Progression** — topic queue, auto-assign next topic
