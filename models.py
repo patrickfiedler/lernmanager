@@ -197,6 +197,7 @@ def init_db():
                 path TEXT,  -- wanderweg/bergweg/gipfeltour (lowest path that includes this task)
                 path_model TEXT DEFAULT 'skip',  -- skip: lower paths skip; depth: all paths do it
                 graded_artifact_json TEXT,  -- JSON: {keyword, format, rubric}
+                hidden INTEGER DEFAULT 0,  -- 1=hidden from all students (admin override)
                 FOREIGN KEY (task_id) REFERENCES task(id) ON DELETE CASCADE
             );
 
@@ -986,10 +987,14 @@ def export_task_to_dict(task_id):
             st_data = {
                 'beschreibung': subtask['beschreibung'],
                 'reihenfolge': subtask['reihenfolge'],
-                'estimated_minutes': subtask['estimated_minutes']
+                'estimated_minutes': subtask['estimated_minutes'],
+                'path': subtask.get('path'),
+                'path_model': subtask.get('path_model', 'skip'),
             }
             if subtask.get('quiz_json'):
                 st_data['quiz'] = json.loads(subtask['quiz_json'])
+            if subtask.get('graded_artifact_json'):
+                st_data['graded_artifact'] = json.loads(subtask['graded_artifact_json'])
             subtasks_data.append(st_data)
 
         materials_data = []
@@ -1123,6 +1128,28 @@ def check_wahlpflicht_erfuellt(student_id, klasse_id, gruppe_id):
         return completed is not None
 
 
+# ============ Learning Paths ============
+
+PATH_ORDER = {'wanderweg': 0, 'bergweg': 1, 'gipfeltour': 2}
+
+
+def is_subtask_required_for_path(subtask, student_path):
+    """Check if a subtask is required for the student's learning path.
+
+    path_model='depth' → always required (all paths do it, different grading)
+    path_model='skip'  → required if subtask's path level <= student's path level
+    """
+    if not student_path or student_path not in PATH_ORDER:
+        return True  # No path set → treat all as required (legacy)
+    subtask_path = subtask.get('path')
+    if not subtask_path or subtask_path not in PATH_ORDER:
+        return True  # No path on subtask → required for everyone
+    if subtask.get('path_model') == 'depth':
+        return True
+    # 'skip' model: required if subtask path <= student path
+    return PATH_ORDER[subtask_path] <= PATH_ORDER[student_path]
+
+
 # ============ Subtask functions ============
 
 def get_subtasks(task_id):
@@ -1135,12 +1162,13 @@ def get_subtasks(task_id):
         return [dict(r) for r in rows]
 
 
-def create_subtask(task_id, beschreibung, reihenfolge=0, estimated_minutes=None, quiz_json=None):
+def create_subtask(task_id, beschreibung, reihenfolge=0, estimated_minutes=None, quiz_json=None,
+                   path=None, path_model='skip', graded_artifact_json=None):
     """Create a subtask."""
     with db_session() as conn:
         cursor = conn.execute(
-            "INSERT INTO subtask (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json) VALUES (?, ?, ?, ?, ?)",
-            (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json)
+            "INSERT INTO subtask (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json)
         )
         return cursor.lastrowid
 
@@ -1151,10 +1179,11 @@ def delete_subtask(subtask_id):
         conn.execute("DELETE FROM subtask WHERE id = ?", (subtask_id,))
 
 
-def update_subtasks(task_id, subtasks_list, estimated_minutes_list=None, quiz_json_list=None):
+def update_subtasks(task_id, subtasks_list, estimated_minutes_list=None, quiz_json_list=None,
+                    path_list=None, path_model_list=None, graded_artifact_json_list=None):
     """Replace all subtasks for a task.
 
-    Preserves visibility settings by matching subtask order/position.
+    Preserves material assignments by matching subtask order/position.
     Orphans quiz_attempt records by setting subtask_id=NULL before deleting old subtasks.
     """
     with db_session() as conn:
@@ -1169,22 +1198,7 @@ def update_subtasks(task_id, subtasks_list, estimated_minutes_list=None, quiz_js
                 WHERE subtask_id IN ({placeholders})
             """, old_subtask_ids)
 
-        # Step 1: Save visibility settings by order (reihenfolge), not ID
-        old_visibility = conn.execute("""
-            SELECT sv.klasse_id, sv.student_id, sv.enabled, sv.set_by_admin_id, s.reihenfolge
-            FROM subtask_visibility sv
-            JOIN subtask s ON sv.subtask_id = s.id
-            WHERE s.task_id = ?
-            ORDER BY s.reihenfolge
-        """, (task_id,)).fetchall()
-
-        # Convert to dict: (klasse_id or None, student_id or None, reihenfolge) -> (enabled, admin_id)
-        visibility_by_position = {}
-        for row in old_visibility:
-            key = (row['klasse_id'], row['student_id'], row['reihenfolge'])
-            visibility_by_position[key] = (row['enabled'], row['set_by_admin_id'])
-
-        # Step 1b: Save material-subtask assignments by position
+        # Step 1: Save material-subtask assignments by position
         old_mat_assignments = conn.execute("""
             SELECT ms.material_id, s.reihenfolge
             FROM material_subtask ms
@@ -1192,7 +1206,6 @@ def update_subtasks(task_id, subtasks_list, estimated_minutes_list=None, quiz_js
             WHERE s.task_id = ?
         """, (task_id,)).fetchall()
 
-        # {material_id: set(reihenfolge)}
         mat_assignments_by_position = {}
         for row in old_mat_assignments:
             mid = row['material_id']
@@ -1200,11 +1213,7 @@ def update_subtasks(task_id, subtasks_list, estimated_minutes_list=None, quiz_js
                 mat_assignments_by_position[mid] = set()
             mat_assignments_by_position[mid].add(row['reihenfolge'])
 
-        # Step 2: Delete old visibility records, material assignments, and subtasks
-        conn.execute("""
-            DELETE FROM subtask_visibility
-            WHERE subtask_id IN (SELECT id FROM subtask WHERE task_id = ?)
-        """, (task_id,))
+        # Step 2: Delete old material assignments and subtasks
         conn.execute("""
             DELETE FROM material_subtask
             WHERE subtask_id IN (SELECT id FROM subtask WHERE task_id = ?)
@@ -1216,7 +1225,6 @@ def update_subtasks(task_id, subtasks_list, estimated_minutes_list=None, quiz_js
 
         for i, beschreibung in enumerate(subtasks_list):
             if beschreibung.strip():
-                # Get estimated_minutes if provided
                 estimated_minutes = None
                 if estimated_minutes_list and i < len(estimated_minutes_list):
                     try:
@@ -1225,29 +1233,33 @@ def update_subtasks(task_id, subtasks_list, estimated_minutes_list=None, quiz_js
                     except (ValueError, AttributeError):
                         estimated_minutes = None
 
-                # Get quiz_json if provided
                 subtask_quiz = None
                 if quiz_json_list and i < len(quiz_json_list):
                     qj = quiz_json_list[i].strip() if quiz_json_list[i] else ''
                     subtask_quiz = qj if qj else None
 
+                path = None
+                if path_list and i < len(path_list):
+                    p = path_list[i].strip() if path_list[i] else ''
+                    path = p if p else None
+
+                path_model = 'skip'
+                if path_model_list and i < len(path_model_list):
+                    pm = path_model_list[i].strip() if path_model_list[i] else ''
+                    path_model = pm if pm in ('skip', 'depth') else 'skip'
+
+                graded_artifact = None
+                if graded_artifact_json_list and i < len(graded_artifact_json_list):
+                    ga = graded_artifact_json_list[i].strip() if graded_artifact_json_list[i] else ''
+                    graded_artifact = ga if ga else None
+
                 cursor = conn.execute(
-                    "INSERT INTO subtask (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json) VALUES (?, ?, ?, ?, ?)",
-                    (task_id, beschreibung.strip(), i, estimated_minutes, subtask_quiz)
+                    "INSERT INTO subtask (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (task_id, beschreibung.strip(), i, estimated_minutes, subtask_quiz, path, path_model, graded_artifact)
                 )
-                new_subtask_id = cursor.lastrowid
-                new_subtask_ids_by_position[i] = new_subtask_id
+                new_subtask_ids_by_position[i] = cursor.lastrowid
 
-        # Step 4: Restore visibility settings for matching positions
-        for (klasse_id, student_id, old_position), (enabled, admin_id) in visibility_by_position.items():
-            if old_position in new_subtask_ids_by_position:
-                new_subtask_id = new_subtask_ids_by_position[old_position]
-                conn.execute("""
-                    INSERT INTO subtask_visibility (subtask_id, klasse_id, student_id, enabled, set_by_admin_id)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (new_subtask_id, klasse_id, student_id, enabled, admin_id))
-
-        # Step 4b: Restore material-subtask assignments for matching positions
+        # Step 4: Restore material-subtask assignments for matching positions
         for material_id, old_positions in mat_assignments_by_position.items():
             for old_pos in old_positions:
                 if old_pos in new_subtask_ids_by_position:
@@ -1410,12 +1422,12 @@ def assign_task_to_klasse(klasse_id, task_id, rolle='primary'):
 # ============================================================================
 
 def get_visible_subtasks_for_student(student_id, klasse_id, task_id):
-    """Get list of subtasks visible to a student based on visibility rules.
+    """Get list of subtasks visible to a student based on learning path.
 
-    Rules priority:
-    1. Student-specific rules (if they exist)
-    2. Class-wide rules (if no student rule exists)
-    3. Default: NO subtasks visible (admin must explicitly enable)
+    If student has a learning path (lernpfad):
+      - Return ALL subtasks (ordered), each with a 'required' flag
+      - Filter out hidden subtasks (hidden=1)
+    If no path (legacy): fall back to subtask_visibility query.
 
     Args:
         student_id: The student ID
@@ -1423,187 +1435,54 @@ def get_visible_subtasks_for_student(student_id, klasse_id, task_id):
         task_id: The task ID
 
     Returns:
-        List of subtask dicts that are visible to this student
+        List of subtask dicts that are visible to this student.
+        Each dict has an added 'required' key (True/False) when path-based.
     """
     with db_session() as conn:
-        rows = conn.execute('''
-            SELECT s.* FROM subtask s
-            WHERE s.task_id = ?
-            AND s.id IN (
-                -- Student-specific rules (highest priority)
-                SELECT sv.subtask_id FROM subtask_visibility sv
-                WHERE sv.student_id = ? AND sv.enabled = 1
+        # Check if student has a learning path
+        student_row = conn.execute(
+            "SELECT lernpfad FROM student WHERE id = ?", (student_id,)
+        ).fetchone()
+        student_path = student_row['lernpfad'] if student_row else None
 
-                UNION
-
-                -- Class rules (if no student-specific rule exists)
-                SELECT sv.subtask_id FROM subtask_visibility sv
-                WHERE sv.klasse_id = ? AND sv.enabled = 1
-                AND NOT EXISTS (
-                    SELECT 1 FROM subtask_visibility sv2
-                    WHERE sv2.subtask_id = sv.subtask_id
-                    AND sv2.student_id = ?
-                )
-            )
-            ORDER BY s.reihenfolge
-        ''', (task_id, student_id, klasse_id, student_id)).fetchall()
-        return [dict(r) for r in rows]
-
-
-def get_subtask_visibility_settings(klasse_id=None, student_id=None, task_id=None):
-    """Get current visibility settings for a context.
-
-    Args:
-        klasse_id: Optional class ID to filter by
-        student_id: Optional student ID to filter by
-        task_id: Optional task ID to filter by (gets subtasks for this task)
-
-    Returns:
-        Dict mapping subtask_id -> {'enabled': bool, 'source': 'class'|'student'}
-    """
-    with db_session() as conn:
-        # Build query based on context
-        conditions = []
-        params = []
-
-        if task_id:
-            # Get all subtasks for this task first
-            subtasks = conn.execute(
-                'SELECT id FROM subtask WHERE task_id = ? ORDER BY reihenfolge',
-                (task_id,)
-            ).fetchall()
-            subtask_ids = [s['id'] for s in subtasks]
+        if student_path and student_path in PATH_ORDER:
+            # Path-based: return all non-hidden subtasks with required flag
+            rows = conn.execute('''
+                SELECT * FROM subtask
+                WHERE task_id = ? AND COALESCE(hidden, 0) = 0
+                ORDER BY reihenfolge
+            ''', (task_id,)).fetchall()
+            result = []
+            for r in rows:
+                d = dict(r)
+                d['required'] = is_subtask_required_for_path(d, student_path)
+                result.append(d)
+            return result
         else:
-            subtask_ids = None
-
-        # Query visibility rules
-        query = 'SELECT subtask_id, enabled, klasse_id, student_id FROM subtask_visibility WHERE 1=1'
-
-        if klasse_id is not None:
-            query += ' AND klasse_id = ?'
-            params.append(klasse_id)
-
-        if student_id is not None:
-            query += ' AND student_id = ?'
-            params.append(student_id)
-
-        if subtask_ids:
-            placeholders = ','.join('?' * len(subtask_ids))
-            query += f' AND subtask_id IN ({placeholders})'
-            params.extend(subtask_ids)
-
-        rows = conn.execute(query, params).fetchall()
-
-        # Build result mapping
-        result = {}
-        for r in rows:
-            source = 'student' if r['student_id'] else 'class'
-            result[r['subtask_id']] = {
-                'enabled': bool(r['enabled']),
-                'source': source
-            }
-
-        return result
-
-
-def set_subtask_visibility_for_class(klasse_id, subtask_id, enabled, admin_id):
-    """Set visibility of a subtask for an entire class.
-
-    Args:
-        klasse_id: The class ID
-        subtask_id: The subtask ID
-        enabled: True to enable, False to disable
-        admin_id: Admin making the change (for audit trail)
-    """
-    with db_session() as conn:
-        # Delete existing rule for this class+subtask
-        conn.execute('''
-            DELETE FROM subtask_visibility
-            WHERE klasse_id = ? AND subtask_id = ?
-        ''', (klasse_id, subtask_id))
-
-        # Insert new rule
-        conn.execute('''
-            INSERT INTO subtask_visibility (subtask_id, klasse_id, enabled, set_by_admin_id)
-            VALUES (?, ?, ?, ?)
-        ''', (subtask_id, klasse_id, 1 if enabled else 0, admin_id))
-
-
-def set_subtask_visibility_for_student(student_id, subtask_id, enabled, admin_id):
-    """Set visibility of a subtask for an individual student.
-
-    This creates a student-specific override that takes priority over class rules.
-
-    Args:
-        student_id: The student ID
-        subtask_id: The subtask ID
-        enabled: True to enable, False to disable
-        admin_id: Admin making the change (for audit trail)
-    """
-    with db_session() as conn:
-        # Delete existing rule for this student+subtask
-        conn.execute('''
-            DELETE FROM subtask_visibility
-            WHERE student_id = ? AND subtask_id = ?
-        ''', (student_id, subtask_id))
-
-        # Insert new rule
-        conn.execute('''
-            INSERT INTO subtask_visibility (subtask_id, student_id, enabled, set_by_admin_id)
-            VALUES (?, ?, ?, ?)
-        ''', (subtask_id, student_id, 1 if enabled else 0, admin_id))
-
-
-def clear_student_subtask_visibility_override(student_id, subtask_id):
-    """Remove a student-specific visibility override, reverting to class default."""
-    with db_session() as conn:
-        conn.execute(
-            'DELETE FROM subtask_visibility WHERE student_id = ? AND subtask_id = ?',
-            (student_id, subtask_id)
-        )
-
-
-def bulk_set_subtask_visibility(klasse_id=None, student_id=None, subtask_ids=None, enabled=True, admin_id=None):
-    """Bulk set visibility for multiple subtasks.
-
-    Args:
-        klasse_id: If set, applies to entire class
-        student_id: If set, applies to individual student
-        subtask_ids: List of subtask IDs to update
-        enabled: True to enable, False to disable
-        admin_id: Admin making the change
-    """
-    if not subtask_ids:
-        return
-
-    with db_session() as conn:
-        for subtask_id in subtask_ids:
-            if klasse_id:
-                set_subtask_visibility_for_class(klasse_id, subtask_id, enabled, admin_id)
-            elif student_id:
-                set_subtask_visibility_for_student(student_id, subtask_id, enabled, admin_id)
-
-
-def reset_subtask_visibility_to_class_default(student_id, task_id):
-    """Remove all student-specific overrides for a task, reverting to class defaults.
-
-    Args:
-        student_id: The student ID
-        task_id: The task ID
-    """
-    with db_session() as conn:
-        # Get all subtasks for this task
-        subtasks = conn.execute(
-            'SELECT id FROM subtask WHERE task_id = ?',
-            (task_id,)
-        ).fetchall()
-
-        # Delete student-specific rules
-        for s in subtasks:
-            conn.execute('''
-                DELETE FROM subtask_visibility
-                WHERE student_id = ? AND subtask_id = ?
-            ''', (student_id, s['id']))
+            # Legacy fallback: subtask_visibility query
+            rows = conn.execute('''
+                SELECT s.* FROM subtask s
+                WHERE s.task_id = ?
+                AND s.id IN (
+                    SELECT sv.subtask_id FROM subtask_visibility sv
+                    WHERE sv.student_id = ? AND sv.enabled = 1
+                    UNION
+                    SELECT sv.subtask_id FROM subtask_visibility sv
+                    WHERE sv.klasse_id = ? AND sv.enabled = 1
+                    AND NOT EXISTS (
+                        SELECT 1 FROM subtask_visibility sv2
+                        WHERE sv2.subtask_id = sv.subtask_id
+                        AND sv2.student_id = ?
+                    )
+                )
+                ORDER BY s.reihenfolge
+            ''', (task_id, student_id, klasse_id, student_id)).fetchall()
+            result = []
+            for r in rows:
+                d = dict(r)
+                d['required'] = True  # Legacy: all visible = required
+                result.append(d)
+            return result
 
 
 def get_student_task(student_id, klasse_id):
@@ -1784,8 +1663,9 @@ def mark_task_complete(student_task_id, manual=False):
 def check_task_completion(student_task_id):
     """Check if task should be marked complete.
 
-    Complete = all visible subtasks erledigt + all required subtask quizzes passed
+    Complete = all required subtasks erledigt + all required subtask quizzes passed
                + topic quiz passed (or no topic quiz).
+    Only path-required subtasks count toward completion.
     """
     with db_session() as conn:
         student_task_info = conn.execute('''
@@ -1804,18 +1684,20 @@ def check_task_completion(student_task_id):
             "SELECT quiz_json, subtask_quiz_required FROM task WHERE id = ?", (task_id,)
         ).fetchone()
 
-        # Q5A: Get visible subtasks for this student
+        # Get visible subtasks (with path-based required flag)
         visible_subtasks = get_visible_subtasks_for_student(student_id, klasse_id, task_id)
-        visible_subtask_ids = [s['id'] for s in visible_subtasks]
+        # Only check required subtasks for completion
+        required_subtasks = [s for s in visible_subtasks if s.get('required', True)]
+        required_ids = [s['id'] for s in required_subtasks]
 
-        if visible_subtask_ids:
-            placeholders = ','.join('?' * len(visible_subtask_ids))
+        if required_ids:
+            placeholders = ','.join('?' * len(required_ids))
             subtask_rows = conn.execute(f'''
                 SELECT sub.id, sub.quiz_json, COALESCE(ss.erledigt, 0) as erledigt
                 FROM subtask sub
                 LEFT JOIN student_subtask ss ON sub.id = ss.subtask_id AND ss.student_task_id = ?
                 WHERE sub.id IN ({placeholders})
-            ''', [student_task_id] + visible_subtask_ids).fetchall()
+            ''', [student_task_id] + required_ids).fetchall()
 
             quiz_required = task_info and task_info['subtask_quiz_required']
 

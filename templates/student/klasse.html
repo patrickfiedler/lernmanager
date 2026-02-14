@@ -25,21 +25,23 @@
     <div class="progress-section">
         <div class="progress-header">
             <div class="progress-text" id="progress-text">
-                {{ subtasks|selectattr('erledigt')|list|length }} von {{ subtasks|length }} Aufgaben erledigt
+                {% set required_subtasks = subtasks|selectattr('required')|list if student_path else subtasks %}
+                {{ required_subtasks|selectattr('erledigt')|list|length }} von {{ required_subtasks|length }} Aufgaben erledigt
             </div>
             <div class="progress-dots" role="group" aria-label="Aufgabenfortschritt">
                 {% for sub in subtasks %}
                 {% set has_quiz = sub.quiz_json %}
                 {% set quiz_passed = subtask_quiz_status.get(sub.id, false) %}
-                <div class="dot dot-subtask {% if sub.erledigt %}completed {% endif %}{% if current_subtask and sub.id == current_subtask.id %}current{% endif %}"
+                <div class="dot dot-subtask {% if sub.erledigt %}completed {% endif %}{% if current_subtask and sub.id == current_subtask.id %}current{% endif %}{% if not sub.get('required', true) %} optional{% endif %}"
                      role="button"
                      tabindex="0"
-                     aria-label="Aufgabe {{ loop.index }}: {{ sub.beschreibung[:50] }}{% if sub.beschreibung|length > 50 %}...{% endif %}{% if sub.erledigt %} - Erledigt{% endif %}"
+                     aria-label="Aufgabe {{ loop.index }}: {{ sub.beschreibung[:50] }}{% if sub.beschreibung|length > 50 %}...{% endif %}{% if sub.erledigt %} - Erledigt{% endif %}{% if not sub.get('required', true) %} (optional){% endif %}"
                      {% if current_subtask and sub.id == current_subtask.id %}aria-current="true"{% endif %}
                      data-subtask-position="{{ loop.index }}"
+                     data-required="{{ 'true' if sub.get('required', true) else 'false' }}"
                      onclick="navigateToSubtask({{ loop.index }})"
                      onkeydown="handleDotKeydown(event)"
-                     title="Aufgabe {{ loop.index }}: {{ sub.beschreibung[:30] }}{% if sub.beschreibung|length > 30 %}...{% endif %}"></div>
+                     title="{% if sub.get('path') %}{% if sub.path == 'wanderweg' %}🟢{% elif sub.path == 'bergweg' %}🔵{% elif sub.path == 'gipfeltour' %}⭐{% endif %} {% endif %}Aufgabe {{ loop.index }}{% if not sub.get('required', true) %} (optional){% endif %}"></div>
                 {% if has_quiz %}
                 <div class="dot dot-subtask-quiz {% if quiz_passed %}completed{% elif sub.erledigt %}available{% endif %}"
                      role="button"
@@ -91,6 +93,9 @@
                 <div class="task-badge">Aufgabe {{ current_index + 1 }} von {{ subtasks|length }}</div>
                 {% if active_subtask.estimated_minutes %}
                 <div class="task-badge time-estimate">⏱️ ~{{ active_subtask.estimated_minutes }} Min</div>
+                {% endif %}
+                {% if not active_subtask.get('required', true) %}
+                <div class="task-badge" style="background: #fef3c7; color: #92400e;">Optional für deinen Weg</div>
                 {% endif %}
             </div>
             {% endif %}
@@ -325,12 +330,13 @@ function toggleSubtask(position, checked) {
 }
 
 function updateProgressText() {
-    const dots = document.querySelectorAll('.progress-dots .dot.dot-subtask');
-    const completedDots = document.querySelectorAll('.progress-dots .dot.dot-subtask.completed');
+    const allDots = document.querySelectorAll('.progress-dots .dot.dot-subtask');
+    const requiredDots = Array.from(allDots).filter(d => d.dataset.required !== 'false');
+    const completedRequired = requiredDots.filter(d => d.classList.contains('completed'));
     const progressText = document.getElementById('progress-text');
 
     if (progressText) {
-        progressText.textContent = `${completedDots.length} von ${dots.length} Aufgaben erledigt`;
+        progressText.textContent = `${completedRequired.length} von ${requiredDots.length} Aufgaben erledigt`;
     }
 }
 

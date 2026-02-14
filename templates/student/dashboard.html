@@ -16,15 +16,22 @@
         {% if task %}
         <div class="card-header flex flex-between">
             <span>{% if task.kategorie == 'bonus' %}⭐{% else %}📚{% endif %} {{ task.name }}</span>
-            {% if task.abgeschlossen %}
-            <span class="badge badge-success">✅ Fertig</span>
-            {% else %}
-            <span class="badge badge-primary">🔄 In Arbeit</span>
-            {% endif %}
+            <div class="flex gap-1">
+                {% if task.abgeschlossen %}
+                <span class="badge badge-success">✅ Fertig</span>
+                {% else %}
+                <span class="badge badge-primary">🔄 In Arbeit</span>
+                {% endif %}
+            </div>
         </div>
 
         {% if task.kategorie == 'bonus' %}
         <span class="badge badge-warning mb-1">⭐ Bonusthema</span>
+        {% endif %}
+        {% if student_path %}
+        <span class="badge mb-1" style="{% if student_path == 'wanderweg' %}background: #dcfce7; color: #166534;{% elif student_path == 'bergweg' %}background: #dbeafe; color: #1e40af;{% else %}background: #fef3c7; color: #92400e;{% endif %}">
+            {% if student_path == 'wanderweg' %}🟢 Wanderweg{% elif student_path == 'bergweg' %}🔵 Bergweg{% else %}⭐ Gipfeltour{% endif %}
+        </span>
         {% endif %}
 
         {% if task.next_task_preview %}

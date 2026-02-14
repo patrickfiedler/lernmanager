@@ -116,6 +116,8 @@ def validate_task_structure(data):
                     errors.append(f"Voraussetzung {i+1} must be a non-empty string")
 
     # Validate subtasks
+    VALID_PATHS = ('wanderweg', 'bergweg', 'gipfeltour')
+    VALID_PATH_MODELS = ('skip', 'depth')
     if 'subtasks' in task:
         if not isinstance(task['subtasks'], list):
             errors.append("subtasks must be a list")
@@ -126,6 +128,22 @@ def validate_task_structure(data):
                     continue
                 if 'beschreibung' not in sub or not sub['beschreibung']:
                     errors.append(f"Subtask {i+1} missing 'beschreibung'")
+                # path is required
+                if 'path' not in sub or sub['path'] not in VALID_PATHS:
+                    errors.append(f"Subtask {i+1} missing or invalid 'path'. Must be one of: {', '.join(VALID_PATHS)}")
+                # path_model is optional, defaults to 'skip'
+                if 'path_model' in sub and sub['path_model'] not in VALID_PATH_MODELS:
+                    errors.append(f"Subtask {i+1} invalid 'path_model'. Must be one of: {', '.join(VALID_PATH_MODELS)}")
+                # graded_artifact is optional
+                if 'graded_artifact' in sub and sub['graded_artifact']:
+                    ga = sub['graded_artifact']
+                    if not isinstance(ga, dict):
+                        errors.append(f"Subtask {i+1} graded_artifact must be an object")
+                    else:
+                        if 'keyword' not in ga or not ga['keyword']:
+                            errors.append(f"Subtask {i+1} graded_artifact missing 'keyword'")
+                        if 'format' not in ga or not ga['format']:
+                            errors.append(f"Subtask {i+1} graded_artifact missing 'format'")
                 if 'quiz' in sub and sub['quiz']:
                     errors.extend(_validate_quiz(sub['quiz'], f"Subtask {i+1} quiz"))
 
@@ -246,7 +264,11 @@ def import_task(task_data, dry_run=False):
         reihenfolge = sub.get('reihenfolge', i)
         estimated_minutes = sub.get('estimated_minutes')
         sub_quiz_json = json.dumps(sub['quiz'], ensure_ascii=False) if sub.get('quiz') else None
-        sub_id = models.create_subtask(task_id, sub['beschreibung'], reihenfolge, estimated_minutes, sub_quiz_json)
+        path = sub.get('path')
+        path_model = sub.get('path_model', 'skip')
+        graded_artifact_json = json.dumps(sub['graded_artifact'], ensure_ascii=False) if sub.get('graded_artifact') else None
+        sub_id = models.create_subtask(task_id, sub['beschreibung'], reihenfolge, estimated_minutes, sub_quiz_json,
+                                       path=path, path_model=path_model, graded_artifact_json=graded_artifact_json)
         subtask_id_by_position[reihenfolge] = sub_id
 
     # Create materials and restore subtask assignments

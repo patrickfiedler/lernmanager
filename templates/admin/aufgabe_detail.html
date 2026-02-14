@@ -113,6 +113,16 @@
                 <div class="subtask-edit-header">
                     <span class="subtask-edit-number">{{ loop.index }}</span>
                     <div class="flex gap-1 flex-center">
+                        <select name="path[]" class="form-control" style="width: 140px;" title="Lernpfad">
+                            <option value="">– Pfad –</option>
+                            <option value="wanderweg" {% if st.path == 'wanderweg' %}selected{% endif %}>🟢 Wanderweg</option>
+                            <option value="bergweg" {% if st.path == 'bergweg' %}selected{% endif %}>🔵 Bergweg</option>
+                            <option value="gipfeltour" {% if st.path == 'gipfeltour' %}selected{% endif %}>⭐ Gipfeltour</option>
+                        </select>
+                        <select name="path_model[]" class="form-control" style="width: 100px;" title="Pfadmodell">
+                            <option value="skip" {% if st.path_model != 'depth' %}selected{% endif %}>Skip</option>
+                            <option value="depth" {% if st.path_model == 'depth' %}selected{% endif %}>Depth</option>
+                        </select>
                         <input type="number" name="estimated_minutes[]" class="form-control" style="width: 80px;" min="5" max="180" placeholder="Min" value="{{ st.estimated_minutes or '' }}" title="Geschätzte Dauer in Minuten">
                         <button type="button" class="btn btn-danger btn-sm" onclick="removeSubtask(this)">✕ Entfernen</button>
                     </div>
@@ -433,6 +443,16 @@ function addSubtask() {
         <div class="subtask-edit-header">
             <span class="subtask-edit-number">${count + 1}</span>
             <div class="flex gap-1 flex-center">
+                <select name="path[]" class="form-control" style="width: 140px;" title="Lernpfad">
+                    <option value="">– Pfad –</option>
+                    <option value="wanderweg">🟢 Wanderweg</option>
+                    <option value="bergweg" selected>🔵 Bergweg</option>
+                    <option value="gipfeltour">⭐ Gipfeltour</option>
+                </select>
+                <select name="path_model[]" class="form-control" style="width: 100px;" title="Pfadmodell">
+                    <option value="skip" selected>Skip</option>
+                    <option value="depth">Depth</option>
+                </select>
                 <input type="number" name="estimated_minutes[]" class="form-control" style="width: 80px;" min="5" max="180" placeholder="Min" title="Geschätzte Dauer in Minuten">
                 <button type="button" class="btn btn-danger btn-sm" onclick="removeSubtask(this)">✕ Entfernen</button>
             </div>

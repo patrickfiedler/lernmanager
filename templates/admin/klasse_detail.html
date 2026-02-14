@@ -53,21 +53,14 @@
     <div class="card-header">📝 Thema für alle zuweisen</div>
     <form method="POST" action="{{ url_for('admin_klasse_thema_zuweisen', klasse_id=klasse.id) }}" id="assign-task-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <div class="flex gap-1 mb-1">
-            <select name="task_id" id="task-select" class="form-control" style="flex: 1;" required onchange="loadSubtasks(this.value)">
+        <div class="flex gap-1">
+            <select name="task_id" class="form-control" style="flex: 1;" required>
                 <option value="">-- Thema wählen --</option>
                 {% for task in tasks %}
                 <option value="{{ task.id }}">{{ task.fach }} ({{ task.stufe }}): {{ task.name }}</option>
                 {% endfor %}
             </select>
             <button type="submit" class="btn btn-primary">Zuweisen</button>
-        </div>
-        <div id="subtask-selector" style="display: none;">
-            <label class="text-muted">Aufgabe (optional):</label>
-            <select name="subtask_id" id="subtask-select" class="form-control">
-                <option value="">Alle Aufgaben zeigen</option>
-            </select>
-            <small class="text-muted">Wähle eine spezifische Aufgabe, um nur diese für alle Schüler zu zeigen.</small>
         </div>
     </form>
 </div>
@@ -124,43 +117,3 @@
 </div>
 {% endblock %}
 
-{% block scripts %}
-function loadSubtasks(taskId) {
-    const subtaskSelector = document.getElementById('subtask-selector');
-    const subtaskSelect = document.getElementById('subtask-select');
-
-    if (!taskId) {
-        subtaskSelector.style.display = 'none';
-        return;
-    }
-
-    // Fetch subtasks for this task
-    const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
-    fetch(`/admin/thema/${taskId}/aufgaben`, {
-        headers: {
-            'X-CSRFToken': csrfToken
-        }
-    })
-    .then(r => r.json())
-    .then(subtasks => {
-        // Clear existing options
-        subtaskSelect.innerHTML = '<option value="">Alle Aufgaben zeigen</option>';
-
-        if (subtasks.length > 0) {
-            subtasks.forEach((sub, index) => {
-                const option = document.createElement('option');
-                option.value = sub.id;
-                option.textContent = `${index + 1}. ${sub.beschreibung.substring(0, 60)}${sub.beschreibung.length > 60 ? '...' : ''}`;
-                subtaskSelect.appendChild(option);
-            });
-            subtaskSelector.style.display = 'block';
-        } else {
-            subtaskSelector.style.display = 'none';
-        }
-    })
-    .catch(err => {
-        console.error('Failed to load subtasks:', err);
-        subtaskSelector.style.display = 'none';
-    });
-}
-{% endblock %}

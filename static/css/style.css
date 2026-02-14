@@ -1247,6 +1247,19 @@ tr.unsaved-row td {
     background: #10b981;
 }
 
+/* Optional task dots (not required for student's learning path) */
+.dot.dot-subtask.optional {
+    opacity: 0.4;
+    border: 2px dashed #9ca3af;
+    background: transparent;
+}
+
+.dot.dot-subtask.optional.completed {
+    opacity: 0.6;
+    background: #10b981;
+    border: none;
+}
+
 /* Quiz images */
 .quiz-question-image {
     max-width: 100%;

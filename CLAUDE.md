@@ -104,7 +104,7 @@ In commit messages and docs, use the **UI terminology** (Thema/topic, Aufgabe/ta
 
 **Full format spec**: `docs/task_json_format.md` — also serves as a Claude prompt for generating new content.
 
-### Learning Paths (Planned, not yet implemented)
+### Learning Paths (Implemented)
 
 Curriculum spec: `docs/2026-02-13_lernmanager_curriculum_spec.md`
 
@@ -112,13 +112,16 @@ Three cumulative difficulty paths per student: 🟢 Wanderweg (foundational) ⊂
 
 - Each subtask has a `path` field (`wanderweg`/`bergweg`/`gipfeltour`) = lowest path that includes it
 - `path_model`: `skip` (lower paths skip task entirely) or `depth` (all paths do it, different grading expectations)
-- **All tasks are visible** to all students — non-required tasks are styled as optional, NOT hidden
-- **Learning paths take precedence over `subtask_visibility`**: path is the default; visibility settings are admin overrides for special cases only. Switching paths overrides visibility.
-- Progress completion depends on student's chosen path
-- Graded artifacts: some tasks produce graded files (`graded_artifact` field with `keyword`, `format`, `rubric`)
+- **All tasks are visible** to all students — non-required tasks are styled as optional (dimmed dots, "Optional für deinen Weg" badge), NOT hidden
+- **Path scope is global** (student-level `lernpfad` column). Per-topic path override is a future option.
+- **Bidirectional switching**: Students can change path in any direction via Settings page.
+- Progress completion only counts path-required subtasks
+- `hidden` column on `subtask`: simple admin override to hide specific subtasks from ALL students
+- Legacy fallback: students without a `lernpfad` value use old `subtask_visibility` query
+- **Old visibility management UI removed** (4 routes, 421-line template deleted). `subtask_visibility` table kept in DB for legacy data.
+- Admin subtask editor includes path/path_model dropdowns per subtask
+- Graded artifacts: `graded_artifact_json` column on `subtask` (JSON with `keyword`, `format`, `rubric`). UI display not yet implemented.
 - Spaced repetition: weekly quiz from completed question pools (not yet designed)
-
-**DB changes needed** (not yet migrated): `path` + `path_model` on `subtask`, `lernpfad` on `student`, `graded_artifact_json` on `subtask`. See `todo.md` for full checklist.
 
 ### Student URL Structure (Slug-Based)
 
@@ -149,10 +152,10 @@ Student-facing routes use human-readable slugs instead of numeric DB IDs. Slugs 
 
 The task page shows progress dots: `[task] [?] [task] [task] [?] [topic-quiz?]`
 
-- **Task dots** (`.dot.dot-subtask`): gray (incomplete), green (completed), blue ring (current)
+- **Task dots** (`.dot.dot-subtask`): gray (incomplete), green (completed), blue ring (current), `.optional` (dimmed + dashed border for non-required path tasks)
 - **Subtask quiz dots** (`.dot.dot-subtask-quiz`): smaller (1.25rem), gray (locked — task not done), amber `.available` (task done, quiz not passed), green `.completed` (passed)
 - **Topic quiz dot** (`.dot.dot-quiz`): amber (available), green (passed)
-- Progress text ("X von Y Aufgaben erledigt") counts only `.dot-subtask` elements, not quiz dots
+- Progress text ("X von Y Aufgaben erledigt") counts only required `.dot-subtask` elements (not optional, not quiz dots)
 
 ## Common Issues and Solutions
 
@@ -162,15 +165,11 @@ Jinja2 templates use `{% block scripts %}` and `{% block content %}` inheritance
 ### Unsaved Changes Detection
 When tracking form state with `beforeunload` event listener, always update `initialState` after successful save and before reload to prevent false unsaved changes warnings.
 
-### Subtask Visibility and Task Assignment
+### Subtask Editing Cascading Effects
 When editing subtasks via `models.update_subtasks()`, be aware of cascading effects:
-- Deleting subtasks orphans `student_task.current_subtask_id` references
-- Deleting subtasks orphans `subtask_visibility` records (controls which subtasks students see)
-- **Solution**: Preserve visibility by subtask position/order, not by ID
-- Map old subtask position 1 → new subtask position 1 (even with different IDs)
-- Update `student_task.current_subtask_id` to point to first new subtask
-
-**See**: `docs/archive/2026-01-27_ux_tier1_implementation/task_visibility_bug_plan.md`
+- Deleting subtasks orphans `quiz_attempt` records → solved by setting `subtask_id=NULL` before delete
+- Material-subtask assignments are preserved by matching subtask position/order, not by ID
+- Old `subtask_visibility` records are NOT preserved (visibility system replaced by learning paths)
 
 ### Easy Reading Mode Scope
 When adding user-specific features that affect template rendering:

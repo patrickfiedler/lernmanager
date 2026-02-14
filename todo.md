@@ -29,27 +29,35 @@
 
 ## Subtask Management Enhancements
 
-- Add "Activate All Compulsory" button to admin subtask config (requires marking subtasks as compulsory vs. bonus)
-- Add "Manage Subtasks" link to admin class detail page
-- Show warning on class subtask config if students have individual overrides
+- ~~Add "Activate All Compulsory" button to admin subtask config~~ → superseded by learning paths
+- ~~Add "Manage Subtasks" link to admin class detail page~~ → removed subtask management UI
+- ~~Show warning on class subtask config if students have individual overrides~~ → visibility system removed
 
-## Learning Paths (Spec Ready)
+## Learning Paths (Implemented — Phase 3 Done)
 
-Combined plan: `~/.claude/plans/fuzzy-wiggling-unicorn.md` (Phases 1–3)
+Combined plan: `~/.claude/plans/fuzzy-wiggling-unicorn.md`
 Spec: `docs/2026-02-13_lernmanager_curriculum_spec.md`
-Research: `docs/research/2026-02-07_learning_paths_and_quiz_evolution.md`
 
-Three cumulative paths: 🟢 Wanderweg (foundational) ⊂ 🔵 Bergweg (full curriculum) ⊂ ⭐ Gipfeltour (everything).
-Per-task `path` field = lowest path that includes it. Per-task `path_model`: `skip` (lower paths skip) or `depth` (all paths do it, different grading expectations).
-**Learning paths take precedence over task visibility.** Paths are the default. Easy switching overrides visibility settings.
+Three cumulative paths: 🟢 Wanderweg ⊂ 🔵 Bergweg ⊂ ⭐ Gipfeltour. Implemented:
+- [x] DB columns: `subtask.path`, `subtask.path_model`, `subtask.hidden`, `student.lernpfad`
+- [x] Path-based completion logic (`is_subtask_required_for_path()`)
+- [x] Student path selection (Settings page, bidirectional)
+- [x] Student UI: optional dot styling, path badges, path-aware progress counts
+- [x] Admin: path/path_model dropdowns in subtask editor
+- [x] Import/export: path fields validated and round-tripped
+- [x] Removed old visibility management (4 routes, 6 model functions, 421-line template)
+- [x] Simplified admin class/student detail pages
 
-## Graded Artifacts (Spec Ready)
+Future: per-topic path override, graded artifact UI, spaced repetition
+
+## Graded Artifacts (DB Ready, UI Pending)
 
 Spec: `docs/2026-02-13_lernmanager_curriculum_spec.md` (Section 3)
 
 Some tasks produce graded digital artifacts (documents, images, Scratch projects). ~20 total across the curriculum.
 
-- [ ] Add `graded_artifact_json TEXT` column to `subtask` table (JSON with `keyword`, `format`, `rubric`)
+- [x] Add `graded_artifact_json TEXT` column to `subtask` table (JSON with `keyword`, `format`, `rubric`)
+- [x] Import/export support for graded_artifact field
 - [ ] Student UI: display artifact keyword and accepted formats
 - [ ] Student UI: display grade when available
 - [ ] External API endpoint to receive grades from collection/grading script (overlaps with scan-folders.ps1 API todo)
