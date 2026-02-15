@@ -1,6 +1,24 @@
-# Lernmanager - Current State (2026-02-14)
+# Lernmanager - Current State (2026-02-15)
 
-## Latest Session (2026-02-14) — Phase 3 Done
+## Latest Session (2026-02-15) — Web-Based Topic Import
+
+### Admin Topic Import via Web UI
+- **Problem:** CLI `import_task.py` can't access encrypted SQLCipher DB on production
+- **Solution:** Admin web route `/admin/themen/import` with preview → confirm flow
+- Refactored `import_task.py`: `check_duplicate()` and `import_task()` accept optional `warnings` list (CLI keeps printing, web collects)
+- Route reuses `validate_task_structure()`, `check_duplicate()`, `import_task()` directly — no code duplication
+- Supports both single (`{"task": {...}}`) and bulk (`{"tasks": [...]}`) export formats
+- Preview shows: name, fach, stufe, kategorie, subtask count with path breakdown, materials, quizzes, duplicate warnings
+- Validated JSON passed via hidden `<textarea>` between preview and confirm (stateless)
+- Import button added to admin topic list page next to "Alle exportieren"
+
+**Files changed:**
+- `import_task.py` — `warnings` parameter on `check_duplicate()` and `import_task()`
+- `app.py` — `_build_topic_preview()` helper + `admin_themen_import` route, import from `import_task`
+- `templates/admin/themen_import.html` — new template (upload + preview + confirm)
+- `templates/admin/aufgaben.html` — import button
+
+## Previous Session (2026-02-14) — Phase 3 Done
 
 ### Phase 3: Learning Paths + Admin Visibility Overhaul (DONE)
 

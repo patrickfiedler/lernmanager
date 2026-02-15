@@ -172,8 +172,10 @@ def validate_task_structure(data):
     return True
 
 
-def check_duplicate(task_data):
-    """Check if a task with the same name, fach, and stufe already exists."""
+def check_duplicate(task_data, warnings=None):
+    """Check if a task with the same name, fach, and stufe already exists.
+    Returns existing task ID if duplicate found, None otherwise.
+    If warnings list provided, appends warning message instead of printing."""
     task = task_data['task']
     existing_tasks = models.get_all_tasks()
 
@@ -181,19 +183,24 @@ def check_duplicate(task_data):
         if (existing['name'] == task['name'] and
             existing['fach'] == task['fach'] and
             existing['stufe'] == task['stufe']):
+            msg = f"Thema '{task['name']}' ({task['fach']} {task['stufe']}) existiert bereits (ID: {existing['id']})"
+            if warnings is not None:
+                warnings.append(msg)
             return existing['id']
 
     return None
 
 
-def import_task(task_data, dry_run=False):
-    """Import a task into the database."""
+def import_task(task_data, dry_run=False, warnings=None):
+    """Import a task into the database.
+    If warnings list provided, appends warning messages instead of printing."""
     task = task_data['task']
 
     # Check for duplicates
-    existing_id = check_duplicate(task_data)
+    existing_id = check_duplicate(task_data, warnings=warnings)
     if existing_id:
-        print(f"Warning: Task '{task['name']}' ({task['fach']} {task['stufe']}) already exists (ID: {existing_id})")
+        if warnings is None:
+            print(f"Warning: Task '{task['name']}' ({task['fach']} {task['stufe']}) already exists (ID: {existing_id})")
         return None
 
     if dry_run:
@@ -246,7 +253,11 @@ def import_task(task_data, dry_run=False):
             if v_name in task_name_to_id:
                 models.add_task_voraussetzung(task_id, task_name_to_id[v_name])
             else:
-                print(f"  Warning: Prerequisite '{v_name}' not found, skipping")
+                msg = f"Voraussetzung '{v_name}' nicht gefunden, übersprungen"
+                if warnings is not None:
+                    warnings.append(msg)
+                else:
+                    print(f"  Warning: {msg}")
 
     # Set subtask_quiz_required if specified (default is 1/true in DB)
     if 'subtask_quiz_required' in task:

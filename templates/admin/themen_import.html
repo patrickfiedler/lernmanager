@@ -1,0 +1,114 @@
+{% extends 'base.html' %}
+
+{% block title %}Themen importieren - Lernmanager{% endblock %}
+
+{% block content %}
+<div class="flex flex-between flex-center mb-2">
+    <h1>📤 Themen importieren</h1>
+    <a href="{{ url_for('admin_themen') }}" class="btn btn-secondary">Zurück</a>
+</div>
+
+{% if not preview %}
+{# === Upload Form === #}
+<div class="card">
+    <p class="mb-1">JSON-Datei hochladen (Einzelexport oder Sammelexport).</p>
+    <form method="POST" enctype="multipart/form-data">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="action" value="preview">
+        <div class="form-group">
+            <label for="json_file">JSON-Datei</label>
+            <input type="file" id="json_file" name="json_file" accept=".json" required class="form-control">
+        </div>
+        <button type="submit" class="btn btn-primary mt-1">Vorschau</button>
+    </form>
+</div>
+
+{% else %}
+{# === Preview === #}
+
+{% if errors %}
+<div class="alert alert-danger">
+    <strong>Validierungsfehler:</strong>
+    <ul class="mt-1" style="margin-bottom: 0;">
+        {% for error in errors %}
+        <li>{{ error }}</li>
+        {% endfor %}
+    </ul>
+</div>
+<div class="card mt-1">
+    <a href="{{ url_for('admin_themen_import') }}" class="btn btn-secondary">Neue Datei wählen</a>
+</div>
+{% else %}
+
+{% if warnings %}
+<div class="alert alert-warning">
+    <strong>Hinweise:</strong>
+    <ul class="mt-1" style="margin-bottom: 0;">
+        {% for warning in warnings %}
+        <li>{{ warning }}</li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}
+
+{% for topic in topics_preview %}
+<div class="card mb-1">
+    <h3>{{ topic.name }}</h3>
+    <table class="table mt-1">
+        <tbody>
+            <tr><td style="width:12rem"><strong>Fach</strong></td><td>{{ topic.fach }}</td></tr>
+            <tr><td><strong>Stufe</strong></td><td>{{ topic.stufe }}</td></tr>
+            <tr><td><strong>Kategorie</strong></td><td>{{ topic.kategorie }}</td></tr>
+            {% if topic.number %}
+            <tr><td><strong>Nummer</strong></td><td>{{ topic.number }}</td></tr>
+            {% endif %}
+            {% if topic.voraussetzungen %}
+            <tr><td><strong>Voraussetzungen</strong></td><td>{{ topic.voraussetzungen|join(', ') }}</td></tr>
+            {% endif %}
+            <tr>
+                <td><strong>Aufgaben</strong></td>
+                <td>
+                    {{ topic.subtask_count }} gesamt
+                    {% if topic.path_counts %}
+                    (🟢 {{ topic.path_counts.wanderweg }}
+                    / 🔵 {{ topic.path_counts.bergweg }}
+                    / ⭐ {{ topic.path_counts.gipfeltour }})
+                    {% endif %}
+                </td>
+            </tr>
+            <tr><td><strong>Materialien</strong></td><td>{{ topic.material_count }}</td></tr>
+            {% if topic.topic_quiz_count %}
+            <tr><td><strong>Themen-Quiz</strong></td><td>{{ topic.topic_quiz_count }} Fragen</td></tr>
+            {% endif %}
+            {% if topic.subtask_quiz_count %}
+            <tr><td><strong>Aufgaben-Quizze</strong></td><td>{{ topic.subtask_quiz_count }} Aufgaben mit Quiz</td></tr>
+            {% endif %}
+            {% if topic.is_duplicate %}
+            <tr><td><strong>Status</strong></td><td><span class="badge badge-warning">Duplikat — wird übersprungen</span></td></tr>
+            {% endif %}
+        </tbody>
+    </table>
+</div>
+{% endfor %}
+
+{% set importable = topics_preview|rejectattr('is_duplicate')|list %}
+{% if importable %}
+<form method="POST">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="action" value="confirm">
+    <textarea name="json_data" style="display:none;">{{ json_data }}</textarea>
+    <div class="flex gap-1 mt-1">
+        <button type="submit" class="btn btn-primary">{{ importable|length }} Thema{{ 'en' if importable|length > 1 }} importieren</button>
+        <a href="{{ url_for('admin_themen_import') }}" class="btn btn-secondary">Abbrechen</a>
+    </div>
+</form>
+{% else %}
+<div class="card mt-1">
+    <p>Alle Themen existieren bereits. Nichts zu importieren.</p>
+    <a href="{{ url_for('admin_themen_import') }}" class="btn btn-secondary mt-1">Neue Datei wählen</a>
+</div>
+{% endif %}
+
+{% endif %}
+{% endif %}
+{% endblock %}

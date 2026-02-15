@@ -14,6 +14,7 @@ import config
 import models
 import llm_grading
 from utils import generate_username, generate_password, allowed_file, generate_credentials_pdf, generate_student_self_report_pdf, slugify
+from import_task import validate_task_structure, check_duplicate, import_task as do_import_task, ValidationError
 
 app = Flask(__name__)
 app.secret_key = config.SECRET_KEY
@@ -545,6 +546,125 @@ def admin_thema_export(task_id):
         mimetype='application/json',
         headers={'Content-Disposition': f'attachment; filename=thema_{task_id}_export.json'}
     )
+
+
+def _build_topic_preview(task_data):
+    """Build a preview dict for one topic from import JSON."""
+    task = task_data['task']
+    subtasks = task.get('subtasks', [])
+    path_counts = {'wanderweg': 0, 'bergweg': 0, 'gipfeltour': 0}
+    for s in subtasks:
+        p = s.get('path', 'bergweg')
+        if p in path_counts:
+            path_counts[p] += 1
+    return {
+        'name': task['name'],
+        'fach': task['fach'],
+        'stufe': task['stufe'],
+        'kategorie': task.get('kategorie', 'pflicht'),
+        'number': task.get('number'),
+        'voraussetzungen': task.get('voraussetzungen', []),
+        'subtask_count': len(subtasks),
+        'path_counts': path_counts,
+        'material_count': len(task.get('materials', [])),
+        'topic_quiz_count': len(task['quiz']['questions']) if task.get('quiz') else 0,
+        'subtask_quiz_count': sum(1 for s in subtasks if s.get('quiz')),
+        'is_duplicate': check_duplicate(task_data) is not None,
+    }
+
+
+@app.route('/admin/themen/import', methods=['GET', 'POST'])
+@admin_required
+def admin_themen_import():
+    if request.method == 'GET':
+        return render_template('admin/themen_import.html', preview=False)
+
+    action = request.form.get('action')
+
+    # --- Preview phase: parse uploaded file ---
+    if action == 'preview':
+        file = request.files.get('json_file')
+        if not file or not file.filename.endswith('.json'):
+            flash('Bitte eine JSON-Datei auswählen.', 'danger')
+            return render_template('admin/themen_import.html', preview=False)
+
+        try:
+            raw = file.read().decode('utf-8')
+            data = json.loads(raw)
+        except (UnicodeDecodeError, json.JSONDecodeError) as e:
+            return render_template('admin/themen_import.html', preview=True,
+                                   errors=[f'Ungültiges JSON: {e}'])
+
+        # Normalize to list of {"task": {...}} dicts
+        task_list = []
+        errors = []
+        if 'tasks' in data and isinstance(data['tasks'], list):
+            for t in data['tasks']:
+                wrapped = {'task': t}
+                try:
+                    validate_task_structure(wrapped)
+                    task_list.append(wrapped)
+                except ValidationError as e:
+                    errors.append(f"{t.get('name', '?')}: {e}")
+        elif 'task' in data:
+            try:
+                validate_task_structure(data)
+                task_list.append(data)
+            except ValidationError as e:
+                errors.append(str(e))
+        else:
+            errors.append("JSON muss 'task' oder 'tasks' als Wurzelelement enthalten.")
+
+        if errors:
+            return render_template('admin/themen_import.html', preview=True, errors=errors)
+
+        # Build preview for each topic
+        topics_preview = [_build_topic_preview(td) for td in task_list]
+        warnings = []
+        for tp in topics_preview:
+            if tp['is_duplicate']:
+                warnings.append(f"'{tp['name']}' ({tp['fach']} {tp['stufe']}) existiert bereits — wird übersprungen.")
+
+        # Re-serialize the validated data for the hidden form field
+        export_data = {'tasks': [td['task'] for td in task_list]}
+        json_data = json.dumps(export_data, ensure_ascii=False)
+
+        return render_template('admin/themen_import.html', preview=True,
+                               topics_preview=topics_preview, warnings=warnings,
+                               json_data=json_data)
+
+    # --- Confirm phase: actually import ---
+    if action == 'confirm':
+        raw = request.form.get('json_data', '')
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            flash('Ungültige Daten. Bitte erneut hochladen.', 'danger')
+            return redirect(url_for('admin_themen_import'))
+
+        imported = []
+        skipped = []
+        warnings = []
+        for task_entry in data.get('tasks', []):
+            wrapped = {'task': task_entry}
+            w = []
+            task_id = do_import_task(wrapped, warnings=w)
+            warnings.extend(w)
+            if task_id:
+                imported.append(task_entry['name'])
+            else:
+                skipped.append(task_entry['name'])
+
+        if imported:
+            flash(f"{len(imported)} Thema{'en' if len(imported) > 1 else ''} importiert: {', '.join(imported)}", 'success')
+        if skipped:
+            flash(f"{len(skipped)} übersprungen (Duplikate): {', '.join(skipped)}", 'warning')
+        for w in warnings:
+            flash(w, 'warning')
+
+        return redirect(url_for('admin_themen'))
+
+    return redirect(url_for('admin_themen_import'))
 
 
 @app.route('/admin/thema/neu', methods=['GET', 'POST'])
