@@ -67,20 +67,6 @@
             <small class="text-muted">Kurze Erklärung (1-2 Sätze), altersgerecht für Stufe {{ task.stufe if task else 'X/Y' }}. Wird den Schülern prominent angezeigt.</small>
         </div>
 
-        <div class="form-group">
-            <label for="voraussetzungen">Voraussetzungen (optional)</label>
-            <select id="voraussetzungen" name="voraussetzungen" class="form-control" multiple size="5">
-                {% for t in tasks %}
-                {% if not task or t.id != task.id %}
-                <option value="{{ t.id }}" {% if t.id in voraussetzungen|map(attribute='id')|list %}selected{% endif %}>
-                    {{ t.fach }} ({{ t.stufe }}): {{ t.name }}
-                </option>
-                {% endif %}
-                {% endfor %}
-            </select>
-            <small class="text-muted">Halte Strg/Cmd gedrückt, um mehrere auszuwählen</small>
-        </div>
-
         <button type="submit" class="btn btn-primary">{% if task %}Speichern{% else %}Erstellen{% endif %}</button>
         <a href="{{ url_for('admin_themen') }}" class="btn btn-secondary">Abbrechen</a>
     </form>

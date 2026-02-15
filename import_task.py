@@ -106,15 +106,6 @@ def validate_task_structure(data):
     if 'kategorie' in task and task['kategorie'] not in ['pflicht', 'bonus']:
         errors.append("Invalid kategorie. Must be 'pflicht' or 'bonus'")
 
-    # Validate voraussetzungen (prerequisites)
-    if 'voraussetzungen' in task:
-        if not isinstance(task['voraussetzungen'], list):
-            errors.append("voraussetzungen must be a list of task names")
-        else:
-            for i, v in enumerate(task['voraussetzungen']):
-                if not isinstance(v, str) or not v:
-                    errors.append(f"Voraussetzung {i+1} must be a non-empty string")
-
     # Validate subtasks
     VALID_PATHS = ('wanderweg', 'bergweg', 'gipfeltour')
     VALID_PATH_MODELS = ('skip', 'depth')
@@ -214,8 +205,6 @@ def import_task(task_data, dry_run=False, warnings=None):
             print(f"  Warum: {task['why_learn_this'][:50]}...")
         if task.get('lernziel'):
             print(f"  Lernziel: {task['lernziel'][:50]}...")
-        if task.get('voraussetzungen'):
-            print(f"  Voraussetzungen: {', '.join(task['voraussetzungen'])}")
         subtasks = task.get('subtasks', [])
         subtasks_with_quiz = sum(1 for s in subtasks if s.get('quiz'))
         print(f"  Subtasks: {len(subtasks)} ({subtasks_with_quiz} with quiz)")
@@ -243,21 +232,6 @@ def import_task(task_data, dry_run=False, warnings=None):
         why_learn_this=task.get('why_learn_this'),
         lernziel_schueler=task.get('lernziel_schueler')
     )
-
-    # Handle prerequisites (by name lookup)
-    voraussetzungen = task.get('voraussetzungen', [])
-    if voraussetzungen:
-        all_tasks = models.get_all_tasks()
-        task_name_to_id = {t['name']: t['id'] for t in all_tasks}
-        for v_name in voraussetzungen:
-            if v_name in task_name_to_id:
-                models.add_task_voraussetzung(task_id, task_name_to_id[v_name])
-            else:
-                msg = f"Voraussetzung '{v_name}' nicht gefunden, übersprungen"
-                if warnings is not None:
-                    warnings.append(msg)
-                else:
-                    print(f"  Warning: {msg}")
 
     # Set subtask_quiz_required if specified (default is 1/true in DB)
     if 'subtask_quiz_required' in task:
@@ -456,8 +430,6 @@ Examples:
             print(f"  Name: {task['name']}")
             print(f"  Fach: {task['fach']}")
             print(f"  Stufe: {task['stufe']}")
-            if task.get('voraussetzungen'):
-                print(f"  Voraussetzungen: {len(task['voraussetzungen'])}")
             print(f"  Subtasks: {len(task.get('subtasks', []))}")
             print(f"  Materials: {len(task.get('materials', []))}")
             if task.get('quiz'):

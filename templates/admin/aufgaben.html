@@ -31,9 +31,6 @@
                     <a href="{{ url_for('admin_thema_detail', task_id=task.id) }}">
                         <strong>{{ task.name }}</strong>
                     </a>
-                    {% if task_voraussetzungen[task.id] %}
-                    <br><small class="text-muted">Voraussetzungen: {{ task_voraussetzungen[task.id]|map(attribute='name')|join(', ') }}</small>
-                    {% endif %}
                 </td>
                 <td>{{ task.fach }}</td>
                 <td>{{ task.stufe }}</td>

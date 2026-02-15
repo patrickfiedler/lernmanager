@@ -81,17 +81,6 @@
             <small class="text-muted">Kurze Erklärung (1-2 Sätze), altersgerecht für Stufe {{ task.stufe }}. Wird den Schülern prominent angezeigt. {% if not task.why_learn_this %}<strong style="color: #ca8a04;">⚠️ Noch nicht ausgefüllt</strong>{% endif %}</small>
         </div>
         <div class="form-group">
-            <label>Voraussetzungen</label>
-            <select name="voraussetzungen" class="form-control" multiple size="4">
-                {% for t in all_tasks %}
-                {% if t.id != task.id %}
-                <option value="{{ t.id }}" {% if t.id in voraussetzungen|map(attribute='id')|list %}selected{% endif %}>{{ t.fach }} ({{ t.stufe }}): {{ t.name }}</option>
-                {% endif %}
-                {% endfor %}
-            </select>
-            <small class="text-muted">Strg/Cmd für Mehrfachauswahl</small>
-        </div>
-        <div class="form-group">
             <label>
                 <input type="checkbox" name="subtask_quiz_required" value="1" {% if task.subtask_quiz_required %}checked{% endif %}>
                 Aufgaben-Quiz muss bestanden werden (ca. 70%) bevor nächste Aufgabe freigeschaltet wird
@@ -263,9 +252,6 @@
         <input type="hidden" name="lernziel" value="{{ task.lernziel or '' }}">
         <input type="hidden" name="lernziel_schueler" value="{{ task.lernziel_schueler or '' }}">
         <input type="hidden" name="beschreibung" value="{{ task.beschreibung or '' }}">
-        {% for v in voraussetzungen %}
-        <input type="hidden" name="voraussetzungen" value="{{ v.id }}">
-        {% endfor %}
 
         <div class="form-group">
             <label>Quiz JSON (für LLM-Generierung geeignet):</label>

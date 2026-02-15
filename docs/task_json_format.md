@@ -110,7 +110,6 @@ Thema (task)
         }
       ]
     },
-    "voraussetzungen": ["2 - Dateien und Ordner"]
   }
 }
 ```
@@ -133,7 +132,6 @@ Thema (task)
 | `subtasks` | nein | array | Liste der Aufgaben (siehe unten) |
 | `materials` | nein | array | Liste der Materialien (siehe unten) |
 | `quiz` | nein | object | Abschluss-Quiz für das gesamte Thema (siehe Quiz-Format) |
-| `voraussetzungen` | nein | array | Liste von Themen-Namen, die vorher abgeschlossen sein müssen |
 
 ### Aufgabe (subtask)
 
@@ -403,6 +401,6 @@ python import_task.py --list
 
 - **JSON muss UTF-8 kodiert sein** (siehe Abschnitt "Kodierung und Markdown-Formatierung")
 - Duplikate (gleicher Name + Fach + Stufe) werden automatisch übersprungen
-- `voraussetzungen` verweisen auf Themen-Namen — das referenzierte Thema muss bereits importiert sein
+- `voraussetzungen` field is ignored on import (deprecated — topic queue replaces progression logic)
 - Materialien vom Typ `datei` können nur manuell über die Admin-Oberfläche hochgeladen werden; im JSON nur `link` verwenden
 - **Dieses Dokument als Claude-Prompt:** Gib diese Datei als Kontext an Claude, wenn du neue Themen erstellen lässt. Claude kann das JSON-Format und die Formatierungsrichtlinien direkt als Vorlage verwenden.

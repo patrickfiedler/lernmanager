@@ -506,11 +506,7 @@ def admin_schueler_bericht(student_id):
 @admin_required
 def admin_themen():
     tasks = models.get_all_tasks()
-    # Get prerequisites for each task
-    task_voraussetzungen = {}
-    for task in tasks:
-        task_voraussetzungen[task['id']] = models.get_task_voraussetzungen(task['id'])
-    return render_template('admin/aufgaben.html', tasks=tasks, task_voraussetzungen=task_voraussetzungen, subjects=config.SUBJECTS, levels=config.LEVELS)
+    return render_template('admin/aufgaben.html', tasks=tasks, subjects=config.SUBJECTS, levels=config.LEVELS)
 
 
 @app.route('/admin/themen/export')
@@ -563,7 +559,6 @@ def _build_topic_preview(task_data):
         'stufe': task['stufe'],
         'kategorie': task.get('kategorie', 'pflicht'),
         'number': task.get('number'),
-        'voraussetzungen': task.get('voraussetzungen', []),
         'subtask_count': len(subtasks),
         'path_counts': path_counts,
         'material_count': len(task.get('materials', [])),
@@ -682,15 +677,10 @@ def admin_thema_neu():
             why_learn_this=request.form.get('why_learn_this') or None,
             lernziel_schueler=request.form.get('lernziel_schueler') or None
         )
-        # Handle multiple prerequisites
-        voraussetzung_ids = request.form.getlist('voraussetzungen')
-        if voraussetzung_ids:
-            models.set_task_voraussetzungen(task_id, [int(v) for v in voraussetzung_ids if v])
         flash('Thema erstellt. ✅', 'success')
         return redirect(url_for('admin_thema_detail', task_id=task_id))
 
-    tasks = models.get_all_tasks()
-    return render_template('admin/aufgabe_form.html', task=None, tasks=tasks, voraussetzungen=[], subjects=config.SUBJECTS, levels=config.LEVELS)
+    return render_template('admin/aufgabe_form.html', task=None, subjects=config.SUBJECTS, levels=config.LEVELS)
 
 
 @app.route('/admin/thema/<int:task_id>')
@@ -702,10 +692,8 @@ def admin_thema_detail(task_id):
         return redirect(url_for('admin_themen'))
     subtasks = models.get_subtasks(task_id)
     materials = models.get_materials(task_id)
-    all_tasks = models.get_all_tasks()
-    voraussetzungen = models.get_task_voraussetzungen(task_id)
     material_assignments = models.get_material_subtask_assignments(task_id)
-    return render_template('admin/aufgabe_detail.html', task=task, subtasks=subtasks, materials=materials, all_tasks=all_tasks, voraussetzungen=voraussetzungen, subjects=config.SUBJECTS, levels=config.LEVELS, material_assignments=material_assignments)
+    return render_template('admin/aufgabe_detail.html', task=task, subtasks=subtasks, materials=materials, subjects=config.SUBJECTS, levels=config.LEVELS, material_assignments=material_assignments)
 
 
 @app.route('/admin/thema/<int:task_id>/bearbeiten', methods=['POST'])
@@ -731,9 +719,6 @@ def admin_thema_bearbeiten(task_id):
         subtask_quiz_required=1 if request.form.get('subtask_quiz_required') else 0,
         lernziel_schueler=request.form.get('lernziel_schueler') or None
     )
-    # Handle multiple prerequisites
-    voraussetzung_ids = request.form.getlist('voraussetzungen')
-    models.set_task_voraussetzungen(task_id, [int(v) for v in voraussetzung_ids if v])
     flash('Thema aktualisiert. ✅', 'success')
     return redirect(url_for('admin_thema_detail', task_id=task_id))
 

@@ -873,74 +873,6 @@ def delete_task(task_id):
         conn.execute("DELETE FROM task WHERE id = ?", (task_id,))
 
 
-# ============ Task Prerequisites ============
-
-def get_task_voraussetzungen(task_id):
-    """Get all prerequisites for a task."""
-    with db_session() as conn:
-        rows = conn.execute('''
-            SELECT t.* FROM task t
-            JOIN task_voraussetzung tv ON t.id = tv.voraussetzung_task_id
-            WHERE tv.task_id = ?
-            ORDER BY t.name
-        ''', (task_id,)).fetchall()
-        return [dict(r) for r in rows]
-
-
-def add_task_voraussetzung(task_id, voraussetzung_task_id):
-    """Add a prerequisite to a task."""
-    with db_session() as conn:
-        conn.execute(
-            "INSERT OR IGNORE INTO task_voraussetzung (task_id, voraussetzung_task_id) VALUES (?, ?)",
-            (task_id, voraussetzung_task_id)
-        )
-
-
-def remove_task_voraussetzung(task_id, voraussetzung_task_id):
-    """Remove a prerequisite from a task."""
-    with db_session() as conn:
-        conn.execute(
-            "DELETE FROM task_voraussetzung WHERE task_id = ? AND voraussetzung_task_id = ?",
-            (task_id, voraussetzung_task_id)
-        )
-
-
-def set_task_voraussetzungen(task_id, voraussetzung_ids):
-    """Set all prerequisites for a task (replaces existing)."""
-    with db_session() as conn:
-        conn.execute("DELETE FROM task_voraussetzung WHERE task_id = ?", (task_id,))
-        for v_id in voraussetzung_ids:
-            conn.execute(
-                "INSERT INTO task_voraussetzung (task_id, voraussetzung_task_id) VALUES (?, ?)",
-                (task_id, v_id)
-            )
-
-
-def check_voraussetzungen_erfuellt(student_id, klasse_id, task_id):
-    """Check if student has completed all prerequisites for a task."""
-    with db_session() as conn:
-        # Get all prerequisites
-        voraussetzungen = conn.execute(
-            "SELECT voraussetzung_task_id FROM task_voraussetzung WHERE task_id = ?",
-            (task_id,)
-        ).fetchall()
-
-        if not voraussetzungen:
-            return True  # No prerequisites
-
-        for v in voraussetzungen:
-            # Check if student has completed this prerequisite
-            completed = conn.execute('''
-                SELECT abgeschlossen FROM student_task
-                WHERE student_id = ? AND klasse_id = ? AND task_id = ? AND abgeschlossen = 1
-            ''', (student_id, klasse_id, v['voraussetzung_task_id'])).fetchone()
-
-            if not completed:
-                return False
-
-        return True
-
-
 # ============ Task Export ============
 
 def export_task_to_dict(task_id):
@@ -949,16 +881,6 @@ def export_task_to_dict(task_id):
     Returns a dict matching the import format from import_task.py, so that
     exported JSON can be edited and re-imported.
 
-    Available helpers:
-        get_task(task_id) -> dict with: name, number, beschreibung, lernziel,
-                             fach, stufe, kategorie, quiz_json, why_learn_this
-        get_subtasks(task_id) -> list of dicts with: beschreibung, reihenfolge,
-                                 estimated_minutes
-        get_materials(task_id) -> list of dicts with: typ, pfad, beschreibung
-        get_task_voraussetzungen(task_id) -> list of task dicts (use their 'name')
-
-    For quiz: task['quiz_json'] is a JSON string or None. Use json.loads() to parse.
-
     Return format (see import_task.py):
         {
             'name': ..., 'number': ..., 'beschreibung': ..., 'lernziel': ...,
@@ -966,7 +888,6 @@ def export_task_to_dict(task_id):
             'subtasks': [{'beschreibung': ..., 'reihenfolge': ..., 'estimated_minutes': ...}],
             'materials': [{'typ': ..., 'pfad': ..., 'beschreibung': ...}],
             'quiz': {'questions': [...]} or None,
-            'voraussetzungen': ['task_name_1', ...]
         }
     """
     task = get_task(task_id)
@@ -976,7 +897,6 @@ def export_task_to_dict(task_id):
 
         subtasks = get_subtasks(task_id)
         materials = get_materials(task_id)
-        task_voraussetzungen = get_task_voraussetzungen(task_id)
         material_assignments = get_material_subtask_assignments(task_id)
 
         # Build subtask ID -> reihenfolge lookup
@@ -1018,11 +938,6 @@ def export_task_to_dict(task_id):
         else:
             quiz_data = None
             
-        if (task_voraussetzungen is not None):
-            voraussetzungen_data = [v['name'] for v in task_voraussetzungen]
-        else:
-            voraussetzungen_data = []
-                  
         data = {
             'name': task['name'],
             'number': task['number'],
@@ -1037,7 +952,6 @@ def export_task_to_dict(task_id):
             'subtasks': subtasks_data,
             'materials': materials_data,
             'quiz': quiz_data,
-            'voraussetzungen': voraussetzungen_data
         }
         return data
           

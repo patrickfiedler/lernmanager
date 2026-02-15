@@ -122,6 +122,7 @@ Three cumulative difficulty paths per student: 🟢 Wanderweg (foundational) ⊂
 - Admin subtask editor includes path/path_model dropdowns per subtask
 - Graded artifacts: `graded_artifact_json` column on `subtask` (JSON with `keyword`, `format`, `rubric`). UI display not yet implemented.
 - Spaced repetition: weekly quiz from completed question pools (not yet designed)
+- **Prerequisites removed from UI/code** (2026-02-15): `task_voraussetzung` DB table kept for potential future use, but all model functions, admin UI, import/export handling removed. Topic queue (Phase 4) replaces progression logic via queue ordering per class.
 
 ### Student URL Structure (Slug-Based)
 

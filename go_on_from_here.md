@@ -1,6 +1,25 @@
 # Lernmanager - Current State (2026-02-15)
 
-## Latest Session (2026-02-15) — Web-Based Topic Import
+## Latest Session (2026-02-15) — Remove Prerequisites
+
+### Prerequisite System Removal
+- **Why:** `task_voraussetzung` was built before learning paths existed. `check_voraussetzungen_erfuellt()` was never called anywhere — dead code with a misleading admin UI. Topic queue (Phase 4) handles progression via queue ordering.
+- **What was removed:** 5 model functions, admin UI (multi-select dropdowns in create/edit/detail forms), prerequisite display on topic list, import/export handling, validation
+- **What was kept:** `task_voraussetzung` DB table (existing data preserved, CREATE TABLE stays in `init_db`)
+- **Import compatibility:** Old JSON files with `voraussetzungen` field are silently ignored (no validation error)
+
+**Files changed:**
+- `models.py` — deleted 5 prerequisite functions, removed from `export_task_to_dict()`
+- `app.py` — removed from `admin_themen`, `admin_thema_neu`, `admin_thema_detail`, `admin_thema_bearbeiten`, `_build_topic_preview`
+- `import_task.py` — removed validation block, import block, dry-run/CLI output
+- `templates/admin/aufgaben.html` — removed prerequisite display
+- `templates/admin/aufgabe_form.html` — removed multi-select dropdown
+- `templates/admin/aufgabe_detail.html` — removed multi-select + hidden inputs
+- `templates/admin/themen_import.html` — removed preview row
+- `CLAUDE.md`, `docs/task_json_format.md`, `docs/2026-02-13_lernmanager_curriculum_spec.md` — updated
+- `~/.claude/plans/fuzzy-wiggling-unicorn.md` — added design decision
+
+## Previous Session (2026-02-15) — Web-Based Topic Import
 
 ### Admin Topic Import via Web UI
 - **Problem:** CLI `import_task.py` can't access encrypted SQLCipher DB on production

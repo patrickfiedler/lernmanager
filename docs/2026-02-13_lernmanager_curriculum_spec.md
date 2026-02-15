@@ -17,7 +17,7 @@ Thema (= Kapitel, DB table: task)
 - **10 Themen** (Kapitel 1–10), completed over 2 school years (Kl.5 + Kl.6)
 - Each Thema has **3–8 Aufgaben**
 - Each Aufgabe = 1 lesson = 45 minutes
-- Themen have prerequisites (linear with some branching)
+- Themen follow a queue order per class (prerequisites deferred in favor of queue-based progression)
 - Total: **67 Aufgaben** across all Themen
 
 ## 2. Learning Paths
@@ -254,7 +254,7 @@ Links and files attached to a Thema, optionally scoped to specific Aufgaben.
     ],
     "materials": [ ... ],
     "quiz": { "questions": [ ... ] },
-    "voraussetzungen": ["Previous Thema name"]
+    "voraussetzungen": ["Previous Thema name"]  // deprecated — ignored on import
   }
 }
 ```
@@ -275,7 +275,7 @@ Links and files attached to a Thema, optionally scoped to specific Aufgaben.
 | `subtasks` | no | array | Ordered list of Aufgaben |
 | `materials` | no | array | Links and files |
 | `quiz` | no | object | Synthesis quiz (Abschlussquiz) |
-| `voraussetzungen` | no | array | Names of prerequisite Themen |
+| `voraussetzungen` | no | array | ~~Names of prerequisite Themen~~ Deprecated — ignored on import. Queue ordering replaces prerequisites. |
 
 ### Field reference — Aufgabe (subtask)
 
@@ -305,7 +305,7 @@ Links and files attached to a Thema, optionally scoped to specific Aufgaben.
 | **Spaced repetition** | Weekly quiz (~5 questions) drawn from completed task/synthesis quiz pools. Prioritize previously incorrect answers. |
 | **Graded artifact** | Display keyword and format. Artifact is collected from network drive (not uploaded). Show grade when available. |
 | **Materials** | Show materials scoped to their subtask(s), or globally if no `subtask_indices`. |
-| **Prerequisites** | Lock a Thema until all listed `voraussetzungen` are completed. |
+| **Prerequisites** | ~~Lock a Thema until all listed `voraussetzungen` are completed.~~ Deferred — queue ordering handles topic progression. DB table kept for future use. |
 
 ### Progress tracking per path
 
@@ -331,5 +331,5 @@ python import_task.py --list                    # List existing Themen
 ```
 
 - Duplicates (same name + fach + stufe) are skipped
-- `voraussetzungen` reference Themen by name — prerequisite must already exist
+- `voraussetzungen` field is deprecated and ignored on import (queue ordering replaces prerequisites)
 - Files are UTF-8 encoded

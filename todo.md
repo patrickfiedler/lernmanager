@@ -12,7 +12,7 @@
 
 ## Features
 
-- **Learning paths + topic progression + sidequests + admin simplification** — combined plan: `~/.claude/plans/fuzzy-wiggling-unicorn.md`. 5 phases: migration → shared model → learning paths + admin overhaul → topic progression → sidequests + polish. Analysis: `docs/2026-02-13_admin_simplification_analysis.md`. See below for detailed checklists.
+- **Learning paths + topic progression + sidequests + admin simplification** — combined plan: `~/.claude/plans/fuzzy-wiggling-unicorn.md`. 5 phases: migration → shared model → learning paths + admin overhaul → topic progression → sidequests + polish. Analysis: `docs/2026-02-13_admin_simplification_analysis.md`. Prerequisites removed from UI/code (2026-02-15), DB table kept — queue ordering replaces progression logic. See below for detailed checklists.
 - add external API to upload log files from scan-folders.ps1 script -> track student progress from files created on school computers
 - **Admin: curriculum alignment page** - Show how topics/tasks map to curriculum learning goals, gaps/overlaps (Priority: Medium)
 
