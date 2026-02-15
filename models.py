@@ -873,6 +873,76 @@ def delete_task(task_id):
         conn.execute("DELETE FROM task WHERE id = ?", (task_id,))
 
 
+# ============ Topic Queue ============
+
+def get_topic_queue(klasse_id):
+    """Get ordered topic queue for a class.
+
+    Returns list of dicts with position, task_id, name, fach, stufe, kategorie.
+    Empty list if no queue defined.
+    """
+    with db_session() as conn:
+        rows = conn.execute('''
+            SELECT tq.position, tq.task_id, t.name, t.fach, t.stufe, t.kategorie
+            FROM topic_queue tq
+            JOIN task t ON tq.task_id = t.id
+            WHERE tq.klasse_id = ?
+            ORDER BY tq.position
+        ''', (klasse_id,)).fetchall()
+        return [dict(r) for r in rows]
+
+
+def set_topic_queue(klasse_id, task_ids_ordered):
+    """Replace the topic queue for a class with the given ordered task IDs."""
+    with db_session() as conn:
+        conn.execute("DELETE FROM topic_queue WHERE klasse_id = ?", (klasse_id,))
+        for pos, task_id in enumerate(task_ids_ordered, start=1):
+            conn.execute(
+                "INSERT INTO topic_queue (klasse_id, task_id, position) VALUES (?, ?, ?)",
+                (klasse_id, task_id, pos)
+            )
+
+
+def get_next_queued_topic(klasse_id, current_task_id):
+    """Get the next topic in queue after current_task_id.
+
+    Returns dict with task_id, name, fach, stufe or None.
+    """
+    with db_session() as conn:
+        current = conn.execute(
+            "SELECT position FROM topic_queue WHERE klasse_id = ? AND task_id = ?",
+            (klasse_id, current_task_id)
+        ).fetchone()
+        if not current:
+            return None
+        row = conn.execute('''
+            SELECT tq.task_id, t.name, t.fach, t.stufe
+            FROM topic_queue tq
+            JOIN task t ON tq.task_id = t.id
+            WHERE tq.klasse_id = ? AND tq.position = ?
+        ''', (klasse_id, current['position'] + 1)).fetchone()
+        return dict(row) if row else None
+
+
+def get_queue_position(klasse_id, task_id):
+    """Get position and total count for a task in a class queue.
+
+    Returns (position, total) or (None, None) if not in queue.
+    """
+    with db_session() as conn:
+        row = conn.execute(
+            "SELECT position FROM topic_queue WHERE klasse_id = ? AND task_id = ?",
+            (klasse_id, task_id)
+        ).fetchone()
+        if not row:
+            return None, None
+        total = conn.execute(
+            "SELECT COUNT(*) as cnt FROM topic_queue WHERE klasse_id = ?",
+            (klasse_id,)
+        ).fetchone()['cnt']
+        return row['position'], total
+
+
 # ============ Task Export ============
 
 def export_task_to_dict(task_id):

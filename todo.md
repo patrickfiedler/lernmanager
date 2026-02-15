@@ -12,7 +12,7 @@
 
 ## Features
 
-- **Learning paths + topic progression + sidequests + admin simplification** — combined plan: `~/.claude/plans/fuzzy-wiggling-unicorn.md`. 5 phases: migration → shared model → learning paths + admin overhaul → topic progression → sidequests + polish. Analysis: `docs/2026-02-13_admin_simplification_analysis.md`. Prerequisites removed from UI/code (2026-02-15), DB table kept — queue ordering replaces progression logic. See below for detailed checklists.
+- **Learning paths + topic progression + sidequests + admin simplification** — combined plan: `~/.claude/plans/fuzzy-wiggling-unicorn.md`. 5 phases: migration → shared model → learning paths + admin overhaul → topic progression → sidequests + polish. **Phases 1–4 done.** Phase 5 (sidequests + polish) remaining. See below for detailed checklists.
 - add external API to upload log files from scan-folders.ps1 script -> track student progress from files created on school computers
 - **Admin: curriculum alignment page** - Show how topics/tasks map to curriculum learning goals, gaps/overlaps (Priority: Medium)
 
@@ -49,6 +49,17 @@ Three cumulative paths: 🟢 Wanderweg ⊂ 🔵 Bergweg ⊂ ⭐ Gipfeltour. Impl
 - [x] Simplified admin class/student detail pages
 
 Future: per-topic path override, graded artifact UI, spaced repetition
+
+## Topic Queue (Implemented — Phase 4 Done)
+
+Optional per-class topic ordering for self-paced progression.
+- [x] Model functions: `get_topic_queue()`, `set_topic_queue()`, `get_next_queued_topic()`, `get_queue_position()`
+- [x] Admin queue management page (`/admin/klasse/<id>/themen-reihenfolge`)
+- [x] Admin klasse_detail: queue link + position display
+- [x] Student progression route (`POST /schueler/naechstes-thema`)
+- [x] Dashboard + topic page: next-topic prompts
+
+Future: drag-and-drop reordering, queue auto-suggestions
 
 ## Graded Artifacts (DB Ready, UI Pending)
 

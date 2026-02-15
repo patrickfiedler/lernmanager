@@ -1,0 +1,145 @@
+{% extends 'base.html' %}
+
+{% block title %}Themen-Reihenfolge - {{ klasse.name }}{% endblock %}
+
+{% block content %}
+<div class="flex flex-between flex-center mb-2">
+    <h1>📋 Themen-Reihenfolge: {{ klasse.name }}</h1>
+    <a href="{{ url_for('admin_klasse_detail', klasse_id=klasse.id) }}" class="btn btn-secondary">← Zurück</a>
+</div>
+
+<p class="text-muted mb-2">Lege fest, in welcher Reihenfolge Schüler die Themen bearbeiten. Nach Abschluss eines Themas können sie das nächste selbst starten.</p>
+
+<form method="POST" id="queue-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <!-- Queued Topics Table -->
+    <div class="card mb-2">
+        <div class="card-header">Reihenfolge</div>
+        <table class="table" id="queue-table">
+            <thead>
+                <tr>
+                    <th style="width: 3rem;">#</th>
+                    <th>Thema</th>
+                    <th>Fach / Stufe</th>
+                    <th style="width: 10rem;">Aktionen</th>
+                </tr>
+            </thead>
+            <tbody id="queue-body">
+                {% for item in queue %}
+                <tr data-task-id="{{ item.task_id }}">
+                    <td class="row-number">{{ item.position }}</td>
+                    <td>{{ item.name }}</td>
+                    <td>{{ item.fach }} ({{ item.stufe }})</td>
+                    <td>
+                        <button type="button" class="btn btn-sm btn-secondary btn-move-up" title="Nach oben">↑</button>
+                        <button type="button" class="btn btn-sm btn-secondary btn-move-down" title="Nach unten">↓</button>
+                        <button type="button" class="btn btn-sm btn-danger btn-remove" title="Entfernen">✕</button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% if not queue %}
+        <p class="text-muted text-center" id="empty-msg">Noch keine Themen in der Reihenfolge.</p>
+        {% endif %}
+    </div>
+
+    <!-- Add Topic -->
+    <div class="card mb-2">
+        <div class="card-header">Thema hinzufügen</div>
+        <div class="flex gap-1">
+            <select id="add-topic-select" class="form-control" style="flex: 1;">
+                <option value="">-- Thema wählen --</option>
+                {% for task in available_tasks %}
+                <option value="{{ task.id }}" data-name="{{ task.name }}" data-fach="{{ task.fach }}" data-stufe="{{ task.stufe }}">
+                    {{ task.fach }} ({{ task.stufe }}): {{ task.name }}
+                </option>
+                {% endfor %}
+            </select>
+            <button type="button" id="btn-add" class="btn btn-primary">Hinzufügen</button>
+        </div>
+    </div>
+
+    <!-- Hidden inputs are built by JS on submit -->
+    <div id="hidden-inputs"></div>
+    <button type="submit" class="btn btn-success">Speichern</button>
+</form>
+{% endblock %}
+
+{% block scripts %}
+const body = document.getElementById('queue-body');
+const select = document.getElementById('add-topic-select');
+const emptyMsg = document.getElementById('empty-msg');
+
+function renumber() {
+    const rows = body.querySelectorAll('tr');
+    rows.forEach((row, i) => row.querySelector('.row-number').textContent = i + 1);
+    if (emptyMsg) emptyMsg.style.display = rows.length ? 'none' : '';
+}
+
+// Up / Down / Remove — one click handler on the table body
+body.addEventListener('click', function(e) {
+    const btn = e.target;
+    const row = btn.closest('tr');
+    if (!row) return;
+
+    if (btn.classList.contains('btn-move-up') && row.previousElementSibling) {
+        body.insertBefore(row, row.previousElementSibling);
+        renumber();
+    } else if (btn.classList.contains('btn-move-down') && row.nextElementSibling) {
+        body.insertBefore(row.nextElementSibling, row);
+        renumber();
+    } else if (btn.classList.contains('btn-remove')) {
+        // Put the topic back into the dropdown
+        const cells = row.querySelectorAll('td');
+        const opt = document.createElement('option');
+        opt.value = row.dataset.taskId;
+        opt.textContent = cells[2].textContent.trim() + ': ' + cells[1].textContent.trim();
+        opt.dataset.name = cells[1].textContent.trim();
+        // Parse "Fach (Stufe)" back into separate values
+        const match = cells[2].textContent.trim().match(/^(.+?) \((.+)\)$/);
+        opt.dataset.fach = match ? match[1] : '';
+        opt.dataset.stufe = match ? match[2] : '';
+        select.appendChild(opt);
+        row.remove();
+        renumber();
+    }
+});
+
+// Add topic from dropdown
+document.getElementById('btn-add').addEventListener('click', function() {
+    const opt = select.options[select.selectedIndex];
+    if (!opt.value) return;
+
+    const row = document.createElement('tr');
+    row.dataset.taskId = opt.value;
+    row.innerHTML =
+        '<td class="row-number"></td>' +
+        '<td>' + opt.dataset.name + '</td>' +
+        '<td>' + opt.dataset.fach + ' (' + opt.dataset.stufe + ')</td>' +
+        '<td>' +
+            '<button type="button" class="btn btn-sm btn-secondary btn-move-up" title="Nach oben">↑</button> ' +
+            '<button type="button" class="btn btn-sm btn-secondary btn-move-down" title="Nach unten">↓</button> ' +
+            '<button type="button" class="btn btn-sm btn-danger btn-remove" title="Entfernen">✕</button>' +
+        '</td>';
+    body.appendChild(row);
+    opt.remove();
+    renumber();
+});
+
+// On submit: collect task IDs into hidden inputs
+document.getElementById('queue-form').addEventListener('submit', function() {
+    const container = document.getElementById('hidden-inputs');
+    container.innerHTML = '';
+    body.querySelectorAll('tr').forEach(function(row) {
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = 'task_ids';
+        input.value = row.dataset.taskId;
+        container.appendChild(input);
+    });
+});
+
+renumber();
+{% endblock %}

@@ -237,6 +237,20 @@
     {% endif %}
     {% endif %}
 
+    <!-- Next topic from queue -->
+    {% if task.abgeschlossen and next_topic %}
+    <div class="card mt-2" style="border-left: 4px solid #22c55e;">
+        <div class="card-header">🎯 Nächstes Thema: {{ next_topic.name }}</div>
+        <p class="text-muted mb-1">{{ next_topic.fach }} ({{ next_topic.stufe }})</p>
+        <form method="POST" action="{{ url_for('student_start_next_topic') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="task_id" value="{{ next_topic.task_id }}">
+            <input type="hidden" name="klasse_id" value="{{ klasse.id }}">
+            <button type="submit" class="btn btn-success">Nächstes Thema starten →</button>
+        </form>
+    </div>
+    {% endif %}
+
     <!-- Topic Description (expandable, at bottom) -->
     <details class="topic-description-toggle mt-2">
         <summary>Ausführliche Beschreibung</summary>

@@ -1,6 +1,31 @@
 # Lernmanager - Current State (2026-02-15)
 
-## Latest Session (2026-02-15) — Remove Prerequisites
+## Latest Session (2026-02-15) — Phase 4: Topic Queue
+
+### Topic Queue (Topic Progression)
+- **What:** Admins define an optional ordered topic sequence per class. Students self-advance when they complete a topic.
+- **DB:** `topic_queue` table already existed from Phase 1 migration. No new migration needed.
+- **Models:** 4 new functions in `models.py`: `get_topic_queue()`, `set_topic_queue()`, `get_next_queued_topic()`, `get_queue_position()`
+- **Admin:** New route `GET/POST /admin/klasse/<id>/themen-reihenfolge` with up/down/remove/add UI. Queue link button added to klasse_detail. Student table shows "(3/7)" position.
+- **Student:** New route `POST /schueler/naechstes-thema`. Dashboard shows "Nächstes Thema" with start button. Topic page shows next-topic card after completion.
+- **Design:** Queue is optional — classes without one work exactly as before. No drag-and-drop (up/down buttons instead). One-click start (no preview page).
+
+**Files changed:**
+- `models.py` — 4 queue functions added before Task Export section
+- `app.py` — `admin_topic_queue` route, modified `admin_klasse_detail` (queue enrichment), `student_start_next_topic` route, modified `student_dashboard` (next_topics), modified `student_klasse` (next_topic)
+- `templates/admin/topic_queue.html` — new template (queue table + add dropdown + JS reordering)
+- `templates/admin/klasse_detail.html` — queue link button + position display
+- `templates/student/dashboard.html` — next topic prompts (completed + no-active cases)
+- `templates/student/klasse.html` — next topic card after completion
+- `CLAUDE.md` — documented queue behavior, new route, DB table
+
+### Next Steps
+- **Phase 5: Sidequests + Polish** — sidequest role, polish
+- Graded artifact UI (student display, admin grade override)
+- Spaced repetition (weekly quiz from completed pools)
+- Per-topic path override (future option)
+
+## Previous Session (2026-02-15) — Remove Prerequisites
 
 ### Prerequisite System Removal
 - **Why:** `task_voraussetzung` was built before learning paths existed. `check_voraussetzungen_erfuellt()` was never called anywhere — dead code with a misleading admin UI. Topic queue (Phase 4) handles progression via queue ordering.

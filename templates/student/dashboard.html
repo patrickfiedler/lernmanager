@@ -58,8 +58,37 @@
         <a href="{{ url_for('student_klasse', slug=task.name|slugify) }}" class="btn btn-primary">
             {% if task.abgeschlossen %}Details ansehen{% else %}Weiter lernen →{% endif %}
         </a>
+
+        {% set nxt = next_topics.get(klasse.id) if next_topics else None %}
+        {% if task.abgeschlossen and nxt %}
+        <hr style="margin: 0.75rem 0; border-color: #e5e7eb;">
+        <div>
+            <div class="text-muted mb-1">🎯 Nächstes Thema: <strong>{{ nxt.name }}</strong></div>
+            <form method="POST" action="{{ url_for('student_start_next_topic') }}" style="display: inline;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="task_id" value="{{ nxt.task_id }}">
+                <input type="hidden" name="klasse_id" value="{{ klasse.id }}">
+                <button type="submit" class="btn btn-success">Nächstes Thema starten →</button>
+            </form>
+        </div>
+        {% endif %}
+
+        {% else %}
+
+        {% set nxt = next_topics.get(klasse.id) if next_topics else None %}
+        {% if nxt %}
+        <div class="card-header">🎯 {{ nxt.name }}</div>
+        <p class="text-muted mb-1">Dein nächstes Thema ist bereit.</p>
+        <form method="POST" action="{{ url_for('student_start_next_topic') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="task_id" value="{{ nxt.task_id }}">
+            <input type="hidden" name="klasse_id" value="{{ klasse.id }}">
+            <button type="submit" class="btn btn-success">Thema starten →</button>
+        </form>
         {% else %}
         <p class="text-muted">Kein Thema zugewiesen.</p>
+        {% endif %}
+
         {% endif %}
     </div>
     {% endfor %}

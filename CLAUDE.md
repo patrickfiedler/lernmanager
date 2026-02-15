@@ -34,7 +34,7 @@ pip install -r requirements.txt
 - `llm_grading.py` - LLM-based grading for free-text quiz answers (`fill_blank`, `short_answer`). Supports Anthropic cloud and local Ollama. Rate-limited, with automatic fallback on errors.
 
 ### Database Schema (SQLite)
-Key tables: `admin`, `klasse` (class), `student`, `student_klasse` (many-to-many), `task` (Thema/topic with optional topic-level quiz), `subtask` (Aufgabe/task with optional per-task quiz), `material` (links/files), `student_task` (per-class assignment, has `current_subtask_id`), `student_subtask` (per-task completion), `subtask_visibility` (per-student/class task visibility), `quiz_attempt` (quiz results), `unterricht` (lesson attendance/evaluation), `analytics_events` (activity logging), `llm_usage` (LLM rate limiting).
+Key tables: `admin`, `klasse` (class), `student`, `student_klasse` (many-to-many), `task` (Thema/topic with optional topic-level quiz), `subtask` (Aufgabe/task with optional per-task quiz), `material` (links/files), `student_task` (per-class assignment, has `current_subtask_id`), `student_subtask` (per-task completion), `subtask_visibility` (per-student/class task visibility), `quiz_attempt` (quiz results), `unterricht` (lesson attendance/evaluation), `analytics_events` (activity logging), `llm_usage` (LLM rate limiting), `topic_queue` (ordered topic sequence per class, optional).
 
 Each student has one active topic per class. Topics have tasks (subtasks) with optional quizzes (JSON in `quiz_json` column on both `task` and `subtask` tables).
 
@@ -124,6 +124,19 @@ Three cumulative difficulty paths per student: 🟢 Wanderweg (foundational) ⊂
 - Spaced repetition: weekly quiz from completed question pools (not yet designed)
 - **Prerequisites removed from UI/code** (2026-02-15): `task_voraussetzung` DB table kept for potential future use, but all model functions, admin UI, import/export handling removed. Topic queue (Phase 4) replaces progression logic via queue ordering per class.
 
+### Topic Queue (Implemented)
+
+Optional per-class ordered topic sequence. Admins define a progression order; students self-advance when they complete a topic.
+
+- **Queue is optional**: classes without a queue work exactly as before (manual assignment only)
+- Admin manages queue at `/admin/klasse/<id>/themen-reihenfolge` — up/down/remove/add UI, one save button
+- `topic_queue` table: `klasse_id`, `task_id`, `position` (1-based, UNIQUE per class+task)
+- Model functions: `get_topic_queue()`, `set_topic_queue()`, `get_next_queued_topic()`, `get_queue_position()`
+- Student progression: `POST /schueler/naechstes-thema` with `task_id` + `klasse_id` in form body — validates class membership + queue membership, then calls `assign_task_to_student()`
+- Dashboard shows "Nächstes Thema" prompt when: (a) active topic is completed, or (b) no active topic but queue has items
+- Topic page shows next-topic card below completion banner
+- Admin klasse_detail shows queue position "(3/7)" next to student's current topic
+
 ### Student URL Structure (Slug-Based)
 
 Student-facing routes use human-readable slugs instead of numeric DB IDs. Slugs are computed on-the-fly via `slugify(task['name'])` — not stored in the DB.
@@ -138,6 +151,7 @@ Student-facing routes use human-readable slugs instead of numeric DB IDs. Slugs 
 | `/schueler/thema/<slug>/aufgabe-<pos>/quiz` | `student_quiz_subtask` | Per-task quiz |
 | `/schueler/thema/<slug>/quiz-ergebnis` | `student_quiz_result` | View topic quiz result |
 | `/schueler/thema/<slug>/aufgabe-<pos>/quiz-ergebnis` | `student_quiz_result_subtask` | View task quiz result |
+| `/schueler/naechstes-thema` | `student_start_next_topic` | POST: start next topic from queue |
 
 **Key helpers in `app.py`:**
 - `_resolve_student_topic(student_id, slug)` → resolves slug to `(task, klasse)` by iterating student's classes

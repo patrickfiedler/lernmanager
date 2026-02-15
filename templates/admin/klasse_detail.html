@@ -6,6 +6,7 @@
 <div class="flex flex-between flex-center mb-2">
     <h1>📁 {{ klasse.name }}</h1>
     <div class="flex gap-1">
+        <a href="{{ url_for('admin_topic_queue', klasse_id=klasse.id) }}" class="btn btn-secondary">📋 Themen-Reihenfolge</a>
         <a href="{{ url_for('admin_unterricht', klasse_id=klasse.id) }}" class="btn btn-primary">📅 Unterricht</a>
         <a href="{{ url_for('admin_klasse_bericht', klasse_id=klasse.id) }}" class="btn btn-success">📊 Klassenbericht</a>
         <form method="POST" action="{{ url_for('admin_klasse_loeschen', klasse_id=klasse.id) }}" style="display: inline;" onsubmit="return confirm('Klasse wirklich löschen?');">
@@ -91,6 +92,9 @@
                 <td>
                     {% if student.task_name %}
                         {{ student.task_name }}
+                        {% if student.queue_pos %}
+                        <span class="text-muted">({{ student.queue_pos }}/{{ student.queue_total }})</span>
+                        {% endif %}
                     {% else %}
                         <span class="text-muted">-</span>
                     {% endif %}

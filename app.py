@@ -257,7 +257,17 @@ def admin_klasse_detail(klasse_id):
     tasks = models.get_all_tasks()
     unterricht = models.get_klasse_unterricht(klasse_id)
     schedule = models.get_class_schedule(klasse_id)
-    return render_template('admin/klasse_detail.html', klasse=klasse, students=students, tasks=tasks, unterricht=unterricht, schedule=schedule)
+
+    # Enrich students with queue position (avoids N+1 queries)
+    queue = models.get_topic_queue(klasse_id)
+    queue_lookup = {q['task_id']: (q['position'], len(queue)) for q in queue}
+    for s in students:
+        if s.get('task_id') and s['task_id'] in queue_lookup:
+            s['queue_pos'], s['queue_total'] = queue_lookup[s['task_id']]
+
+    return render_template('admin/klasse_detail.html', klasse=klasse, students=students,
+                           tasks=tasks, unterricht=unterricht, schedule=schedule,
+                           has_queue=bool(queue))
 
 
 @app.route('/admin/klasse/<int:klasse_id>/loeschen', methods=['POST'])
@@ -374,6 +384,31 @@ def admin_klasse_thema_zuweisen(klasse_id):
         flash('Thema zugewiesen. ✅', 'success')
 
     return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id))
+
+
+@app.route('/admin/klasse/<int:klasse_id>/themen-reihenfolge', methods=['GET', 'POST'])
+@admin_required
+def admin_topic_queue(klasse_id):
+    """Manage topic queue (ordered progression) for a class."""
+    klasse = models.get_klasse(klasse_id)
+    if not klasse:
+        flash('Klasse nicht gefunden.', 'danger')
+        return redirect(url_for('admin_klassen'))
+
+    if request.method == 'POST':
+        task_ids = request.form.getlist('task_ids', type=int)
+        models.set_topic_queue(klasse_id, task_ids)
+        flash('Themen-Reihenfolge gespeichert. ✅', 'success')
+        return redirect(url_for('admin_topic_queue', klasse_id=klasse_id))
+
+    queue = models.get_topic_queue(klasse_id)
+    queued_ids = {q['task_id'] for q in queue}
+    all_tasks = models.get_all_tasks()
+    available_tasks = [t for t in all_tasks if t['id'] not in queued_ids]
+
+    return render_template('admin/topic_queue.html',
+                           klasse=klasse, queue=queue,
+                           available_tasks=available_tasks)
 
 
 # ============ Admin: Schüler ============
@@ -1321,8 +1356,31 @@ def student_dashboard():
                 task['next_task_preview'] = None
         tasks_by_klasse[klasse['id']] = task
 
+    # Compute next queued topic per class
+    next_topics = {}
+    for klasse in klassen:
+        task = tasks_by_klasse.get(klasse['id'])
+        queue = models.get_topic_queue(klasse['id'])
+        if not queue:
+            continue
+
+        if task and task.get('abgeschlossen') and task.get('task_id'):
+            # Active completed topic → get next in queue
+            nxt = models.get_next_queued_topic(klasse['id'], task['task_id'])
+            if nxt:
+                next_topics[klasse['id']] = nxt
+        elif not task:
+            # No active topic → find first queue item not yet done
+            all_student_tasks = models.get_all_student_tasks(student_id, klasse['id'])
+            done_task_ids = {st['task_id'] for st in all_student_tasks}
+            for q in queue:
+                if q['task_id'] not in done_task_ids:
+                    next_topics[klasse['id']] = q
+                    break
+
     return render_template('student/dashboard.html', student=student, klassen=klassen,
                            tasks_by_klasse=tasks_by_klasse,
+                           next_topics=next_topics,
                            student_path=student.get('lernpfad'))
 
 
@@ -1436,6 +1494,11 @@ def student_klasse(slug):
         # Q5A: Calculate completed based on VISIBLE subtasks only
         completed_subtasks = [st for st in subtasks if st['erledigt']]
 
+    # Check for next queued topic (only when current is completed)
+    next_topic = None
+    if task and task.get('abgeschlossen'):
+        next_topic = models.get_next_queued_topic(klasse_id, task['task_id'])
+
     return render_template('student/klasse.html',
                            student=student,
                            klasse=klasse,
@@ -1448,6 +1511,7 @@ def student_klasse(slug):
                            quiz_attempts=quiz_attempts,
                            subtask_quiz_status=subtask_quiz_status,
                            quiz_bestanden=quiz_bestanden,
+                           next_topic=next_topic,
                            student_path=student.get('lernpfad') if student else None)
 
 
@@ -1803,6 +1867,49 @@ def student_selbstbewertung(unterricht_id):
     models.update_student_self_eval(unterricht_id, student_id, selbst_selbst, selbst_respekt)
     flash('Selbstbewertung gespeichert. ✅', 'success')
     return redirect(request.referrer or url_for('student_dashboard'))
+
+
+@app.route('/schueler/naechstes-thema', methods=['POST'])
+@student_required
+def student_start_next_topic():
+    """Start the next topic from the class queue."""
+    student_id = session['student_id']
+    task_id = request.form.get('task_id', type=int)
+    klasse_id = request.form.get('klasse_id', type=int)
+
+    if not task_id or not klasse_id:
+        flash('Ungültige Anfrage.', 'danger')
+        return redirect(url_for('student_dashboard'))
+
+    # Validate: student is in this class
+    klassen = models.get_student_klassen(student_id)
+    if not any(k['id'] == klasse_id for k in klassen):
+        flash('Klasse nicht gefunden.', 'danger')
+        return redirect(url_for('student_dashboard'))
+
+    # Validate: task_id is in the class queue
+    queue = models.get_topic_queue(klasse_id)
+    if not any(q['task_id'] == task_id for q in queue):
+        flash('Thema nicht in der Reihenfolge.', 'danger')
+        return redirect(url_for('student_dashboard'))
+
+    # Get task name for flash message and redirect
+    task = models.get_task(task_id)
+    if not task:
+        flash('Thema nicht gefunden.', 'danger')
+        return redirect(url_for('student_dashboard'))
+
+    models.assign_task_to_student(student_id, klasse_id, task_id)
+
+    models.log_analytics_event(
+        event_type='topic_progression',
+        user_id=student_id,
+        user_type='student',
+        metadata={'task_id': task_id, 'klasse_id': klasse_id}
+    )
+
+    flash(f'Neues Thema gestartet: {task["name"]} 🎉', 'success')
+    return redirect(url_for('student_klasse', slug=slugify(task['name'])))
 
 
 @app.route('/schueler/einstellungen', methods=['GET', 'POST'])
