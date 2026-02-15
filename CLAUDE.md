@@ -136,6 +136,7 @@ Optional per-class ordered topic sequence. Admins define a progression order; st
 - Dashboard shows "Nächstes Thema" prompt when: (a) active topic is completed, or (b) no active topic but queue has items
 - Topic page shows next-topic card below completion banner
 - Admin klasse_detail shows queue position "(3/7)" next to student's current topic
+- **Design decision: queue stays optional** — making it required would only remove ~4 guard clauses but would add setup overhead for simple classes, break per-student assignment overrides, and force migration of existing classes. Queue handles *progression*; manual assignment handles *exceptions*.
 
 ### Student URL Structure (Slug-Based)
 

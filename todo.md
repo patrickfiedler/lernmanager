@@ -107,6 +107,12 @@ See `docs/research/2026-02-07_learning_paths_and_quiz_evolution.md` (Section 5)
 - [ ] AV-Vertrag mit VPS-Hoster prüfen/abschließen
 - [ ] Landesspezifische Schuldatenschutzverordnung prüfen
 
+## Reference Documents
+
+- **Pedagogical rationale:** `docs/pedagogical_decisions.md` — teaching philosophy, design decisions, open questions
+- **Curriculum spec:** `docs/2026-02-13_lernmanager_curriculum_spec.md`
+- **Combined plan:** `~/.claude/plans/fuzzy-wiggling-unicorn.md`
+
 ## Completed (Archive)
 
 <details>

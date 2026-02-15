@@ -36,7 +36,15 @@ Each archive folder contains:
 - `class_assignment_bug/` - Bug fix for class-wide assignments
 - `infrastructure_research/` - WSGI server comparison
 
+### Top-Level Documents
+
+- `pedagogical_decisions.md` - Core teaching philosophy and design rationale
+- `task_json_format.md` - Subtask/quiz JSON format specification
+- `2026-02-13_lernmanager_curriculum_spec.md` - Curriculum structure and learning paths spec
+
 ## Navigation
+
+**For pedagogical rationale:** See `pedagogical_decisions.md`
 
 **For deployment and operations:** See `/guides/` and `deploy/QUICK_REFERENCE.md`
 

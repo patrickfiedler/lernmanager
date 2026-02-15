@@ -9,21 +9,28 @@
 - **Admin:** New route `GET/POST /admin/klasse/<id>/themen-reihenfolge` with up/down/remove/add UI. Queue link button added to klasse_detail. Student table shows "(3/7)" position.
 - **Student:** New route `POST /schueler/naechstes-thema`. Dashboard shows "Nächstes Thema" with start button. Topic page shows next-topic card after completion.
 - **Design:** Queue is optional — classes without one work exactly as before. No drag-and-drop (up/down buttons instead). One-click start (no preview page).
+- **Design decision documented:** Analyzed making queue required — only ~4 guard clauses to remove but significant flexibility loss (per-student overrides, setup overhead, migration burden). Kept optional.
 
 **Files changed:**
-- `models.py` — 4 queue functions added before Task Export section
-- `app.py` — `admin_topic_queue` route, modified `admin_klasse_detail` (queue enrichment), `student_start_next_topic` route, modified `student_dashboard` (next_topics), modified `student_klasse` (next_topic)
+- `models.py` — 4 queue functions added before Task Export section (~line 876)
+- `app.py` — `admin_topic_queue` route (~line 391), modified `admin_klasse_detail` (~line 251), `student_start_next_topic` route (~line 1874), modified `student_dashboard` (~line 1359), modified `student_klasse` (~line 1497)
 - `templates/admin/topic_queue.html` — new template (queue table + add dropdown + JS reordering)
 - `templates/admin/klasse_detail.html` — queue link button + position display
 - `templates/student/dashboard.html` — next topic prompts (completed + no-active cases)
 - `templates/student/klasse.html` — next topic card after completion
-- `CLAUDE.md` — documented queue behavior, new route, DB table
+- `CLAUDE.md` — documented queue behavior, new route, DB table, design decision
+
+### Git state
+- Committed: `1b5de8c` — feat: topic queue for self-paced progression (Phase 4)
+- Plus one uncommitted change: design decision note added to CLAUDE.md
+- Branch `main` is 3 commits ahead of origin (not pushed)
 
 ### Next Steps
 - **Phase 5: Sidequests + Polish** — sidequest role, polish
 - Graded artifact UI (student display, admin grade override)
 - Spaced repetition (weekly quiz from completed pools)
 - Per-topic path override (future option)
+- **Not yet tested in browser** — manual verification recommended before deploy
 
 ## Previous Session (2026-02-15) — Remove Prerequisites
 
