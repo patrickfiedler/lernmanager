@@ -8,6 +8,33 @@ Lernmanager is a German-language learning progress tracker for schools. It allow
 
 **Repository**: https://github.com/patrickfiedler/lernmanager
 
+### Shared Decisions
+Cross-project decisions are symlinked at `docs/shared/` → `~/coding/shared-decisions/`. Each project maintains a subfolder with key decision documents. Read relevant files when making decisions that affect content format, pedagogical approach, or technical constraints shared across projects.
+
+Current projects in shared-decisions:
+
+**`lernmanager/`** (this project):
+- `pedagogical.md` — teaching philosophy, key decisions, known tensions
+- `technical.md` — architecture, DB/UI terminology mapping, key technical choices
+- `conventions.md` — content format contract (Aufgabe descriptions, paths, quizzes, JSON import)
+
+**`mbi/`** (MBI curriculum content — units, tasks, quizzes for Medienbildung & Informatik grades 5/6):
+- `pedagogical.md` — content-side teaching decisions: fun-first sequencing, tight scaffolding for 10-12yr, spiral progression, accepted trade-offs
+- `content-design.md` — gradual artifact building (📎 pattern), task/quiz design, differentiation models (skip vs. depth), 60-lesson budget constraint
+- `conventions.md` — authoring conventions: unit workflow (design doc → JSON → import), file naming, UTF-8 encoding, language rules, student-facing text fields
+
+**`grading-with-llm/`** (automated artifact grading via LLM micro-prompting):
+- `pedagogical.md` — why automated grading (feedback timing > speed), objective criteria only, LLM as tool not authority, structural assignments first
+- `technical.md` — Python CLI, Anthropic Batch API (Haiku 4.5, 98.3% accuracy), micro-prompting pattern, anonymization, CSV/Markdown/JSON output
+- `conventions.md` — data contract: input filenames (`nachname.vorname.docx`), rubric format (YAML frontmatter), per-student JSON output, integration via `graded_artifact.keyword`
+
+**Key integration points:**
+- MBI generates curriculum content → imported into Lernmanager via `lernmanager/conventions.md` JSON format
+- Grading system outputs per-student JSON → planned Lernmanager API consumes it via `graded_artifact.keyword` matching
+- All use UI terminology (Topic/Thema, Aufgabe), not DB names (task, subtask)
+
+See `docs/shared/README.md` for structure and how to add new projects.
+
 ## Commands
 
 ### Development

@@ -1,6 +1,41 @@
 # Lernmanager - Current State (2026-02-15)
 
-## Latest Session (2026-02-15) — Phase 4: Topic Queue
+## Latest Session (2026-02-15) — Docs, Deploy, Shared Decisions
+
+### What happened
+1. **Pedagogical decisions documented** — created `docs/pedagogy/pedagogical_decisions.md` (teaching philosophy, design rationale, 5 known tensions)
+2. **Committed and pushed** all pending changes (4 commits total, including Phase 4 topic queue)
+3. **Deployed to production** — teacher is testing with new MBI curriculum content
+4. **Shared decisions layer created** — `~/coding/shared-decisions/` with 3 project subfolders, symlinked into this project at `docs/shared/`
+5. **Cross-project docs updated** — CLAUDE.md, docs/README.md, todo.md all reference shared decisions and sibling projects
+6. **Terminology fixed** in shared decision files — UI terms (Topic/Aufgabe) not DB names (task/subtask)
+
+### Shared Decisions (`docs/shared/` → `~/coding/shared-decisions/`)
+Three projects now have shared decision files:
+- `lernmanager/` — pedagogical.md, technical.md, conventions.md
+- `mbi/` — pedagogical.md, content-design.md, conventions.md (MBI curriculum, grades 5/6)
+- `grading-with-llm/` — pedagogical.md, technical.md, conventions.md (LLM artifact grading)
+
+**Key integration points:**
+- MBI → Lernmanager: JSON import via `lernmanager/conventions.md` format
+- Grading → Lernmanager: per-student JSON via `graded_artifact.keyword` matching (API not yet built)
+
+### Git state
+- Last pushed: `6744bf7` — docs: add pedagogical decisions and design rationale
+- Uncommitted changes: CLAUDE.md, docs/README.md, todo.md, docs/pedagogy/ (moved from docs/), docs/shared symlink, go_on_from_here.md
+- Shared-decisions files live outside repo at `~/coding/shared-decisions/`
+
+### Next Steps
+- **Commit uncommitted doc updates** (CLAUDE.md, README, todo, pedagogy move, shared symlink)
+- **Await test results** — topic queue + Phases 1-4 features under real use
+- **Phase 5: Sidequests + Polish** — sidequest role, polish
+- **Graded artifact API** — receive grades from grading system (data contract: `docs/shared/grading-with-llm/conventions.md`)
+- Graded artifact UI (student display, admin grade override)
+- Spaced repetition (weekly quiz from completed pools)
+- Per-topic path override (future option)
+- Consider: collaborative tasks, open-ended tasks (see `docs/pedagogy/pedagogical_decisions.md` tensions)
+
+## Previous Session (2026-02-15) — Phase 4: Topic Queue
 
 ### Topic Queue (Topic Progression)
 - **What:** Admins define an optional ordered topic sequence per class. Students self-advance when they complete a topic.
@@ -20,17 +55,8 @@
 - `templates/student/klasse.html` — next topic card after completion
 - `CLAUDE.md` — documented queue behavior, new route, DB table, design decision
 
-### Git state
+### Git state (at that time)
 - Committed: `1b5de8c` — feat: topic queue for self-paced progression (Phase 4)
-- Plus one uncommitted change: design decision note added to CLAUDE.md
-- Branch `main` is 3 commits ahead of origin (not pushed)
-
-### Next Steps
-- **Phase 5: Sidequests + Polish** — sidequest role, polish
-- Graded artifact UI (student display, admin grade override)
-- Spaced repetition (weekly quiz from completed pools)
-- Per-topic path override (future option)
-- **Not yet tested in browser** — manual verification recommended before deploy
 
 ## Previous Session (2026-02-15) — Remove Prerequisites
 
@@ -143,8 +169,10 @@
 
 ## Key References
 
-- **Combined plan:** `~/.claude/plans/fuzzy-wiggling-unicorn.md` (Phases 4–5 remaining)
+- **Combined plan:** `~/.claude/plans/fuzzy-wiggling-unicorn.md` (Phase 5 remaining)
 - **Architecture & conventions:** `CLAUDE.md`
+- **Shared decisions:** `docs/shared/` (symlink → `~/coding/shared-decisions/`)
+- **Pedagogical rationale:** `docs/pedagogy/pedagogical_decisions.md`
 - **Curriculum spec:** `docs/2026-02-13_lernmanager_curriculum_spec.md`
 - **Admin simplification:** `docs/2026-02-13_admin_simplification_analysis.md`
 - **Open tasks:** `todo.md`

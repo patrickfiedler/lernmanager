@@ -2,6 +2,8 @@
 
 Core design decisions behind the Lernmanager, with rationale.
 
+**Related:** Shared cross-project summaries at `docs/shared/lernmanager/pedagogical.md`. Content-side pedagogical decisions at `docs/shared/mbi/pedagogical.md`. LLM grading rationale at `docs/shared/grading-with-llm/pedagogical.md`.
+
 ## Teaching Philosophy
 
 The Lernmanager is designed to **complement in-person teaching, not replace it.** The app handles deterministic decisions (who's next, what's their path, have they passed) so that the teacher's limited cognitive bandwidth goes to the work that actually requires a human: reading faces, sensing frustration, knowing when to push and when to back off.

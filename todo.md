@@ -13,7 +13,7 @@
 ## Features
 
 - **Learning paths + topic progression + sidequests + admin simplification** — combined plan: `~/.claude/plans/fuzzy-wiggling-unicorn.md`. 5 phases: migration → shared model → learning paths + admin overhaul → topic progression → sidequests + polish. **Phases 1–4 done.** Phase 5 (sidequests + polish) remaining. See below for detailed checklists.
-- add external API to upload log files from scan-folders.ps1 script -> track student progress from files created on school computers
+- add external API to receive grading results from grading-with-llm system + upload log files from scan-folders.ps1 script (see `docs/shared/grading-with-llm/conventions.md` for data contract)
 - **Admin: curriculum alignment page** - Show how topics/tasks map to curriculum learning goals, gaps/overlaps (Priority: Medium)
 
 ## Improvements
@@ -71,7 +71,7 @@ Some tasks produce graded digital artifacts (documents, images, Scratch projects
 - [x] Import/export support for graded_artifact field
 - [ ] Student UI: display artifact keyword and accepted formats
 - [ ] Student UI: display grade when available
-- [ ] External API endpoint to receive grades from collection/grading script (overlaps with scan-folders.ps1 API todo)
+- [ ] External API endpoint to receive grades from grading system — data contract: `docs/shared/grading-with-llm/conventions.md` (per-student JSON, keyword matching)
 - [ ] Admin UI: view/override artifact grades
 
 ## Spaced Repetition (Spec Ready)
@@ -109,7 +109,8 @@ See `docs/research/2026-02-07_learning_paths_and_quiz_evolution.md` (Section 5)
 
 ## Reference Documents
 
-- **Pedagogical rationale:** `docs/pedagogical_decisions.md` — teaching philosophy, design decisions, open questions
+- **Pedagogical rationale:** `docs/pedagogy/pedagogical_decisions.md` — teaching philosophy, design decisions, open questions
+- **Cross-project decisions:** `docs/shared/` — shared context across Lernmanager, MBI curriculum, grading system
 - **Curriculum spec:** `docs/2026-02-13_lernmanager_curriculum_spec.md`
 - **Combined plan:** `~/.claude/plans/fuzzy-wiggling-unicorn.md`
 

@@ -36,15 +36,25 @@ Each archive folder contains:
 - `class_assignment_bug/` - Bug fix for class-wide assignments
 - `infrastructure_research/` - WSGI server comparison
 
+### `/pedagogy/` - Teaching Philosophy
+- `pedagogical_decisions.md` - Core teaching philosophy, design rationale, known tensions
+
+### `/shared/` - Cross-Project Decisions (symlink → `~/coding/shared-decisions/`)
+Shared decision documents across the Lernmanager ecosystem:
+- `lernmanager/` — pedagogical, technical, and content convention decisions for this app
+- `mbi/` — MBI curriculum content design (grades 5/6 Medienbildung & Informatik)
+- `grading-with-llm/` — LLM-based automated artifact grading system
+
 ### Top-Level Documents
 
-- `pedagogical_decisions.md` - Core teaching philosophy and design rationale
-- `task_json_format.md` - Subtask/quiz JSON format specification
+- `task_json_format.md` - Aufgabe/quiz JSON format specification
 - `2026-02-13_lernmanager_curriculum_spec.md` - Curriculum structure and learning paths spec
 
 ## Navigation
 
-**For pedagogical rationale:** See `pedagogical_decisions.md`
+**For pedagogical rationale:** See `pedagogy/pedagogical_decisions.md` and `shared/lernmanager/pedagogical.md`
+
+**For cross-project decisions:** See `shared/README.md`
 
 **For deployment and operations:** See `/guides/` and `deploy/QUICK_REFERENCE.md`
 
