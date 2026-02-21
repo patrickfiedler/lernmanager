@@ -270,7 +270,11 @@
                     'Content-Type': 'application/json',
                     'X-CSRFToken': csrfToken
                 },
-                body: JSON.stringify({})
+                body: JSON.stringify({
+                    shown: questions.map(function(q) {
+                        return {task_id: q.task_id, subtask_id: q.subtask_id, question_index: q.question_index};
+                    })
+                })
             })
             .then(r => r.json())
             .then(data => {

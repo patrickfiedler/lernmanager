@@ -2088,7 +2088,18 @@ def student_warmup_answer():
 def student_warmup_continue():
     """AJAX: after easy round all correct, return 2 hard questions."""
     student_id = session['student_id']
+    data = request.get_json() or {}
+
+    # Exclude questions already shown in the easy round
+    shown = data.get('shown', [])
+    shown_keys = set()
+    for s in shown:
+        shown_keys.add((s.get('task_id'), s.get('subtask_id'), s.get('question_index')))
+
     pool = models.get_warmup_question_pool(student_id)
+    pool = [q for q in pool
+            if (q['task_id'], q['subtask_id'], q['question_index']) not in shown_keys]
+
     hard_questions = models.select_warmup_questions(student_id, pool, difficulty='hard', count=2)
 
     if not hard_questions:
