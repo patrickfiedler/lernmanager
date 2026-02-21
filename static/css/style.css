@@ -254,6 +254,32 @@ nav .nav-links {
     border-bottom: 1px solid var(--gray-200);
 }
 
+/* Description preview (dashboard topic cards) */
+.description-preview {
+    max-height: 6.5em;
+    overflow: hidden;
+    font-size: 0.9rem;
+    color: var(--gray-600);
+}
+.description-preview.expanded {
+    max-height: none;
+}
+.description-preview p:first-child { margin-top: 0; }
+.description-preview p:last-child { margin-bottom: 0; }
+body.easy-reading-mode .description-preview {
+    max-height: 8.5em;
+}
+.description-toggle {
+    display: inline-block;
+    font-size: 0.8rem;
+    color: var(--primary);
+    cursor: pointer;
+    margin-bottom: 0.5rem;
+}
+.description-toggle:hover {
+    text-decoration: underline;
+}
+
 /* Buttons */
 .btn {
     display: inline-block;

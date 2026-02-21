@@ -9,6 +9,9 @@
 4. **Spaced repetition heuristic** — `warmup_history` tracks per-question streak, times shown/correct, last shown. 3-tier priority: previously incorrect → not recently shown → random. No SM-2 (overkill for 2-4 questions per irregular session).
 5. **JS-driven single-page flow** — questions embedded as JSON, graded via AJAX, no page reloads between questions. Same endpoint for warmup and practice grading.
 6. **CSS cache busting removed** — dropped `?v=` from `base.html`, removed `immutable` from `deploy/nginx.conf`. `expires 1d` alone is sufficient.
+7. **Feedback matches quiz results** — warmup/practice reuse exact same visual patterns from `quiz_result.html` (colored left borders, ✅/❌ emojis, 💬 feedback line, "Deine Antwort" label).
+8. **No duplicate questions** — easy round sends shown question IDs to `/weiter` endpoint; server excludes them before selecting hard questions. Small pools gracefully show only 2 questions.
+9. **MC answer order randomized** — Fisher-Yates shuffle on option display order. Original indices preserved in `cb.value`/`dataset.index` so grading and feedback work unchanged.
 
 ### New files
 - `migrate_004_warmup_tables.py` — creates `warmup_history` + `warmup_session`
@@ -20,20 +23,25 @@
 - `app.py` — login redirect → warmup, 6 new routes, `_grade_warmup_answer` + `_serialize_question_for_js` helpers, dashboard passes `has_warmup_pool`
 - `templates/student/dashboard.html` — practice button card
 - `templates/base.html` — removed CSS version query string
-- `static/css/style.css` — `.warmup-feedback`, `.warmup-correct/incorrect`, `.warmup-summary`
+- `static/css/style.css` — removed unused warmup-specific classes (feedback uses quiz-result inline styles)
 - `deploy/nginx.conf` — removed `immutable` from static Cache-Control
 - `todo.md` — spaced repetition section updated to implemented
-- `CLAUDE.md` — warmup routes, section, helpers documented
+- `CLAUDE.md` — warmup routes, section, helpers, visual consistency guideline documented
 
 ### Git state
-- Committed + pushed: `fb2a725` — feat: spaced repetition — login warm-up + practice mode
+- 4 unpushed commits on main:
+  - `fb2a725` feat: spaced repetition — login warm-up + practice mode
+  - `a9ecf39` fix: warmup feedback matches quiz result styling
+  - `37cc3c0` fix: prevent duplicate questions in warmup session
+  - `19d0801` fix: randomize MC answer order in warmup and practice
 - **Deployment pending:**
-  1. Run `python migrate_004_warmup_tables.py` on server (creates 2 tables)
-  2. Run `sudo /opt/lernmanager/deploy/update.sh`
-  3. Manually update nginx: remove `immutable` from static files Cache-Control, reload nginx
+  1. `git push`
+  2. Run `python migrate_004_warmup_tables.py` on server (creates 2 tables)
+  3. Run `sudo /opt/lernmanager/deploy/update.sh`
+  4. Manually update nginx: remove `immutable` from static files Cache-Control, reload nginx
 
 ### Next Steps
-- **Deploy** warmup + practice to production
+- **Push + deploy** warmup + practice to production
 - **Graded artifact API** — receive grades from grading-with-llm system
 - Graded artifact UI (student display, admin grade override)
 - Test warmup flow end-to-end with real student data
