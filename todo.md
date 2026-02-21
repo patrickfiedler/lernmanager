@@ -7,7 +7,7 @@
 
 ## Bugs
 
-- fix: Make lesson comment saveable without saving student evaluation -> required in case a scheduled lesson does not take place
+- ~~fix: Make lesson comment saveable without saving student evaluation~~ → dedicated "Kommentar speichern" button + oninput detection
 - ~~fix: compulsory vs optional tasks~~ → superseded by learning paths (path determines required vs. optional)
 
 ## Features

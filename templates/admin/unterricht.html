@@ -138,7 +138,10 @@
 
 <div class="card mt-2">
     <div class="card-header">💬 Kommentar zur gesamten Unterrichtsstunde</div>
-    <textarea id="lesson-comment" class="form-control" rows="3" placeholder="Notizen zur gesamten Stunde..." onchange="markLessonCommentChanged()">{{ lesson_comment or '' }}</textarea>
+    <textarea id="lesson-comment" class="form-control" rows="3" placeholder="Notizen zur gesamten Stunde..." oninput="markLessonCommentChanged()">{{ lesson_comment or '' }}</textarea>
+    <div class="flex flex-end mt-1">
+        <button id="comment-save-btn" class="btn btn-primary" onclick="saveLessonCommentOnly()" disabled>💬 Kommentar speichern</button>
+    </div>
 </div>
 {% else %}
 <div class="card text-center text-muted">
@@ -203,7 +206,7 @@ tr[data-saved="2"] {
 const unterrichtId = {{ unterricht_id }};
 const unsavedChanges = new Set();
 let lessonCommentChanged = false;
-const originalLessonComment = `{{ lesson_comment or '' }}`;
+let originalLessonComment = `{{ lesson_comment or '' }}`;
 
 function updateUnsavedCount() {
     const count = unsavedChanges.size + (lessonCommentChanged ? 1 : 0);
@@ -256,12 +259,15 @@ function markAsChanged(studentId) {
 
 function markLessonCommentChanged() {
     const textarea = document.getElementById('lesson-comment');
+    const commentBtn = document.getElementById('comment-save-btn');
     if (textarea.value !== originalLessonComment) {
         lessonCommentChanged = true;
         textarea.classList.add('changed');
+        commentBtn.disabled = false;
     } else {
         lessonCommentChanged = false;
         textarea.classList.remove('changed');
+        commentBtn.disabled = true;
     }
     updateUnsavedCount();
 }
@@ -304,16 +310,35 @@ function saveLessonComment() {
 
     const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
     const data = new FormData();
-    data.append('kommentar', document.getElementById('lesson-comment').value);
+    const comment = document.getElementById('lesson-comment').value;
+    data.append('kommentar', comment);
 
     return fetch(`/admin/unterricht/${unterrichtId}/kommentar`, {
         method: 'POST',
         headers: {'X-CSRFToken': csrfToken},
         body: data
     }).then(() => {
+        originalLessonComment = comment;
         lessonCommentChanged = false;
         document.getElementById('lesson-comment').classList.remove('changed');
+        document.getElementById('comment-save-btn').disabled = true;
     });
+}
+
+async function saveLessonCommentOnly() {
+    const btn = document.getElementById('comment-save-btn');
+    btn.innerHTML = '💬 Speichern...';
+    btn.disabled = true;
+    try {
+        await saveLessonComment();
+        btn.innerHTML = '✅ Gespeichert!';
+        updateUnsavedCount();
+        setTimeout(() => { btn.innerHTML = '💬 Kommentar speichern'; }, 2000);
+    } catch (error) {
+        alert('Fehler beim Speichern.');
+        btn.innerHTML = '💬 Kommentar speichern';
+        btn.disabled = false;
+    }
 }
 
 async function saveAll() {
