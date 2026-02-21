@@ -478,7 +478,8 @@ def admin_schueler_thema_zuweisen(student_id):
     klasse_id = request.form['klasse_id']
     task_id = request.form['task_id']
     if klasse_id and task_id:
-        models.assign_task_to_student(student_id, int(klasse_id), int(task_id))
+        rolle = request.form.get('rolle', 'primary')
+        models.assign_task_to_student(student_id, int(klasse_id), int(task_id), rolle)
         flash('Thema zugewiesen. ✅', 'success')
     return redirect(url_for('admin_schueler_detail', student_id=student_id))
 
@@ -1378,9 +1379,15 @@ def student_dashboard():
                     next_topics[klasse['id']] = q
                     break
 
+    # Fetch sidequests per class
+    sidequests_by_klasse = {}
+    for klasse in klassen:
+        sidequests_by_klasse[klasse['id']] = models.get_student_sidequests(student_id, klasse['id'])
+
     return render_template('student/dashboard.html', student=student, klassen=klassen,
                            tasks_by_klasse=tasks_by_klasse,
                            next_topics=next_topics,
+                           sidequests_by_klasse=sidequests_by_klasse,
                            student_path=student.get('lernpfad'))
 
 

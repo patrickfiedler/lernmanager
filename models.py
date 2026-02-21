@@ -1501,6 +1501,19 @@ def get_all_student_tasks(student_id, klasse_id):
     return result
 
 
+def get_student_sidequests(student_id, klasse_id):
+    """Get active sidequests for a student in a class."""
+    with db_session() as conn:
+        rows = conn.execute('''
+            SELECT st.*, t.name, t.beschreibung, t.fach, t.stufe, t.kategorie, t.quiz_json
+            FROM student_task st
+            JOIN task t ON st.task_id = t.id
+            WHERE st.student_id = ? AND st.klasse_id = ? AND st.rolle = 'sidequest' AND st.abgeschlossen = 0
+            ORDER BY st.id DESC
+        ''', (student_id, klasse_id)).fetchall()
+        return [dict(r) for r in rows]
+
+
 def get_student_subtask_progress(student_task_id):
     """Get subtask completion status for a student's task."""
     with db_session() as conn:

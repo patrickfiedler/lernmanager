@@ -96,6 +96,14 @@
                 <option value="{{ task.id }}">{{ task.fach }} ({{ task.stufe }}): {{ task.name }}</option>
                 {% endfor %}
             </select>
+        </div>
+        <div class="flex gap-1 flex-center">
+            <label style="font-weight: normal;">
+                <input type="radio" name="rolle" value="primary" checked> Hauptthema
+            </label>
+            <label style="font-weight: normal;">
+                <input type="radio" name="rolle" value="sidequest"> Sidequest
+            </label>
             <button type="submit" class="btn btn-primary">Zuweisen</button>
         </div>
     </form>

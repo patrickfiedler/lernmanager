@@ -12,7 +12,7 @@
 
 ## Features
 
-- **Learning paths + topic progression + sidequests + admin simplification** — combined plan: `~/.claude/plans/fuzzy-wiggling-unicorn.md`. 5 phases: migration → shared model → learning paths + admin overhaul → topic progression → sidequests + polish. **Phases 1–4 done.** Phase 5 (sidequests + polish) remaining. See below for detailed checklists.
+- **Learning paths + topic progression + sidequests + admin simplification** — combined plan: `~/.claude/plans/fuzzy-wiggling-unicorn.md`. 5 phases: migration → shared model → learning paths + admin overhaul → topic progression → sidequests + polish. **Phases 1–5 done.** ✅
 - add external API to receive grading results from grading-with-llm system + upload log files from scan-folders.ps1 script (see `docs/shared/grading-with-llm/conventions.md` for data contract)
 - **Admin: curriculum alignment page** - Show how topics/tasks map to curriculum learning goals, gaps/overlaps (Priority: Medium)
 

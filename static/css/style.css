@@ -176,6 +176,67 @@ nav .nav-links {
     }
 }
 
+/* Dropdown nav ("Mehr" menu) */
+.nav-dropdown {
+    position: relative;
+}
+
+.nav-dropdown summary {
+    list-style: none;
+    cursor: pointer;
+    color: white;
+}
+
+.nav-dropdown summary::-webkit-details-marker {
+    display: none;
+}
+
+.nav-dropdown-menu {
+    position: absolute;
+    top: calc(100% + 0.5rem);
+    right: 0;
+    background: var(--primary-dark);
+    border-radius: 0.375rem;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    display: flex;
+    flex-direction: column;
+    min-width: 160px;
+    z-index: 100;
+}
+
+.nav-dropdown-menu a {
+    padding: 0.625rem 1rem;
+    white-space: nowrap;
+    border-top: 1px solid rgba(255,255,255,0.15);
+}
+
+.nav-dropdown-menu a:first-child {
+    border-top: none;
+}
+
+@media (max-width: 960px) {
+    .nav-dropdown {
+        width: 100%;
+    }
+
+    .nav-dropdown summary {
+        padding: 0.625rem 0;
+        border-top: 1px solid rgba(255, 255, 255, 0.15);
+    }
+
+    .nav-dropdown-menu {
+        position: static;
+        box-shadow: none;
+        border-radius: 0;
+        background: transparent;
+        width: 100%;
+    }
+
+    .nav-dropdown-menu a {
+        padding-left: 1.5rem;
+    }
+}
+
 /* Cards */
 .card {
     background: white;

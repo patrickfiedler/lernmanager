@@ -91,6 +91,17 @@
 
         {% endif %}
     </div>
+
+    {% for sq in sidequests_by_klasse.get(klasse.id, []) %}
+    <div class="card task-card">
+        <div class="card-header flex flex-between">
+            <span>⚔️ {{ sq.name }}</span>
+            <span class="badge" style="background: #fef3c7; color: #92400e;">Sidequest</span>
+        </div>
+        <a href="{{ url_for('student_klasse', slug=sq.name|slugify) }}" class="btn btn-primary">Weiter lernen →</a>
+    </div>
+    {% endfor %}
+
     {% endfor %}
 </div>
 {% else %}
