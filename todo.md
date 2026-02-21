@@ -18,6 +18,7 @@
 
 ## Improvements
 
+- **Dashboard: move Lernfortschritt to bottom card** — replace top-right green button with a card at the end of the dashboard flow. Show key stats (completed topics, streak, etc.), link to PDF report. Keeps dashboard focused on the next task.
 - Student onboarding page: asks about accessibility preferences (easy reading mode, etc.), reminds when new options available
 - Onboarding: preview and choose settings, quick tutorial/guide
 - (low priority) Visual learning map of open tasks and connections

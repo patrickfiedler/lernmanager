@@ -1,6 +1,26 @@
 # Lernmanager - Current State (2026-02-21)
 
-## Latest Session (2026-02-21) — Spaced Repetition: Warmup + Practice Mode
+## Latest Session (2026-02-21) — Dashboard Description + Layout
+
+### What happened
+1. **Topic description on dashboard** — `task.beschreibung` (already loaded from DB) now rendered as markdown in topic cards with CSS `max-height` clamp (~4 lines). "Mehr anzeigen ▾" / "Weniger ▴" toggle, only shown when content overflows (`scrollHeight > clientHeight` check). Easy reading mode gets taller clamp (`8.5em` vs `6.5em`).
+2. **Sidequest description** — same expandable preview added to sidequest cards.
+3. **Dashboard layout restructured** — dropped 2-column grid for single-column stack. All action buttons right-aligned, consistent blue `btn-primary` with → across topic, sidequest, and practice cards.
+4. **Deployed** — all warmup + dashboard commits pushed and deployed. Migration `migrate_004_warmup_tables.py` run. Nginx `immutable` removed, confirmed via browser DevTools.
+
+### Files changed
+- `static/css/style.css` — `.description-preview`, `.description-toggle`, easy-reading override
+- `templates/student/dashboard.html` — description sections, single-column layout, right-aligned buttons, JS toggle
+
+### Git state
+- All pushed and deployed: `e74859b` — feat: show topic description on student dashboard
+
+### Next Steps
+- **Graded artifact API** — receive grades from grading-with-llm system
+- Graded artifact UI (student display, admin grade override)
+- Test warmup flow end-to-end with real student data
+
+## Previous Session (2026-02-21) — Spaced Repetition: Warmup + Practice Mode
 
 ### What happened
 1. **Login warm-up** — after login, students see 2 easy review questions from completed topics/tasks. If both correct, 2 harder questions follow. Completely skippable, no grades. Skipped if already done today or no question pool.
@@ -34,17 +54,7 @@
   - `a9ecf39` fix: warmup feedback matches quiz result styling
   - `37cc3c0` fix: prevent duplicate questions in warmup session
   - `19d0801` fix: randomize MC answer order in warmup and practice
-- **Deployment pending:**
-  1. `git push`
-  2. Run `python migrate_004_warmup_tables.py` on server (creates 2 tables)
-  3. Run `sudo /opt/lernmanager/deploy/update.sh`
-  4. Manually update nginx: remove `immutable` from static files Cache-Control, reload nginx
-
-### Next Steps
-- **Push + deploy** warmup + practice to production
-- **Graded artifact API** — receive grades from grading-with-llm system
-- Graded artifact UI (student display, admin grade override)
-- Test warmup flow end-to-end with real student data
+- All pushed and deployed.
 
 ## Previous Session (2026-02-21) — Phase 5: Sidequests + Admin Nav
 
