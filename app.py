@@ -1858,13 +1858,16 @@ def student_quiz_result_subtask(slug, position):
     quiz = json.loads(subtask_row['quiz_json'])
     antworten = json.loads(latest['antworten_json']) if latest['antworten_json'] else {}
 
+    next_position = position + 1 if position < len(subtasks) else None
+
     return render_template('student/quiz_result.html',
                            student=student, task=task,
                            quiz=_build_display_quiz(quiz),
                            punkte=latest['punkte'], max_punkte=latest['max_punkte'],
                            bestanden=latest['bestanden'], antworten=antworten,
                            previous_attempt=attempts[1] if len(attempts) > 1 else None,
-                           slug=slug, position=position)
+                           slug=slug, position=position,
+                           next_position=next_position)
 
 
 @app.route('/schueler/unterricht/<int:unterricht_id>/selbstbewertung', methods=['POST'])

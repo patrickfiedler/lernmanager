@@ -83,7 +83,11 @@
 <div class="flex gap-1">
     {% if not bestanden %}
     <a href="{% if position %}{{ url_for('student_quiz_subtask', slug=slug, position=position) }}{% else %}{{ url_for('student_quiz', slug=slug) }}{% endif %}" class="btn btn-primary">🔄 Erneut versuchen</a>
+    <a href="{{ url_for('student_klasse', slug=slug, aufgabe=position) if position else url_for('student_klasse', slug=slug) }}" class="btn btn-secondary">← Zurück zur Aufgabe</a>
+    {% elif position and next_position %}
+    <a href="{{ url_for('student_klasse', slug=slug, aufgabe=next_position) }}" class="btn btn-primary">Zur nächsten Aufgabe →</a>
+    {% else %}
+    <a href="{{ url_for('student_klasse', slug=slug) }}" class="btn btn-primary">Zum Thema →</a>
     {% endif %}
-    <a href="{{ url_for('student_klasse', slug=slug) }}" class="btn btn-secondary">← Zurück zur Aufgabe</a>
 </div>
 {% endblock %}
