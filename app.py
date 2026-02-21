@@ -1813,13 +1813,19 @@ def student_quiz_result(slug):
     quiz = json.loads(task['quiz_json'])
     antworten = json.loads(latest['antworten_json']) if latest['antworten_json'] else {}
 
+    next_topic = None
+    if latest['bestanden'] and klasse:
+        next_topic = models.get_next_queued_topic(klasse['id'], task['task_id'])
+
     return render_template('student/quiz_result.html',
                            student=student, task=task,
                            quiz=_build_display_quiz(quiz),
                            punkte=latest['punkte'], max_punkte=latest['max_punkte'],
                            bestanden=latest['bestanden'], antworten=antworten,
                            previous_attempt=attempts[1] if len(attempts) > 1 else None,
-                           slug=slug, position=None)
+                           slug=slug, position=None,
+                           quiz_bestanden=latest['bestanden'],
+                           next_topic=next_topic, klasse=klasse)
 
 
 @app.route('/schueler/thema/<slug>/aufgabe-<int:position>/quiz-ergebnis')

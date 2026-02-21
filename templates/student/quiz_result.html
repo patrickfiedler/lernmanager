@@ -88,6 +88,13 @@
     <a href="{{ url_for('student_klasse', slug=slug, aufgabe=next_position) }}" class="btn btn-primary">Zur nächsten Aufgabe →</a>
     {% elif task.quiz_json and not quiz_bestanden %}
     <a href="{{ url_for('student_quiz', slug=slug) }}" class="btn btn-primary">Zum Themen-Quiz →</a>
+    {% elif next_topic is defined and next_topic and klasse is defined and klasse %}
+    <form method="POST" action="{{ url_for('student_start_next_topic') }}" style="display: inline;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="task_id" value="{{ next_topic.task_id }}">
+        <input type="hidden" name="klasse_id" value="{{ klasse.id }}">
+        <button type="submit" class="btn btn-primary">Nächstes Thema starten →</button>
+    </form>
     {% else %}
     <a href="{{ url_for('student_klasse', slug=slug, aufgabe=position) if position else url_for('student_klasse', slug=slug) }}" class="btn btn-primary">Zum Thema →</a>
     {% endif %}
