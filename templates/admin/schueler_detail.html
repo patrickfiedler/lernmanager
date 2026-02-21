@@ -115,10 +115,13 @@
     <div class="card-header">✅ Thema manuell abschließen</div>
     <div class="flex gap-1">
         {% for klasse in klassen %}
+        {% set st = student_tasks.get(klasse.id) %}
+        {% if st and not st.abgeschlossen %}
         <form method="POST" action="{{ url_for('admin_schueler_thema_abschliessen', student_id=student.id, klasse_id=klasse.id) }}" style="display: inline;">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button type="submit" class="btn btn-success">{{ klasse.name }} abschließen</button>
+            <button type="submit" class="btn btn-success">{{ st.name }} abschließen</button>
         </form>
+        {% endif %}
         {% endfor %}
     </div>
 </div>
