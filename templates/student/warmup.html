@@ -49,6 +49,16 @@
     let easyCorrect = 0;
     let answered = false;
 
+    function shuffleIndices(length) {
+        var indices = [];
+        for (var i = 0; i < length; i++) indices.push(i);
+        for (var i = indices.length - 1; i > 0; i--) {
+            var j = Math.floor(Math.random() * (i + 1));
+            var tmp = indices[i]; indices[i] = indices[j]; indices[j] = tmp;
+        }
+        return indices;
+    }
+
     function renderQuestion() {
         const q = questions[currentIdx];
         answered = false;
@@ -90,16 +100,18 @@
             area.appendChild(input);
             setTimeout(() => input.focus(), 50);
         } else {
-            // Multiple choice
+            // Multiple choice — shuffled order
             const singleCorrect = q.correct.length === 1;
-            q.options.forEach((opt, i) => {
+            const order = shuffleIndices(q.options.length);
+            order.forEach(function(origIdx) {
+                const opt = q.options[origIdx];
                 const label = document.createElement('label');
                 label.className = 'quiz-option';
-                label.dataset.index = i;
+                label.dataset.index = origIdx;
                 const cb = document.createElement('input');
                 cb.type = singleCorrect ? 'radio' : 'checkbox';
                 cb.name = 'mc-answer';
-                cb.value = i;
+                cb.value = origIdx;
                 const span = document.createElement('span');
                 span.textContent = (typeof opt === 'object') ? opt.text : opt;
                 label.appendChild(cb);
