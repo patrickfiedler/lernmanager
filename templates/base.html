@@ -37,7 +37,6 @@
                         </div>
                     </details>
                 {% elif session.student_id %}
-                    <a href="{{ url_for('student_dashboard') }}">Meine Themen</a>
                     <a href="{{ url_for('student_settings') }}">⚙️ Einstellungen</a>
                     <span>👤 {{ session.student_name }}</span>
                 {% endif %}
