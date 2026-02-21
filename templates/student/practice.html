@@ -1,0 +1,254 @@
+{% extends 'base.html' %}
+
+{% block title %}Übungsmodus - Lernmanager{% endblock %}
+
+{% block content %}
+<div class="flex flex-between flex-center mb-2">
+    <h1>🧠 Übungsmodus</h1>
+    <a href="{{ url_for('student_dashboard') }}" class="btn btn-secondary">← Zurück</a>
+</div>
+
+<!-- Mode tabs -->
+<div class="flex gap-1 mb-2" style="flex-wrap: wrap;">
+    <a href="{{ url_for('student_practice', mode='random') }}"
+       class="btn {% if mode == 'random' %}btn-primary{% else %}btn-secondary{% endif %}">Alles</a>
+    <a href="{{ url_for('student_practice', mode='schwaechen') }}"
+       class="btn {% if mode == 'schwaechen' %}btn-primary{% else %}btn-secondary{% endif %}">Schwächen</a>
+    <a href="{{ url_for('student_practice', mode='thema') }}"
+       class="btn {% if mode == 'thema' %}btn-primary{% else %}btn-secondary{% endif %}">Nach Thema</a>
+</div>
+
+{% if mode == 'thema' %}
+<div class="card mb-2" style="padding: 0.75rem;">
+    <form method="GET" action="{{ url_for('student_practice') }}" class="flex gap-1 flex-center">
+        <input type="hidden" name="mode" value="thema">
+        <select name="thema" class="form-control" onchange="this.form.submit()" style="max-width: 300px;">
+            <option value="">Thema wählen...</option>
+            {% for name in topic_names %}
+            <option value="{{ name|slugify }}" {% if selected_topic == name|slugify %}selected{% endif %}>{{ name }}</option>
+            {% endfor %}
+        </select>
+    </form>
+</div>
+{% endif %}
+
+<div id="practice-container">
+    <!-- Score -->
+    <div class="flex flex-between mb-1">
+        <span class="text-muted" id="progress-text"></span>
+        <span id="score-display" class="badge badge-primary">0 richtig</span>
+    </div>
+
+    <!-- Question card -->
+    <div class="card mb-2" id="question-card">
+        <div class="text-muted mb-1" id="topic-label"></div>
+        <h4 id="question-text"></h4>
+        <div id="question-image-container"></div>
+        <div id="answer-area"></div>
+        <div id="feedback-area" class="warmup-feedback" style="display: none;"></div>
+        <div class="mt-2">
+            <button class="btn btn-primary" id="check-btn" onclick="checkAnswer()">Prüfen</button>
+            <button class="btn btn-primary" id="next-btn" onclick="nextQuestion()" style="display: none;">Weiter →</button>
+        </div>
+    </div>
+
+    <!-- Summary (hidden initially) -->
+    <div class="card warmup-summary" id="summary-card" style="display: none;">
+        <h2 class="text-center" id="summary-title"></h2>
+        <p class="text-center" style="font-size: 1.25rem;" id="summary-score"></p>
+        <div class="text-center mt-2 flex gap-1" style="justify-content: center;">
+            <a href="{{ url_for('student_practice', mode=mode, thema=selected_topic or '') }}" class="btn btn-primary">🔄 Nochmal</a>
+            <a href="{{ url_for('student_dashboard') }}" class="btn btn-secondary">Zum Dashboard →</a>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+(function() {
+    const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+    const questions = {{ questions_json|safe }};
+    let currentIdx = 0;
+    let totalCorrect = 0;
+    let totalShown = 0;
+    let answered = false;
+
+    function updateScore() {
+        document.getElementById('score-display').textContent = totalCorrect + ' richtig';
+    }
+
+    function renderQuestion() {
+        const q = questions[currentIdx];
+        answered = false;
+
+        document.getElementById('progress-text').textContent =
+            'Frage ' + (currentIdx + 1) + ' von ' + questions.length;
+        document.getElementById('topic-label').textContent = q.topic_name;
+        document.getElementById('question-text').textContent = q.text;
+
+        // Image
+        const imgContainer = document.getElementById('question-image-container');
+        imgContainer.innerHTML = '';
+        if (q.image) {
+            const img = document.createElement('img');
+            img.src = q.image;
+            img.className = 'quiz-question-image';
+            img.alt = 'Bild zur Frage';
+            imgContainer.appendChild(img);
+        }
+
+        // Answer area
+        const area = document.getElementById('answer-area');
+        area.innerHTML = '';
+
+        if (q.type === 'fill_blank') {
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'form-control';
+            input.id = 'fill-input';
+            input.placeholder = 'Antwort eingeben...';
+            input.autocomplete = 'off';
+            input.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (!answered) checkAnswer();
+                    else nextQuestion();
+                }
+            });
+            area.appendChild(input);
+            setTimeout(() => input.focus(), 50);
+        } else {
+            const singleCorrect = q.correct.length === 1;
+            q.options.forEach((opt, i) => {
+                const label = document.createElement('label');
+                label.className = 'quiz-option';
+                const cb = document.createElement('input');
+                cb.type = singleCorrect ? 'radio' : 'checkbox';
+                cb.name = 'mc-answer';
+                cb.value = i;
+                const span = document.createElement('span');
+                span.textContent = (typeof opt === 'object') ? opt.text : opt;
+                label.appendChild(cb);
+                label.appendChild(span);
+                if (typeof opt === 'object' && opt.image) {
+                    const img = document.createElement('img');
+                    img.src = opt.image;
+                    img.className = 'quiz-option-image';
+                    label.appendChild(img);
+                }
+                area.appendChild(label);
+            });
+            if (!singleCorrect) {
+                const hint = document.createElement('p');
+                hint.className = 'text-muted mt-1';
+                hint.textContent = '💡 Mehrere Antworten können richtig sein.';
+                area.appendChild(hint);
+            }
+        }
+
+        document.getElementById('feedback-area').style.display = 'none';
+        document.getElementById('check-btn').style.display = '';
+        document.getElementById('next-btn').style.display = 'none';
+    }
+
+    window.checkAnswer = function() {
+        if (answered) return;
+        answered = true;
+
+        const q = questions[currentIdx];
+        let answer;
+
+        if (q.type === 'fill_blank') {
+            answer = document.getElementById('fill-input').value;
+        } else {
+            const checked = document.querySelectorAll('input[name="mc-answer"]:checked');
+            answer = Array.from(checked).map(cb => parseInt(cb.value));
+        }
+
+        document.querySelectorAll('#answer-area input, #answer-area textarea').forEach(el => {
+            el.disabled = true;
+        });
+
+        fetch('{{ url_for("student_warmup_answer") }}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrfToken
+            },
+            body: JSON.stringify({
+                task_id: q.task_id,
+                subtask_id: q.subtask_id,
+                question_index: q.question_index,
+                answer: answer,
+                phase: 'practice'
+            })
+        })
+        .then(r => r.json())
+        .then(data => {
+            totalShown++;
+            if (data.correct) totalCorrect++;
+            updateScore();
+
+            const fb = document.getElementById('feedback-area');
+            fb.style.display = 'block';
+            fb.className = 'warmup-feedback ' + (data.correct ? 'warmup-correct' : 'warmup-incorrect');
+            fb.textContent = data.feedback || (data.correct ? 'Richtig!' : 'Leider falsch.');
+
+            if (q.type !== 'fill_blank' && data.correct_answer) {
+                const correctSet = new Set(data.correct_answer);
+                document.querySelectorAll('.quiz-option').forEach((opt, i) => {
+                    if (correctSet.has(i)) opt.classList.add('correct');
+                    const cb = opt.querySelector('input');
+                    if (cb && cb.checked && !correctSet.has(i)) opt.classList.add('incorrect');
+                });
+            }
+
+            document.getElementById('check-btn').style.display = 'none';
+            document.getElementById('next-btn').style.display = '';
+        });
+    };
+
+    window.nextQuestion = function() {
+        currentIdx++;
+        if (currentIdx < questions.length) {
+            renderQuestion();
+        } else {
+            showSummary();
+        }
+    };
+
+    function showSummary() {
+        // Save practice session
+        fetch('{{ url_for("student_warmup_finish") }}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrfToken
+            },
+            body: JSON.stringify({
+                questions_shown: totalShown,
+                questions_correct: totalCorrect,
+                skipped: false
+            })
+        });
+
+        document.getElementById('question-card').style.display = 'none';
+        document.getElementById('progress-text').style.display = 'none';
+        document.getElementById('score-display').style.display = 'none';
+        const summary = document.getElementById('summary-card');
+        summary.style.display = '';
+
+        if (totalCorrect === totalShown) {
+            document.getElementById('summary-title').textContent = '🎉 Alles richtig!';
+        } else if (totalCorrect >= totalShown / 2) {
+            document.getElementById('summary-title').textContent = '💪 Gut gemacht!';
+        } else {
+            document.getElementById('summary-title').textContent = '📚 Weiter üben lohnt sich!';
+        }
+        document.getElementById('summary-score').textContent =
+            totalCorrect + ' von ' + totalShown + ' richtig';
+    }
+
+    renderQuestion();
+})();
+{% endblock %}

@@ -487,6 +487,37 @@ def init_db():
 
             CREATE INDEX IF NOT EXISTS idx_llm_usage_student_time
             ON llm_usage(student_id, timestamp);
+
+            -- ============ Warmup / Spaced Repetition ============
+
+            -- Per-student per-question stats for spaced repetition
+            CREATE TABLE IF NOT EXISTS warmup_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_id INTEGER NOT NULL,
+                task_id INTEGER,
+                subtask_id INTEGER,
+                question_index INTEGER NOT NULL,
+                times_shown INTEGER NOT NULL DEFAULT 0,
+                times_correct INTEGER NOT NULL DEFAULT 0,
+                last_shown DATE,
+                streak INTEGER NOT NULL DEFAULT 0,
+                UNIQUE(student_id, task_id, subtask_id, question_index),
+                FOREIGN KEY (student_id) REFERENCES student(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_warmup_student
+            ON warmup_history(student_id, last_shown);
+
+            -- Log of each warmup/practice session
+            CREATE TABLE IF NOT EXISTS warmup_session (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_id INTEGER NOT NULL,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                questions_shown INTEGER NOT NULL DEFAULT 0,
+                questions_correct INTEGER NOT NULL DEFAULT 0,
+                skipped INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY (student_id) REFERENCES student(id) ON DELETE CASCADE
+            );
         ''')
 
 
@@ -2769,3 +2800,221 @@ def record_llm_usage(student_id, question_type, tokens_used=0):
             "INSERT INTO llm_usage (student_id, question_type, tokens_used) VALUES (?, ?, ?)",
             (student_id, question_type, tokens_used)
         )
+
+
+# ============ Warmup / Spaced Repetition ============
+
+def get_warmup_question_pool(student_id):
+    """Build question pool from completed topics and completed tasks of active topics.
+
+    Returns list of dicts: [{task_id, subtask_id, question_index, question, topic_name}, ...]
+    Filters out short_answer questions (too slow for quick warm-up).
+    """
+    pool = []
+    with db_session() as conn:
+        # 1. Completed topics → topic-level quiz questions
+        completed_topics = conn.execute('''
+            SELECT DISTINCT t.id as task_id, t.name, t.quiz_json
+            FROM student_task st
+            JOIN task t ON st.task_id = t.id
+            WHERE st.student_id = ? AND st.abgeschlossen = 1
+              AND t.quiz_json IS NOT NULL AND t.quiz_json != ''
+        ''', (student_id,)).fetchall()
+
+        for topic in completed_topics:
+            try:
+                quiz = json.loads(topic['quiz_json'])
+            except (json.JSONDecodeError, TypeError):
+                continue
+            for i, q in enumerate(quiz.get('questions', [])):
+                if q.get('type') == 'short_answer':
+                    continue
+                pool.append({
+                    'task_id': topic['task_id'],
+                    'subtask_id': None,
+                    'question_index': i,
+                    'question': q,
+                    'topic_name': topic['name']
+                })
+
+        # 2. Completed subtasks → per-task quiz questions
+        completed_subtasks = conn.execute('''
+            SELECT DISTINCT sub.id as subtask_id, sub.task_id, sub.quiz_json, t.name as topic_name
+            FROM student_subtask ss
+            JOIN student_task st ON ss.student_task_id = st.id
+            JOIN subtask sub ON ss.subtask_id = sub.id
+            JOIN task t ON sub.task_id = t.id
+            WHERE st.student_id = ? AND ss.erledigt = 1
+              AND sub.quiz_json IS NOT NULL AND sub.quiz_json != ''
+        ''', (student_id,)).fetchall()
+
+        for sub in completed_subtasks:
+            try:
+                quiz = json.loads(sub['quiz_json'])
+            except (json.JSONDecodeError, TypeError):
+                continue
+            for i, q in enumerate(quiz.get('questions', [])):
+                if q.get('type') == 'short_answer':
+                    continue
+                pool.append({
+                    'task_id': sub['task_id'],
+                    'subtask_id': sub['subtask_id'],
+                    'question_index': i,
+                    'question': q,
+                    'topic_name': sub['topic_name']
+                })
+
+    return pool
+
+
+def select_warmup_questions(student_id, pool, difficulty='easy', count=2):
+    """Select questions from pool based on difficulty and history.
+
+    Difficulty (per-student, not per-question):
+      - 'easy': questions with streak >= 2 OR never seen
+      - 'hard': questions with streak < 2 AND seen before
+      - 'mixed': no filter (for practice mode)
+
+    TODO(human): Implement prioritization within the difficulty bucket.
+    """
+    import random
+    if not pool:
+        return []
+
+    # Load history for this student
+    with db_session() as conn:
+        history_rows = conn.execute(
+            'SELECT task_id, subtask_id, question_index, times_shown, times_correct, last_shown, streak '
+            'FROM warmup_history WHERE student_id = ?',
+            (student_id,)
+        ).fetchall()
+
+    # Build lookup: (task_id, subtask_id, question_index) → history dict
+    history = {}
+    for h in history_rows:
+        key = (h['task_id'], h['subtask_id'], h['question_index'])
+        history[key] = dict(h)
+
+    # Split pool into difficulty buckets
+    bucket = []
+    for q in pool:
+        key = (q['task_id'], q['subtask_id'], q['question_index'])
+        h = history.get(key)
+
+        if difficulty == 'mixed':
+            bucket.append(q)
+        elif difficulty == 'easy':
+            # Never seen OR streak >= 2
+            if h is None or h['streak'] >= 2:
+                bucket.append(q)
+        elif difficulty == 'hard':
+            # Seen before AND streak < 2
+            if h is not None and h['streak'] < 2:
+                bucket.append(q)
+
+    if not bucket:
+        return []
+
+    # Prioritize within bucket
+    today = datetime.now().strftime('%Y-%m-%d')
+    selected = _prioritize_questions(bucket, history, today, count)
+    return selected
+
+
+def _prioritize_questions(bucket, history, today, count):
+    """Prioritize questions within a difficulty bucket.
+
+    Priority order:
+    1. Previously incorrect (times_correct < times_shown) AND not shown today
+    2. Not recently shown (last_shown is NULL or > 3 days ago)
+    3. Random from rest
+
+    Returns up to `count` questions.
+    """
+    import random
+    from datetime import datetime as dt, timedelta
+
+    three_days_ago = (dt.now() - timedelta(days=3)).strftime('%Y-%m-%d')
+
+    tier1 = []  # previously incorrect, not shown today
+    tier2 = []  # not recently shown
+    tier3 = []  # everything else
+
+    for q in bucket:
+        key = (q['task_id'], q['subtask_id'], q['question_index'])
+        h = history.get(key)
+
+        if h is None:
+            tier2.append(q)
+        elif h['last_shown'] == today:
+            tier3.append(q)
+        elif h['times_correct'] < h['times_shown']:
+            tier1.append(q)
+        elif h['last_shown'] is None or h['last_shown'] <= three_days_ago:
+            tier2.append(q)
+        else:
+            tier3.append(q)
+
+    random.shuffle(tier1)
+    random.shuffle(tier2)
+    random.shuffle(tier3)
+
+    selected = []
+    for tier in [tier1, tier2, tier3]:
+        for q in tier:
+            if len(selected) >= count:
+                break
+            selected.append(q)
+        if len(selected) >= count:
+            break
+
+    return selected
+
+
+def record_warmup_answer(student_id, task_id, subtask_id, question_index, correct):
+    """Upsert warmup_history: update streak, times_shown/correct, last_shown."""
+    with db_session() as conn:
+        existing = conn.execute(
+            'SELECT id, streak FROM warmup_history '
+            'WHERE student_id = ? AND task_id IS ? AND subtask_id IS ? AND question_index = ?',
+            (student_id, task_id, subtask_id, question_index)
+        ).fetchone()
+
+        today = datetime.now().strftime('%Y-%m-%d')
+
+        if existing:
+            new_streak = (existing['streak'] + 1) if correct else 0
+            conn.execute(
+                'UPDATE warmup_history SET times_shown = times_shown + 1, '
+                'times_correct = times_correct + ?, last_shown = ?, streak = ? '
+                'WHERE id = ?',
+                (1 if correct else 0, today, new_streak, existing['id'])
+            )
+        else:
+            conn.execute(
+                'INSERT INTO warmup_history '
+                '(student_id, task_id, subtask_id, question_index, times_shown, times_correct, last_shown, streak) '
+                'VALUES (?, ?, ?, ?, 1, ?, ?, ?)',
+                (student_id, task_id, subtask_id, question_index,
+                 1 if correct else 0, today, 1 if correct else 0)
+            )
+
+
+def save_warmup_session(student_id, questions_shown, questions_correct, skipped=False):
+    """Log a warmup/practice session."""
+    with db_session() as conn:
+        conn.execute(
+            'INSERT INTO warmup_session (student_id, questions_shown, questions_correct, skipped) '
+            'VALUES (?, ?, ?, ?)',
+            (student_id, questions_shown, questions_correct, 1 if skipped else 0)
+        )
+
+
+def has_done_warmup_today(student_id):
+    """Check if student already completed a warmup session today."""
+    with db_session() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM warmup_session WHERE student_id = ? AND DATE(timestamp) = DATE('now') LIMIT 1",
+            (student_id,)
+        ).fetchone()
+        return row is not None

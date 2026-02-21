@@ -1,0 +1,276 @@
+{% extends 'base.html' %}
+
+{% block title %}Aufwärmen - Lernmanager{% endblock %}
+
+{% block content %}
+<div class="flex flex-between flex-center mb-2">
+    <h1>🧠 Aufwärmen</h1>
+    <a href="{{ url_for('student_dashboard') }}" class="btn btn-secondary" id="skip-btn">Überspringen →</a>
+</div>
+
+<p class="text-muted mb-2">Kurze Wiederholung zum Start — kein Druck!</p>
+
+<div id="warmup-container">
+    <!-- Progress -->
+    <div class="mb-1 text-muted" id="progress-text">Frage 1 von 2</div>
+
+    <!-- Question card -->
+    <div class="card mb-2" id="question-card">
+        <div class="text-muted mb-1" id="topic-label"></div>
+        <h4 id="question-text"></h4>
+        <div id="question-image-container"></div>
+        <div id="answer-area"></div>
+        <div id="feedback-area" class="warmup-feedback" style="display: none;"></div>
+        <div class="mt-2">
+            <button class="btn btn-primary" id="check-btn" onclick="checkAnswer()">Prüfen</button>
+            <button class="btn btn-primary" id="next-btn" onclick="nextQuestion()" style="display: none;">Weiter →</button>
+        </div>
+    </div>
+
+    <!-- Summary (hidden initially) -->
+    <div class="card warmup-summary" id="summary-card" style="display: none;">
+        <h2 class="text-center" id="summary-title"></h2>
+        <p class="text-center" style="font-size: 1.25rem;" id="summary-score"></p>
+        <div class="text-center mt-2">
+            <a href="{{ url_for('student_dashboard') }}" class="btn btn-primary btn-lg">Zum Dashboard →</a>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+(function() {
+    const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+    let questions = {{ questions_json|safe }};
+    let currentIdx = 0;
+    let phase = 'easy';  // 'easy' or 'hard'
+    let totalCorrect = 0;
+    let totalShown = 0;
+    let easyCorrect = 0;
+    let answered = false;
+
+    function renderQuestion() {
+        const q = questions[currentIdx];
+        answered = false;
+
+        document.getElementById('progress-text').textContent =
+            'Frage ' + (totalShown + 1) + ' von ' + questions.length;
+        document.getElementById('topic-label').textContent = q.topic_name;
+        document.getElementById('question-text').textContent = q.text;
+
+        // Image
+        const imgContainer = document.getElementById('question-image-container');
+        imgContainer.innerHTML = '';
+        if (q.image) {
+            const img = document.createElement('img');
+            img.src = q.image;
+            img.className = 'quiz-question-image';
+            img.alt = 'Bild zur Frage';
+            imgContainer.appendChild(img);
+        }
+
+        // Answer area
+        const area = document.getElementById('answer-area');
+        area.innerHTML = '';
+
+        if (q.type === 'fill_blank') {
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'form-control';
+            input.id = 'fill-input';
+            input.placeholder = 'Antwort eingeben...';
+            input.autocomplete = 'off';
+            input.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (!answered) checkAnswer();
+                    else nextQuestion();
+                }
+            });
+            area.appendChild(input);
+            setTimeout(() => input.focus(), 50);
+        } else {
+            // Multiple choice
+            const singleCorrect = q.correct.length === 1;
+            q.options.forEach((opt, i) => {
+                const label = document.createElement('label');
+                label.className = 'quiz-option';
+                const cb = document.createElement('input');
+                cb.type = singleCorrect ? 'radio' : 'checkbox';
+                cb.name = 'mc-answer';
+                cb.value = i;
+                const span = document.createElement('span');
+                span.textContent = (typeof opt === 'object') ? opt.text : opt;
+                label.appendChild(cb);
+                label.appendChild(span);
+                if (typeof opt === 'object' && opt.image) {
+                    const img = document.createElement('img');
+                    img.src = opt.image;
+                    img.className = 'quiz-option-image';
+                    label.appendChild(img);
+                }
+                area.appendChild(label);
+            });
+            if (!singleCorrect) {
+                const hint = document.createElement('p');
+                hint.className = 'text-muted mt-1';
+                hint.textContent = '💡 Mehrere Antworten können richtig sein.';
+                area.appendChild(hint);
+            }
+        }
+
+        // Reset feedback and buttons
+        document.getElementById('feedback-area').style.display = 'none';
+        document.getElementById('check-btn').style.display = '';
+        document.getElementById('next-btn').style.display = 'none';
+    }
+
+    window.checkAnswer = function() {
+        if (answered) return;
+        answered = true;
+
+        const q = questions[currentIdx];
+        let answer;
+
+        if (q.type === 'fill_blank') {
+            answer = document.getElementById('fill-input').value;
+        } else {
+            const checked = document.querySelectorAll('input[name="mc-answer"]:checked');
+            answer = Array.from(checked).map(cb => parseInt(cb.value));
+        }
+
+        // Disable inputs
+        document.querySelectorAll('#answer-area input, #answer-area textarea').forEach(el => {
+            el.disabled = true;
+        });
+
+        fetch('{{ url_for("student_warmup_answer") }}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrfToken
+            },
+            body: JSON.stringify({
+                task_id: q.task_id,
+                subtask_id: q.subtask_id,
+                question_index: q.question_index,
+                answer: answer,
+                phase: phase
+            })
+        })
+        .then(r => r.json())
+        .then(data => {
+            totalShown++;
+            if (data.correct) {
+                totalCorrect++;
+                if (phase === 'easy') easyCorrect++;
+            }
+
+            // Show feedback
+            const fb = document.getElementById('feedback-area');
+            fb.style.display = 'block';
+            fb.className = 'warmup-feedback ' + (data.correct ? 'warmup-correct' : 'warmup-incorrect');
+            fb.textContent = data.feedback || (data.correct ? 'Richtig!' : 'Leider falsch.');
+
+            // Highlight MC options
+            if (q.type !== 'fill_blank' && data.correct_answer) {
+                const correctSet = new Set(data.correct_answer);
+                document.querySelectorAll('.quiz-option').forEach((opt, i) => {
+                    if (correctSet.has(i)) opt.classList.add('correct');
+                    const cb = opt.querySelector('input');
+                    if (cb && cb.checked && !correctSet.has(i)) opt.classList.add('incorrect');
+                });
+            }
+
+            document.getElementById('check-btn').style.display = 'none';
+            document.getElementById('next-btn').style.display = '';
+        });
+    };
+
+    window.nextQuestion = function() {
+        currentIdx++;
+
+        if (currentIdx < questions.length) {
+            renderQuestion();
+            return;
+        }
+
+        // End of current batch
+        if (phase === 'easy' && easyCorrect === 2) {
+            // Both easy correct → try to get hard questions
+            fetch('{{ url_for("student_warmup_continue") }}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken
+                },
+                body: JSON.stringify({})
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (!data.done && data.questions && data.questions.length > 0) {
+                    phase = 'hard';
+                    questions = data.questions;
+                    currentIdx = 0;
+                    renderQuestion();
+                } else {
+                    showSummary();
+                }
+            });
+        } else {
+            showSummary();
+        }
+    };
+
+    function showSummary() {
+        // Save session
+        fetch('{{ url_for("student_warmup_finish") }}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrfToken
+            },
+            body: JSON.stringify({
+                questions_shown: totalShown,
+                questions_correct: totalCorrect,
+                skipped: false
+            })
+        });
+
+        document.getElementById('question-card').style.display = 'none';
+        document.getElementById('progress-text').style.display = 'none';
+        const summary = document.getElementById('summary-card');
+        summary.style.display = '';
+
+        if (totalCorrect === totalShown) {
+            document.getElementById('summary-title').textContent = '🎉 Alles richtig!';
+        } else {
+            document.getElementById('summary-title').textContent = '💪 Gut gemacht!';
+        }
+        document.getElementById('summary-score').textContent =
+            totalCorrect + ' von ' + totalShown + ' richtig';
+    }
+
+    // Skip button saves session as skipped
+    document.getElementById('skip-btn').addEventListener('click', function(e) {
+        e.preventDefault();
+        fetch('{{ url_for("student_warmup_finish") }}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrfToken
+            },
+            body: JSON.stringify({
+                questions_shown: totalShown,
+                questions_correct: totalCorrect,
+                skipped: true
+            })
+        }).then(() => {
+            window.location.href = '{{ url_for("student_dashboard") }}';
+        });
+    });
+
+    // Start
+    renderQuestion();
+})();
+{% endblock %}

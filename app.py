@@ -175,7 +175,7 @@ def login():
                 metadata={'username': student['username']}
             )
             flash(f'Willkommen, {student["vorname"]}! 👋', 'success')
-            return redirect(url_for('student_dashboard'))
+            return redirect(url_for('student_warmup'))
 
         flash('Ungültiger Benutzername oder Passwort.', 'danger')
 
@@ -1384,11 +1384,15 @@ def student_dashboard():
     for klasse in klassen:
         sidequests_by_klasse[klasse['id']] = models.get_student_sidequests(student_id, klasse['id'])
 
+    # Check if practice mode has questions available
+    has_warmup_pool = bool(models.get_warmup_question_pool(student_id))
+
     return render_template('student/dashboard.html', student=student, klassen=klassen,
                            tasks_by_klasse=tasks_by_klasse,
                            next_topics=next_topics,
                            sidequests_by_klasse=sidequests_by_klasse,
-                           student_path=student.get('lernpfad'))
+                           student_path=student.get('lernpfad'),
+                           has_warmup_pool=has_warmup_pool)
 
 
 @app.route('/schueler/bericht')
@@ -1939,6 +1943,211 @@ def student_settings():
 
     student = models.get_student(student_id)
     return render_template('student/settings.html', student=student)
+
+
+# ============ Warmup / Spaced Repetition ============
+
+def _grade_warmup_answer(question, answer):
+    """Grade a single warmup answer. Returns (correct: bool, feedback: str).
+
+    MC: compare selected indices to correct set.
+    fill_blank: case-insensitive exact match, then LLM fallback.
+    """
+    qtype = question.get('type', 'multiple_choice')
+
+    if qtype == 'fill_blank':
+        student_text = (answer or '').strip()
+        if not student_text:
+            return False, 'Keine Antwort.'
+        # Exact match (case-insensitive)
+        if student_text.lower() in [a.lower() for a in question['answers']]:
+            return True, 'Richtig!'
+        # LLM fallback
+        result = llm_grading.grade_answer(
+            question['text'], ', '.join(question['answers']),
+            student_text, session.get('student_id')
+        )
+        return result['correct'], result.get('feedback', '')
+    else:
+        # Multiple choice
+        try:
+            submitted = set(int(x) for x in answer) if answer else set()
+        except (ValueError, TypeError):
+            submitted = set()
+        correct_set = set(question.get('correct', []))
+        if submitted == correct_set:
+            return True, 'Richtig!'
+        # Build feedback showing correct answer(s)
+        options = question.get('options', [])
+        correct_texts = []
+        for idx in correct_set:
+            if idx < len(options):
+                opt = options[idx]
+                correct_texts.append(opt['text'] if isinstance(opt, dict) else str(opt))
+        return False, f'Richtige Antwort: {", ".join(correct_texts)}'
+
+
+def _serialize_question_for_js(item):
+    """Convert a pool item to a JSON-safe dict for the frontend."""
+    q = item['question']
+    result = {
+        'task_id': item['task_id'],
+        'subtask_id': item['subtask_id'],
+        'question_index': item['question_index'],
+        'topic_name': item['topic_name'],
+        'type': q.get('type', 'multiple_choice'),
+        'text': q['text'],
+    }
+    if result['type'] == 'fill_blank':
+        # Don't send answers to client
+        pass
+    else:
+        # MC: send options (shuffled) + correct indices
+        options = q.get('options', [])
+        result['options'] = options
+        result['correct'] = q.get('correct', [])
+    if q.get('image'):
+        result['image'] = q['image']
+    return result
+
+
+@app.route('/schueler/aufwaermen')
+@student_required
+def student_warmup():
+    """Warmup page — 2 easy questions, optionally 2 hard if both correct."""
+    student_id = session['student_id']
+    student = models.get_student(student_id)
+
+    # Already done today? → dashboard
+    if models.has_done_warmup_today(student_id):
+        return redirect(url_for('student_dashboard'))
+
+    pool = models.get_warmup_question_pool(student_id)
+    if not pool:
+        return redirect(url_for('student_dashboard'))
+
+    easy_questions = models.select_warmup_questions(student_id, pool, difficulty='easy', count=2)
+    if not easy_questions:
+        return redirect(url_for('student_dashboard'))
+
+    questions_json = json.dumps([_serialize_question_for_js(q) for q in easy_questions])
+    return render_template('student/warmup.html', student=student,
+                           questions_json=questions_json)
+
+
+@app.route('/schueler/aufwaermen/antwort', methods=['POST'])
+@student_required
+def student_warmup_answer():
+    """AJAX: grade a single warmup answer."""
+    student_id = session['student_id']
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data'}), 400
+
+    task_id = data.get('task_id')
+    subtask_id = data.get('subtask_id')
+    question_index = data.get('question_index')
+    answer = data.get('answer')
+
+    # Rebuild the question from source to prevent client-side tampering
+    pool = models.get_warmup_question_pool(student_id)
+    question = None
+    for item in pool:
+        if (item['task_id'] == task_id and
+                item['subtask_id'] == subtask_id and
+                item['question_index'] == question_index):
+            question = item['question']
+            break
+
+    if question is None:
+        return jsonify({'error': 'Question not found'}), 404
+
+    correct, feedback = _grade_warmup_answer(question, answer)
+    models.record_warmup_answer(student_id, task_id, subtask_id, question_index, correct)
+
+    # Build correct_answer for feedback display
+    qtype = question.get('type', 'multiple_choice')
+    correct_answer = None
+    if not correct:
+        if qtype == 'fill_blank':
+            correct_answer = question['answers'][0] if question.get('answers') else None
+        else:
+            correct_answer = question.get('correct', [])
+
+    return jsonify({
+        'correct': correct,
+        'feedback': feedback,
+        'correct_answer': correct_answer
+    })
+
+
+@app.route('/schueler/aufwaermen/weiter', methods=['POST'])
+@student_required
+def student_warmup_continue():
+    """AJAX: after easy round all correct, return 2 hard questions."""
+    student_id = session['student_id']
+    pool = models.get_warmup_question_pool(student_id)
+    hard_questions = models.select_warmup_questions(student_id, pool, difficulty='hard', count=2)
+
+    if not hard_questions:
+        return jsonify({'done': True})
+
+    return jsonify({
+        'done': False,
+        'questions': [_serialize_question_for_js(q) for q in hard_questions]
+    })
+
+
+@app.route('/schueler/aufwaermen/fertig', methods=['POST'])
+@student_required
+def student_warmup_finish():
+    """AJAX: save warmup session stats."""
+    student_id = session['student_id']
+    data = request.get_json() or {}
+    models.save_warmup_session(
+        student_id,
+        questions_shown=data.get('questions_shown', 0),
+        questions_correct=data.get('questions_correct', 0),
+        skipped=data.get('skipped', False)
+    )
+    return jsonify({'ok': True})
+
+
+@app.route('/schueler/ueben')
+@student_required
+def student_practice():
+    """Practice mode — student-initiated review session."""
+    student_id = session['student_id']
+    student = models.get_student(student_id)
+    mode = request.args.get('mode', 'random')
+    topic_slug = request.args.get('thema')
+
+    pool = models.get_warmup_question_pool(student_id)
+    if not pool:
+        flash('Noch keine Fragen zum Üben verfügbar.', 'info')
+        return redirect(url_for('student_dashboard'))
+
+    # Collect unique topic names for the topic selector
+    topic_names = sorted(set(q['topic_name'] for q in pool))
+
+    # Filter by topic if requested
+    if mode == 'thema' and topic_slug:
+        pool = [q for q in pool if slugify(q['topic_name']) == topic_slug]
+
+    # Select questions based on mode
+    if mode == 'schwaechen':
+        questions = models.select_warmup_questions(student_id, pool, difficulty='hard', count=5)
+    else:
+        questions = models.select_warmup_questions(student_id, pool, difficulty='mixed', count=5)
+
+    if not questions:
+        flash('Keine passenden Fragen gefunden.', 'info')
+        return redirect(url_for('student_practice', mode='random'))
+
+    questions_json = json.dumps([_serialize_question_for_js(q) for q in questions])
+    return render_template('student/practice.html', student=student,
+                           questions_json=questions_json, mode=mode,
+                           topic_names=topic_names, selected_topic=topic_slug)
 
 
 # ============ Error Handlers ============

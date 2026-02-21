@@ -74,16 +74,20 @@ Some tasks produce graded digital artifacts (documents, images, Scratch projects
 - [ ] External API endpoint to receive grades from grading system — data contract: `docs/shared/grading-with-llm/conventions.md` (per-student JSON, keyword matching)
 - [ ] Admin UI: view/override artifact grades
 
-## Spaced Repetition (Spec Ready)
+## Spaced Repetition (Implemented — Warmup + Practice)
 
 Spec: `docs/2026-02-13_lernmanager_curriculum_spec.md` (Section 4.3)
 
-Weekly synthesis quiz (~5 questions) drawn from completed task/topic quiz pools. Low-stakes reinforcement.
+Login warm-up (2-4 questions) + dedicated practice mode. Low-stakes, skippable.
 
-- [ ] DB: track question exposure history per student (table: `spaced_repetition_history` or similar)
-- [ ] Algorithm: draw from recently completed tasks, prioritize previously incorrect answers
-- [ ] New student route + template for weekly quiz
-- [ ] Dashboard prompt: "Wochenquiz verfügbar" when due
+- [x] DB: `warmup_history` (per-question stats) + `warmup_session` (session log)
+- [x] Migration: `migrate_004_warmup_tables.py`
+- [x] Model: pool builder, question selection (3-tier priority), history tracking
+- [x] Warmup route: `/schueler/aufwaermen` — 2 easy, optionally 2 hard
+- [x] Practice route: `/schueler/ueben` — modes: random, schwaechen, thema
+- [x] JS-driven single-page question flow (AJAX grading, no reloads)
+- [x] Dashboard: practice button when pool is non-empty
+- [x] Login redirects to warmup (skips if already done today or no pool)
 
 ## New Question Types (Future)
 

@@ -148,7 +148,7 @@ Three cumulative difficulty paths per student: 🟢 Wanderweg (foundational) ⊂
 - **Old visibility management UI removed** (4 routes, 421-line template deleted). `subtask_visibility` table kept in DB for legacy data.
 - Admin subtask editor includes path/path_model dropdowns per subtask
 - Graded artifacts: `graded_artifact_json` column on `subtask` (JSON with `keyword`, `format`, `rubric`). UI display not yet implemented.
-- Spaced repetition: weekly quiz from completed question pools (not yet designed)
+- Spaced repetition: **Implemented** — see "Warmup / Spaced Repetition" section below
 - **Prerequisites removed from UI/code** (2026-02-15): `task_voraussetzung` DB table kept for potential future use, but all model functions, admin UI, import/export handling removed. Topic queue (Phase 4) replaces progression logic via queue ordering per class.
 
 ### Topic Queue (Implemented)
@@ -165,6 +165,20 @@ Optional per-class ordered topic sequence. Admins define a progression order; st
 - Admin klasse_detail shows queue position "(3/7)" next to student's current topic
 - **Design decision: queue stays optional** — making it required would only remove ~4 guard clauses but would add setup overhead for simple classes, break per-student assignment overrides, and force migration of existing classes. Queue handles *progression*; manual assignment handles *exceptions*.
 
+### Warmup / Spaced Repetition (Implemented)
+
+Login warm-up + dedicated practice mode for reinforcing previously learned material.
+
+- **Warmup flow:** Login → `/schueler/aufwaermen` → 2 easy questions → if both correct, 2 hard questions → dashboard. Skippable, no grades, once per day.
+- **Practice mode:** `/schueler/ueben` — student-initiated from dashboard. Modes: `random`, `schwaechen` (previously incorrect), `thema` (topic filter). 5 questions per session.
+- **Question pool:** Built at runtime from `quiz_json` on `task`/`subtask`. Includes completed topics + completed subtasks. Excludes `short_answer` type (too slow for quick sessions).
+- **No separate pool table:** Avoids sync problems when teachers edit quizzes.
+- **Difficulty model (per-student):** Easy = streak >= 2 OR never seen. Hard = streak < 2 AND seen before. Mixed = no filter.
+- **Selection priority:** Previously incorrect → not recently shown (>3 days) → random.
+- **DB tables:** `warmup_history` (per-question stats: streak, times_shown/correct, last_shown), `warmup_session` (session log).
+- **Grading:** MC: compare index sets. fill_blank: case-insensitive match → LLM fallback (same as `_handle_quiz`). AJAX endpoints, no page reloads.
+- **JS-driven:** Questions embedded as JSON in template, one-at-a-time with immediate feedback. Hard questions fetched via AJAX after easy round.
+
 ### Student URL Structure (Slug-Based)
 
 Student-facing routes use human-readable slugs instead of numeric DB IDs. Slugs are computed on-the-fly via `slugify(task['name'])` — not stored in the DB.
@@ -180,12 +194,19 @@ Student-facing routes use human-readable slugs instead of numeric DB IDs. Slugs 
 | `/schueler/thema/<slug>/quiz-ergebnis` | `student_quiz_result` | View topic quiz result |
 | `/schueler/thema/<slug>/aufgabe-<pos>/quiz-ergebnis` | `student_quiz_result_subtask` | View task quiz result |
 | `/schueler/naechstes-thema` | `student_start_next_topic` | POST: start next topic from queue |
+| `/schueler/aufwaermen` | `student_warmup` | Warmup: 2 easy + 2 hard questions |
+| `/schueler/aufwaermen/antwort` | `student_warmup_answer` | POST (AJAX): grade single warmup answer |
+| `/schueler/aufwaermen/weiter` | `student_warmup_continue` | POST (AJAX): get hard questions after easy round |
+| `/schueler/aufwaermen/fertig` | `student_warmup_finish` | POST (AJAX): save session stats |
+| `/schueler/ueben` | `student_practice` | Practice mode (modes: random, schwaechen, thema) |
 
 **Key helpers in `app.py`:**
 - `_resolve_student_topic(student_id, slug)` → resolves slug to `(task, klasse)` by iterating student's classes
 - `_resolve_subtask_by_position(subtasks, position)` → returns subtask at 1-based position
 - `_handle_quiz(...)` → shared GET/POST quiz logic for both topic and subtask quizzes
 - `_build_display_quiz(quiz)` → transforms quiz JSON (`text`/`options`) to template format (`question`/`answers`)
+- `_grade_warmup_answer(question, answer)` → grades MC or fill_blank for warmup (with LLM fallback)
+- `_serialize_question_for_js(item)` → converts pool item to JSON-safe dict for frontend
 
 **Jinja2 filter:** `{{ task.name|slugify }}` available in all templates for generating slug URLs.
 

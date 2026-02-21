@@ -104,6 +104,15 @@
 
     {% endfor %}
 </div>
+
+{% if has_warmup_pool %}
+<div class="card mt-2">
+    <div class="card-header">🧠 Üben</div>
+    <p class="text-muted mb-1">Wiederhole Fragen aus abgeschlossenen Themen.</p>
+    <a href="{{ url_for('student_practice') }}" class="btn btn-secondary">Übungsmodus starten</a>
+</div>
+{% endif %}
+
 {% else %}
 <div class="card text-center text-muted">
     <p>Du bist noch keiner Klasse zugeordnet.</p>
