@@ -378,29 +378,19 @@ document.addEventListener('DOMContentLoaded', function() {
 
     if (basicInfoForm) {
         basicInfoForm.addEventListener('submit', function() {
-            console.log('Basic info form submitting - will update state');
-            // Clear unsaved changes flag on save
-            setTimeout(() => {
-                initialBasicInfoState = captureFormState(getBasicInfoForm());
-            }, 0);
+            initialBasicInfoState = captureFormState(getBasicInfoForm());
         });
     }
 
     if (subtasksForm) {
         subtasksForm.addEventListener('submit', function() {
-            console.log('Subtasks form submitting - will update state');
-            setTimeout(() => {
-                initialSubtasksState = captureFormState(getSubtasksForm());
-            }, 0);
+            initialSubtasksState = captureFormState(getSubtasksForm());
         });
     }
 
     if (quizForm) {
         quizForm.addEventListener('submit', function() {
-            console.log('Quiz form submitting - will update state');
-            setTimeout(() => {
-                initialQuizState = captureFormState(getQuizForm());
-            }, 0);
+            initialQuizState = captureFormState(getQuizForm());
         });
     }
 });
