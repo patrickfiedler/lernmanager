@@ -89,7 +89,7 @@ ANIMALS = [
     # I
     'ibis', 'iguana', 'impala',
     # J
-    'jaguar', 'jellyfish', 'jackrabbit', 'jay',
+    'jaguar', 'jellyfish', 'jay',
     # K
     'koala', 'kangaroo', 'kiwi', 'kingfisher',
     # L
@@ -105,23 +105,23 @@ ANIMALS = [
     # Q
     'quail', 'quokka',
     # R
-    'rabbit', 'raven', 'raccoon', 'reindeer', 'robin', 'rooster',
+    'rabbit', 'raven', 'raccoon', 'reindeer', 'robin', 'ringtail',
     # S
     'swan', 'seal', 'sparrow', 'stork', 'salmon', 'squirrel', 'starfish', 'sloth',
     # T
-    'tiger', 'turtle', 'toucan', 'tapir', 'termite',
+    'tiger', 'turtle', 'toucan', 'tapir', 'terrapin',
     # U
     'urchin', 'urial',
     # V
-    'viper', 'vulture', 'vicuna',
+    'vicuna', 'vole',
     # W
-    'wolf', 'whale', 'walrus', 'wombat', 'woodpecker', 'wren',
+    'wolf', 'whale', 'wombat', 'woodpecker', 'wren', 'warbler',
     # X
     'xerus',
     # Y
-    'yak', 'yellowjacket',
+    'yak',
     # Z
-    'zebra', 'zebrafish'
+    'zebra', 'zorro'
 ]
 
 CONSONANTS = 'bcdfghjklmnprstvw'
