@@ -20,7 +20,7 @@
         <h4 id="question-text"></h4>
         <div id="question-image-container"></div>
         <div id="answer-area"></div>
-        <div id="feedback-area" class="warmup-feedback" style="display: none;"></div>
+        <div id="feedback-area" style="display: none;"></div>
         <div class="mt-2">
             <button class="btn btn-primary" id="check-btn" onclick="checkAnswer()">Prüfen</button>
             <button class="btn btn-primary" id="next-btn" onclick="nextQuestion()" style="display: none;">Weiter →</button>
@@ -95,6 +95,7 @@
             q.options.forEach((opt, i) => {
                 const label = document.createElement('label');
                 label.className = 'quiz-option';
+                label.dataset.index = i;
                 const cb = document.createElement('input');
                 cb.type = singleCorrect ? 'radio' : 'checkbox';
                 cb.name = 'mc-answer';
@@ -121,8 +122,92 @@
 
         // Reset feedback and buttons
         document.getElementById('feedback-area').style.display = 'none';
+        document.getElementById('feedback-area').innerHTML = '';
         document.getElementById('check-btn').style.display = '';
         document.getElementById('next-btn').style.display = 'none';
+    }
+
+    function showQuizFeedback(q, data) {
+        // Disable inputs
+        document.querySelectorAll('#answer-area input, #answer-area textarea').forEach(function(el) {
+            el.disabled = true;
+        });
+
+        if (q.type === 'fill_blank') {
+            // Fill-blank: show answer with colored left border + emoji (matches quiz_result.html)
+            var inputEl = document.getElementById('fill-input');
+            var studentText = inputEl ? inputEl.value : '';
+            var answerDiv = document.createElement('div');
+            answerDiv.className = 'quiz-option selected';
+            answerDiv.style.cssText = 'border-left: 4px solid ' +
+                (data.correct ? 'var(--success-color, #28a745)' : 'var(--danger-color, #dc3545)') +
+                '; padding-left: 1rem;';
+            answerDiv.innerHTML = (data.correct ? '✅' : '❌') +
+                ' <strong>Deine Antwort:</strong> ' + (studentText || '(keine Antwort)');
+
+            var fb = document.getElementById('feedback-area');
+            fb.innerHTML = '';
+            fb.appendChild(answerDiv);
+
+            // Feedback line with 💬
+            var feedbackLine = document.createElement('div');
+            feedbackLine.className = 'quiz-option';
+            feedbackLine.style.cssText = 'border-left: 4px solid var(--info-color, #17a2b8); padding-left: 1rem; background: #e8f4fd;';
+            feedbackLine.textContent = '💬 ' + (data.feedback || (data.correct ? 'Richtig!' : 'Leider falsch.'));
+            fb.appendChild(feedbackLine);
+            fb.style.display = 'block';
+
+            // Hide the original input
+            if (inputEl) inputEl.style.display = 'none';
+        } else {
+            // MC: highlight each option with colored left borders + emojis (matches quiz_result.html)
+            var correctSet = new Set(data.correct_answer || []);
+            document.querySelectorAll('#answer-area .quiz-option').forEach(function(opt) {
+                var i = parseInt(opt.dataset.index);
+                var cb = opt.querySelector('input');
+                var wasSelected = cb && cb.checked;
+                var isCorrectOption = correctSet.has(i);
+
+                // Remove interactive styling
+                opt.style.cursor = 'default';
+                opt.classList.remove('correct', 'incorrect');
+
+                // Apply quiz-result-style border + background
+                if (wasSelected && isCorrectOption) {
+                    opt.style.cssText += '; border-left: 4px solid var(--success-color, #28a745); padding-left: 1rem; background: #e8f5e9;';
+                } else if (wasSelected && !isCorrectOption) {
+                    opt.style.cssText += '; border-left: 4px solid var(--danger-color, #dc3545); padding-left: 1rem; background: #fde8e8;';
+                } else if (isCorrectOption) {
+                    opt.style.cssText += '; border-left: 4px solid var(--success-color, #28a745); padding-left: 1rem; background: #e8f5e9; opacity: 0.7;';
+                }
+
+                // Add emoji prefix
+                var span = opt.querySelector('span');
+                if (span) {
+                    if (isCorrectOption) span.textContent = '✅ ' + span.textContent;
+                    else if (wasSelected) span.textContent = '❌ ' + span.textContent;
+                }
+
+                // "Deine Antwort" label
+                if (wasSelected) {
+                    var tag = document.createElement('span');
+                    tag.style.cssText = 'margin-left: auto; font-size: 0.8rem; font-weight: 500; color: ' +
+                        (isCorrectOption ? 'var(--success-color, #28a745)' : 'var(--danger-color, #dc3545)');
+                    tag.textContent = 'Deine Antwort';
+                    opt.appendChild(tag);
+                }
+            });
+
+            // Feedback line below options
+            var fb = document.getElementById('feedback-area');
+            fb.innerHTML = '';
+            var feedbackLine = document.createElement('div');
+            feedbackLine.className = 'quiz-option';
+            feedbackLine.style.cssText = 'border-left: 4px solid var(--info-color, #17a2b8); padding-left: 1rem; background: #e8f4fd;';
+            feedbackLine.textContent = '💬 ' + (data.correct ? 'Richtig!' : 'Leider falsch.');
+            fb.appendChild(feedbackLine);
+            fb.style.display = 'block';
+        }
     }
 
     window.checkAnswer = function() {
@@ -138,11 +223,6 @@
             const checked = document.querySelectorAll('input[name="mc-answer"]:checked');
             answer = Array.from(checked).map(cb => parseInt(cb.value));
         }
-
-        // Disable inputs
-        document.querySelectorAll('#answer-area input, #answer-area textarea').forEach(el => {
-            el.disabled = true;
-        });
 
         fetch('{{ url_for("student_warmup_answer") }}', {
             method: 'POST',
@@ -166,21 +246,7 @@
                 if (phase === 'easy') easyCorrect++;
             }
 
-            // Show feedback
-            const fb = document.getElementById('feedback-area');
-            fb.style.display = 'block';
-            fb.className = 'warmup-feedback ' + (data.correct ? 'warmup-correct' : 'warmup-incorrect');
-            fb.textContent = data.feedback || (data.correct ? 'Richtig!' : 'Leider falsch.');
-
-            // Highlight MC options
-            if (q.type !== 'fill_blank' && data.correct_answer) {
-                const correctSet = new Set(data.correct_answer);
-                document.querySelectorAll('.quiz-option').forEach((opt, i) => {
-                    if (correctSet.has(i)) opt.classList.add('correct');
-                    const cb = opt.querySelector('input');
-                    if (cb && cb.checked && !correctSet.has(i)) opt.classList.add('incorrect');
-                });
-            }
+            showQuizFeedback(q, data);
 
             document.getElementById('check-btn').style.display = 'none';
             document.getElementById('next-btn').style.display = '';

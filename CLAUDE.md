@@ -249,6 +249,9 @@ When adding new features that use session/user data in base template:
 - Routes that render templates: check what base.html needs
 - Example: student_klasse, student_quiz routes needed `student=student` in render_template
 
+### Visual Consistency for Shared Semantics
+When adding a new feature that shares semantics with an existing one (e.g. correct/incorrect answers), reuse the exact same visual vocabulary (colors, borders, emojis) rather than inventing new styling. Students instantly understand the new UI without a learning curve. Example: warmup feedback reuses `quiz_result.html` patterns (green/red left borders, ✅/❌, 💬 feedback line, "Deine Antwort" label).
+
 ### Database Migrations
 For encrypted SQLCipher databases:
 - Pass SQLCIPHER_KEY via environment variable

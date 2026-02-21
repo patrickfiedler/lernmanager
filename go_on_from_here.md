@@ -8,6 +8,7 @@
 3. **Question pool built at runtime** from `quiz_json` on `task`/`subtask` tables — no sync problems when teachers edit quizzes. `short_answer` excluded (too slow for quick sessions).
 4. **Spaced repetition heuristic** — `warmup_history` tracks per-question streak, times shown/correct, last shown. 3-tier priority: previously incorrect → not recently shown → random. No SM-2 (overkill for 2-4 questions per irregular session).
 5. **JS-driven single-page flow** — questions embedded as JSON, graded via AJAX, no page reloads between questions. Same endpoint for warmup and practice grading.
+6. **CSS cache busting removed** — dropped `?v=` from `base.html`, removed `immutable` from `deploy/nginx.conf`. `expires 1d` alone is sufficient.
 
 ### New files
 - `migrate_004_warmup_tables.py` — creates `warmup_history` + `warmup_session`
@@ -15,22 +16,27 @@
 - `templates/student/practice.html` — practice mode with mode tabs
 
 ### Files changed
-- `models.py` — warmup tables in `init_db()`, 6 new functions (pool, selection, history, session, today-check)
-- `app.py` — login redirect → warmup, 6 new routes, `_grade_warmup_answer` helper, dashboard passes `has_warmup_pool`
+- `models.py` — warmup tables in `init_db()`, 7 new functions (pool, selection, priority, history, session, today-check)
+- `app.py` — login redirect → warmup, 6 new routes, `_grade_warmup_answer` + `_serialize_question_for_js` helpers, dashboard passes `has_warmup_pool`
 - `templates/student/dashboard.html` — practice button card
+- `templates/base.html` — removed CSS version query string
 - `static/css/style.css` — `.warmup-feedback`, `.warmup-correct/incorrect`, `.warmup-summary`
-- `todo.md` — spaced repetition section updated
-- `CLAUDE.md` — warmup routes + docs (pending)
+- `deploy/nginx.conf` — removed `immutable` from static Cache-Control
+- `todo.md` — spaced repetition section updated to implemented
+- `CLAUDE.md` — warmup routes, section, helpers documented
 
 ### Git state
-- Uncommitted changes: all files above
-- Next: commit, push, deploy, run migration on server
+- Committed + pushed: `fb2a725` — feat: spaced repetition — login warm-up + practice mode
+- **Deployment pending:**
+  1. Run `python migrate_004_warmup_tables.py` on server (creates 2 tables)
+  2. Run `sudo /opt/lernmanager/deploy/update.sh`
+  3. Manually update nginx: remove `immutable` from static files Cache-Control, reload nginx
 
 ### Next Steps
-- **Run migration** on production: `python migrate_004_warmup_tables.py`
-- **Commit + deploy** warmup + practice
+- **Deploy** warmup + practice to production
 - **Graded artifact API** — receive grades from grading-with-llm system
 - Graded artifact UI (student display, admin grade override)
+- Test warmup flow end-to-end with real student data
 
 ## Previous Session (2026-02-21) — Phase 5: Sidequests + Admin Nav
 
@@ -39,7 +45,7 @@
 2. **Admin nav cleanup** — 3 items + "Mehr ▾" dropdown
 
 ### Git state
-- Last pushed: `757c426` — fix: curate animal list for student usernames
+- Pushed: `757c426` — fix: curate animal list for student usernames
 
 ## Previous Sessions
 

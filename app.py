@@ -2066,13 +2066,15 @@ def student_warmup_answer():
     models.record_warmup_answer(student_id, task_id, subtask_id, question_index, correct)
 
     # Build correct_answer for feedback display
+    # MC: always send correct indices (needed for ✅/❌ highlighting on all options)
+    # fill_blank: only send on wrong answer (shows expected answer)
     qtype = question.get('type', 'multiple_choice')
     correct_answer = None
-    if not correct:
-        if qtype == 'fill_blank':
+    if qtype == 'fill_blank':
+        if not correct:
             correct_answer = question['answers'][0] if question.get('answers') else None
-        else:
-            correct_answer = question.get('correct', [])
+    else:
+        correct_answer = question.get('correct', [])
 
     return jsonify({
         'correct': correct,
