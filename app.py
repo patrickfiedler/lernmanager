@@ -1345,14 +1345,13 @@ def student_dashboard():
             task['total_subtasks'] = len(required_subtasks)
             task['completed_subtasks'] = sum(1 for s in required_subtasks if s['erledigt'])
 
-            # Find first incomplete subtask for preview
+            # Find first incomplete subtask name for preview
             import re as _re
             next_subtask = next((s for s in visible_with_progress if not s['erledigt']), None)
             if next_subtask and next_subtask.get('beschreibung'):
-                preview = next_subtask['beschreibung']
-                # Strip markdown bold/italic markers
-                preview = _re.sub(r'\*{1,2}([^*]+)\*{1,2}', r'\1', preview)
-                task['next_task_preview'] = preview[:120] + ('...' if len(preview) > 120 else '')
+                # Extract ### heading as task name, fall back to first line
+                heading = _re.match(r'^#{1,4}\s+(.+)', next_subtask['beschreibung'])
+                task['next_task_preview'] = heading.group(1).strip() if heading else next_subtask['beschreibung'].split('\n')[0][:80]
             else:
                 task['next_task_preview'] = None
         tasks_by_klasse[klasse['id']] = task
