@@ -1859,6 +1859,8 @@ def student_quiz_result_subtask(slug, position):
     antworten = json.loads(latest['antworten_json']) if latest['antworten_json'] else {}
 
     next_position = position + 1 if position < len(subtasks) else None
+    topic_quiz_attempts = models.get_quiz_attempts(task['id'])
+    quiz_bestanden = any(a['bestanden'] for a in topic_quiz_attempts)
 
     return render_template('student/quiz_result.html',
                            student=student, task=task,
@@ -1867,7 +1869,8 @@ def student_quiz_result_subtask(slug, position):
                            bestanden=latest['bestanden'], antworten=antworten,
                            previous_attempt=attempts[1] if len(attempts) > 1 else None,
                            slug=slug, position=position,
-                           next_position=next_position)
+                           next_position=next_position,
+                           quiz_bestanden=quiz_bestanden)
 
 
 @app.route('/schueler/unterricht/<int:unterricht_id>/selbstbewertung', methods=['POST'])
