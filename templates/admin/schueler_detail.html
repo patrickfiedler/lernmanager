@@ -6,8 +6,9 @@
 <div class="flex flex-between flex-center mb-2">
     <h1>👤 {{ student.nachname }}, {{ student.vorname }}
         {% if student.lernpfad == 'wanderweg' %}<span class="badge" style="background: #dcfce7; color: #166534; font-size: 0.5em; vertical-align: middle;">🟢 Wanderweg</span>
+        {% elif student.lernpfad == 'bergweg' %}<span class="badge" style="background: #dbeafe; color: #1e40af; font-size: 0.5em; vertical-align: middle;">🔵 Bergweg</span>
         {% elif student.lernpfad == 'gipfeltour' %}<span class="badge" style="background: #fef3c7; color: #92400e; font-size: 0.5em; vertical-align: middle;">⭐ Gipfeltour</span>
-        {% else %}<span class="badge" style="background: #dbeafe; color: #1e40af; font-size: 0.5em; vertical-align: middle;">🔵 Bergweg</span>
+        {% else %}<span class="badge" style="background: #f3f4f6; color: #6b7280; font-size: 0.5em; vertical-align: middle;">Kein Pfad</span>
         {% endif %}
     </h1>
     <div class="flex gap-1">

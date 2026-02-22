@@ -359,8 +359,8 @@ function goToNextSubtask(currentIndex) {
     const position = currentIndex + 1; // 1-based
     // Check if current task has an unpassed quiz → go there first
     const quizDot = document.querySelector(`.dot-subtask-quiz[data-quiz-position="${position}"]`);
-    if (quizDot && quizDot.dataset.quizPassed !== 'true') {
-        navigateToSubtaskQuiz(position, false, quizDot.dataset.quizAvailable === 'true');
+    if (quizDot && quizDot.dataset.quizPassed !== 'true' && quizDot.dataset.quizAvailable === 'true') {
+        navigateToSubtaskQuiz(position, false, true);
         return;
     }
     if (currentIndex < subtaskCount - 1) {
