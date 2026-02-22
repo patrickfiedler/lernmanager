@@ -2945,6 +2945,8 @@ def get_warmup_question_pool(student_id):
                 })
 
         # 2. Completed subtasks → per-task quiz questions
+        # Exclude first subtask per topic (intro tasks have chapter-specific
+        # questions that don't make sense out of context in warm-up)
         completed_subtasks = conn.execute('''
             SELECT DISTINCT sub.id as subtask_id, sub.task_id, sub.quiz_json, t.name as topic_name
             FROM student_subtask ss
@@ -2953,6 +2955,10 @@ def get_warmup_question_pool(student_id):
             JOIN task t ON sub.task_id = t.id
             WHERE st.student_id = ? AND ss.erledigt = 1
               AND sub.quiz_json IS NOT NULL AND sub.quiz_json != ''
+              AND sub.reihenfolge > (
+                  SELECT MIN(s2.reihenfolge) FROM subtask s2
+                  WHERE s2.task_id = sub.task_id
+              )
         ''', (student_id,)).fetchall()
 
         for sub in completed_subtasks:

@@ -14,10 +14,11 @@
 - `templates/admin/themen_import.html` — Action dropdown, reset checkbox, dynamic JS for button text
 
 ### Git state
-- Not yet committed
+- Committed and pushed as `727a6b8` — feat: import overwrite mode for topic JSON re-import
+- User deploying to production for testing
 
 ### Next Steps
-- Test overwrite flow end-to-end with real data
+- Verify overwrite flow works in production with real student data
 - **Dashboard Lernfortschritt card** — stats card at bottom of dashboard flow (see `todo.md`)
 - **Graded artifact API** — receive grades from grading-with-llm system
 - Graded artifact UI (student display, admin grade override)
