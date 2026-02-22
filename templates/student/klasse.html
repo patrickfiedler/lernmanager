@@ -75,7 +75,8 @@
     {% set active_subtask = current_subtask or (subtasks|rejectattr('erledigt')|list|first) %}
     {% set current_index = subtasks.index(active_subtask) if active_subtask and active_subtask in subtasks else 0 %}
     {% set has_prev = current_index > 0 %}
-    {% set has_next = current_index < (subtasks|length - 1) or (current_index == (subtasks|length - 1) and task.quiz_json) %}
+    {% set current_has_unpassed_quiz = active_subtask.quiz_json and not subtask_quiz_status.get(active_subtask.id, false) %}
+    {% set has_next = current_has_unpassed_quiz or current_index < (subtasks|length - 1) or (current_index == (subtasks|length - 1) and task.quiz_json) %}
 
     <div class="task-navigation-wrapper">
         <!-- Desktop: Left Button -->
@@ -355,13 +356,20 @@ function updateProgressText() {
 }
 
 function goToNextSubtask(currentIndex) {
+    const position = currentIndex + 1; // 1-based
+    // Check if current task has an unpassed quiz → go there first
+    const quizDot = document.querySelector(`.dot-subtask-quiz[data-quiz-position="${position}"]`);
+    if (quizDot && quizDot.dataset.quizPassed !== 'true') {
+        navigateToSubtaskQuiz(position, false, quizDot.dataset.quizAvailable === 'true');
+        return;
+    }
     if (currentIndex < subtaskCount - 1) {
         const url = new URL(window.location);
         url.searchParams.set('aufgabe', currentIndex + 2);
         window.location.href = url.toString();
     } else {
-        const quizDot = document.querySelector('.dot-quiz');
-        if (quizDot) {
+        const topicQuizDot = document.querySelector('.dot-quiz');
+        if (topicQuizDot) {
             navigateToQuiz(false);
         }
     }
