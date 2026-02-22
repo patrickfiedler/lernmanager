@@ -386,6 +386,18 @@ def admin_klasse_thema_zuweisen(klasse_id):
     return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id))
 
 
+@app.route('/admin/klasse/<int:klasse_id>/lernpfad-setzen', methods=['POST'])
+@admin_required
+def admin_klasse_lernpfad(klasse_id):
+    lernpfad = request.form.get('lernpfad')
+    if lernpfad not in ('wanderweg', 'bergweg', 'gipfeltour'):
+        flash('Ungültiger Lernpfad.', 'danger')
+        return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id))
+    models.set_class_lernpfad(klasse_id, lernpfad)
+    flash(f'Lernpfad für alle Schüler gesetzt. ✅', 'success')
+    return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id))
+
+
 @app.route('/admin/klasse/<int:klasse_id>/themen-reihenfolge', methods=['GET', 'POST'])
 @admin_required
 def admin_topic_queue(klasse_id):

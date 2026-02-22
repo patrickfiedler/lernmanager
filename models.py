@@ -736,14 +736,23 @@ def get_existing_usernames():
         return {r['username'] for r in rows}
 
 
-def create_student(nachname, vorname, username, password):
+def create_student(nachname, vorname, username, password, lernpfad='bergweg'):
     """Create a new student."""
     with db_session() as conn:
         cursor = conn.execute(
-            "INSERT INTO student (nachname, vorname, username, password_hash) VALUES (?, ?, ?, ?)",
-            (nachname, vorname, username, hash_password(password))
+            "INSERT INTO student (nachname, vorname, username, password_hash, lernpfad) VALUES (?, ?, ?, ?, ?)",
+            (nachname, vorname, username, hash_password(password), lernpfad)
         )
         return cursor.lastrowid
+
+
+def set_class_lernpfad(klasse_id, lernpfad):
+    """Set lernpfad for all students in a class."""
+    with db_session() as conn:
+        conn.execute(
+            "UPDATE student SET lernpfad = ? WHERE id IN (SELECT student_id FROM student_klasse WHERE klasse_id = ?)",
+            (lernpfad, klasse_id)
+        )
 
 
 def add_student_to_klasse(student_id, klasse_id):

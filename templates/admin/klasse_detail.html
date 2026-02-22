@@ -66,6 +66,20 @@
     </form>
 </div>
 
+<!-- Set Lernpfad for whole class -->
+<div class="card mb-2">
+    <div class="card-header">🛤️ Lernpfad für alle setzen</div>
+    <form method="POST" action="{{ url_for('admin_klasse_lernpfad', klasse_id=klasse.id) }}" class="flex gap-1 flex-center">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <select name="lernpfad" class="form-control" style="width: auto;">
+            <option value="wanderweg">🟢 Wanderweg — Grundlagen</option>
+            <option value="bergweg" selected>🔵 Bergweg — Vollständig</option>
+            <option value="gipfeltour">⭐ Gipfeltour — Alles</option>
+        </select>
+        <button type="submit" class="btn btn-primary" onclick="return confirm('Lernpfad für alle Schüler in dieser Klasse setzen?')">Für alle setzen</button>
+    </form>
+</div>
+
 <!-- Students List -->
 <div class="card">
     <div class="card-header">👥 Schüler ({{ students|length }})</div>
