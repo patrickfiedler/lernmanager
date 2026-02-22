@@ -51,6 +51,21 @@
         <p class="text-muted">Keine Klassen zugewiesen.</p>
         {% endif %}
     </div>
+
+    <!-- Learning Path -->
+    <div class="card">
+        <div class="card-header">🛤️ Lernpfad</div>
+        <form method="POST" action="{{ url_for('admin_schueler_lernpfad', student_id=student.id) }}" class="flex gap-1 flex-center">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            {% set current_path = student.lernpfad or 'bergweg' %}
+            <select name="lernpfad" class="form-control" style="width: auto;">
+                <option value="wanderweg" {% if current_path == 'wanderweg' %}selected{% endif %}>🟢 Wanderweg — Grundlagen</option>
+                <option value="bergweg" {% if current_path == 'bergweg' %}selected{% endif %}>🔵 Bergweg — Vollständig</option>
+                <option value="gipfeltour" {% if current_path == 'gipfeltour' %}selected{% endif %}>⭐ Gipfeltour — Alles</option>
+            </select>
+            <button type="submit" class="btn btn-primary">Speichern</button>
+        </form>
+    </div>
 </div>
 
 <!-- Move Student -->

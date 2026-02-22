@@ -35,13 +35,13 @@
                 <div class="dot dot-subtask {% if sub.erledigt %}completed {% endif %}{% if current_subtask and sub.id == current_subtask.id %}current{% endif %}{% if not sub.get('required', true) %} optional{% endif %}"
                      role="button"
                      tabindex="0"
-                     aria-label="Aufgabe {{ loop.index }}: {{ sub.beschreibung[:50] }}{% if sub.beschreibung|length > 50 %}...{% endif %}{% if sub.erledigt %} - Erledigt{% endif %}{% if not sub.get('required', true) %} (optional){% endif %}"
+                     aria-label="Aufgabe {{ loop.index }}: {{ sub.beschreibung[:50] }}{% if sub.beschreibung|length > 50 %}...{% endif %}{% if sub.erledigt %} - Erledigt{% endif %}{% if not sub.get('required', true) %} (Zusatz){% endif %}"
                      {% if current_subtask and sub.id == current_subtask.id %}aria-current="true"{% endif %}
                      data-subtask-position="{{ loop.index }}"
                      data-required="{{ 'true' if sub.get('required', true) else 'false' }}"
                      onclick="navigateToSubtask({{ loop.index }})"
                      onkeydown="handleDotKeydown(event)"
-                     title="{% if sub.get('path') %}{% if sub.path == 'wanderweg' %}🟢{% elif sub.path == 'bergweg' %}🔵{% elif sub.path == 'gipfeltour' %}⭐{% endif %} {% endif %}Aufgabe {{ loop.index }}{% if not sub.get('required', true) %} (optional){% endif %}"></div>
+                     title="Aufgabe {{ loop.index }}{% if not sub.get('required', true) %} (Zusatz){% endif %}"></div>
                 {% if has_quiz %}
                 <div class="dot dot-subtask-quiz {% if quiz_passed %}completed{% elif sub.erledigt %}available{% endif %}"
                      role="button"
@@ -96,7 +96,7 @@
                 <div class="task-badge time-estimate">⏱️ ~{{ active_subtask.estimated_minutes }} Min</div>
                 {% endif %}
                 {% if not active_subtask.get('required', true) %}
-                <div class="task-badge" style="background: #fef3c7; color: #92400e;">Optional für deinen Weg</div>
+                <div class="task-badge" style="background: #fef3c7; color: #92400e;">Zusatz</div>
                 {% endif %}
             </div>
             {% endif %}

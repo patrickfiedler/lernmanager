@@ -139,9 +139,11 @@ Three cumulative difficulty paths per student: 🟢 Wanderweg (foundational) ⊂
 
 - Each subtask has a `path` field (`wanderweg`/`bergweg`/`gipfeltour`) = lowest path that includes it
 - `path_model`: `skip` (lower paths skip task entirely) or `depth` (all paths do it, different grading expectations)
-- **All tasks are visible** to all students — non-required tasks are styled as optional (dimmed dots, "Optional für deinen Weg" badge), NOT hidden
+- **All tasks are visible** to all students — non-required tasks use diamond-shaped dots and "Zusatz" badge, NOT hidden
 - **Path scope is global** (student-level `lernpfad` column). Per-topic path override is a future option.
-- **Bidirectional switching**: Students can change path in any direction via Settings page.
+- **Teacher assigns path** via admin student detail page (`POST /admin/schueler/<id>/lernpfad`). Students cannot change their own path.
+- **Student UI shows "Pflicht/Zusatz" only** — no path names (Wanderweg/Bergweg/Gipfeltour) visible to students. Admin UI still shows path names.
+- **Zusatz dots use diamond shape** (rotated square via `transform: rotate(45deg)`) — colorblind-accessible shape distinction instead of dimming.
 - Progress completion only counts path-required subtasks
 - `hidden` column on `subtask`: simple admin override to hide specific subtasks from ALL students
 - Legacy fallback: students without a `lernpfad` value use old `subtask_visibility` query

@@ -24,40 +24,6 @@
             </label>
         </div>
 
-        <hr style="margin: 1.5rem 0; border: none; border-top: 1px solid #e5e7eb;">
-
-        <h2>Lernpfad</h2>
-        <p class="text-muted" style="margin-bottom: 1rem;">
-            Dein Lernpfad bestimmt, welche Aufgaben du erledigen musst. Aufgaben über deinem Lernpfad sind optional — du kannst sie trotzdem machen, wenn du möchtest!
-        </p>
-
-        <div class="form-group">
-            {% set current_path = student.lernpfad or 'bergweg' %}
-            <label style="display: block; padding: 0.75rem; margin-bottom: 0.5rem; border: 2px solid {% if current_path == 'wanderweg' %}#22c55e{% else %}#e5e7eb{% endif %}; border-radius: 0.5rem; cursor: pointer;{% if current_path == 'wanderweg' %} background: #f0fdf4;{% endif %}">
-                <input type="radio" name="lernpfad" value="wanderweg" {% if current_path == 'wanderweg' %}checked{% endif %} style="margin-right: 0.5rem;">
-                <strong>🟢 Wanderweg</strong> — Grundlagen
-                <small class="text-muted d-block" style="margin-top: 0.25rem; margin-left: 1.5rem;">
-                    Die wichtigsten Aufgaben. Ein guter Einstieg.
-                </small>
-            </label>
-
-            <label style="display: block; padding: 0.75rem; margin-bottom: 0.5rem; border: 2px solid {% if current_path == 'bergweg' %}#3b82f6{% else %}#e5e7eb{% endif %}; border-radius: 0.5rem; cursor: pointer;{% if current_path == 'bergweg' %} background: #eff6ff;{% endif %}">
-                <input type="radio" name="lernpfad" value="bergweg" {% if current_path == 'bergweg' %}checked{% endif %} style="margin-right: 0.5rem;">
-                <strong>🔵 Bergweg</strong> — Vollständig
-                <small class="text-muted d-block" style="margin-top: 0.25rem; margin-left: 1.5rem;">
-                    Alle regulären Aufgaben. Der Standardweg.
-                </small>
-            </label>
-
-            <label style="display: block; padding: 0.75rem; margin-bottom: 0.5rem; border: 2px solid {% if current_path == 'gipfeltour' %}#f59e0b{% else %}#e5e7eb{% endif %}; border-radius: 0.5rem; cursor: pointer;{% if current_path == 'gipfeltour' %} background: #fffbeb;{% endif %}">
-                <input type="radio" name="lernpfad" value="gipfeltour" {% if current_path == 'gipfeltour' %}checked{% endif %} style="margin-right: 0.5rem;">
-                <strong>⭐ Gipfeltour</strong> — Alles
-                <small class="text-muted d-block" style="margin-top: 0.25rem; margin-left: 1.5rem;">
-                    Alle Aufgaben inklusive Bonusaufgaben. Für Entdecker!
-                </small>
-            </label>
-        </div>
-
         <button type="submit" class="btn btn-primary">Speichern</button>
         <a href="{{ url_for('student_dashboard') }}" class="btn btn-secondary">Abbrechen</a>
     </form>

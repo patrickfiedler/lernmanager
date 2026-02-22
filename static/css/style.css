@@ -1340,17 +1340,26 @@ tr.unsaved-row td {
     background: #10b981;
 }
 
-/* Optional task dots (not required for student's learning path) */
+/* Zusatz task dots — diamond shape (rotated square) for colorblind-accessible distinction */
 .dot.dot-subtask.optional {
-    opacity: 0.4;
-    border: 2px dashed #9ca3af;
-    background: transparent;
+    border-radius: 2px;
+    transform: rotate(45deg);
 }
 
-.dot.dot-subtask.optional.completed {
-    opacity: 0.6;
-    background: #10b981;
-    border: none;
+.dot.dot-subtask.optional:hover {
+    transform: rotate(45deg) scale(1.2);
+}
+
+.dot.dot-subtask.optional:focus {
+    transform: rotate(45deg) scale(1.2);
+}
+
+.dot.dot-subtask.optional.current:not(.completed) {
+    transform: rotate(45deg) scale(1.2);
+}
+
+.dot.dot-subtask.optional.current.completed {
+    transform: rotate(45deg) scale(1.2);
 }
 
 /* Quiz images */

@@ -461,6 +461,18 @@ def admin_schueler_passwort_reset(student_id):
     return redirect(url_for('admin_schueler_detail', student_id=student_id))
 
 
+@app.route('/admin/schueler/<int:student_id>/lernpfad', methods=['POST'])
+@admin_required
+def admin_schueler_lernpfad(student_id):
+    lernpfad = request.form.get('lernpfad')
+    if lernpfad not in ('wanderweg', 'bergweg', 'gipfeltour'):
+        flash('Ungültiger Lernpfad.', 'danger')
+        return redirect(url_for('admin_schueler_detail', student_id=student_id))
+    models.update_student_setting(student_id, 'lernpfad', lernpfad)
+    flash('Lernpfad gespeichert. ✅', 'success')
+    return redirect(url_for('admin_schueler_detail', student_id=student_id))
+
+
 @app.route('/admin/schueler/<int:student_id>/verschieben', methods=['POST'])
 @admin_required
 def admin_schueler_verschieben(student_id):
@@ -1960,17 +1972,12 @@ def student_start_next_topic():
 @app.route('/schueler/einstellungen', methods=['GET', 'POST'])
 @student_required
 def student_settings():
-    """Student settings page (Easy Reading Mode + Learning Path)."""
+    """Student settings page (Easy Reading Mode)."""
     student_id = session['student_id']
 
     if request.method == 'POST':
         easy_reading_mode = 1 if request.form.get('easy_reading_mode') == 'on' else 0
         models.update_student_setting(student_id, 'easy_reading_mode', easy_reading_mode)
-
-        # Handle learning path change
-        lernpfad = request.form.get('lernpfad')
-        if lernpfad in ('wanderweg', 'bergweg', 'gipfeltour'):
-            models.update_student_setting(student_id, 'lernpfad', lernpfad)
 
         flash('Einstellungen gespeichert! ✅', 'success')
         return redirect(url_for('student_settings'))
