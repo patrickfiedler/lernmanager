@@ -257,15 +257,26 @@ def import_task(task_data, dry_run=False, warnings=None):
         subtask_id_by_position[reihenfolge] = sub_id
 
     # Create materials and restore subtask assignments
-    materials = task.get('materials', [])
-    for mat in materials:
+    _create_materials(task_id, task.get('materials', []), subtask_id_by_position)
+
+    return task_id
+
+
+def _create_materials(task_id, materials_data, subtask_id_by_position):
+    """Create materials for a task and set subtask assignments.
+
+    Args:
+        task_id: The task ID to attach materials to
+        materials_data: List of material dicts from import JSON
+        subtask_id_by_position: Dict mapping reihenfolge -> subtask_id
+    """
+    for mat in materials_data:
         mat_id = models.create_material(
             task_id,
             mat['typ'],
             mat['pfad'],
             mat.get('beschreibung', '')
         )
-        # Restore per-Aufgabe assignments if present
         if mat.get('subtask_indices'):
             assigned_ids = [
                 subtask_id_by_position[pos]
@@ -275,7 +286,103 @@ def import_task(task_data, dry_run=False, warnings=None):
             if assigned_ids:
                 models.set_material_subtask_assignments(mat_id, assigned_ids)
 
-    return task_id
+
+def overwrite_task_from_import(existing_task_id, task_data, reset_progress=False):
+    """Overwrite an existing topic with imported data.
+
+    Preserves student_task assignments. Updates subtasks in-place by position
+    so student_subtask progress survives (unless reset_progress is True).
+    Materials are fully replaced (no student-side state to preserve).
+
+    Args:
+        existing_task_id: ID of the existing task to overwrite
+        task_data: Dict with 'task' key containing import data
+        reset_progress: If True, delete all student progress first
+
+    Returns:
+        existing_task_id on success
+    """
+    task = task_data['task']
+
+    if reset_progress:
+        models.reset_student_progress_for_task(existing_task_id)
+
+    # Update task-level fields
+    quiz_json = None
+    if task.get('quiz') and task['quiz'].get('questions'):
+        quiz_json = json.dumps(task['quiz'], ensure_ascii=False)
+
+    models.update_task(
+        existing_task_id,
+        name=task['name'],
+        beschreibung=task['beschreibung'],
+        lernziel=task.get('lernziel', ''),
+        fach=task['fach'],
+        stufe=task['stufe'],
+        kategorie=task.get('kategorie', 'pflicht'),
+        quiz_json=quiz_json,
+        number=task.get('number', 0),
+        why_learn_this=task.get('why_learn_this'),
+        subtask_quiz_required=1 if task.get('subtask_quiz_required', True) else 0,
+        lernziel_schueler=task.get('lernziel_schueler')
+    )
+
+    # Update subtasks in-place by position (preserves student_subtask)
+    subtask_id_by_position = models.update_subtasks_from_import(
+        existing_task_id, task.get('subtasks', [])
+    )
+
+    # Replace all materials (no student-side progress to preserve)
+    _replace_materials(existing_task_id, task.get('materials', []), subtask_id_by_position)
+
+    # Recalculate completion status for affected students
+    if not reset_progress:
+        _recalculate_completion(existing_task_id)
+
+    return existing_task_id
+
+
+def _replace_materials(task_id, materials_data, subtask_id_by_position):
+    """Delete all old materials for a task and create new ones from import data."""
+    from models import db_session
+    with db_session() as conn:
+        # Delete old material assignments, then old materials
+        conn.execute("""
+            DELETE FROM material_subtask
+            WHERE material_id IN (SELECT id FROM material WHERE task_id = ?)
+        """, (task_id,))
+        conn.execute("DELETE FROM material WHERE task_id = ?", (task_id,))
+
+    # Create new materials
+    _create_materials(task_id, materials_data, subtask_id_by_position)
+
+
+def _recalculate_completion(task_id):
+    """Recalculate student_task.abgeschlossen after subtask changes.
+
+    Called after overwrite WITHOUT progress reset. Re-evaluates every
+    non-manually-completed student_task: a previously-complete topic may
+    reopen (new subtask added) or a previously-incomplete one may now
+    be complete (subtask removed). Manual overrides are respected.
+    """
+    from models import db_session
+    with db_session() as conn:
+        rows = conn.execute(
+            "SELECT id, manuell_abgeschlossen, abgeschlossen FROM student_task WHERE task_id = ?",
+            (task_id,)
+        ).fetchall()
+
+    for row in rows:
+        if row['manuell_abgeschlossen']:
+            continue  # admin override — don't touch
+        should_be_complete = models.check_task_completion(row['id'])
+        new_val = 1 if should_be_complete else 0
+        if new_val != row['abgeschlossen']:
+            with db_session() as conn:
+                conn.execute(
+                    "UPDATE student_task SET abgeschlossen = ? WHERE id = ?",
+                    (new_val, row['id'])
+                )
 
 
 def import_batch(directory, dry_run=False):

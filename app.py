@@ -14,7 +14,7 @@ import config
 import models
 import llm_grading
 from utils import generate_username, generate_password, allowed_file, generate_credentials_pdf, generate_student_self_report_pdf, slugify
-from import_task import validate_task_structure, check_duplicate, import_task as do_import_task, ValidationError
+from import_task import validate_task_structure, check_duplicate, import_task as do_import_task, overwrite_task_from_import, ValidationError
 
 app = Flask(__name__)
 app.secret_key = config.SECRET_KEY
@@ -589,6 +589,7 @@ def _build_topic_preview(task_data):
         p = s.get('path', 'bergweg')
         if p in path_counts:
             path_counts[p] += 1
+    existing_id = check_duplicate(task_data)
     return {
         'name': task['name'],
         'fach': task['fach'],
@@ -600,7 +601,8 @@ def _build_topic_preview(task_data):
         'material_count': len(task.get('materials', [])),
         'topic_quiz_count': len(task['quiz']['questions']) if task.get('quiz') else 0,
         'subtask_quiz_count': sum(1 for s in subtasks if s.get('quiz')),
-        'is_duplicate': check_duplicate(task_data) is not None,
+        'is_duplicate': existing_id is not None,
+        'existing_task_id': existing_id,
     }
 
 
@@ -654,7 +656,10 @@ def admin_themen_import():
         warnings = []
         for tp in topics_preview:
             if tp['is_duplicate']:
-                warnings.append(f"'{tp['name']}' ({tp['fach']} {tp['stufe']}) existiert bereits — wird übersprungen.")
+                warnings.append(f"'{tp['name']}' ({tp['fach']} {tp['stufe']}) existiert bereits.")
+
+        # Fetch all existing tasks for the overwrite dropdown
+        existing_tasks = models.get_all_tasks()
 
         # Re-serialize the validated data for the hidden form field
         export_data = {'tasks': [td['task'] for td in task_list]}
@@ -662,7 +667,7 @@ def admin_themen_import():
 
         return render_template('admin/themen_import.html', preview=True,
                                topics_preview=topics_preview, warnings=warnings,
-                               json_data=json_data)
+                               json_data=json_data, existing_tasks=existing_tasks)
 
     # --- Confirm phase: actually import ---
     if action == 'confirm':
@@ -674,22 +679,40 @@ def admin_themen_import():
             return redirect(url_for('admin_themen_import'))
 
         imported = []
-        skipped = []
+        overwritten = []
+        overwritten_reset = []
         warnings = []
-        for task_entry in data.get('tasks', []):
+
+        for i, task_entry in enumerate(data.get('tasks', [])):
             wrapped = {'task': task_entry}
-            w = []
-            task_id = do_import_task(wrapped, warnings=w)
-            warnings.extend(w)
-            if task_id:
-                imported.append(task_entry['name'])
+            action_value = request.form.get(f'action_{i}', 'new')
+            reset = request.form.get(f'reset_{i}') == '1'
+
+            if action_value != 'new':
+                # Overwrite existing topic
+                try:
+                    target_id = int(action_value)
+                    overwrite_task_from_import(target_id, wrapped, reset_progress=reset)
+                    if reset:
+                        overwritten_reset.append(task_entry['name'])
+                    else:
+                        overwritten.append(task_entry['name'])
+                except (ValueError, Exception) as e:
+                    warnings.append(f"Fehler beim Überschreiben von '{task_entry['name']}': {e}")
             else:
-                skipped.append(task_entry['name'])
+                # Import as new (existing behavior)
+                w = []
+                task_id = do_import_task(wrapped, warnings=w)
+                warnings.extend(w)
+                if task_id:
+                    imported.append(task_entry['name'])
 
         if imported:
             flash(f"{len(imported)} Thema{'en' if len(imported) > 1 else ''} importiert: {', '.join(imported)}", 'success')
-        if skipped:
-            flash(f"{len(skipped)} übersprungen (Duplikate): {', '.join(skipped)}", 'warning')
+        if overwritten:
+            flash(f"{len(overwritten)} überschrieben: {', '.join(overwritten)}", 'success')
+        if overwritten_reset:
+            flash(f"{len(overwritten_reset)} überschrieben + Fortschritte zurückgesetzt: {', '.join(overwritten_reset)}", 'success')
         for w in warnings:
             flash(w, 'warning')
 

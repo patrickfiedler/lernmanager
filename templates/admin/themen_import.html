@@ -51,61 +51,111 @@
 </div>
 {% endif %}
 
-{% for topic in topics_preview %}
-<div class="card mb-1">
-    <h3>{{ topic.name }}</h3>
-    <table class="table mt-1">
-        <tbody>
-            <tr><td style="width:12rem"><strong>Fach</strong></td><td>{{ topic.fach }}</td></tr>
-            <tr><td><strong>Stufe</strong></td><td>{{ topic.stufe }}</td></tr>
-            <tr><td><strong>Kategorie</strong></td><td>{{ topic.kategorie }}</td></tr>
-            {% if topic.number %}
-            <tr><td><strong>Nummer</strong></td><td>{{ topic.number }}</td></tr>
-            {% endif %}
-            <tr>
-                <td><strong>Aufgaben</strong></td>
-                <td>
-                    {{ topic.subtask_count }} gesamt
-                    {% if topic.path_counts %}
-                    (🟢 {{ topic.path_counts.wanderweg }}
-                    / 🔵 {{ topic.path_counts.bergweg }}
-                    / ⭐ {{ topic.path_counts.gipfeltour }})
-                    {% endif %}
-                </td>
-            </tr>
-            <tr><td><strong>Materialien</strong></td><td>{{ topic.material_count }}</td></tr>
-            {% if topic.topic_quiz_count %}
-            <tr><td><strong>Themen-Quiz</strong></td><td>{{ topic.topic_quiz_count }} Fragen</td></tr>
-            {% endif %}
-            {% if topic.subtask_quiz_count %}
-            <tr><td><strong>Aufgaben-Quizze</strong></td><td>{{ topic.subtask_quiz_count }} Aufgaben mit Quiz</td></tr>
-            {% endif %}
-            {% if topic.is_duplicate %}
-            <tr><td><strong>Status</strong></td><td><span class="badge badge-warning">Duplikat — wird übersprungen</span></td></tr>
-            {% endif %}
-        </tbody>
-    </table>
-</div>
-{% endfor %}
-
-{% set importable = topics_preview|rejectattr('is_duplicate')|list %}
-{% if importable %}
-<form method="POST">
+<form method="POST" id="import-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <input type="hidden" name="action" value="confirm">
     <textarea name="json_data" style="display:none;">{{ json_data }}</textarea>
+
+    {% for topic in topics_preview %}
+    <div class="card mb-1">
+        <h3>{{ topic.name }}</h3>
+        <table class="table mt-1">
+            <tbody>
+                <tr><td style="width:12rem"><strong>Fach</strong></td><td>{{ topic.fach }}</td></tr>
+                <tr><td><strong>Stufe</strong></td><td>{{ topic.stufe }}</td></tr>
+                <tr><td><strong>Kategorie</strong></td><td>{{ topic.kategorie }}</td></tr>
+                {% if topic.number %}
+                <tr><td><strong>Nummer</strong></td><td>{{ topic.number }}</td></tr>
+                {% endif %}
+                <tr>
+                    <td><strong>Aufgaben</strong></td>
+                    <td>
+                        {{ topic.subtask_count }} gesamt
+                        {% if topic.path_counts %}
+                        (🟢 {{ topic.path_counts.wanderweg }}
+                        / 🔵 {{ topic.path_counts.bergweg }}
+                        / ⭐ {{ topic.path_counts.gipfeltour }})
+                        {% endif %}
+                    </td>
+                </tr>
+                <tr><td><strong>Materialien</strong></td><td>{{ topic.material_count }}</td></tr>
+                {% if topic.topic_quiz_count %}
+                <tr><td><strong>Themen-Quiz</strong></td><td>{{ topic.topic_quiz_count }} Fragen</td></tr>
+                {% endif %}
+                {% if topic.subtask_quiz_count %}
+                <tr><td><strong>Aufgaben-Quizze</strong></td><td>{{ topic.subtask_quiz_count }} Aufgaben mit Quiz</td></tr>
+                {% endif %}
+            </tbody>
+        </table>
+
+        {# Action selector: new import or overwrite existing #}
+        <div class="mt-1" style="padding-top: 0.75rem; border-top: 1px solid var(--border-color, #ddd);">
+            <label for="action_{{ loop.index0 }}" style="font-weight: 600;">Aktion:</label>
+            <select name="action_{{ loop.index0 }}" id="action_{{ loop.index0 }}" class="form-control import-action-select" data-index="{{ loop.index0 }}" style="max-width: 30rem; display: inline-block; margin-left: 0.5rem;">
+                <option value="new">Neu importieren</option>
+                <optgroup label="Vorhandenes Thema überschreiben">
+                    {% for et in existing_tasks %}
+                    <option value="{{ et.id }}" {% if topic.existing_task_id == et.id %}selected{% endif %}>
+                        {{ et.fach }} {{ et.stufe }}: {{ et.name }}
+                    </option>
+                    {% endfor %}
+                </optgroup>
+            </select>
+
+            <div class="reset-option mt-1" id="reset_{{ loop.index0 }}" style="display: none;">
+                <label style="cursor: pointer;">
+                    <input type="checkbox" name="reset_{{ loop.index0 }}" value="1">
+                    Fortschritte zurücksetzen
+                </label>
+                <div style="font-size: 0.85rem; color: var(--text-muted, #666); margin-top: 0.25rem;">
+                    Setzt alle Schüler-Fortschritte zurück. Zuweisungen bleiben erhalten.
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+
     <div class="flex gap-1 mt-1">
-        <button type="submit" class="btn btn-primary">{{ importable|length }} Thema{{ 'en' if importable|length > 1 }} importieren</button>
+        <button type="submit" class="btn btn-primary" id="import-submit-btn">Importieren</button>
         <a href="{{ url_for('admin_themen_import') }}" class="btn btn-secondary">Abbrechen</a>
     </div>
 </form>
-{% else %}
-<div class="card mt-1">
-    <p>Alle Themen existieren bereits. Nichts zu importieren.</p>
-    <a href="{{ url_for('admin_themen_import') }}" class="btn btn-secondary mt-1">Neue Datei wählen</a>
-</div>
-{% endif %}
 
 {% endif %}
 {% endif %}
+{% endblock %}
+
+{% block scripts %}
+// Import page: toggle reset checkbox and update button text
+(function() {
+    var selects = document.querySelectorAll('.import-action-select');
+    if (!selects.length) return;
+
+    function updateUI() {
+        var newCount = 0, overwriteCount = 0;
+        selects.forEach(function(sel) {
+            var idx = sel.dataset.index;
+            var resetDiv = document.getElementById('reset_' + idx);
+            if (sel.value === 'new') {
+                newCount++;
+                if (resetDiv) resetDiv.style.display = 'none';
+            } else {
+                overwriteCount++;
+                if (resetDiv) resetDiv.style.display = 'block';
+            }
+        });
+
+        var btn = document.getElementById('import-submit-btn');
+        if (!btn) return;
+        var parts = [];
+        if (newCount > 0) parts.push(newCount + ' importieren');
+        if (overwriteCount > 0) parts.push(overwriteCount + ' überschreiben');
+        btn.textContent = parts.join(' + ');
+    }
+
+    selects.forEach(function(sel) {
+        sel.addEventListener('change', updateUI);
+    });
+    updateUI();
+})();
 {% endblock %}

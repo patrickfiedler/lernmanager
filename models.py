@@ -904,6 +904,42 @@ def delete_task(task_id):
         conn.execute("DELETE FROM task WHERE id = ?", (task_id,))
 
 
+def reset_student_progress_for_task(task_id):
+    """Reset all student progress for a task while preserving assignments.
+
+    Deletes student_subtask, quiz_attempt, warmup_history records and
+    resets student_task completion flags. student_task rows stay intact
+    so students remain assigned to the topic.
+    """
+    with db_session() as conn:
+        # Get all student_task IDs and subtask IDs for this task
+        st_rows = conn.execute(
+            "SELECT id FROM student_task WHERE task_id = ?", (task_id,)
+        ).fetchall()
+        st_ids = [r['id'] for r in st_rows]
+
+        sub_rows = conn.execute(
+            "SELECT id FROM subtask WHERE task_id = ?", (task_id,)
+        ).fetchall()
+        sub_ids = [r['id'] for r in sub_rows]
+
+        if st_ids:
+            ph = ','.join('?' * len(st_ids))
+            conn.execute(f"DELETE FROM student_subtask WHERE student_task_id IN ({ph})", st_ids)
+            conn.execute(f"DELETE FROM quiz_attempt WHERE student_task_id IN ({ph})", st_ids)
+            conn.execute(f"""
+                UPDATE student_task SET abgeschlossen = 0, manuell_abgeschlossen = 0
+                WHERE id IN ({ph})
+            """, st_ids)
+
+        if sub_ids:
+            ph = ','.join('?' * len(sub_ids))
+            conn.execute(f"DELETE FROM warmup_history WHERE subtask_id IN ({ph})", sub_ids)
+
+        # Also clear warmup_history linked by task_id
+        conn.execute("DELETE FROM warmup_history WHERE task_id = ?", (task_id,))
+
+
 # ============ Topic Queue ============
 
 def get_topic_queue(klasse_id):
@@ -1283,6 +1319,77 @@ def update_subtasks(task_id, subtasks_list, estimated_minutes_list=None, quiz_js
                         (material_id, new_subtask_ids_by_position[old_pos])
                     )
 
+
+def update_subtasks_from_import(task_id, subtasks_data):
+    """Update subtasks in-place by position to preserve student progress.
+
+    Unlike update_subtasks() which deletes and recreates all subtasks,
+    this function UPDATEs existing subtasks at matching positions so that
+    student_subtask foreign keys (and thus completion status) survive.
+
+    Args:
+        task_id: The task to update subtasks for
+        subtasks_data: List of subtask dicts from import JSON (with keys:
+            beschreibung, reihenfolge, estimated_minutes, quiz, path, path_model,
+            graded_artifact)
+
+    Returns:
+        dict mapping reihenfolge -> subtask_id for the new state
+    """
+    with db_session() as conn:
+        # Get old subtasks keyed by position
+        old_rows = conn.execute(
+            "SELECT * FROM subtask WHERE task_id = ? ORDER BY reihenfolge",
+            (task_id,)
+        ).fetchall()
+        old_by_pos = {r['reihenfolge']: dict(r) for r in old_rows}
+
+        new_positions = set()
+        subtask_id_by_position = {}
+
+        for i, sub in enumerate(subtasks_data):
+            pos = sub.get('reihenfolge', i)
+            new_positions.add(pos)
+            quiz_json = json.dumps(sub['quiz'], ensure_ascii=False) if sub.get('quiz') else None
+            ga_json = json.dumps(sub['graded_artifact'], ensure_ascii=False) if sub.get('graded_artifact') else None
+            path = sub.get('path')
+            path_model = sub.get('path_model', 'skip')
+            estimated_minutes = sub.get('estimated_minutes')
+
+            if pos in old_by_pos:
+                # UPDATE existing subtask — keeps the ID, preserves student_subtask
+                sub_id = old_by_pos[pos]['id']
+                conn.execute("""
+                    UPDATE subtask SET beschreibung=?, estimated_minutes=?,
+                    quiz_json=?, path=?, path_model=?, graded_artifact_json=?
+                    WHERE id=?
+                """, (sub['beschreibung'], estimated_minutes, quiz_json,
+                      path, path_model, ga_json, sub_id))
+                subtask_id_by_position[pos] = sub_id
+            else:
+                # INSERT new subtask at this position
+                cursor = conn.execute(
+                    "INSERT INTO subtask (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (task_id, sub['beschreibung'], pos, estimated_minutes, quiz_json, path, path_model, ga_json)
+                )
+                subtask_id_by_position[pos] = cursor.lastrowid
+
+        # Delete old subtasks at positions no longer present
+        for old_pos, old_sub in old_by_pos.items():
+            if old_pos not in new_positions:
+                old_id = old_sub['id']
+                # Orphan quiz_attempt references
+                conn.execute("UPDATE quiz_attempt SET subtask_id = NULL WHERE subtask_id = ?", (old_id,))
+                # Delete student_subtask (task no longer exists)
+                conn.execute("DELETE FROM student_subtask WHERE subtask_id = ?", (old_id,))
+                # Delete warmup_history
+                conn.execute("DELETE FROM warmup_history WHERE subtask_id = ?", (old_id,))
+                # Delete material assignments
+                conn.execute("DELETE FROM material_subtask WHERE subtask_id = ?", (old_id,))
+                # Delete the subtask itself
+                conn.execute("DELETE FROM subtask WHERE id = ?", (old_id,))
+
+        return subtask_id_by_position
 
 
 # ============ Material functions ============
