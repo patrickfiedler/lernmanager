@@ -2,7 +2,7 @@
 """
 DB Crypto Management for Lernmanager
 
-Handles encrypt, decrypt, rekey, and verify operations with automatic
+Handles encrypt, decrypt, rekey, switch, and verify operations with automatic
 service management and rollback-on-failure for production safety.
 
 Usage:
@@ -13,6 +13,7 @@ Operations:
     encrypt   Convert plain SQLite → encrypted (in-place)
     decrypt   Convert encrypted → plain SQLite (new file, original unchanged)
     rekey     Change encryption key in-place
+    switch    Auto-detect state and toggle encrypted ↔ plain (in-place)
 
 Options:
     --key KEY       Current encryption key (overrides env/file)
@@ -211,6 +212,79 @@ def verify_db(path, key=None):
         return False, f"integrity_check error: {e}"
 
 
+def detect_db_state(path):
+    """Detect if DB is plain or encrypted. Returns 'plain' or 'encrypted'."""
+    import sqlite3
+    try:
+        conn = sqlite3.connect(path)
+        conn.execute("SELECT COUNT(*) FROM sqlite_master").fetchone()
+        conn.close()
+        return 'plain'
+    except Exception:
+        return 'encrypted'
+
+
+def _fix_ownership(path):
+    """Restore lernmanager:lernmanager ownership after root writes the DB file."""
+    import pwd
+    import grp
+    try:
+        uid = pwd.getpwnam('lernmanager').pw_uid
+        gid = grp.getgrnam('lernmanager').gr_gid
+        os.chown(path, uid, gid)
+        print(f"✓ Ownership restored → lernmanager:lernmanager")
+    except KeyError:
+        print(f"  NOTE: 'lernmanager' user/group not found — check ownership of {path} manually")
+
+
+def _env_disable_key():
+    """Comment out SQLCIPHER_KEY= in .env (disables encryption at runtime)."""
+    if not os.path.exists(ENV_FILE):
+        print(f"  NOTE: {ENV_FILE} not found — no .env changes needed")
+        return
+    with open(ENV_FILE) as f:
+        content = f.read()
+    new_content = re.sub(
+        r'^(SQLCIPHER_KEY=.*)$',
+        r'# \1  # disabled by db_crypto.py switch',
+        content, flags=re.MULTILINE
+    )
+    with open(ENV_FILE, 'w') as f:
+        f.write(new_content)
+    print(f"✓ SQLCIPHER_KEY disabled in {ENV_FILE}")
+
+
+def _env_enable_key(key):
+    """Enable SQLCIPHER_KEY in .env: uncomment if present, replace if active, else append."""
+    if not os.path.exists(ENV_FILE):
+        with open(ENV_FILE, 'w') as f:
+            f.write(f'SQLCIPHER_KEY={key}\n')
+        print(f"✓ Created {ENV_FILE} with SQLCIPHER_KEY")
+        return
+    with open(ENV_FILE) as f:
+        content = f.read()
+    # Case 1: commented-out line exists → uncomment + update value
+    if re.search(r'^#\s*SQLCIPHER_KEY=', content, flags=re.MULTILINE):
+        new_content = re.sub(
+            r'^#\s*SQLCIPHER_KEY=.*$',
+            f'SQLCIPHER_KEY={key}',
+            content, flags=re.MULTILINE
+        )
+    # Case 2: active line exists → replace value
+    elif re.search(r'^SQLCIPHER_KEY=', content, flags=re.MULTILINE):
+        new_content = re.sub(
+            r'^SQLCIPHER_KEY=.*$',
+            f'SQLCIPHER_KEY={key}',
+            content, flags=re.MULTILINE
+        )
+    # Case 3: not present → append
+    else:
+        new_content = content.rstrip('\n') + f'\nSQLCIPHER_KEY={key}\n'
+    with open(ENV_FILE, 'w') as f:
+        f.write(new_content)
+    print(f"✓ SQLCIPHER_KEY enabled in {ENV_FILE}")
+
+
 # ─── Operations ──────────────────────────────────────────────────────────────
 
 def op_verify(key, dry_run=False):
@@ -240,7 +314,8 @@ def op_encrypt(key, dry_run=False, no_service=False):
         print(f"  4. Encrypt plain DB → {tmp_path}")
         print(f"  5. Verify {tmp_path} with new key")
         print(f"  6. Atomic rename: {tmp_path} → {DB_PATH}")
-        print(f"  7. {'(skip)' if no_service else 'Start service'}")
+        print(f"  7. Fix ownership → lernmanager:lernmanager")
+        print(f"  8. {'(skip)' if no_service else 'Start service'}")
         return
 
     if not no_service:
@@ -278,6 +353,7 @@ def op_encrypt(key, dry_run=False, no_service=False):
 
         os.rename(tmp_path, DB_PATH)
         print(f"✓ Renamed → {DB_PATH}")
+        _fix_ownership(DB_PATH)
 
     except Exception as e:
         print(f"\n✗ Error during encrypt: {e}")
@@ -307,7 +383,8 @@ def op_decrypt(key, dry_run=False, no_service=False):
         print(f"  1. {'(skip)' if no_service else 'Stop service (for WAL consistency)'}")
         print(f"  2. Checkpoint WAL (with key)")
         print(f"  3. Decrypt {DB_PATH} → {out_path}")
-        print(f"  4. {'(skip)' if no_service else 'Start service'}")
+        print(f"  4. Fix ownership → lernmanager:lernmanager")
+        print(f"  5. {'(skip)' if no_service else 'Start service'}")
         print(f"  NOTE: Original encrypted DB is not modified")
         return
 
@@ -331,6 +408,7 @@ def op_decrypt(key, dry_run=False, no_service=False):
         if not ok:
             raise RuntimeError(f"Verification of plain file failed: {msg}")
         print(f"✓ Verified ({msg})")
+        _fix_ownership(out_path)
 
     except Exception as e:
         print(f"\n✗ Error during decrypt: {e}")
@@ -361,8 +439,9 @@ def op_rekey(key, new_key, dry_run=False, no_service=False):
         print(f"  4. Re-encrypt {DB_PATH} → {tmp_path} with new key")
         print(f"  5. Verify {tmp_path} with new key")
         print(f"  6. Atomic rename: {tmp_path} → {DB_PATH}")
-        print(f"  7. Update SQLCIPHER_KEY in {ENV_FILE}")
-        print(f"  8. {'(skip)' if no_service else 'Start service'}")
+        print(f"  7. Fix ownership → lernmanager:lernmanager")
+        print(f"  8. Update SQLCIPHER_KEY in {ENV_FILE}")
+        print(f"  9. {'(skip)' if no_service else 'Start service'}")
         return
 
     if not no_service:
@@ -399,6 +478,7 @@ def op_rekey(key, new_key, dry_run=False, no_service=False):
 
         os.rename(tmp_path, DB_PATH)
         print(f"✓ Renamed → {DB_PATH}")
+        _fix_ownership(DB_PATH)
 
     except Exception as e:
         print(f"\n✗ Error during rekey: {e}")
@@ -436,6 +516,166 @@ def op_rekey(key, new_key, dry_run=False, no_service=False):
     print(f"  Record this key securely — it cannot be recovered.")
 
 
+def op_switch(key, dry_run=False, no_service=False):
+    """Auto-detect DB state and toggle encrypted ↔ plain in-place."""
+    print(f"\n=== switch ===\n")
+
+    # Detect current state (read-only, safe even in dry-run)
+    if os.path.exists(DB_PATH):
+        state = detect_db_state(DB_PATH)
+    elif dry_run:
+        state = 'unknown'
+    else:
+        print(f"ERROR: Database not found: {DB_PATH}")
+        sys.exit(1)
+
+    print(f"→ Detected state: {state}")
+
+    tmp_path = DB_PATH + '.tmp'
+    backup_path = f"{DB_PATH}.backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+    if dry_run:
+        direction = "encrypted → plain" if state == 'encrypted' else "plain → encrypted (or unknown)"
+        print(f"[dry-run] Direction: {direction}")
+        print(f"  1. {'(skip)' if no_service else 'Stop service'}")
+        print(f"  2. Checkpoint WAL")
+        print(f"  3. Backup DB → {backup_path}")
+        print(f"  4. Convert {DB_PATH} → {tmp_path}")
+        print(f"  5. Verify {tmp_path}")
+        print(f"  6. Atomic rename: {tmp_path} → {DB_PATH}")
+        print(f"  7. Fix ownership → lernmanager:lernmanager")
+        print(f"  8. Update SQLCIPHER_KEY in {ENV_FILE}")
+        print(f"  9. {'(skip)' if no_service else 'Start service'}")
+        return
+
+    if state == 'encrypted':
+        # ── encrypted → plain ──────────────────────────────────────────────
+        if not key:
+            print("ERROR: --key / SQLCIPHER_KEY required to switch from encrypted → plain")
+            sys.exit(1)
+        print(f"Direction: encrypted → plain\n")
+
+        if not no_service:
+            service_stop()
+
+        try:
+            wal_checkpoint(DB_PATH, key)
+
+            print(f"→ Backing up to {os.path.basename(backup_path)}...")
+            shutil.copy2(DB_PATH, backup_path)
+            ok, msg = verify_db(backup_path, key)
+            if not ok:
+                raise RuntimeError(f"Backup verification failed: {msg}")
+            print(f"✓ Backup verified ({msg})")
+
+            print(f"→ Decrypting to tmp...")
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+            import sqlite3
+            src_conn = open_encrypted(DB_PATH, key)
+            dst_conn = sqlite3.connect(tmp_path)
+            tables, rows = copy_schema_and_data(src_conn, dst_conn)
+            src_conn.close()
+            dst_conn.close()
+            print(f"✓ Decrypted ({tables} tables, {rows} rows)")
+
+            ok, msg = verify_db(tmp_path, key=None)
+            if not ok:
+                raise RuntimeError(f"Verification of plain file failed: {msg}")
+            print(f"✓ Verified ({msg})")
+
+            os.rename(tmp_path, DB_PATH)
+            print(f"✓ Renamed → {DB_PATH}")
+            _fix_ownership(DB_PATH)
+
+        except Exception as e:
+            print(f"\n✗ Error during switch (encrypted → plain): {e}")
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+            if os.path.exists(backup_path):
+                shutil.copy2(backup_path, DB_PATH)
+                print(f"✓ Restored from backup")
+            if not no_service:
+                service_start()
+            sys.exit(1)
+
+        _env_disable_key()
+
+        if not no_service:
+            service_start()
+
+        print(f"\n✓ Switch complete (encrypted → plain). Backup: {backup_path}")
+        print(f"  WARNING: DB is now unencrypted. Run 'switch' again to re-encrypt.")
+        print(f"  WARNING: Backup {os.path.basename(backup_path)} is also unencrypted.")
+
+    else:
+        # ── plain → encrypted ──────────────────────────────────────────────
+        if not key:
+            key = secrets.token_hex(32)
+            print(f"→ Auto-generated key: {key}")
+        print(f"Direction: plain → encrypted\n")
+
+        if not no_service:
+            service_stop()
+
+        try:
+            wal_checkpoint(DB_PATH, key=None)
+
+            print(f"→ Backing up to {os.path.basename(backup_path)}...")
+            shutil.copy2(DB_PATH, backup_path)
+            ok, msg = verify_db(backup_path, key=None)
+            if not ok:
+                raise RuntimeError(f"Backup verification failed: {msg}")
+            print(f"✓ Backup verified ({msg})")
+
+            print(f"→ Encrypting to tmp...")
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+            import sqlite3
+            from sqlcipher3 import dbapi2 as sqlcipher
+            src_conn = sqlite3.connect(DB_PATH)
+            dst_conn = sqlcipher.connect(tmp_path)
+            safe_key = key.replace('"', '""')
+            dst_conn.execute(f'PRAGMA key = "{safe_key}"')
+            tables, rows = copy_schema_and_data(src_conn, dst_conn)
+            src_conn.close()
+            dst_conn.close()
+            print(f"✓ Encrypted ({tables} tables, {rows} rows)")
+
+            ok, msg = verify_db(tmp_path, key)
+            if not ok:
+                raise RuntimeError(f"Verification of encrypted file failed: {msg}")
+            print(f"✓ Verified ({msg})")
+
+            os.rename(tmp_path, DB_PATH)
+            print(f"✓ Renamed → {DB_PATH}")
+            _fix_ownership(DB_PATH)
+
+        except Exception as e:
+            print(f"\n✗ Error during switch (plain → encrypted): {e}")
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+            if os.path.exists(backup_path):
+                shutil.copy2(backup_path, DB_PATH)
+                print(f"✓ Restored from backup")
+            if not no_service:
+                service_start()
+            sys.exit(1)
+
+        _env_enable_key(key)
+
+        if not no_service:
+            service_start()
+
+        print(f"\n{'='*60}")
+        print(f"✓ Switch complete (plain → encrypted). Backup: {backup_path}")
+        print(f"\n  KEY → {key}")
+        print(f"{'='*60}")
+        print(f"  Record this key securely — it cannot be recovered.")
+
+
 # ─── CLI ─────────────────────────────────────────────────────────────────────
 
 def main():
@@ -448,9 +688,11 @@ examples:
   sudo python deploy/db_crypto.py rekey --dry-run
   sudo python deploy/db_crypto.py decrypt
   sudo python deploy/db_crypto.py rekey --new-key <key>
+  sudo python deploy/db_crypto.py switch              # toggle encrypted ↔ plain
+  sudo python deploy/db_crypto.py switch --dry-run    # preview without changes
         """
     )
-    parser.add_argument('operation', choices=['verify', 'encrypt', 'decrypt', 'rekey'])
+    parser.add_argument('operation', choices=['verify', 'encrypt', 'decrypt', 'rekey', 'switch'])
     parser.add_argument('--key', help='Current encryption key (overrides env/file)')
     parser.add_argument('--new-key', dest='new_key', help='New key for rekey (auto-generates if omitted)')
     parser.add_argument('--no-service', action='store_true', help='Skip service stop/start (offline use only)')
@@ -498,6 +740,10 @@ examples:
             new_key = secrets.token_hex(32)
             print(f"→ Auto-generated new key: {new_key}")
         op_rekey(key, new_key, args.dry_run, args.no_service)
+
+    elif args.operation == 'switch':
+        # key is optional for plain→encrypted (auto-generates); required for encrypted→plain
+        op_switch(key, args.dry_run, args.no_service)
 
 
 if __name__ == '__main__':

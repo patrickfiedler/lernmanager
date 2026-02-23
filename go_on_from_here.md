@@ -1,20 +1,27 @@
 # Lernmanager - Current State (2026-02-23)
 
-## Latest Session (2026-02-23) — DB Crypto Management Script
+## Latest Session (2026-02-23) — db_crypto.py switch operation
 
 ### What happened
-1. **feat: deploy/db_crypto.py** — unified DB crypto management script with 4 operations: `verify`, `encrypt`, `decrypt`, `rekey`. Full safety flow for modifying operations: stop service → WAL checkpoint → timestamped backup → operate into `.tmp` → verify → atomic rename → start service → rollback on any failure. Key resolution: `--key` CLI > `SQLCIPHER_KEY` env > `/opt/lernmanager/.env`. `rekey` auto-updates `.env` with new key.
+1. **feat: db_crypto.py `switch` operation** — auto-detects DB state (`detect_db_state`) and toggles encrypted↔plain in-place. encrypted→plain requires `--key`; plain→encrypted auto-generates key if omitted. Updates `.env` via `_env_disable_key`/`_env_enable_key` (comment-out vs. uncomment/append). All in-place ops now call `_fix_ownership` after rename to restore `lernmanager:lernmanager` ownership after root writes.
 
 ### Files changed
-- `deploy/db_crypto.py` — new script
-- `todo.md` — added Deploy/Ops section
+- `deploy/db_crypto.py` — added `switch`, `detect_db_state`, `_fix_ownership`, `_env_disable_key`, `_env_enable_key`
 
 ### Git state
 - Not yet committed or deployed
 
 ### Next Steps
-- **Deploy previous fixes first**: `ssh user@server 'sudo /opt/lernmanager/deploy/update.sh'`
-- **Verify on server**: `sudo python /opt/lernmanager/deploy/db_crypto.py verify`
+- **Deploy**: `ssh user@server 'sudo /opt/lernmanager/deploy/update.sh'`
+- **Test on server**: `sudo python /opt/lernmanager/deploy/db_crypto.py switch --dry-run`
+- **Performance test**: switch to plain, run class-size load, compare CPU
+
+---
+
+## Previous Session (2026-02-23) — DB Crypto Management Script
+
+### What happened
+1. **feat: deploy/db_crypto.py** — unified DB crypto management script with 4 operations: `verify`, `encrypt`, `decrypt`, `rekey`. Full safety flow for modifying operations: stop service → WAL checkpoint → timestamped backup → operate into `.tmp` → verify → atomic rename → start service → rollback on any failure. Key resolution: `--key` CLI > `SQLCIPHER_KEY` env > `/opt/lernmanager/.env`. `rekey` auto-updates `.env` with new key.
 
 ---
 
