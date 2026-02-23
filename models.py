@@ -806,8 +806,11 @@ def get_students_in_klasse(klasse_id):
             SELECT s.*, st.task_id, t.name as task_name, st.abgeschlossen, st.manuell_abgeschlossen
             FROM student s
             JOIN student_klasse sk ON s.id = sk.student_id
-            LEFT JOIN student_task st ON s.id = st.student_id AND st.klasse_id = ?
-                AND st.abgeschlossen = 0 AND st.rolle = 'primary'
+            LEFT JOIN student_task st ON st.id = (
+                SELECT id FROM student_task
+                WHERE student_id = s.id AND klasse_id = ? AND abgeschlossen = 0 AND rolle = 'primary'
+                ORDER BY id DESC LIMIT 1
+            )
             LEFT JOIN task t ON st.task_id = t.id
             WHERE sk.klasse_id = ?
             ORDER BY s.nachname, s.vorname
