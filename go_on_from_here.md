@@ -1,6 +1,32 @@
-# Lernmanager - Current State (2026-02-22)
+# Lernmanager - Current State (2026-02-23)
 
-## Latest Session (2026-02-22) — Align Learning Paths with Shared Decisions
+## Latest Session (2026-02-23) — Production Bug Fixes
+
+### What happened
+1. **fix: Next button skips quiz (JS bug)** — `goToNextSubtask` redirected to the quiz even when it was locked (task not done), which silently did nothing. Fixed by adding `&& quizAvailable === 'true'` to the condition. Side effect: Next now correctly skips the quiz when task isn't done yet, but skips it when it IS done (because `data-quiz-available` isn't updated after AJAX checkbox). This is tracked as High Priority in `todo.md`.
+2. **fix: Lernpfad badge showed "Bergweg" for students with no path** — Changed to "Kein Pfad" (gray) when `lernpfad IS NULL`, so admins can tell at a glance whether a path has been saved.
+3. **feat: Set Lernpfad for whole class** — New form on class detail page ("🛤️ Lernpfad für alle setzen"). New model `set_class_lernpfad()`. New students now default to `bergweg` instead of NULL.
+4. **fix: Duplicate students in class list** — `get_students_in_klasse` LEFT JOIN returned one row per active primary task. Fixed with correlated subquery (LIMIT 1). Migration `migrate_005_fix_duplicate_tasks.py` added partial unique index to prevent recurrence. **Deployed and verified.**
+
+### Files changed
+- `templates/student/klasse.html` — fix Next button quiz-check condition
+- `templates/admin/schueler_detail.html` — Kein Pfad badge
+- `templates/admin/klasse_detail.html` — Lernpfad für alle setzen form
+- `models.py` — `set_class_lernpfad()`, `create_student()` default bergweg, `get_students_in_klasse()` correlated subquery
+- `app.py` — `admin_klasse_lernpfad` route
+- `migrate_005_fix_duplicate_tasks.py` — cleanup + partial unique index
+
+### Git state
+- Committed and pushed through `060f4c8` — fix: duplicate students in class list
+- **Deployed to production. Migration run. Duplicates resolved.**
+
+### Next Steps
+- **HIGH PRIORITY**: Fix Next button skipping quiz after AJAX checkbox — update `data-quiz-available` attribute in `toggleSubtask()` success handler (`templates/student/klasse.html`)
+- Deploy and verify diamond dots (assign lernpfad to class + set path on subtasks in admin editor)
+- **Dashboard Lernfortschritt card** — stats card at bottom of dashboard flow
+- **Graded artifact API** — receive grades from grading-with-llm system
+
+## Previous Session (2026-02-23) — Align Learning Paths with Shared Decisions
 
 ### What happened
 1. **Teacher assigns path** — Removed student self-selection from Settings page. Added admin path assignment dropdown to student detail page (`POST /admin/schueler/<id>/lernpfad`).
@@ -16,8 +42,11 @@
 - `app.py` — removed student lernpfad POST, added admin lernpfad POST route
 - `CLAUDE.md` — updated Learning Paths documentation
 
+### Git state
+- Committed and pushed as `f32c14f` — feat: teacher-assigned learning paths with diamond Zusatz dots
+
 ### Next Steps
-- Verify overwrite flow works in production with real student data
+- Deploy and verify diamond dots + admin path dropdown visually
 - **Dashboard Lernfortschritt card** — stats card at bottom of dashboard flow (see `todo.md`)
 - **Graded artifact API** — receive grades from grading-with-llm system
 - Graded artifact UI (student display, admin grade override)
