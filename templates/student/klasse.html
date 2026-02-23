@@ -329,6 +329,13 @@ function toggleSubtask(position, checked) {
                 currentDot.classList.add('completed');
             }
 
+            // Update quiz dot so goToNextSubtask() knows the quiz is now available
+            const quizDot = document.querySelector(`.dot-subtask-quiz[data-quiz-position="${position}"]`);
+            if (quizDot && quizDot.dataset.quizPassed !== 'true') {
+                quizDot.dataset.quizAvailable = 'true';
+                quizDot.classList.add('available');
+            }
+
             updateProgressText();
         } else {
             // Unchecking - reload page to reset state
