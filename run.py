@@ -25,7 +25,8 @@ if __name__ == '__main__':
         app,
         host='0.0.0.0',
         port=8080,
-        threads=16,                   # Worker threads (handles concurrent class access)
+        threads=32,                   # Worker threads — doubled for concurrent LLM-graded quiz submissions
+        connection_limit=500,         # Max open connections (default 100 — too low for full-class quiz bursts)
         channel_timeout=120,          # Timeout for connections (2 minutes)
         recv_bytes=65536,             # 64KB receive buffer (for uploads)
         send_bytes=262144,            # 256KB send buffer (faster large file responses)
