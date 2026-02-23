@@ -116,6 +116,7 @@ See `docs/research/2026-02-07_learning_paths_and_quiz_evolution.md` (Section 5)
 ## Deploy / Ops
 
 - [x] `deploy/db_crypto.py` — unified DB crypto script: verify/encrypt/decrypt/rekey, auto-service stop/start, rollback-on-failure, `.env` auto-update on rekey
+- [x] `anonymize_db.py` — copy prod DB and replace all PII (names, passwords, class names, comments) with deterministic fake data for local UX investigation
 
 ## Reference Documents
 

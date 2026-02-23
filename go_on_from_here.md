@@ -9,12 +9,20 @@
 - `deploy/db_crypto.py` — added `switch`, `detect_db_state`, `_fix_ownership`, `_env_disable_key`, `_env_enable_key`
 
 ### Git state
-- Not yet committed or deployed
+- Deployed and verified ✓
+
+### Performance Result (2026-02-23)
+**Plain SQLite is dramatically faster on a 1-core VPS under concurrent load.**
+- DB queries: 0.4–0.6ms median (was ~30s timeouts under class-size burst)
+- Page renders: 5–7ms median
+- Zero waitress queue warnings over a full lesson with full class
+- Root cause: SQLCipher per-page AES on every 4KB page; page cache can't absorb burst on 1 CPU
+- **Decision: keep plain SQLite in production.** Disk encryption (LUKS/dm-crypt at OS level) is the right layer for data-at-rest protection, not application-level SQLCipher.
+- benchmark_app.py 404 on student task page = expected (uses old numeric ID URL, slugs now required)
 
 ### Next Steps
-- **Deploy**: `ssh user@server 'sudo /opt/lernmanager/deploy/update.sh'`
-- **Test on server**: `sudo python /opt/lernmanager/deploy/db_crypto.py switch --dry-run`
-- **Performance test**: switch to plain, run class-size load, compare CPU
+- **Dashboard Lernfortschritt card** — stats card at bottom of dashboard flow
+- **Graded artifact API** — receive grades from grading-with-llm system
 
 ---
 
