@@ -28,6 +28,7 @@
                 {% set required_subtasks = subtasks|selectattr('required')|list if student_path else subtasks %}
                 {{ required_subtasks|selectattr('erledigt')|list|length }} von {{ required_subtasks|length }} Aufgaben erledigt
             </div>
+            <div class="progress-dots-column">
             <div class="progress-dots" role="group" aria-label="Aufgabenfortschritt">
                 {% for sub in subtasks %}
                 {% set has_quiz = sub.quiz_json %}
@@ -65,6 +66,12 @@
                      onclick="navigateToQuiz({{ 'true' if quiz_bestanden else 'false' }})"
                      onkeydown="handleDotKeydown(event)">?</div>
                 {% endif %}
+            </div>
+            <div class="dot-legend">
+                <span><span style="display:inline-block; width:0.7rem; height:0.7rem; border-radius:50%; background:#d1d5db; vertical-align:middle;"></span> offen</span>
+                <span><span style="display:inline-block; width:0.7rem; height:0.7rem; border-radius:50%; background:#10b981; vertical-align:middle;"></span> erledigt</span>
+                <span><span style="display:inline-block; width:0.7rem; height:0.7rem; border-radius:50%; background:#f59e0b; vertical-align:middle; font-size:0.55rem; color:white; text-align:center; line-height:0.7rem;">?</span> Quiz</span>
+            </div>
             </div>
         </div>
     </div>
@@ -107,9 +114,15 @@
                 {% endif %}
             </div>
 
+            {% if active_subtask and active_subtask.fertig_wenn %}
+            <div class="fertig-wenn-callout">
+                {{ active_subtask.fertig_wenn | markdown }}
+            </div>
+            {% endif %}
+
             <!-- Checkbox to mark complete -->
             {% if active_subtask and not task.abgeschlossen %}
-            <div class="task-complete" onclick="document.getElementById('subtask-checkbox-{{ active_subtask.id }}').click()">
+            <div class="task-complete {% if active_subtask.fertig_wenn %}has-fertig-wenn{% endif %}" onclick="document.getElementById('subtask-checkbox-{{ active_subtask.id }}').click()">
                 <input type="checkbox"
                        id="subtask-checkbox-{{ active_subtask.id }}"
                        class="subtask-checkbox"
@@ -125,7 +138,8 @@
             <div class="quiz-card mt-1">
                 <div class="quiz-header">❓ Aufgaben-Quiz</div>
                 <p>Beantworte die Fragen, bevor du zur nächsten Aufgabe weitergehst.</p>
-                <a href="{{ url_for('student_quiz_subtask', slug=task.name|slugify, position=current_index + 1) }}" class="btn btn-primary">Quiz starten</a>
+                <p class="text-muted" style="font-size: 0.875rem; margin-top: 0.25rem;">Du kannst das Quiz beliebig oft wiederholen.</p>
+                <a href="{{ url_for('student_quiz_subtask', slug=task.name|slugify, position=current_index + 1) }}" class="btn btn-primary mt-1">Quiz starten</a>
             </div>
             {% endif %}
 
@@ -229,6 +243,7 @@
             {% endfor %}
         </div>
         {% endif %}
+        <p class="text-muted" style="font-size: 0.875rem; margin-top: 0.25rem;">Du kannst das Quiz beliebig oft wiederholen.</p>
         <a href="{{ url_for('student_quiz', slug=task.name|slugify) }}" class="btn btn-primary mt-1">Quiz starten</a>
     </div>
     {% elif task.abgeschlossen %}

@@ -120,6 +120,10 @@
                     <textarea name="subtasks[]" class="form-control subtask-textarea" rows="6" placeholder="Aufgabe..." oninput="updateSubtaskPreview(this)">{{ st.beschreibung }}</textarea>
                     <div class="markdown-preview markdown-content"></div>
                 </div>
+                <div class="form-group mt-1">
+                    <label style="font-size: 0.875rem; color: #374151;">✅ Fertig wenn: <small class="text-muted">(optional — wird als grüner Kasten über dem Häkchen angezeigt)</small></label>
+                    <textarea name="fertig_wenn[]" class="form-control" rows="2" placeholder="z.B. Du hast alle Schritte erledigt und dein Ergebnis gespeichert.">{{ st.fertig_wenn or '' }}</textarea>
+                </div>
                 <details class="subtask-quiz-toggle">
                     <summary>❓ Aufgaben-Quiz {% if st.quiz_json %}<span class="badge badge-primary">Quiz vorhanden</span>{% endif %}</summary>
                     <textarea name="quiz_json[]" class="form-control mt-1" rows="4" placeholder='{"questions": [{"text": "Frage?", "options": ["A", "B", "C", "D"], "correct": [0]}]}'>{{ st.quiz_json or '' }}</textarea>
@@ -436,6 +440,10 @@ function addSubtask() {
         <div class="markdown-editor">
             <textarea name="subtasks[]" class="form-control subtask-textarea" rows="6" placeholder="Aufgabe..." oninput="updateSubtaskPreview(this)"></textarea>
             <div class="markdown-preview markdown-content"></div>
+        </div>
+        <div class="form-group mt-1">
+            <label style="font-size: 0.875rem; color: #374151;">✅ Fertig wenn: <small class="text-muted">(optional — wird als grüner Kasten über dem Häkchen angezeigt)</small></label>
+            <textarea name="fertig_wenn[]" class="form-control" rows="2" placeholder="z.B. Du hast alle Schritte erledigt und dein Ergebnis gespeichert."></textarea>
         </div>
         <details class="subtask-quiz-toggle">
             <summary>❓ Aufgaben-Quiz</summary>

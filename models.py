@@ -1059,6 +1059,7 @@ def export_task_to_dict(task_id):
                 'estimated_minutes': subtask['estimated_minutes'],
                 'path': subtask.get('path'),
                 'path_model': subtask.get('path_model', 'skip'),
+                'fertig_wenn': subtask.get('fertig_wenn') or None,
             }
             if subtask.get('quiz_json'):
                 st_data['quiz'] = json.loads(subtask['quiz_json'])
@@ -1226,12 +1227,12 @@ def get_subtasks(task_id):
 
 
 def create_subtask(task_id, beschreibung, reihenfolge=0, estimated_minutes=None, quiz_json=None,
-                   path=None, path_model='skip', graded_artifact_json=None):
+                   path=None, path_model='skip', graded_artifact_json=None, fertig_wenn=None):
     """Create a subtask."""
     with db_session() as conn:
         cursor = conn.execute(
-            "INSERT INTO subtask (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json)
+            "INSERT INTO subtask (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json, fertig_wenn) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json, fertig_wenn)
         )
         return cursor.lastrowid
 
@@ -1243,7 +1244,8 @@ def delete_subtask(subtask_id):
 
 
 def update_subtasks(task_id, subtasks_list, estimated_minutes_list=None, quiz_json_list=None,
-                    path_list=None, path_model_list=None, graded_artifact_json_list=None):
+                    path_list=None, path_model_list=None, graded_artifact_json_list=None,
+                    fertig_wenn_list=None):
     """Replace all subtasks for a task.
 
     Preserves material assignments by matching subtask order/position.
@@ -1316,9 +1318,14 @@ def update_subtasks(task_id, subtasks_list, estimated_minutes_list=None, quiz_js
                     ga = graded_artifact_json_list[i].strip() if graded_artifact_json_list[i] else ''
                     graded_artifact = ga if ga else None
 
+                fertig_wenn = None
+                if fertig_wenn_list and i < len(fertig_wenn_list):
+                    fw = fertig_wenn_list[i].strip() if fertig_wenn_list[i] else ''
+                    fertig_wenn = fw if fw else None
+
                 cursor = conn.execute(
-                    "INSERT INTO subtask (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    (task_id, beschreibung.strip(), i, estimated_minutes, subtask_quiz, path, path_model, graded_artifact)
+                    "INSERT INTO subtask (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json, fertig_wenn) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (task_id, beschreibung.strip(), i, estimated_minutes, subtask_quiz, path, path_model, graded_artifact, fertig_wenn)
                 )
                 new_subtask_ids_by_position[i] = cursor.lastrowid
 
@@ -1368,21 +1375,23 @@ def update_subtasks_from_import(task_id, subtasks_data):
             path_model = sub.get('path_model', 'skip')
             estimated_minutes = sub.get('estimated_minutes')
 
+            fertig_wenn = sub.get('fertig_wenn') or None
+
             if pos in old_by_pos:
                 # UPDATE existing subtask — keeps the ID, preserves student_subtask
                 sub_id = old_by_pos[pos]['id']
                 conn.execute("""
                     UPDATE subtask SET beschreibung=?, estimated_minutes=?,
-                    quiz_json=?, path=?, path_model=?, graded_artifact_json=?
+                    quiz_json=?, path=?, path_model=?, graded_artifact_json=?, fertig_wenn=?
                     WHERE id=?
                 """, (sub['beschreibung'], estimated_minutes, quiz_json,
-                      path, path_model, ga_json, sub_id))
+                      path, path_model, ga_json, fertig_wenn, sub_id))
                 subtask_id_by_position[pos] = sub_id
             else:
                 # INSERT new subtask at this position
                 cursor = conn.execute(
-                    "INSERT INTO subtask (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    (task_id, sub['beschreibung'], pos, estimated_minutes, quiz_json, path, path_model, ga_json)
+                    "INSERT INTO subtask (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json, fertig_wenn) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (task_id, sub['beschreibung'], pos, estimated_minutes, quiz_json, path, path_model, ga_json, fertig_wenn)
                 )
                 subtask_id_by_position[pos] = cursor.lastrowid
 

@@ -49,7 +49,8 @@ Thema (task)
     "subtask_quiz_required": true,
     "subtasks": [
       {
-        "beschreibung": "### Pixel entdecken\n\n🎯 Ziel: Du verstehst, was Pixel sind und kannst sie sehen.\n\n📋 Aufgabe:\n1. Öffne ein beliebiges Bild am Computer\n2. Zoome stark hinein (400% oder mehr)\n3. Notiere deine Beobachtung\n\n✅ Fertig wenn: Du hast Pixel gesehen und erklärt was sie sind",
+        "beschreibung": "### Pixel entdecken\n\n🎯 Ziel: Du verstehst, was Pixel sind und kannst sie sehen.\n\n📋 Aufgabe:\n1. Öffne ein beliebiges Bild am Computer\n2. Zoome stark hinein (400% oder mehr)\n3. Notiere deine Beobachtung",
+        "fertig_wenn": "Du hast Pixel gesehen und erklärt was sie sind.",
         "reihenfolge": 0,
         "estimated_minutes": 15,
         "path": "wanderweg",
@@ -74,14 +75,16 @@ Thema (task)
         }
       },
       {
-        "beschreibung": "### EVA-Prinzip\n\n🎯 Ziel: Du verstehst das Eingabe-Verarbeitung-Ausgabe-Prinzip.\n\n📋 Aufgabe:\n1. Recherchiere das EVA-Prinzip\n2. Finde 3 Beispiele aus dem Alltag\n3. Erstelle ein Schaubild\n\n✅ Fertig wenn: Dein Schaubild zeigt 3 EVA-Beispiele",
+        "beschreibung": "### EVA-Prinzip\n\n🎯 Ziel: Du verstehst das Eingabe-Verarbeitung-Ausgabe-Prinzip.\n\n📋 Aufgabe:\n1. Recherchiere das EVA-Prinzip\n2. Finde 3 Beispiele aus dem Alltag\n3. Erstelle ein Schaubild",
+        "fertig_wenn": "Dein Schaubild zeigt 3 EVA-Beispiele.",
         "reihenfolge": 1,
         "estimated_minutes": 45,
         "path": "bergweg",
         "path_model": "skip"
       },
       {
-        "beschreibung": "### Computer-Steckbrief\n\n🎯 Ziel: Du kannst ein Dokument über deinen Computer erstellen.\n\n📋 Aufgabe:\n1. Erstelle ein Textdokument mit Infos über deinen Computer\n2. Beschreibe Hardware und Software\n\nFür eine bessere Note: Ergänze EVA-Beispiele und Netzwerk-Infos.\nFür die beste Note: Füge persönliche Reflexion und Zusatzwissen hinzu.\n\n✅ Fertig wenn: Dein Steckbrief hat mindestens 4 Abschnitte",
+        "beschreibung": "### Computer-Steckbrief\n\n🎯 Ziel: Du kannst ein Dokument über deinen Computer erstellen.\n\n📋 Aufgabe:\n1. Erstelle ein Textdokument mit Infos über deinen Computer\n2. Beschreibe Hardware und Software\n\nFür eine bessere Note: Ergänze EVA-Beispiele und Netzwerk-Infos.\nFür die beste Note: Füge persönliche Reflexion und Zusatzwissen hinzu.",
+        "fertig_wenn": "Dein Steckbrief hat mindestens 4 Abschnitte.",
         "reihenfolge": 2,
         "estimated_minutes": 45,
         "path": "wanderweg",
@@ -142,6 +145,7 @@ Thema (task)
 | `estimated_minutes` | nein | integer | Geschätzte Bearbeitungszeit in Minuten |
 | `path` | ja | string | Niedrigster Lernpfad: `wanderweg`, `bergweg` oder `gipfeltour` |
 | `path_model` | nein | string | `skip` (Default): niedrigere Pfade überspringen. `depth`: alle Pfade, unterschiedliche Erwartungen |
+| `fertig_wenn` | nein | string | Abschluss-Kriterium. Markdown erlaubt. Wird als grüner Kasten direkt über dem Abhaken-Häkchen angezeigt. |
 | `graded_artifact` | nein | object | Bewertetes Artefakt (siehe unten) |
 | `quiz` | nein | object | Quiz für diese Aufgabe (siehe Quiz-Format) |
 
@@ -277,8 +281,9 @@ Die App rendert alle Textfelder als Markdown mit folgenden Erweiterungen:
 
 ### Aufgaben-Format (subtask `beschreibung`)
 
-Jede Aufgabe folgt einer einheitlichen Struktur mit Emoji-Abschnittsmarkern:
+Jede Aufgabe folgt einer einheitlichen Struktur. `beschreibung` enthält den Arbeitsauftrag; `fertig_wenn` ist ein separates Feld (wird als grüner Kasten über dem Häkchen angezeigt):
 
+**`beschreibung`-Struktur:**
 ```
 ### Titel der Aufgabe
 
@@ -293,20 +298,30 @@ Jede Aufgabe folgt einer einheitlichen Struktur mit Emoji-Abschnittsmarkern:
 
 💡 Tipp: Hilfreicher Hinweis für den Schüler
 💡 Tipp: Noch ein Hinweis
-
-✅ Fertig wenn: Klares Kriterium, wann die Aufgabe als erledigt gilt
 ```
 
-#### Abschnittsmarker
+**`fertig_wenn`-Feld (separat):**
+```
+Du hast alle Schritte erledigt und dein Ergebnis gespeichert.
+```
 
-| Marker | Zweck | Pflicht? |
-|--------|-------|----------|
+#### Abschnittsmarker in `beschreibung`
+
+| Marker | Inhalt | Pflicht? |
+|--------|--------|----------|
 | `🎯 Ziel:` | Was der Schüler nach dieser Aufgabe kann | Ja |
-| `📋 Aufgabe:` | Konkrete Arbeitsschritte (nummerierte Liste) | Ja |
-| `💡 Tipp:` | Hilfreiche Hinweise (beliebig viele) | Optional |
-| `✅ Fertig wenn:` | Eindeutiges Erledigungskriterium | Ja |
+| `📋 Aufgabe:` | **Nur Pflicht-Handlungen** — ein Schritt, ein Verb, imperativisch | Ja |
+| `💡 Tipp:` | Anleitungen, Hintergrundinfos, Shortcuts, "So geht's" | Optional |
 
-Die Marker werden in der App automatisch **fettgedruckt** gerendert.
+**Wichtige Trennregel: Aktionen vs. Hinweise**
+`📋 Aufgabe:`-Schritte enthalten NUR, was der Schüler tun MUSS. Alles, was er überspringen könnte und die Aufgabe trotzdem erledigt wäre, gehört in `💡 Tipp:`.
+
+- Schlecht: `3. Speichere die Datei — drücke dafür Strg+S oder klicke auf Datei → Speichern unter`
+- Gut: `3. Speichere die Datei.` + `💡 Tipp: Strg+S oder Datei → Speichern unter`
+
+**`✅ Fertig wenn:` gehört NICHT mehr in `beschreibung`** — stattdessen das `fertig_wenn`-Feld verwenden. Die App zeigt es als eigenen grünen Kasten an, damit Schüler das Kriterium lesen, bevor sie abhaken.
+
+Die anderen Marker werden in der App automatisch **fettgedruckt** gerendert.
 
 #### Titelzeile
 
@@ -317,7 +332,8 @@ Die Marker werden in der App automatisch **fettgedruckt** gerendert.
 
 ```json
 {
-  "beschreibung": "### Pixel entdecken\n\n🎯 Ziel: Du verstehst, was Pixel sind und kannst sie sehen.\n\n📋 Aufgabe:\n1. Öffne ein beliebiges Bild am Computer\n2. Zoome stark hinein (400% oder mehr)\n   - Windows: Strg + Mausrad\n   - Paint: Ansicht → Zoom → 800%\n3. Mache einen Screenshot vom vergrößerten Bild\n4. Erkläre mit eigenen Worten: Was ist ein Pixel?\n\n💡 Tipp: Pixel = Picture Element = Bildpunkt\n💡 Tipp: Ein Pixel ist wie ein kleines Quadrat mit einer Farbe\n\n✅ Fertig wenn: Du hast Pixel fotografiert und erklärt was sie sind",
+  "beschreibung": "### Pixel entdecken\n\n🎯 Ziel: Du verstehst, was Pixel sind und kannst sie sehen.\n\n📋 Aufgabe:\n1. Öffne ein beliebiges Bild am Computer\n2. Zoome stark hinein (400% oder mehr)\n   - Windows: Strg + Mausrad\n   - Paint: Ansicht → Zoom → 800%\n3. Mache einen Screenshot vom vergrößerten Bild\n4. Erkläre mit eigenen Worten: Was ist ein Pixel?\n\n💡 Tipp: Pixel = Picture Element = Bildpunkt\n💡 Tipp: Ein Pixel ist wie ein kleines Quadrat mit einer Farbe",
+  "fertig_wenn": "Du hast Pixel fotografiert und erklärt was sie sind.",
   "reihenfolge": 1,
   "estimated_minutes": 15
 }

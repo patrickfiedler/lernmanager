@@ -53,8 +53,8 @@
     </div>
     {% endif %}
 
-    <div class="text-right">
-        <a href="{{ url_for('student_klasse', slug=task.name|slugify) }}" class="btn btn-primary">
+    <div class="mt-1">
+        <a href="{{ url_for('student_klasse', slug=task.name|slugify) }}" class="btn btn-primary btn-block">
             {% if task.abgeschlossen %}Details ansehen →{% else %}Weiter lernen →{% endif %}
         </a>
     </div>
@@ -68,7 +68,7 @@
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="task_id" value="{{ nxt.task_id }}">
             <input type="hidden" name="klasse_id" value="{{ klasse.id }}">
-            <button type="submit" class="btn btn-success">Nächstes Thema starten →</button>
+            <button type="submit" class="btn btn-primary">Nächstes Thema starten →</button>
         </form>
     </div>
     {% endif %}
@@ -79,12 +79,12 @@
     {% if nxt %}
     <div class="card-header">🎯 {{ nxt.name }}</div>
     <p class="text-muted mb-1">Dein nächstes Thema ist bereit.</p>
-    <div class="text-right">
-        <form method="POST" action="{{ url_for('student_start_next_topic') }}" style="display: inline;">
+    <div class="mt-1">
+        <form method="POST" action="{{ url_for('student_start_next_topic') }}">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="task_id" value="{{ nxt.task_id }}">
             <input type="hidden" name="klasse_id" value="{{ klasse.id }}">
-            <button type="submit" class="btn btn-success">Thema starten →</button>
+            <button type="submit" class="btn btn-primary btn-block">Thema starten →</button>
         </form>
     </div>
     {% else %}
@@ -119,7 +119,7 @@
     <div class="card-header">🧠 Üben</div>
     <p class="text-muted mb-1">Wiederhole Fragen aus abgeschlossenen Themen.</p>
     <div class="text-right">
-        <a href="{{ url_for('student_practice') }}" class="btn btn-primary">Üben →</a>
+        <a href="{{ url_for('student_practice') }}" class="btn btn-secondary">Üben →</a>
     </div>
 </div>
 {% endif %}
@@ -129,6 +129,10 @@
     <p>Du bist noch keiner Klasse zugeordnet.</p>
 </div>
 {% endif %}
+
+<p class="text-center text-muted" style="margin-top: 1rem; font-size: 0.8rem;">
+    Schwer zu lesen? <a href="{{ url_for('student_settings') }}" style="color: var(--primary);">Lesemodus aktivieren →</a>
+</p>
 {% endblock %}
 
 {% block scripts %}

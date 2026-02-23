@@ -2,7 +2,9 @@
 
 ## High Priority
 
-- **fix: Next button skips task quizzes after AJAX completion** — When a student checks off a task (AJAX), then immediately clicks Next, the quiz is skipped. The `data-quiz-available` attribute on the quiz dot is set at page render time and not updated by the AJAX handler. Fix: update the attribute in `toggleSubtask()` after success, so the quiz-redirect logic in `goToNextSubtask()` sees the correct state. (`templates/student/klasse.html`)
+- **UX fixes (P0–P7) + fertig_wenn** — deployed 2026-02-23. P4 dot legend TODO(human) still pending before deploying. `fertig_wenn` feature implemented (migration + UI), needs deployment.
+- **P4: Dot legend** — TODO(human) in `klasse.html` — waiting for implementation before deploying
+- **Deploy**: run `migrate_006_add_fertig_wenn.py` on server before deploying code
 - ~~Code Review / Admin simplification~~ → analysis done (`docs/2026-02-13_admin_simplification_analysis.md`), integrated into combined plan
 - ~~Phase 0 cleanup~~ → removed dead `current_subtask_id` system, debug prints, raw SQL in routes, added `subtask_visibility` to `init_db()`
 

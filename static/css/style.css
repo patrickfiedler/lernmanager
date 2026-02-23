@@ -836,6 +836,8 @@ tr.unsaved-row td {
 .flex-center { align-items: center; }
 .gap-1 { gap: 0.5rem; }
 .gap-2 { gap: 1rem; }
+.btn-block { display: block; width: 100%; text-align: center; }
+.btn-lg { padding: 0.75rem 1.5rem; font-size: 1rem; }
 
 /* Emoji indicators */
 .status-indicator {
@@ -1250,6 +1252,20 @@ tr.unsaved-row td {
     font-weight: 500;
 }
 
+.progress-dots-column {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.35rem;
+}
+
+.dot-legend {
+    font-size: 0.75rem;
+    color: var(--gray-500);
+    display: flex;
+    gap: 1rem;
+}
+
 /* Progress Dots */
 .progress-dots {
     display: flex;
@@ -1474,6 +1490,26 @@ tr.unsaved-row td {
     color: #374151;
     cursor: pointer;
     font-weight: 500;
+}
+
+/* Fertig-wenn callout + merged completion zone */
+.fertig-wenn-callout {
+    background: #f0fdf4;
+    border: 2px solid #10b981;
+    border-bottom: none;
+    border-radius: 0.5rem 0.5rem 0 0;
+    padding: 1rem 1.25rem;
+    margin-top: 1.5rem;
+}
+
+.fertig-wenn-callout p { margin-bottom: 0; }
+
+.task-complete.has-fertig-wenn {
+    background: #f0fdf4;
+    border: 2px solid #10b981;
+    border-top: 1px dashed #a7f3d0;
+    border-radius: 0 0 0.5rem 0.5rem;
+    margin-top: 0;
 }
 
 /* Success Banner */

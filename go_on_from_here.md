@@ -1,5 +1,104 @@
 # Lernmanager - Current State (2026-02-23)
 
+## Latest Session (2026-02-23) — Authoring quality rules + fertig_wenn
+
+### What happened
+1. **Actions vs. guidance rule added to shared docs** — `📋 Aufgabe:` steps = required actions only; `💡 Tipp:` = how-to, background, shortcuts. Bad/good example (Strg+S) added to:
+   - `docs/shared/lernmanager/conventions.md` — new "Section roles" table
+   - `docs/shared/mbi/content-design.md` — new bullet block under Authoring Quality Standards
+   - `docs/task_json_format.md` — added to marker table + Trennregel box
+
+### Files changed
+- `docs/shared/lernmanager/conventions.md`
+- `docs/shared/mbi/content-design.md`
+- `docs/task_json_format.md`
+
+### Git state
+- **Not yet committed** — includes fertig_wenn feature + authoring quality rules
+
+### Next Steps
+1. **Complete P4 dot legend** — TODO(human) in `templates/student/klasse.html` — waiting for human contribution before deploying
+2. **Commit** (all current changes: fertig_wenn + authoring docs + P0–P7 UX fixes)
+3. **Deploy**: ssh server + `sudo /opt/lernmanager/deploy/update.sh` — migration already ran locally, also run on server: `python migrate_006_add_fertig_wenn.py`
+4. **Walkthrough** with anonymized DB (`anonymize_db.py`) + `list_students.py`
+
+---
+
+## Previous Session (2026-02-23) — fertig_wenn as first-class field + visual completion zone
+
+### What happened
+1. **`migrate_006_add_fertig_wenn.py`** — adds `fertig_wenn TEXT NULL` to `subtask` table; populates from existing `beschreibung` via regex (strips `✅ Fertig wenn:` section)
+2. **`models.py`** — `create_subtask()`, `update_subtasks()`, `update_subtasks_from_import()`, `export_task_to_dict()` all updated with `fertig_wenn` field
+3. **`import_task.py`** — create path reads `fertig_wenn` from JSON and passes to `create_subtask()`; overwrite path handled via `update_subtasks_from_import()`
+4. **`app.py`** — `admin_thema_aufgaben` handler reads `fertig_wenn[]` from form and passes to `update_subtasks()`
+5. **`templates/admin/aufgabe_detail.html`** — added `fertig_wenn` textarea (2 rows) below `beschreibung`, both in the static list and in the `addSubtask()` JS function
+6. **`templates/student/klasse.html`** — green callout `.fertig-wenn-callout` shown above checkbox; checkbox gets `.has-fertig-wenn` class when field is set → visually merged completion zone
+7. **`static/css/style.css`** — `.fertig-wenn-callout` (green top border, no bottom), `.task-complete.has-fertig-wenn` (green, dashed top border, no top radius) — forms one seamless zone
+8. **Docs** — `docs/task_json_format.md`, `docs/shared/lernmanager/conventions.md`, `docs/shared/mbi/conventions.md`, `docs/shared/mbi/content-design.md` updated to reflect `fertig_wenn` as a separate field (not embedded in `beschreibung`)
+
+### Files changed
+- `migrate_006_add_fertig_wenn.py` — new
+- `models.py` — 4 locations
+- `import_task.py` — 1 location (create path)
+- `app.py` — admin_thema_aufgaben handler
+- `templates/admin/aufgabe_detail.html` — subtask editor + addSubtask() JS
+- `templates/student/klasse.html` — completion zone
+- `static/css/style.css` — fertig-wenn-callout styles
+- `docs/task_json_format.md` — field table + examples
+- `docs/shared/lernmanager/conventions.md` — format spec
+- `docs/shared/mbi/conventions.md` — measurability rule
+- `docs/shared/mbi/content-design.md` — format reference
+
+### Git state
+- **Not yet committed** — P4 dot legend TODO(human) still pending
+
+### Next Steps
+1. **Complete P4 dot legend** — implement the TODO(human) in `klasse.html`
+2. **Run migration** on server: `python migrate_006_add_fertig_wenn.py`
+3. **Commit and deploy** after P4 is done
+4. **Walkthrough** with `list_students.py` and anonymized DB
+
+---
+
+
+
+## Latest Session (2026-02-23) — Student UX Fixes (P0–P7)
+
+### What happened
+1. **UX investigation findings document** — `docs/ux_investigation_2026-02.md` — full findings from first classroom lesson + code analysis
+2. **P0: Color consistency** — `btn-success` → `btn-primary` on all next-topic CTA buttons; semantic colors (green/amber) reserved for state indicators only
+3. **P1: Dashboard CTA hierarchy** — "Weiter lernen →" is now full-width (`btn-block`); practice card demoted to `btn-secondary`
+4. **P3: Quiz gating explained** — retry-free note added to subtask quiz card, topic quiz card, and quiz.html intro
+5. **P4: Dot legend** — TODO(human) placeholder in `klasse.html` below dot row — pending human contribution
+6. **P5: Quiz anxiety** — "retrying is free" message added to quiz_result.html (failed state); warmup subtitle updated to "Kein Druck — das hier wird nicht bewertet"
+7. **P6: Easy Reading Mode** — subtle passive link at bottom of dashboard
+8. **P7: Post-quiz CTA** — primary buttons on quiz_result.html made full-width + btn-lg
+9. **Shared docs** — UX principle added to `lernmanager/pedagogical.md`; authoring quality rules added to `mbi/content-design.md` and `mbi/conventions.md`
+10. **list_students.py** — new helper script to list student accounts by state for walkthrough testing
+
+### Files changed
+- `static/css/style.css` — `.btn-block`, `.btn-lg` utility classes
+- `templates/student/dashboard.html` — P1, P6
+- `templates/student/klasse.html` — P3, P4 (TODO placeholder)
+- `templates/student/quiz.html` — P3
+- `templates/student/quiz_result.html` — P5, P7
+- `templates/student/warmup.html` — P5
+- `docs/shared/lernmanager/pedagogical.md` — UX design principle
+- `docs/shared/mbi/content-design.md` — authoring quality guidelines
+- `docs/shared/mbi/conventions.md` — Fertig-wenn measurability rule
+- `docs/ux_investigation_2026-02.md` — new findings document
+- `list_students.py` — new helper script
+
+### Git state
+- **Not yet committed** — waiting for P4 dot legend (TODO(human))
+
+### Next Steps
+1. **Complete P4 dot legend** — implement the TODO(human) in `klasse.html`
+2. **Commit and deploy** after P4 is done
+3. **Walkthrough** with `list_students.py` and anonymized DB
+
+
+
 ## Latest Session (2026-02-23) — db_crypto.py switch operation
 
 ### What happened

@@ -13,6 +13,7 @@
     {% set prozent = ((punkte / max_punkte) * 100)|int %}
     {% set min_richtig = [1, (max_punkte * 0.7)|int]|max %}
     <p>Du brauchst mindestens {{ min_richtig }} von {{ max_punkte }} richtigen Antworten zum Bestehen.</p>
+    <p style="margin-top: 0.5rem; color: #374151;">Du kannst es so oft versuchen, wie du möchtest — schau dir die richtigen Antworten unten an und versuch es nochmal. 💪</p>
 
     {% if previous_attempt %}
         {% set previous_prozent = ((previous_attempt.punkte / previous_attempt.max_punkte) * 100)|int %}
@@ -80,23 +81,23 @@
     {% endfor %}
 </div>
 
-<div class="flex gap-1">
+<div>
     {% if not bestanden %}
-    <a href="{% if position %}{{ url_for('student_quiz_subtask', slug=slug, position=position) }}{% else %}{{ url_for('student_quiz', slug=slug) }}{% endif %}" class="btn btn-primary">🔄 Erneut versuchen</a>
-    <a href="{{ url_for('student_klasse', slug=slug, aufgabe=position) if position else url_for('student_klasse', slug=slug) }}" class="btn btn-secondary">← Zurück zur Aufgabe</a>
+    <a href="{% if position %}{{ url_for('student_quiz_subtask', slug=slug, position=position) }}{% else %}{{ url_for('student_quiz', slug=slug) }}{% endif %}" class="btn btn-primary btn-block btn-lg">🔄 Erneut versuchen</a>
+    <a href="{{ url_for('student_klasse', slug=slug, aufgabe=position) if position else url_for('student_klasse', slug=slug) }}" class="btn btn-secondary mt-1" style="display: inline-block;">← Zurück zur Aufgabe</a>
     {% elif position and next_position is defined and next_position %}
-    <a href="{{ url_for('student_klasse', slug=slug, aufgabe=next_position) }}" class="btn btn-primary">Zur nächsten Aufgabe →</a>
+    <a href="{{ url_for('student_klasse', slug=slug, aufgabe=next_position) }}" class="btn btn-primary btn-block btn-lg">Zur nächsten Aufgabe →</a>
     {% elif task.quiz_json and not quiz_bestanden %}
-    <a href="{{ url_for('student_quiz', slug=slug) }}" class="btn btn-primary">Zum Themen-Quiz →</a>
+    <a href="{{ url_for('student_quiz', slug=slug) }}" class="btn btn-primary btn-block btn-lg">Zum Themen-Quiz →</a>
     {% elif next_topic is defined and next_topic and klasse is defined and klasse %}
-    <form method="POST" action="{{ url_for('student_start_next_topic') }}" style="display: inline;">
+    <form method="POST" action="{{ url_for('student_start_next_topic') }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="task_id" value="{{ next_topic.task_id }}">
         <input type="hidden" name="klasse_id" value="{{ klasse.id }}">
-        <button type="submit" class="btn btn-primary">Nächstes Thema starten →</button>
+        <button type="submit" class="btn btn-primary btn-block btn-lg">Nächstes Thema starten →</button>
     </form>
     {% else %}
-    <a href="{{ url_for('student_klasse', slug=slug, aufgabe=position) if position else url_for('student_klasse', slug=slug) }}" class="btn btn-primary">Zum Thema →</a>
+    <a href="{{ url_for('student_klasse', slug=slug, aufgabe=position) if position else url_for('student_klasse', slug=slug) }}" class="btn btn-primary btn-block btn-lg">Zum Thema →</a>
     {% endif %}
 </div>
 {% endblock %}
