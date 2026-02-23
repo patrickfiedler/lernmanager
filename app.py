@@ -1712,22 +1712,9 @@ def _handle_quiz(student_id, student, task, slug, quiz_json_str, subtask_id=None
                 metadata={'student_task_id': student_task_id}
             )
 
-        display_quiz = _build_display_quiz(quiz)
-
-        all_attempts = models.get_quiz_attempts(student_task_id, subtask_id=subtask_id)
-        previous_attempt = all_attempts[1] if len(all_attempts) > 1 else None
-
-        return render_template('student/quiz_result.html',
-                               student=student,
-                               task=task,
-                               quiz=display_quiz,
-                               punkte=punkte,
-                               max_punkte=max_punkte,
-                               bestanden=bestanden,
-                               antworten=antworten,
-                               previous_attempt=previous_attempt,
-                               slug=slug,
-                               position=position)
+        if subtask_id and position:
+            return redirect(url_for('student_quiz_result_subtask', slug=slug, position=position))
+        return redirect(url_for('student_quiz_result', slug=slug))
 
     # GET: Filter out LLM questions if rate limit exceeded
     llm_available = models.check_llm_rate_limit(student_id)
