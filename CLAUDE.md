@@ -255,10 +255,8 @@ When adding new features that use session/user data in base template:
 When adding a new feature that shares semantics with an existing one (e.g. correct/incorrect answers), reuse the exact same visual vocabulary (colors, borders, emojis) rather than inventing new styling. Students instantly understand the new UI without a learning curve. Example: warmup feedback reuses `quiz_result.html` patterns (green/red left borders, ✅/❌, 💬 feedback line, "Deine Antwort" label).
 
 ### Database Migrations
-For encrypted SQLCipher databases:
-- Pass SQLCIPHER_KEY via environment variable
-- Migrations must handle both encrypted and unencrypted databases
 - Always run migrations BEFORE deploying code changes
 - Test migrations locally before production
+- DB is plain SQLite in production (SQLCipher removed 2026-02-23 — see `docs/shared/lernmanager/technical.md`)
 
 **See**: Migration scripts in project root (e.g., `migrate_add_time_estimates.py`)
