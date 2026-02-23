@@ -1,6 +1,24 @@
 # Lernmanager - Current State (2026-02-23)
 
-## Latest Session (2026-02-23) — AJAX Quiz Dot Fix
+## Latest Session (2026-02-23) — DB Crypto Management Script
+
+### What happened
+1. **feat: deploy/db_crypto.py** — unified DB crypto management script with 4 operations: `verify`, `encrypt`, `decrypt`, `rekey`. Full safety flow for modifying operations: stop service → WAL checkpoint → timestamped backup → operate into `.tmp` → verify → atomic rename → start service → rollback on any failure. Key resolution: `--key` CLI > `SQLCIPHER_KEY` env > `/opt/lernmanager/.env`. `rekey` auto-updates `.env` with new key.
+
+### Files changed
+- `deploy/db_crypto.py` — new script
+- `todo.md` — added Deploy/Ops section
+
+### Git state
+- Not yet committed or deployed
+
+### Next Steps
+- **Deploy previous fixes first**: `ssh user@server 'sudo /opt/lernmanager/deploy/update.sh'`
+- **Verify on server**: `sudo python /opt/lernmanager/deploy/db_crypto.py verify`
+
+---
+
+## Previous Session (2026-02-23) — AJAX Quiz Dot Fix
 
 ### What happened
 1. **fix: Next button skips quiz after AJAX checkbox** — After checking a subtask done via AJAX, clicking Next skipped the quiz because `data-quiz-available` was never updated in the DOM. Fixed by updating `quizDot.dataset.quizAvailable = 'true'` and adding `.available` CSS class in `toggleSubtask()` success handler. (`templates/student/klasse.html`)

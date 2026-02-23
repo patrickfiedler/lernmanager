@@ -113,6 +113,10 @@ See `docs/research/2026-02-07_learning_paths_and_quiz_evolution.md` (Section 5)
 - [ ] AV-Vertrag mit VPS-Hoster prüfen/abschließen
 - [ ] Landesspezifische Schuldatenschutzverordnung prüfen
 
+## Deploy / Ops
+
+- [x] `deploy/db_crypto.py` — unified DB crypto script: verify/encrypt/decrypt/rekey, auto-service stop/start, rollback-on-failure, `.env` auto-update on rekey
+
 ## Reference Documents
 
 - **Pedagogical rationale:** `docs/pedagogy/pedagogical_decisions.md` — teaching philosophy, design decisions, open questions
