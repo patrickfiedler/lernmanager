@@ -13,8 +13,6 @@
     {% set prozent = ((punkte / max_punkte) * 100)|int %}
     {% set min_richtig = [1, (max_punkte * 0.7)|int]|max %}
     <p>Du brauchst mindestens {{ min_richtig }} von {{ max_punkte }} richtigen Antworten zum Bestehen.</p>
-    <p style="margin-top: 0.5rem; color: #374151;">Du kannst es so oft versuchen, wie du möchtest — schau dir die richtigen Antworten unten an und versuch es nochmal. 💪</p>
-
     {% if previous_attempt %}
         {% set previous_prozent = ((previous_attempt.punkte / previous_attempt.max_punkte) * 100)|int %}
         {% if prozent > previous_prozent %}
@@ -28,7 +26,7 @@
         </div>
         {% endif %}
     {% else %}
-        <p style="margin-top: 1rem;">Schau dir die richtigen Antworten unten an und versuche es noch einmal! Du schaffst das! 🚀</p>
+        <p style="margin-top: 0.5rem; color: #374151;">Du kannst es so oft versuchen, wie du möchtest — schau dir die richtigen Antworten unten an und versuch es nochmal. Du schaffst das! 🚀</p>
     {% endif %}
     {% endif %}
 </div>
