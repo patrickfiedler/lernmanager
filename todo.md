@@ -104,6 +104,14 @@ Login warm-up (2-4 questions) + dedicated practice mode. Low-stakes, skippable.
 **Tier 2:** Draft saving, color blindness, practice mode, focus mode
 **Tier 3:** Topic→Task→Subtask redesign (5-20 min chunks)
 
+### Task page declutter ✅ Implemented 2026-02-24
+
+- "Wofür brauchst du das?" moved to collapsible `<details>` at bottom
+- "Ausführliche Beschreibung" removed from student view
+- `tipps` field: extracted from `beschreibung`, rendered as collapsible "💡 Hilfe" below task
+- **Deploy**: run `migrate_007_add_tipps.py` on server before deploying code
+- **Content work needed**: reauthor existing task `beschreibung` to move tips into `tipps` field in JSON
+
 ## DSGVO / Datenschutz
 
 See `docs/research/2026-02-07_learning_paths_and_quiz_evolution.md` (Section 5)

@@ -829,6 +829,7 @@ def admin_thema_aufgaben(task_id):
         path_list = request.form.getlist('path[]')
         path_model_list = request.form.getlist('path_model[]')
         fertig_wenn_list = request.form.getlist('fertig_wenn[]')
+        tipps_list = request.form.getlist('tipps[]')
 
         # Validate all subtask quiz JSONs before saving
         for i, qj in enumerate(quiz_json_list):
@@ -840,7 +841,7 @@ def admin_thema_aufgaben(task_id):
 
         models.update_subtasks(task_id, subtasks_list, estimated_minutes_list, quiz_json_list,
                                path_list=path_list, path_model_list=path_model_list,
-                               fertig_wenn_list=fertig_wenn_list)
+                               fertig_wenn_list=fertig_wenn_list, tipps_list=tipps_list)
         flash('Aufgaben aktualisiert.', 'success')
         return redirect(url_for('admin_thema_detail', task_id=task_id))
 

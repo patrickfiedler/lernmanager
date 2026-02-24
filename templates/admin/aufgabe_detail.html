@@ -124,6 +124,10 @@
                     <label style="font-size: 0.875rem; color: #374151;">✅ Fertig wenn: <small class="text-muted">(optional — wird als grüner Kasten über dem Häkchen angezeigt)</small></label>
                     <textarea name="fertig_wenn[]" class="form-control" rows="2" placeholder="z.B. Du hast alle Schritte erledigt und dein Ergebnis gespeichert.">{{ st.fertig_wenn or '' }}</textarea>
                 </div>
+                <div class="form-group mt-1">
+                    <label style="font-size: 0.875rem; color: #374151;">💡 Tipps: <small class="text-muted">(optional — ausklappbar unter der Aufgabe)</small></label>
+                    <textarea name="tipps[]" class="form-control" rows="2" placeholder="z.B. Nutze den Zoom-Regler um Details besser zu sehen.">{{ st.tipps or '' }}</textarea>
+                </div>
                 <details class="subtask-quiz-toggle">
                     <summary>❓ Aufgaben-Quiz {% if st.quiz_json %}<span class="badge badge-primary">Quiz vorhanden</span>{% endif %}</summary>
                     <textarea name="quiz_json[]" class="form-control mt-1" rows="4" placeholder='{"questions": [{"text": "Frage?", "options": ["A", "B", "C", "D"], "correct": [0]}]}'>{{ st.quiz_json or '' }}</textarea>
@@ -444,6 +448,10 @@ function addSubtask() {
         <div class="form-group mt-1">
             <label style="font-size: 0.875rem; color: #374151;">✅ Fertig wenn: <small class="text-muted">(optional — wird als grüner Kasten über dem Häkchen angezeigt)</small></label>
             <textarea name="fertig_wenn[]" class="form-control" rows="2" placeholder="z.B. Du hast alle Schritte erledigt und dein Ergebnis gespeichert."></textarea>
+        </div>
+        <div class="form-group mt-1">
+            <label style="font-size: 0.875rem; color: #374151;">💡 Tipps: <small class="text-muted">(optional — ausklappbar unter der Aufgabe)</small></label>
+            <textarea name="tipps[]" class="form-control" rows="2" placeholder="z.B. Nutze den Zoom-Regler um Details besser zu sehen."></textarea>
         </div>
         <details class="subtask-quiz-toggle">
             <summary>❓ Aufgaben-Quiz</summary>

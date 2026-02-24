@@ -9,16 +9,6 @@
 
     <!-- Topic Headline -->
     <h1 class="topic-headline">{{ task.name }}</h1>
-    <!-- Purpose Banner (Why learn this?) -->
-    {% if task.why_learn_this %}
-    <div class="purpose">
-        <div class="purpose-icon">💡</div>
-        <div>
-            <div class="purpose-label">Wofür brauchst du das?</div>
-            {{ task.why_learn_this }}
-        </div>
-    </div>
-    {% endif %}
 
     <!-- Progress Section with Dots -->
     {% if subtasks %}
@@ -113,6 +103,13 @@
                 {{ active_subtask.beschreibung | markdown }}
                 {% endif %}
             </div>
+
+            {% if active_subtask and active_subtask.tipps %}
+            <details class="tipps-toggle">
+                <summary>💡 Hilfe</summary>
+                <div class="tipps-content markdown-content">{{ active_subtask.tipps | markdown }}</div>
+            </details>
+            {% endif %}
 
             {% if active_subtask and active_subtask.fertig_wenn %}
             <div class="fertig-wenn-callout">
@@ -267,28 +264,12 @@
     </div>
     {% endif %}
 
-    <!-- Topic Description (expandable, at bottom) -->
-    <details class="topic-description-toggle mt-2">
-        <summary>Ausführliche Beschreibung</summary>
-        <div class="topic-description-content">
-            {% set lz = task.lernziel_schueler or task.lernziel %}
-            {% if lz %}
-            <div class="mb-1">
-                <strong>🎯 Lernziel:</strong>
-                <div class="markdown-content">{{ lz | markdown }}</div>
-            </div>
-            {% endif %}
-            {% if task.beschreibung %}
-            <div>
-                <strong>📋 Beschreibung:</strong>
-                <div class="markdown-content">{{ task.beschreibung | markdown }}</div>
-            </div>
-            {% endif %}
-            {% if not lz and not task.beschreibung %}
-            <p class="text-muted">Keine zusätzlichen Informationen verfügbar.</p>
-            {% endif %}
-        </div>
+    {% if task.why_learn_this %}
+    <details class="why-learn-toggle mt-2">
+        <summary>💡 Wofür brauchst du das?</summary>
+        <div class="why-learn-content">{{ task.why_learn_this }}</div>
     </details>
+    {% endif %}
 
 </div>
 

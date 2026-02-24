@@ -146,6 +146,7 @@ Thema (task)
 | `path` | ja | string | Niedrigster Lernpfad: `wanderweg`, `bergweg` oder `gipfeltour` |
 | `path_model` | nein | string | `skip` (Default): niedrigere Pfade überspringen. `depth`: alle Pfade, unterschiedliche Erwartungen |
 | `fertig_wenn` | nein | string | Abschluss-Kriterium. Markdown erlaubt. Wird als grüner Kasten direkt über dem Abhaken-Häkchen angezeigt. |
+| `tipps` | nein | string | Hilfestellungen. Markdown erlaubt. Wird als ausklappbarer "💡 Hilfe"-Block unter der Aufgabe angezeigt. |
 | `graded_artifact` | nein | object | Bewertetes Artefakt (siehe unten) |
 | `quiz` | nein | object | Quiz für diese Aufgabe (siehe Quiz-Format) |
 
@@ -295,10 +296,14 @@ Jede Aufgabe folgt einer einheitlichen Struktur. `beschreibung` enthält den Arb
    - Unterpunkt
    - Unterpunkt
 3. Dritter Schritt
-
-💡 Tipp: Hilfreicher Hinweis für den Schüler
-💡 Tipp: Noch ein Hinweis
 ```
+
+**`tipps`-Feld (separat, optional):**
+```
+💡 Tipp: Hilfreicher Hinweis für den Schüler
+💡 Tipp: Noch ein Hinweis — Mehrere Tipps im selben Feld sind erlaubt.
+```
+Wird als ausklappbarer "💡 Hilfe"-Block unterhalb der Aufgabenbeschreibung angezeigt. Schüler öffnen ihn bei Bedarf, er stört nicht den normalen Lesefluss.
 
 **`fertig_wenn`-Feld (separat):**
 ```
@@ -311,7 +316,7 @@ Du hast alle Schritte erledigt und dein Ergebnis gespeichert.
 |--------|--------|----------|
 | `🎯 Ziel:` | Was der Schüler nach dieser Aufgabe kann | Ja |
 | `📋 Aufgabe:` | **Nur Pflicht-Handlungen** — ein Schritt, ein Verb, imperativisch | Ja |
-| `💡 Tipp:` | Anleitungen, Hintergrundinfos, Shortcuts, "So geht's" | Optional |
+| `💡 Tipp:` | Gehört ins **`tipps`-Feld**, nicht in `beschreibung` — ausklappbarer Hilfe-Block | Optional |
 
 **Wichtige Trennregel: Aktionen vs. Hinweise**
 `📋 Aufgabe:`-Schritte enthalten NUR, was der Schüler tun MUSS. Alles, was er überspringen könnte und die Aufgabe trotzdem erledigt wäre, gehört in `💡 Tipp:`.

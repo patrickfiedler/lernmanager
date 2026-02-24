@@ -1630,12 +1630,15 @@ tr.unsaved-row td {
 
 /* Materials Toggle */
 .materials-toggle,
-.topic-description-toggle {
+.topic-description-toggle,
+.why-learn-toggle {
     margin-top: 2rem;
 }
 
 .materials-toggle summary,
-.topic-description-toggle summary {
+.topic-description-toggle summary,
+.tipps-toggle summary,
+.why-learn-toggle summary {
     cursor: pointer;
     color: #374151;
     font-size: 0.9375rem;
@@ -1650,13 +1653,17 @@ tr.unsaved-row td {
 }
 
 .materials-toggle summary:hover,
-.topic-description-toggle summary:hover {
+.topic-description-toggle summary:hover,
+.tipps-toggle summary:hover,
+.why-learn-toggle summary:hover {
     background: #f3f4f6;
     border-color: #d1d5db;
 }
 
 .materials-toggle summary::before,
-.topic-description-toggle summary::before {
+.topic-description-toggle summary::before,
+.tipps-toggle summary::before,
+.why-learn-toggle summary::before {
     content: '▸ ';
     margin-right: 0.5rem;
     transition: transform 0.2s;
@@ -1664,18 +1671,24 @@ tr.unsaved-row td {
 }
 
 .materials-toggle[open] summary::before,
-.topic-description-toggle[open] summary::before {
+.topic-description-toggle[open] summary::before,
+.tipps-toggle[open] summary::before,
+.why-learn-toggle[open] summary::before {
     transform: rotate(90deg);
 }
 
 .materials-toggle[open] summary,
-.topic-description-toggle[open] summary {
+.topic-description-toggle[open] summary,
+.tipps-toggle[open] summary,
+.why-learn-toggle[open] summary {
     border-bottom: none;
     border-radius: 0.5rem 0.5rem 0 0;
 }
 
 .materials-content,
-.topic-description-content {
+.topic-description-content,
+.tipps-content,
+.why-learn-content {
     padding: 1.25rem;
     background: var(--gray-50);
     border-radius: 0 0 0.5rem 0.5rem;
