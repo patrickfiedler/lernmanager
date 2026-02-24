@@ -1451,7 +1451,6 @@ tr.unsaved-row td {
     color: #111827;
     margin-bottom: 1.75rem;
     line-height: 1.7;
-    font-weight: 500;
 }
 
 @media (max-width: 768px) {
