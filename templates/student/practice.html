@@ -18,6 +18,12 @@
        class="btn {% if mode == 'thema' %}btn-primary{% else %}btn-secondary{% endif %}">Nach Thema</a>
 </div>
 
+{% if practice_sessions_today >= 2 %}
+<div class="card mb-2" style="border-left: 4px solid var(--info-color, #17a2b8); padding: 0.75rem 1rem; background: #e8f4fd;">
+    💡 Du hast heute schon {{ practice_sessions_today }}× geübt — super! Vergiss nicht, auch an deiner aktuellen Aufgabe weiterzumachen.
+</div>
+{% endif %}
+
 {% if mode == 'thema' %}
 <div class="card mb-2" style="padding: 0.75rem;">
     <form method="GET" action="{{ url_for('student_practice') }}" class="flex gap-1 flex-center">
@@ -309,7 +315,8 @@
             body: JSON.stringify({
                 questions_shown: totalShown,
                 questions_correct: totalCorrect,
-                skipped: false
+                skipped: false,
+                session_type: 'practice'
             })
         });
 

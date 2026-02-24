@@ -2164,7 +2164,8 @@ def student_warmup_finish():
         student_id,
         questions_shown=data.get('questions_shown', 0),
         questions_correct=data.get('questions_correct', 0),
-        skipped=data.get('skipped', False)
+        skipped=data.get('skipped', False),
+        session_type=data.get('session_type', 'warmup')
     )
     return jsonify({'ok': True})
 
@@ -2200,10 +2201,12 @@ def student_practice():
         flash('Keine passenden Fragen gefunden.', 'info')
         return redirect(url_for('student_practice', mode='random'))
 
+    practice_sessions_today = models.count_practice_sessions_today(student_id)
     questions_json = json.dumps([_serialize_question_for_js(q) for q in questions])
     return render_template('student/practice.html', student=student,
                            questions_json=questions_json, mode=mode,
-                           topic_names=topic_names, selected_topic=topic_slug)
+                           topic_names=topic_names, selected_topic=topic_slug,
+                           practice_sessions_today=practice_sessions_today)
 
 
 # ============ Error Handlers ============

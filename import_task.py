@@ -371,7 +371,7 @@ def _recalculate_completion(task_id):
     from models import db_session
     with db_session() as conn:
         rows = conn.execute(
-            "SELECT id, manuell_abgeschlossen, abgeschlossen FROM student_task WHERE task_id = ?",
+            "SELECT id, student_id, klasse_id, rolle, manuell_abgeschlossen, abgeschlossen FROM student_task WHERE task_id = ?",
             (task_id,)
         ).fetchall()
 
@@ -381,6 +381,17 @@ def _recalculate_completion(task_id):
         should_be_complete = models.check_task_completion(row['id'])
         new_val = 1 if should_be_complete else 0
         if new_val != row['abgeschlossen']:
+            if new_val == 0 and row['rolle'] == 'primary':
+                # Guard: don't reopen if student already has another active primary
+                # in the same class — that would violate idx_one_active_primary.
+                with db_session() as conn:
+                    conflict = conn.execute("""
+                        SELECT 1 FROM student_task
+                        WHERE student_id = ? AND klasse_id = ?
+                        AND abgeschlossen = 0 AND rolle = 'primary' AND id != ?
+                    """, (row['student_id'], row['klasse_id'], row['id'])).fetchone()
+                if conflict:
+                    continue
             with db_session() as conn:
                 conn.execute(
                     "UPDATE student_task SET abgeschlossen = ? WHERE id = ?",

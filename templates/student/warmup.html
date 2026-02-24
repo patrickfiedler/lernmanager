@@ -46,6 +46,7 @@
     let phase = 'easy';  // 'easy' or 'hard'
     let totalCorrect = 0;
     let totalShown = 0;
+    let totalQuestions = questions.length;  // grows when hard round is added
     let easyCorrect = 0;
     let answered = false;
 
@@ -64,7 +65,7 @@
         answered = false;
 
         document.getElementById('progress-text').textContent =
-            'Frage ' + (totalShown + 1) + ' von ' + questions.length;
+            'Frage ' + (totalShown + 1) + ' von ' + totalQuestions;
         document.getElementById('topic-label').textContent = q.topic_name;
         document.getElementById('question-text').textContent = q.text;
 
@@ -292,6 +293,7 @@
             .then(data => {
                 if (!data.done && data.questions && data.questions.length > 0) {
                     phase = 'hard';
+                    totalQuestions += data.questions.length;
                     questions = data.questions;
                     currentIdx = 0;
                     renderQuestion();
@@ -315,7 +317,8 @@
             body: JSON.stringify({
                 questions_shown: totalShown,
                 questions_correct: totalCorrect,
-                skipped: false
+                skipped: false,
+                session_type: 'warmup'
             })
         });
 
@@ -345,7 +348,8 @@
             body: JSON.stringify({
                 questions_shown: totalShown,
                 questions_correct: totalCorrect,
-                skipped: true
+                skipped: true,
+                session_type: 'warmup'
             })
         }).then(() => {
             window.location.href = '{{ url_for("student_dashboard") }}';

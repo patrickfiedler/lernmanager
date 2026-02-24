@@ -961,9 +961,20 @@ def reset_student_progress_for_task(task_id):
 
             if st_ids:
                 ph = ','.join('?' * len(st_ids))
+                # Only unset abgeschlossen for students who don't already have
+                # a different active primary topic in the same class — otherwise
+                # we'd create two abgeschlossen=0 rows and violate idx_one_active_primary.
                 conn.execute(f"""
                     UPDATE student_task SET abgeschlossen = 0, manuell_abgeschlossen = 0
                     WHERE id IN ({ph})
+                    AND NOT EXISTS (
+                        SELECT 1 FROM student_task st2
+                        WHERE st2.student_id = student_task.student_id
+                        AND st2.klasse_id = student_task.klasse_id
+                        AND st2.abgeschlossen = 0
+                        AND st2.rolle = 'primary'
+                        AND st2.id != student_task.id
+                    )
                 """, st_ids)
 
         if sub_ids:
@@ -3163,14 +3174,25 @@ def record_warmup_answer(student_id, task_id, subtask_id, question_index, correc
             )
 
 
-def save_warmup_session(student_id, questions_shown, questions_correct, skipped=False):
-    """Log a warmup/practice session."""
+def save_warmup_session(student_id, questions_shown, questions_correct, skipped=False, session_type='warmup'):
+    """Log a warmup/practice session. session_type: 'warmup' or 'practice'."""
     with db_session() as conn:
         conn.execute(
-            'INSERT INTO warmup_session (student_id, questions_shown, questions_correct, skipped) '
-            'VALUES (?, ?, ?, ?)',
-            (student_id, questions_shown, questions_correct, 1 if skipped else 0)
+            'INSERT INTO warmup_session (student_id, questions_shown, questions_correct, skipped, session_type) '
+            'VALUES (?, ?, ?, ?, ?)',
+            (student_id, questions_shown, questions_correct, 1 if skipped else 0, session_type)
         )
+
+
+def count_practice_sessions_today(student_id):
+    """Count student-initiated practice sessions completed today."""
+    with db_session() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM warmup_session "
+            "WHERE student_id = ? AND session_type = 'practice' AND DATE(timestamp) = DATE('now')",
+            (student_id,)
+        ).fetchone()
+        return row[0] if row else 0
 
 
 def has_done_warmup_today(student_id):
