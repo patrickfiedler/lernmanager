@@ -939,10 +939,32 @@ def reset_student_progress_for_task(task_id):
             ph = ','.join('?' * len(st_ids))
             conn.execute(f"DELETE FROM student_subtask WHERE student_task_id IN ({ph})", st_ids)
             conn.execute(f"DELETE FROM quiz_attempt WHERE student_task_id IN ({ph})", st_ids)
-            conn.execute(f"""
-                UPDATE student_task SET abgeschlossen = 0, manuell_abgeschlossen = 0
-                WHERE id IN ({ph})
-            """, st_ids)
+
+            # Deduplicate: a student may have multiple student_task rows for the
+            # same task+klasse (history-preserving pattern). Setting all to
+            # abgeschlossen=0 would violate idx_one_active_primary. Keep only
+            # the newest row per (student_id, klasse_id) and delete the rest.
+            conn.execute("""
+                DELETE FROM student_task
+                WHERE task_id = ? AND id NOT IN (
+                    SELECT MAX(id) FROM student_task
+                    WHERE task_id = ?
+                    GROUP BY student_id, klasse_id
+                )
+            """, (task_id, task_id))
+
+            # Refresh st_ids after dedup
+            st_rows = conn.execute(
+                "SELECT id FROM student_task WHERE task_id = ?", (task_id,)
+            ).fetchall()
+            st_ids = [r['id'] for r in st_rows]
+
+            if st_ids:
+                ph = ','.join('?' * len(st_ids))
+                conn.execute(f"""
+                    UPDATE student_task SET abgeschlossen = 0, manuell_abgeschlossen = 0
+                    WHERE id IN ({ph})
+                """, st_ids)
 
         if sub_ids:
             ph = ','.join('?' * len(sub_ids))
