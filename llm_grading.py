@@ -25,8 +25,15 @@ FALLBACK_RESULT = {
 }
 
 
+_OVHCLOUD_BASE_URL = "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1"
+
+
 def _get_client():
-    """Create LLM client. Works with both Anthropic cloud and local Ollama."""
+    """Create LLM client. Anthropic SDK for 'anthropic' provider, OpenAI SDK for 'ovhcloud'."""
+    if config.LLM_PROVIDER == 'ovhcloud':
+        from openai import OpenAI
+        base_url = config.LLM_BASE_URL or _OVHCLOUD_BASE_URL
+        return OpenAI(base_url=base_url, api_key=config.LLM_API_KEY)
     import anthropic
     kwargs = {"api_key": config.LLM_API_KEY}
     if config.LLM_BASE_URL:
@@ -46,28 +53,43 @@ def _call_llm(question_text, expected_or_rubric, student_answer):
     )
 
     client = _get_client()
-    response = client.messages.create(
-        model=config.LLM_MODEL,
-        max_tokens=150,
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": user_prompt}],
-        timeout=config.LLM_TIMEOUT,
-    )
 
-    # Extract text from response
-    if not response.content:
-        print(f"LLM grading: empty response (stop_reason={response.stop_reason})", file=sys.stderr)
-        return None
-    text = response.content[0].text.strip()
-    if not text:
-        print(f"LLM grading: empty response (stop_reason={response.stop_reason})", file=sys.stderr)
-        return None
-
-    # Strip markdown code fences (LLMs often wrap JSON in ```json ... ```)
-    if text.startswith('```'):
-        text = text.split('\n', 1)[-1]  # remove first line (```json)
-        text = text.rsplit('```', 1)[0]  # remove trailing ```
-        text = text.strip()
+    if config.LLM_PROVIDER == 'ovhcloud':
+        response = client.chat.completions.create(
+            model=config.LLM_MODEL,
+            max_tokens=150,
+            temperature=0,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
+            timeout=config.LLM_TIMEOUT,
+        )
+        text = response.choices[0].message.content.strip() if response.choices else ""
+        if not text:
+            print("LLM grading (ovhcloud): empty response", file=sys.stderr)
+            return None
+    else:
+        # Anthropic path
+        response = client.messages.create(
+            model=config.LLM_MODEL,
+            max_tokens=150,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": user_prompt}],
+            timeout=config.LLM_TIMEOUT,
+        )
+        if not response.content:
+            print(f"LLM grading: empty response (stop_reason={response.stop_reason})", file=sys.stderr)
+            return None
+        text = response.content[0].text.strip()
+        if not text:
+            print(f"LLM grading: empty response (stop_reason={response.stop_reason})", file=sys.stderr)
+            return None
+        # Strip markdown code fences (LLMs often wrap JSON in ```json ... ```)
+        if text.startswith('```'):
+            text = text.split('\n', 1)[-1]
+            text = text.rsplit('```', 1)[0].strip()
 
     # Parse JSON — if it fails, the answer can't be graded
     result = json.loads(text)

@@ -27,9 +27,13 @@ SUBJECTS = ['Englisch', 'Chemie', 'MBI', 'Geographie']
 LEVELS = ['5/6', '7/8', '9/10', '11s', '11/12']
 
 # LLM grading (for free-text quiz questions)
-# Works with both Anthropic cloud and local Ollama (Ollama v0.14+ supports Anthropic API)
+# LLM_PROVIDER: 'anthropic' (default) or 'ovhcloud'
+#   anthropic: uses Anthropic SDK. LLM_BASE_URL can point to Ollama (Anthropic-compat mode).
+#   ovhcloud:  uses OpenAI-compatible SDK. Set LLM_API_KEY to OVH_AI_ENDPOINTS_ACCESS_TOKEN.
+#              LLM_BASE_URL defaults to OVHcloud's kepler endpoint.
+LLM_PROVIDER = os.environ.get('LLM_PROVIDER', 'anthropic')
 LLM_API_KEY = os.environ.get('LLM_API_KEY', '')
-LLM_BASE_URL = os.environ.get('LLM_BASE_URL', None)  # None = Anthropic cloud, 'http://localhost:11434' = Ollama
+LLM_BASE_URL = os.environ.get('LLM_BASE_URL', None)
 LLM_MODEL = os.environ.get('LLM_MODEL', 'claude-haiku-4-5-20251001')
 LLM_TIMEOUT = 5  # seconds
 LLM_MAX_CALLS_PER_STUDENT_PER_HOUR = 20
