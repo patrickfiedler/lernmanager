@@ -108,6 +108,25 @@ def _build_display_quiz(quiz):
     }
 
 
+def _apply_question_order(quiz, antworten):
+    """Reorder quiz questions and remap antworten keys to match the original shuffle order.
+
+    antworten may contain '_question_order' (list of original indices in seen order).
+    Returns (ordered_quiz, ordered_antworten) with keys 0..n-1 matching display order.
+    """
+    question_order = antworten.pop('_question_order', None)
+    if not question_order:
+        return quiz, antworten
+    all_questions = quiz['questions']
+    ordered_quiz = {'questions': [all_questions[i] for i in question_order]}
+    ordered_antworten = {
+        str(pos): antworten[str(orig)]
+        for pos, orig in enumerate(question_order)
+        if str(orig) in antworten
+    }
+    return ordered_quiz, ordered_antworten
+
+
 # ============ Auth Decorators ============
 
 def admin_required(f):
@@ -1685,6 +1704,8 @@ def _handle_quiz(student_id, student, task, slug, quiz_json_str, subtask_id=None
                 if set(submitted_original) == set(correct):
                     punkte += 1
 
+        if question_order:
+            antworten['_question_order'] = question_order
         attempt_id, bestanden = models.save_quiz_attempt(
             student_task_id, punkte, max_punkte, json.dumps(antworten), subtask_id=subtask_id
         )
@@ -1854,9 +1875,10 @@ def student_quiz_result(slug):
     if latest['bestanden'] and klasse:
         next_topic = models.get_next_queued_topic(klasse['id'], task['task_id'])
 
+    display_quiz, antworten = _apply_question_order(_build_display_quiz(quiz), antworten)
     return render_template('student/quiz_result.html',
                            student=student, task=task,
-                           quiz=_build_display_quiz(quiz),
+                           quiz=display_quiz,
                            punkte=latest['punkte'], max_punkte=latest['max_punkte'],
                            bestanden=latest['bestanden'], antworten=antworten,
                            previous_attempt=attempts[1] if len(attempts) > 1 else None,
@@ -1905,9 +1927,10 @@ def student_quiz_result_subtask(slug, position):
     topic_quiz_attempts = models.get_quiz_attempts(task['id'])
     quiz_bestanden = any(a['bestanden'] for a in topic_quiz_attempts)
 
+    display_quiz, antworten = _apply_question_order(_build_display_quiz(quiz), antworten)
     return render_template('student/quiz_result.html',
                            student=student, task=task,
-                           quiz=_build_display_quiz(quiz),
+                           quiz=display_quiz,
                            punkte=latest['punkte'], max_punkte=latest['max_punkte'],
                            bestanden=latest['bestanden'], antworten=antworten,
                            previous_attempt=attempts[1] if len(attempts) > 1 else None,
