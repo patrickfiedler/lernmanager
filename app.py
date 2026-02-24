@@ -1710,18 +1710,24 @@ def _handle_quiz(student_id, student, task, slug, quiz_json_str, subtask_id=None
             student_task_id, punkte, max_punkte, json.dumps(antworten), subtask_id=subtask_id
         )
 
+        llm_answers = [v for v in antworten.values() if isinstance(v, dict) and v.get('source') == 'llm']
+        analytics_meta = {
+            'student_task_id': student_task_id,
+            'subtask_id': subtask_id,
+            'punkte': punkte,
+            'max_punkte': max_punkte,
+            'bestanden': bestanden,
+            'prozent': int((punkte / max_punkte) * 100) if max_punkte > 0 else 0
+        }
+        if llm_answers:
+            analytics_meta['llm_provider'] = llm_answers[0].get('llm_provider', config.LLM_PROVIDER)
+            analytics_meta['llm_model'] = llm_answers[0].get('llm_model', config.LLM_MODEL)
+            analytics_meta['llm_graded_count'] = len(llm_answers)
         models.log_analytics_event(
             event_type='quiz_attempt',
             user_id=student_id,
             user_type='student',
-            metadata={
-                'student_task_id': student_task_id,
-                'subtask_id': subtask_id,
-                'punkte': punkte,
-                'max_punkte': max_punkte,
-                'bestanden': bestanden,
-                'prozent': int((punkte / max_punkte) * 100) if max_punkte > 0 else 0
-            }
+            metadata=analytics_meta
         )
 
         if subtask_id and bestanden:

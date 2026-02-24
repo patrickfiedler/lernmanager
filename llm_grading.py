@@ -122,6 +122,8 @@ def grade_answer(question_text, expected_or_rubric, student_answer, student_id=N
             return FALLBACK_RESULT
         models.record_llm_usage(student_id, 'llm_grading', 0)
         llm_response["source"] = "llm"
+        llm_response["llm_provider"] = config.LLM_PROVIDER
+        llm_response["llm_model"] = config.LLM_MODEL
         return llm_response
     except Exception as e:
         print(f"LLM grading error: {type(e).__name__}: {e}", file=sys.stderr)
