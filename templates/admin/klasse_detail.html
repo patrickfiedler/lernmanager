@@ -133,5 +133,58 @@
     <p class="text-muted text-center">Noch keine Schüler in dieser Klasse.</p>
     {% endif %}
 </div>
+
+<!-- Assign Sidequest (Freiwilliges Thema) to class -->
+<div class="card mt-2">
+    <div class="card-header">✨ Freiwilliges Thema zuweisen</div>
+    <form method="POST" action="{{ url_for('admin_klasse_sidequest_zuweisen', klasse_id=klasse.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="flex gap-1 flex-center mb-1">
+            <select name="task_id" class="form-control" style="flex: 1;" required>
+                <option value="">-- Thema wählen --</option>
+                {% for task in tasks %}
+                <option value="{{ task.id }}">{{ task.fach }} ({{ task.stufe }}): {{ task.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div style="max-height: 180px; overflow-y: auto; border: 1px solid #ddd; border-radius: 4px; padding: 0.5rem; margin-bottom: 0.5rem;">
+            <label style="font-weight: bold; display: block; margin-bottom: 0.3rem;">
+                <input type="checkbox" id="sq-alle"> Alle wählen
+            </label>
+            {% for student in students %}
+            <label style="display: block;">
+                <input type="checkbox" name="student_ids" value="{{ student.id }}" class="sq-student-cb"> {{ student.nachname }}, {{ student.vorname }}
+            </label>
+            {% endfor %}
+        </div>
+        <button type="submit" class="btn btn-secondary">Zuweisen</button>
+    </form>
+</div>
+
+<!-- Active Sidequests Overview -->
+{% if sidequests %}
+<div class="card mt-2">
+    <div class="card-header">✨ Aktive Freiwillige Themen</div>
+    <table class="table">
+        <thead>
+            <tr><th>Schüler</th><th>Freiwilliges Thema</th></tr>
+        </thead>
+        <tbody>
+            {% for sq in sidequests %}
+            <tr>
+                <td>{{ sq.vorname }} {{ sq.nachname }}</td>
+                <td>{{ sq.task_name }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+document.getElementById('sq-alle').addEventListener('change', function() {
+    document.querySelectorAll('.sq-student-cb').forEach(cb => cb.checked = this.checked);
+});
 {% endblock %}
 

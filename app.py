@@ -284,9 +284,10 @@ def admin_klasse_detail(klasse_id):
         if s.get('task_id') and s['task_id'] in queue_lookup:
             s['queue_pos'], s['queue_total'] = queue_lookup[s['task_id']]
 
+    sidequests = models.get_sidequests_for_klasse(klasse_id)
     return render_template('admin/klasse_detail.html', klasse=klasse, students=students,
                            tasks=tasks, unterricht=unterricht, schedule=schedule,
-                           has_queue=bool(queue))
+                           has_queue=bool(queue), sidequests=sidequests)
 
 
 @app.route('/admin/klasse/<int:klasse_id>/loeschen', methods=['POST'])
@@ -402,6 +403,18 @@ def admin_klasse_thema_zuweisen(klasse_id):
         models.assign_task_to_klasse(klasse_id, int(task_id))
         flash('Thema zugewiesen. ✅', 'success')
 
+    return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id))
+
+
+@app.route('/admin/klasse/<int:klasse_id>/sidequest-zuweisen', methods=['POST'])
+@admin_required
+def admin_klasse_sidequest_zuweisen(klasse_id):
+    task_id = request.form.get('task_id')
+    student_ids = request.form.getlist('student_ids')
+    if task_id and student_ids:
+        for sid in student_ids:
+            models.assign_task_to_student(int(sid), klasse_id, int(task_id), rolle='sidequest')
+        flash(f'Freiwilliges Thema für {len(student_ids)} Schüler zugewiesen. ✅', 'success')
     return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id))
 
 

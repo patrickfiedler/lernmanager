@@ -1700,6 +1700,20 @@ def get_all_student_tasks(student_id, klasse_id):
     return result
 
 
+def get_sidequests_for_klasse(klasse_id):
+    """Get all active sidequests for students in a class."""
+    with db_session() as conn:
+        rows = conn.execute('''
+            SELECT s.vorname, s.nachname, t.name AS task_name
+            FROM student_task st
+            JOIN student s ON st.student_id = s.id
+            JOIN task t ON st.task_id = t.id
+            WHERE st.klasse_id = ? AND st.rolle = 'sidequest' AND st.abgeschlossen = 0
+            ORDER BY s.nachname, s.vorname
+        ''', (klasse_id,)).fetchall()
+        return [dict(r) for r in rows]
+
+
 def get_student_sidequests(student_id, klasse_id):
     """Get active sidequests for a student in a class."""
     with db_session() as conn:
