@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" shape-rendering="crispEdges">
+  <!-- Monitor frame -->
+  <rect x="1" y="1" width="14" height="10" fill="#cbd5e1"/>
+  <!-- Screen -->
+  <rect x="2" y="2" width="12" height="8" fill="#1e293b"/>
+  <!-- Screen content: green progress bar -->
+  <rect x="3" y="4" width="10" height="2" fill="#374151"/>
+  <rect x="3" y="4" width="7" height="2" fill="#10b981"/>
+  <!-- Screen content: text lines -->
+  <rect x="3" y="7" width="5" height="1" fill="#64748b"/>
+  <rect x="3" y="3" width="4" height="1" fill="#94a3b8"/>
+  <!-- Checkmark on screen -->
+  <rect x="11" y="7" width="1" height="1" fill="#10b981"/>
+  <rect x="12" y="6" width="1" height="1" fill="#10b981"/>
+  <!-- Monitor stand -->
+  <rect x="6" y="11" width="4" height="1" fill="#cbd5e1"/>
+  <rect x="5" y="12" width="6" height="1" fill="#cbd5e1"/>
+</svg>

@@ -65,6 +65,16 @@ Optional per-class topic ordering for self-paced progression.
 
 Future: drag-and-drop reordering, queue auto-suggestions
 
+## Artifact Feedback + Step Checkboxes (Planned)
+
+Design plan: `docs/2026-02-24_artifact_feedback_plan.md`
+
+- [ ] Per-step checkboxes in task descriptions (JS + new step_state DB table)
+- [ ] Per-task artifact upload with formative LLM checklist feedback (no gating, no score)
+- [ ] Growing rubric authoring convention (task N = task N-1 criteria + new)
+- [ ] Admin capstone review + manual grade entry
+- [ ] Rubric format change: scoring rubric → checklist criteria in `graded_artifact_json`
+
 ## Graded Artifacts (DB Ready, UI Pending)
 
 Spec: `docs/2026-02-13_lernmanager_curriculum_spec.md` (Section 3)

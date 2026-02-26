@@ -13,7 +13,7 @@
     {% if session.admin_id or session.student_id %}
     <nav>
         <div class="nav-content">
-            <a href="/" class="logo">📚 Lernmanager</a>
+            <a href="/" class="logo"><img src="{{ url_for('static', filename='favicon-light.svg') }}" alt="" style="height: 1.4em; vertical-align: middle; margin-right: 0.3em;"> Lernmanager</a>
             {% if session.admin_id %}
             <input type="checkbox" id="nav-toggle">
             <label for="nav-toggle" class="nav-hamburger" aria-label="Menü">

@@ -282,3 +282,106 @@ Nicht gesendet: Schülername, Pseudonym, Klasse, Schule, Zeitstempel
 - [ ] Landesspezifische Regelungen prüfen (Schuldatenschutzverordnung)
 - [ ] Ggf. Dienstvereinbarung für Nutzung privater Geräte prüfen
 - [ ] Datenschutzbeauftragten der Schule informieren
+
+---
+
+## 6. DSGVO-Analyse: Geplantes KI-Artefaktfeedback (2026-02-24)
+
+> Ergänzung zur Analyse in Abschnitt 5. Bezieht sich auf das geplante Feature aus `docs/2026-02-24_artifact_feedback_plan.md`.
+
+### Unterschied zur Quiz-Bewertung
+
+Die bestehende LLM-Quizbewertung (Abschnitt 5) fällt **nicht unter die DSGVO**, weil nur anonyme Daten gesendet werden (Frage + Antwort, kein Pseudonym, kein Identifier). Diese Einschätzung bleibt gültig.
+
+Das geplante Artefaktfeedback ist ein anderer Fall:
+
+| | Quiz-Bewertung (bestehend) | Artefakt-Feedback (geplant) |
+|---|---|---|
+| Gesendete Daten | Frage + kurze Antwort | Vollständiges Dokument (.pptx, .docx) |
+| Identifier gesendet | Keiner | Keiner — aber Name im Dokumentinhalt möglich |
+| Persönlicher Inhalt | Faktische/konzeptuelle Antworten | Kann persönliche Erfahrungen enthalten |
+| Re-Identifizierungsrisiko | Vernachlässigbar | Gering–mittel |
+| DSGVO-Anwendbarkeit | Nein (Erwägungsgrund 26) | **Ja** — personenbezogene Daten wahrscheinlich |
+
+### Rechtsgrundlage für Artefakt-API-Aufrufe
+
+**Art. 6 lit. f (berechtigtes Interesse) — nicht anwendbar.** Öffentliche Schulen sind Behörden; lit. f gilt ausdrücklich nicht für Behörden bei der Aufgabenerfüllung.
+
+**Art. 6 lit. e (öffentliche Aufgabe / Bildungsauftrag) — korrekte Grundlage, aber mit Bedingungen.**
+- Schulische Bildung ist eine öffentliche Aufgabe
+- ThürSchulG §70 erlaubt Datenverarbeitung für Bildungszwecke
+- **„Erforderlich"** ist eine reale Hürde: DSBs legen diesen Begriff eng aus. Da eine lokale Alternative (Ollama) existiert, schwächt das das „Erforderlichkeits"-Argument für den Cloud-API-Einsatz
+- Elterneinwilligung ist **nicht** die richtige Grundlage — und wäre in der Praxis schlechter (widerrufbar, Machtgefälle)
+
+**Kapitel V DSGVO — internationaler Datentransfer (das eigentliche Problem):**
+Anthropic ist ein US-Unternehmen. Selbst wenn Art. 6 lit. e den Verarbeitungszweck abdeckt, braucht der Transfer in ein Drittland eine eigene Grundlage:
+- **EU-US Data Privacy Framework (DPF):** gültig, wenn Anthropic zertifiziert ist — muss geprüft werden
+- **Standardvertragsklauseln (SCC):** wahrscheinlich im AV-Vertrag von Anthropic enthalten
+
+Deutsche DSBs sind bei US-Cloud-Diensten in Schulen konsequent streng. Einige Bundesländer haben Google Workspace und Microsoft 365 aus genau diesem Grund eingeschränkt. Thüringer DSB-Leitlinien zu Schul-Cloud-Diensten sind zu prüfen.
+
+### Pseudonymisierung vor API-Aufruf
+
+Auch wenn die DSGVO gilt, reduziert die Pseudonymisierung das Risiko erheblich:
+
+1. Dokument-Metadaten (Autor-Feld in .pptx/.docx) werden vor jeder Speicherung entfernt
+2. Name des Schülers im Dokumenttext wird durch `[Schüler/in]` ersetzt (Name bekannt aus Session)
+3. Originaldatei wird nicht gespeichert — nur extrahierter, bereinigter Text
+
+### Opt-in statt Standard
+
+Das Feature ist **per Klasse opt-in** (Admin-Einstellung, Standard: deaktiviert). Upload + Vorschau funktionieren immer (interne Verarbeitung). Nur der API-Aufruf ist optional und erfordert die Aktivierung durch die Lehrkraft.
+
+Das bedeutet: Das Feature kann entwickelt und deployed werden, bevor die DSGVO-Fragen geklärt sind. Die rechtliche Klärung ist nicht auf dem kritischen Pfad für die Entwicklung.
+
+### EU-Anbieter vs. US-Anbieter: Was sich ändert
+
+Mistral AI (Frankreich) und OVHcloud (Frankreich) sind EU-Unternehmen mit EU-Infrastruktur. Eine Übermittlung von Deutschland nach Frankreich ist keine Drittlandübermittlung — sie bleibt innerhalb des EWR. **Kapitel V DSGVO entfällt vollständig.**
+
+Zusätzlich entfällt der **CLOUD Act**: US-Bundesbehörden können US-Unternehmen verpflichten, Daten herauszugeben, *auch wenn diese auf EU-Servern liegen*. Das gilt für AWS EU, Azure EU und Google Cloud EU genauso — weil es sich um US-Unternehmen handelt. Für Mistral und OVHcloud gilt das nicht.
+
+#### Was trotzdem gilt — auch bei EU-Anbietern
+
+**Art. 6 Abs. 1 lit. e** (Bildungsauftrag) bleibt die Rechtsgrundlage — unabhängig vom Anbieterstandort.
+
+**Auftragsverarbeitungsvertrag (Art. 28 AV-Vertrag)** ist weiterhin Pflicht. Mistral und OVHcloud verarbeiten Daten *im Auftrag* der Schule — das macht sie zu Auftragsverarbeitern, auch wenn sie in der EU sitzen. Beide Anbieter stellen einen AV-Vertrag bereit (Mistral hat ein öffentlich verlinktes Data Processing Addendum).
+
+**Informationspflicht (Art. 13)**, **Verarbeitungsverzeichnis (Art. 30)** und **Genehmigung durch Schulleitung/DSB** bleiben unverändert erforderlich.
+
+#### Was wahrscheinlich entfällt
+
+Eine **Datenschutz-Folgenabschätzung (DPIA, Art. 35)** ist vorgeschrieben bei „voraussichtlich hohem Risiko". Bei US-Anbietern mit Drittlandübermittlung + Minderjährige + systematische Verarbeitung: wahrscheinlich erforderlich. Bei EU-Anbietern mit AV-Vertrag, pseudonymisierten Daten, opt-in-Betrieb und geringem Umfang ist das Risiko deutlich niedriger — eine DPIA ist vermutlich nicht erforderlich. Kurze Rücksprache mit dem Schul-DSB genügt zur Absicherung.
+
+#### Zusammenfassung
+
+| Pflicht | US-Anbieter (Anthropic) | EU-Anbieter (Mistral / OVHcloud) |
+|--------|------------------------|----------------------------------|
+| Art. 6 lit. e Rechtsgrundlage | ✓ erforderlich | ✓ erforderlich |
+| AV-Vertrag (Art. 28) | ✓ erforderlich | ✓ erforderlich |
+| Kapitel V (Drittlandübermittlung) | ✓ DPF / SCC prüfen | **entfällt** |
+| CLOUD Act Risiko | ✓ vorhanden | **entfällt** |
+| DPIA (Art. 35) | wahrscheinlich erforderlich | wahrscheinlich nicht nötig |
+| Informationspflicht (Art. 13) | ✓ erforderlich | ✓ erforderlich |
+| Verarbeitungsverzeichnis (Art. 30) | ✓ erforderlich | ✓ erforderlich |
+| DSB / Schulleitung | ✓ empfohlen | ✓ empfohlen |
+
+Der praktische Unterschied: Mit einem EU-Anbieter sind es vier überschaubare Schritte — AV-Vertrag, Informationsschreiben aktualisieren, Verarbeitungsverzeichnis, DSB-Rücksprache. Mit Anthropic kommen Kapitel-V-Prüfung, DPIA und CLOUD-Act-Abwägung hinzu.
+
+### Was vor der Aktivierung für eine Klasse erledigt sein muss
+
+**Bei EU-Anbieter (empfohlen: OVHcloud oder Mistral):**
+- [ ] AV-Vertrag (Art. 28) mit gewähltem Anbieter abschließen
+- [ ] Keine Modelltrainierung mit API-Eingaben — im AV-Vertrag bestätigen
+- [ ] Datenschutzerklärung der Schule um LLM-Artefaktverarbeitung ergänzen (Art. 13)
+- [ ] Verarbeitungsverzeichnis aktualisieren (Art. 30)
+- [ ] DSB kurz informieren — DPIA wahrscheinlich nicht erforderlich, aber absichern
+- [ ] Genehmigung Schulleitung
+
+**Zusätzlich bei US-Anbieter (Anthropic):**
+- [ ] DPF-Zertifizierung von Anthropic oder SCC im AV-Vertrag bestätigen
+- [ ] Thüringer DSB-Leitlinien zu Schul-Cloud-Diensten prüfen
+- [ ] Datenschutz-Folgenabschätzung (DPIA, Art. 35) durchführen
+
+### Hinweis zu Einheit 4
+
+Einheit 4 „Digitaler Kompass" enthält Schülerreflexionen zu eigenen Online-Erfahrungen, Datenschutzregeln und persönlichen Gewohnheiten — inhaltlich das Sensibelste im gesamten Curriculum. Für dieses Thema ist besondere Sorgfalt geboten. Gleichzeitig ist es pädagogisch wertvoll: Die Vorschau des extrahierten und pseudonymisierten Textes vor dem API-Aufruf ist ein direktes Anwendungsbeispiel für das Unterrichtsthema Datenschutz.
