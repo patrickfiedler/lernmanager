@@ -10,7 +10,7 @@
 <body>
     <div class="login-container">
         <div class="login-card">
-            <h1><img src="{{ url_for('static', filename='favicon.svg') }}" alt="Lernmanager" style="height: 1.4em; vertical-align: middle; margin-right: 0.3em;"> Lernmanager</h1>
+            <h1 style="color:#000"><img src="{{ url_for('static', filename='favicon.svg') }}" alt="Lernmanager" style="height: 1.4em; vertical-align: middle; margin-right: 0.3em;"> Lernmanager</h1>
 
             {% with messages = get_flashed_messages(with_categories=true) %}
                 {% if messages %}
