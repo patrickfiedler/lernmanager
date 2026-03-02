@@ -32,7 +32,7 @@
                      data-required="{{ 'true' if sub.get('required', true) else 'false' }}"
                      onclick="navigateToSubtask({{ loop.index }})"
                      onkeydown="handleDotKeydown(event)"
-                     title="Aufgabe {{ loop.index }}{% if not sub.get('required', true) %} (Zusatz){% endif %}"></div>
+                     title="Aufgabe {{ loop.index }}{% if not sub.get('required', true) %} (Zusatz){% endif %}"><span class="dot-num">{{ loop.index }}</span></div>
                 {% if has_quiz %}
                 <div class="dot dot-subtask-quiz {% if quiz_passed %}completed{% elif sub.erledigt %}available{% endif %}"
                      role="button"

@@ -1282,6 +1282,23 @@ tr.unsaved-row td {
     transition: all 0.2s;
     cursor: pointer;
     position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.dot-num {
+    font-size: 0.6rem;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.85);
+    line-height: 1;
+    user-select: none;
+    pointer-events: none;
+}
+
+/* Counter-rotate number in diamond (optional) dots so it stays upright */
+.dot.dot-subtask.optional .dot-num {
+    transform: rotate(-45deg);
 }
 
 .dot:hover {
@@ -1989,6 +2006,10 @@ tr.unsaved-row td {
 
     .dot.dot-quiz {
         font-size: 1rem;  /* Scale quiz text with dot size */
+    }
+
+    .dot-num {
+        font-size: 0.8rem;  /* Scale number with larger mobile dot */
     }
 
     .dot.dot-subtask-quiz {
