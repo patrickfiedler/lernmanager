@@ -107,6 +107,7 @@
                             <option value="wanderweg" {% if st.path == 'wanderweg' %}selected{% endif %}>🟢 Wanderweg</option>
                             <option value="bergweg" {% if st.path == 'bergweg' %}selected{% endif %}>🔵 Bergweg</option>
                             <option value="gipfeltour" {% if st.path == 'gipfeltour' %}selected{% endif %}>⭐ Gipfeltour</option>
+                            <option value="seilbahn" {% if st.path == 'seilbahn' %}selected{% endif %}>🚡 Seilbahn</option>
                         </select>
                         <select name="path_model[]" class="form-control" style="width: 100px;" title="Pfadmodell">
                             <option value="skip" {% if st.path_model != 'depth' %}selected{% endif %}>Skip</option>
@@ -432,6 +433,7 @@ function addSubtask() {
                     <option value="wanderweg">🟢 Wanderweg</option>
                     <option value="bergweg" selected>🔵 Bergweg</option>
                     <option value="gipfeltour">⭐ Gipfeltour</option>
+                    <option value="seilbahn">🚡 Seilbahn</option>
                 </select>
                 <select name="path_model[]" class="form-control" style="width: 100px;" title="Pfadmodell">
                     <option value="skip" selected>Skip</option>

@@ -126,11 +126,22 @@ Login warm-up (2-4 questions) + dedicated practice mode. Low-stakes, skippable.
 
 See `docs/research/2026-02-07_learning_paths_and_quiz_evolution.md` (Section 5)
 - Rechtsgrundlage: Bildungsauftrag (Art. 6 Abs. 1 lit. e), keine Einwilligung nötig
-- Informationsschreiben (Entwurf): `docs/vorlagen/informationsschreiben_lernmanager.md`
+- Informationsschreiben (teilw. aktualisiert): `docs/vorlagen/informationsschreiben_lernmanager.md`
+
+### Klarnamen vom Server entfernen ← geplant, noch nicht implementiert
+Plan: `~/.claude/plans/composed-greeting-boot.md`
+- [ ] `migrate_009_remove_real_names.py` erstellen + auf Server laufen lassen
+- [ ] `models.py`: vorname/nachname aus Schema + 7 Model-Funktionen entfernen
+- [ ] `app.py`: Session-Key, Flash-Messages, Batch-Erstellung, PDF-Dateinamen
+- [ ] 5 Admin-Templates + `base.html` + `dashboard.html`: username statt Klarname
+- [ ] `utils.py` + `anonymize_db.py` anpassen
+- [ ] DSGVO-Docs finalisieren (Informationsschreiben + Risikotabelle)
+
+### Rechtliche Schritte
 - [ ] Informationsschreiben vom DSB der Schule prüfen lassen
 - [ ] Verarbeitungsverzeichnis aktualisieren
 - [ ] Genehmigung der Schulleitung einholen
-- [ ] AV-Vertrag mit VPS-Hoster prüfen/abschließen
+- [ ] AV-Vertrag mit Strato AG prüfen/abschließen
 - [ ] Landesspezifische Schuldatenschutzverordnung prüfen
 
 ## Deploy / Ops

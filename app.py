@@ -422,7 +422,7 @@ def admin_klasse_sidequest_zuweisen(klasse_id):
 @admin_required
 def admin_klasse_lernpfad(klasse_id):
     lernpfad = request.form.get('lernpfad')
-    if lernpfad not in ('wanderweg', 'bergweg', 'gipfeltour'):
+    if lernpfad not in ('wanderweg', 'bergweg', 'gipfeltour', 'seilbahn'):
         flash('Ungültiger Lernpfad.', 'danger')
         return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id))
     models.set_class_lernpfad(klasse_id, lernpfad)
@@ -509,7 +509,7 @@ def admin_schueler_passwort_reset(student_id):
 @admin_required
 def admin_schueler_lernpfad(student_id):
     lernpfad = request.form.get('lernpfad')
-    if lernpfad not in ('wanderweg', 'bergweg', 'gipfeltour'):
+    if lernpfad not in ('wanderweg', 'bergweg', 'gipfeltour', 'seilbahn'):
         flash('Ungültiger Lernpfad.', 'danger')
         return redirect(url_for('admin_schueler_detail', student_id=student_id))
     models.update_student_setting(student_id, 'lernpfad', lernpfad)
@@ -640,7 +640,7 @@ def _build_topic_preview(task_data):
     """Build a preview dict for one topic from import JSON."""
     task = task_data['task']
     subtasks = task.get('subtasks', [])
-    path_counts = {'wanderweg': 0, 'bergweg': 0, 'gipfeltour': 0}
+    path_counts = {'wanderweg': 0, 'bergweg': 0, 'gipfeltour': 0, 'seilbahn': 0}
     for s in subtasks:
         p = s.get('path', 'bergweg')
         if p in path_counts:

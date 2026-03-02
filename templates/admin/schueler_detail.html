@@ -8,6 +8,7 @@
         {% if student.lernpfad == 'wanderweg' %}<span class="badge" style="background: #dcfce7; color: #166534; font-size: 0.5em; vertical-align: middle;">🟢 Wanderweg</span>
         {% elif student.lernpfad == 'bergweg' %}<span class="badge" style="background: #dbeafe; color: #1e40af; font-size: 0.5em; vertical-align: middle;">🔵 Bergweg</span>
         {% elif student.lernpfad == 'gipfeltour' %}<span class="badge" style="background: #fef3c7; color: #92400e; font-size: 0.5em; vertical-align: middle;">⭐ Gipfeltour</span>
+        {% elif student.lernpfad == 'seilbahn' %}<span class="badge" style="background: #f3e8ff; color: #6b21a8; font-size: 0.5em; vertical-align: middle;">🚡 Seilbahn</span>
         {% else %}<span class="badge" style="background: #f3f4f6; color: #6b7280; font-size: 0.5em; vertical-align: middle;">Kein Pfad</span>
         {% endif %}
     </h1>
@@ -63,6 +64,7 @@
                 <option value="wanderweg" {% if current_path == 'wanderweg' %}selected{% endif %}>🟢 Wanderweg — Grundlagen</option>
                 <option value="bergweg" {% if current_path == 'bergweg' %}selected{% endif %}>🔵 Bergweg — Vollständig</option>
                 <option value="gipfeltour" {% if current_path == 'gipfeltour' %}selected{% endif %}>⭐ Gipfeltour — Alles</option>
+                <option value="seilbahn" {% if current_path == 'seilbahn' %}selected{% endif %}>🚡 Seilbahn — Einfache Sprache</option>
             </select>
             <button type="submit" class="btn btn-primary">Speichern</button>
         </form>

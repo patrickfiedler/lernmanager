@@ -113,7 +113,7 @@ def init_db():
                 vorname TEXT NOT NULL,
                 username TEXT UNIQUE NOT NULL,
                 password_hash TEXT NOT NULL,
-                lernpfad TEXT DEFAULT 'bergweg'  -- wanderweg/bergweg/gipfeltour
+                lernpfad TEXT DEFAULT 'bergweg'  -- wanderweg/bergweg/gipfeltour/seilbahn
             );
 
             -- Student-Class relationship (many-to-many)
@@ -194,7 +194,7 @@ def init_db():
                 reihenfolge INTEGER NOT NULL DEFAULT 0,
                 estimated_minutes INTEGER,
                 quiz_json TEXT,  -- per-subtask quiz JSON
-                path TEXT,  -- wanderweg/bergweg/gipfeltour (lowest path that includes this task)
+                path TEXT,  -- wanderweg/bergweg/gipfeltour/seilbahn (lowest path that includes this task)
                 path_model TEXT DEFAULT 'skip',  -- skip: lower paths skip; depth: all paths do it
                 graded_artifact_json TEXT,  -- JSON: {keyword, format, rubric}
                 hidden INTEGER DEFAULT 0,  -- 1=hidden from all students (admin override)
@@ -1229,19 +1229,29 @@ def check_wahlpflicht_erfuellt(student_id, klasse_id, gruppe_id):
 # ============ Learning Paths ============
 
 PATH_ORDER = {'wanderweg': 0, 'bergweg': 1, 'gipfeltour': 2}
+VALID_PATHS = set(PATH_ORDER) | {'seilbahn'}
 
 
 def is_subtask_required_for_path(subtask, student_path):
     """Check if a subtask is required for the student's learning path.
 
-    path_model='depth' → always required (all paths do it, different grading)
-    path_model='skip'  → required if subtask's path level <= student's path level
+    Seilbahn is non-cumulative: seilbahn students only do seilbahn tasks;
+    main-path students never see seilbahn tasks as required.
+
+    For main paths (wanderweg/bergweg/gipfeltour):
+      path_model='depth' → always required (all paths do it, different grading)
+      path_model='skip'  → required if subtask's path level <= student's path level
     """
-    if not student_path or student_path not in PATH_ORDER:
+    if not student_path or student_path not in VALID_PATHS:
         return True  # No path set → treat all as required (legacy)
     subtask_path = subtask.get('path')
+    if student_path == 'seilbahn':
+        return subtask_path == 'seilbahn'
+    # Main paths: seilbahn tasks are never required
+    if subtask_path == 'seilbahn':
+        return False
     if not subtask_path or subtask_path not in PATH_ORDER:
-        return True  # No path on subtask → required for everyone
+        return True  # No path on subtask → required for all main paths
     if subtask.get('path_model') == 'depth':
         return True
     # 'skip' model: required if subtask path <= student path
@@ -1628,7 +1638,7 @@ def get_visible_subtasks_for_student(student_id, klasse_id, task_id):
         ).fetchone()
         student_path = student_row['lernpfad'] if student_row else None
 
-        if student_path and student_path in PATH_ORDER:
+        if student_path and student_path in VALID_PATHS:
             # Path-based: return all non-hidden subtasks with required flag
             rows = conn.execute('''
                 SELECT * FROM subtask

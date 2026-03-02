@@ -72,9 +72,13 @@
                     <td>
                         {{ topic.subtask_count }} gesamt
                         {% if topic.path_counts %}
+                        {% if topic.path_counts.seilbahn %}
+                        (🚡 {{ topic.path_counts.seilbahn }})
+                        {% else %}
                         (🟢 {{ topic.path_counts.wanderweg }}
                         / 🔵 {{ topic.path_counts.bergweg }}
                         / ⭐ {{ topic.path_counts.gipfeltour }})
+                        {% endif %}
                         {% endif %}
                     </td>
                 </tr>
