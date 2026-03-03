@@ -107,7 +107,7 @@ def validate_task_structure(data):
         errors.append("Invalid kategorie. Must be 'pflicht' or 'bonus'")
 
     # Validate subtasks
-    VALID_PATHS = ('wanderweg', 'bergweg', 'gipfeltour')
+    VALID_PATHS = ('wanderweg', 'bergweg', 'gipfeltour', 'seilbahn')
     VALID_PATH_MODELS = ('skip', 'depth')
     if 'subtasks' in task:
         if not isinstance(task['subtasks'], list):
