@@ -10,24 +10,28 @@
     {% else %}
     <h1>💪 Fast geschafft!</h1>
     <p style="font-size: 1.5rem;">Du hast {{ punkte }} von {{ max_punkte }} Punkten erreicht.</p>
-    {% set prozent = ((punkte / max_punkte) * 100)|int %}
+    {% if ever_passed %}
+    <div class="alert alert-success" style="margin-top: 1rem;">✅ Du hast dieses Quiz bereits bestanden — dieser Durchlauf zählt nur als Übung.</div>
+    {% else %}
     {% set min_richtig = [1, (max_punkte * 0.7)|int]|max %}
     <p>Du brauchst mindestens {{ min_richtig }} von {{ max_punkte }} richtigen Antworten zum Bestehen.</p>
-    {% if previous_attempt %}
-        {% set previous_prozent = ((previous_attempt.punkte / previous_attempt.max_punkte) * 100)|int %}
-        {% if prozent > previous_prozent %}
-        <div class="alert alert-success" style="margin-top: 1rem;">
-            ⭐ Du wirst besser! Beim letzten Mal: {{ previous_attempt.punkte }}/{{ previous_attempt.max_punkte }} ({{ previous_prozent }}%).
-            Jetzt: {{ punkte }}/{{ max_punkte }} ({{ prozent }}%). Weiter so! 💪
-        </div>
-        {% elif prozent == previous_prozent %}
-        <div class="alert alert-info" style="margin-top: 1rem;">
-            Du hast die gleiche Punktzahl wie beim letzten Mal. Schau dir die Antworten unten an und versuche es noch einmal!
-        </div>
-        {% endif %}
-    {% else %}
-        <p style="margin-top: 0.5rem; color: #374151;">Du kannst es so oft versuchen, wie du möchtest — schau dir die richtigen Antworten unten an und versuch es nochmal. Du schaffst das! 🚀</p>
     {% endif %}
+    {% endif %}
+    {% if previous_attempt %}
+    {% set prozent = ((punkte / max_punkte) * 100)|int %}
+    {% set previous_prozent = ((previous_attempt.punkte / previous_attempt.max_punkte) * 100)|int %}
+    {% if prozent > previous_prozent %}
+    <div class="alert alert-success" style="margin-top: 1rem;">
+        ⭐ Du wirst besser! Beim letzten Mal: {{ previous_attempt.punkte }}/{{ previous_attempt.max_punkte }} ({{ previous_prozent }}%).
+        Jetzt: {{ punkte }}/{{ max_punkte }} ({{ prozent }}%). Weiter so! 💪
+    </div>
+    {% elif prozent == previous_prozent and not bestanden and not ever_passed %}
+    <div class="alert alert-info" style="margin-top: 1rem;">
+        Du hast die gleiche Punktzahl wie beim letzten Mal. Schau dir die Antworten unten an und versuche es noch einmal!
+    </div>
+    {% endif %}
+    {% elif not bestanden and not ever_passed %}
+    <p style="margin-top: 0.5rem; color: #374151;">Du kannst es so oft versuchen, wie du möchtest — schau dir die richtigen Antworten unten an und versuch es nochmal. Du schaffst das! 🚀</p>
     {% endif %}
 </div>
 
@@ -80,10 +84,11 @@
 </div>
 
 <div>
-    {% if not bestanden %}
+    {% if not bestanden and not ever_passed %}
     <a href="{% if position %}{{ url_for('student_quiz_subtask', slug=slug, position=position) }}{% else %}{{ url_for('student_quiz', slug=slug) }}{% endif %}" class="btn btn-primary btn-block btn-lg">🔄 Erneut versuchen</a>
     <a href="{{ url_for('student_klasse', slug=slug, aufgabe=position) if position else url_for('student_klasse', slug=slug) }}" class="btn btn-secondary mt-1" style="display: inline-block;">← Zurück zur Aufgabe</a>
-    {% elif position and next_position is defined and next_position %}
+    {% else %}
+    {% if position and next_position is defined and next_position %}
     <a href="{{ url_for('student_klasse', slug=slug, aufgabe=next_position) }}" class="btn btn-primary btn-block btn-lg">Zur nächsten Aufgabe →</a>
     {% elif task.quiz_json and not quiz_bestanden %}
     <a href="{{ url_for('student_quiz', slug=slug) }}" class="btn btn-primary btn-block btn-lg">Zum Themen-Quiz →</a>
@@ -96,6 +101,8 @@
     </form>
     {% else %}
     <a href="{{ url_for('student_klasse', slug=slug, aufgabe=position) if position else url_for('student_klasse', slug=slug) }}" class="btn btn-primary btn-block btn-lg">Zum Thema →</a>
+    {% endif %}
+    <a href="{% if position %}{{ url_for('student_quiz_subtask', slug=slug, position=position) }}{% else %}{{ url_for('student_quiz', slug=slug) }}{% endif %}" class="btn btn-secondary mt-1" style="display: inline-block;">🔄 Nochmal üben</a>
     {% endif %}
 </div>
 {% endblock %}

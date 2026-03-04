@@ -1887,11 +1887,12 @@ def student_quiz_result(slug):
         return redirect(url_for('student_klasse', slug=slug))
 
     latest = attempts[0]
+    ever_passed = any(a['bestanden'] for a in attempts)
     quiz = json.loads(task['quiz_json'])
     antworten = json.loads(latest['antworten_json']) if latest['antworten_json'] else {}
 
     next_topic = None
-    if latest['bestanden'] and klasse:
+    if ever_passed and klasse:
         next_topic = models.get_next_queued_topic(klasse['id'], task['task_id'])
 
     display_quiz, antworten = _apply_question_order(_build_display_quiz(quiz), antworten)
@@ -1900,9 +1901,10 @@ def student_quiz_result(slug):
                            quiz=display_quiz,
                            punkte=latest['punkte'], max_punkte=latest['max_punkte'],
                            bestanden=latest['bestanden'], antworten=antworten,
+                           ever_passed=ever_passed,
                            previous_attempt=attempts[1] if len(attempts) > 1 else None,
                            slug=slug, position=None,
-                           quiz_bestanden=latest['bestanden'],
+                           quiz_bestanden=ever_passed,
                            next_topic=next_topic, klasse=klasse)
 
 
@@ -1936,6 +1938,7 @@ def student_quiz_result_subtask(slug, position):
         return redirect(url_for('student_klasse', slug=slug))
 
     latest = attempts[0]
+    ever_passed = models.has_passed_subtask_quiz(task['id'], subtask['id'])
     with models.db_session() as conn:
         subtask_row = conn.execute("SELECT quiz_json FROM subtask WHERE id = ?", (subtask['id'],)).fetchone()
 
@@ -1952,6 +1955,7 @@ def student_quiz_result_subtask(slug, position):
                            quiz=display_quiz,
                            punkte=latest['punkte'], max_punkte=latest['max_punkte'],
                            bestanden=latest['bestanden'], antworten=antworten,
+                           ever_passed=ever_passed,
                            previous_attempt=attempts[1] if len(attempts) > 1 else None,
                            slug=slug, position=position,
                            next_position=next_position,
