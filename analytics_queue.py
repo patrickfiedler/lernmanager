@@ -22,6 +22,7 @@ import sys
 import time
 import atexit
 from contextlib import contextmanager
+from datetime import datetime
 
 # Thread-safe queue for events
 # maxsize=1000 prevents memory issues if disk becomes very slow
@@ -56,7 +57,8 @@ def enqueue_event(event_type, user_id=None, user_type=None, metadata=None):
             'event_type': event_type,
             'user_id': user_id,
             'user_type': user_type,
-            'metadata': metadata_json
+            'metadata': metadata_json,
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         })
         return True
     except queue.Full:
@@ -137,10 +139,10 @@ def background_worker():
                 try:
                     with db_connection() as conn:
                         conn.executemany('''
-                            INSERT INTO analytics_events (event_type, user_id, user_type, metadata)
-                            VALUES (?, ?, ?, ?)
+                            INSERT INTO analytics_events (event_type, user_id, user_type, metadata, timestamp)
+                            VALUES (?, ?, ?, ?, ?)
                         ''', [
-                            (e['event_type'], e['user_id'], e['user_type'], e['metadata'])
+                            (e['event_type'], e['user_id'], e['user_type'], e['metadata'], e['timestamp'])
                             for e in events
                         ])
 
