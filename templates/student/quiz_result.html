@@ -14,7 +14,7 @@
     <div class="alert alert-success" style="margin-top: 1rem;">✅ Du hast dieses Quiz bereits bestanden — dieser Durchlauf zählt nur als Übung.</div>
     {% else %}
     {% set min_richtig = [1, (max_punkte * 0.7)|int]|max %}
-    <p>Du brauchst mindestens {{ min_richtig }} von {{ max_punkte }} richtigen Antworten zum Bestehen.</p>
+    <p>{{ min_richtig }} von {{ max_punkte }} richtig = bestanden.</p>
     {% endif %}
     {% endif %}
     {% if previous_attempt %}

@@ -193,10 +193,10 @@ def login():
                 user_type='student',
                 metadata={'username': student['username']}
             )
-            flash(f'Willkommen, {student["vorname"]}! 👋', 'success')
+            flash(f'Willkommen, {student["username"]}! 👋', 'success')
             return redirect(url_for('student_warmup'))
 
-        flash('Ungültiger Benutzername oder Passwort.', 'danger')
+        flash('Benutzername oder Passwort stimmt nicht.', 'danger')
 
     return render_template('login.html')
 
@@ -1883,7 +1883,7 @@ def student_quiz_result(slug):
 
     attempts = models.get_quiz_attempts(task['id'])
     if not attempts:
-        flash('Noch kein Quiz-Ergebnis vorhanden.', 'warning')
+        flash('Du hast dieses Quiz noch nicht gemacht.', 'warning')
         return redirect(url_for('student_klasse', slug=slug))
 
     latest = attempts[0]
@@ -1934,7 +1934,7 @@ def student_quiz_result_subtask(slug, position):
 
     attempts = models.get_quiz_attempts(task['id'], subtask_id=subtask['id'])
     if not attempts:
-        flash('Noch kein Quiz-Ergebnis vorhanden.', 'warning')
+        flash('Du hast dieses Quiz noch nicht gemacht.', 'warning')
         return redirect(url_for('student_klasse', slug=slug))
 
     latest = attempts[0]
@@ -1983,25 +1983,25 @@ def student_start_next_topic():
     klasse_id = request.form.get('klasse_id', type=int)
 
     if not task_id or not klasse_id:
-        flash('Ungültige Anfrage.', 'danger')
+        flash('Da ist etwas schiefgelaufen. Bitte die Seite neu laden.', 'danger')
         return redirect(url_for('student_dashboard'))
 
     # Validate: student is in this class
     klassen = models.get_student_klassen(student_id)
     if not any(k['id'] == klasse_id for k in klassen):
-        flash('Klasse nicht gefunden.', 'danger')
+        flash('Da ist etwas schiefgelaufen. Bitte die Seite neu laden.', 'danger')
         return redirect(url_for('student_dashboard'))
 
     # Validate: task_id is in the class queue
     queue = models.get_topic_queue(klasse_id)
     if not any(q['task_id'] == task_id for q in queue):
-        flash('Thema nicht in der Reihenfolge.', 'danger')
+        flash('Dieses Thema ist noch nicht dran.', 'danger')
         return redirect(url_for('student_dashboard'))
 
     # Get task name for flash message and redirect
     task = models.get_task(task_id)
     if not task:
-        flash('Thema nicht gefunden.', 'danger')
+        flash('Da ist etwas schiefgelaufen. Bitte die Seite neu laden.', 'danger')
         return redirect(url_for('student_dashboard'))
 
     models.assign_task_to_student(student_id, klasse_id, task_id)
@@ -2286,7 +2286,7 @@ def handle_bad_request(error):
         method=request.method,
         url=request.url
     )
-    flash('Ungültige Anfrage.', 'warning')
+    flash('Da ist etwas schiefgelaufen. Bitte die Seite neu laden.', 'warning')
     return redirect(request.referrer or url_for('index'))
 
 
