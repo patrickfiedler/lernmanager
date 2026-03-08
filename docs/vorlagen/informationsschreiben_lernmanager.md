@@ -42,24 +42,42 @@ Die Verarbeitung erfolgt auf Grundlage von **Art. 6 Abs. 1 lit. e DSGVO** in Ver
 
 | Datenkategorie | Beschreibung |
 |---|---|
-| Pseudonymisierter Benutzername | Automatisch generiert (z.B. „happypanda"), kein Bezug zum Klarnamen |
-| Lernfortschritt | Bearbeitete Aufgaben, Ergebnisse von Lernzielkontrollen |
-| Aktivitätsprotokoll | Zeitpunkte der Nutzung (ohne Klarnamen) |
+| Vor- und Nachname | Zur Identifikation durch die Lehrkraft erforderlich |
+| Pseudonymisierter Benutzername | Automatisch generiert (z.B. „happypanda"), wird für den Login und als Anzeigename verwendet |
+| Lernfortschritt | Bearbeitete Aufgaben, Ergebnisse von Übungsquizzes (nicht benotet) |
+| Übungshistorie | Ergebnisse von Wiederholungsübungen (Warmup / Spaced Repetition), gespeichert pro Frage und Schüler |
+| Lernpfad | Zugewiesene Schwierigkeitsstufe (von der Lehrkraft vergeben) |
+| Aktivitätsprotokoll | Zeitpunkte der Nutzung |
 
-**Klarnamen** (Vor- und Nachname) werden **nicht** auf dem Server der Lernplattform gespeichert. Die Zuordnung von Pseudonym zu Klarname erfolgt ausschließlich lokal auf dem verschlüsselten Dienstgerät der Lehrkraft und wird nur bei Bedarf (z.B. für Zeugnisse oder Elterngespräche) herangezogen.
+Vor- und Nachname werden auf dem Server gespeichert, da die Lehrkraft die Lernwege und optionalen Aufgaben einzelnen Schülerinnen und Schülern zuweisen muss. Die Speicherung erfolgt auf Grundlage des schulischen Bildungsauftrags (Art. 6 Abs. 1 lit. e DSGVO). Schülerinnen und Schüler melden sich mit ihrem Pseudonym an; der Klarname erscheint nur in der Verwaltungsansicht der Lehrkraft.
 
-### 5. Automatisierte Bewertung von Freitextantworten
+### 5. Automatisierte Auswertung durch KI
 
-Für bestimmte Aufgabentypen (Lückentext, Kurzantwort) wird eine automatisierte Bewertung eingesetzt. Dabei werden **ausschließlich die Aufgabenstellung und die Schülerantwort** — ohne jeglichen Personenbezug — an einen externen Dienst (Anthropic, USA) übermittelt.
+#### 5a. Automatisierte Bewertung von Freitextantworten (Quiz)
+
+Für bestimmte Aufgabentypen (Lückentext, Kurzantwort) wird eine automatisierte Auswertung eingesetzt. Dabei werden **ausschließlich die Aufgabenstellung und die Schülerantwort** — ohne jeglichen Personenbezug — an einen externen KI-Dienst (OVHcloud AI Endpoints, Frankreich) übermittelt.
+
+#### 5b. Optionaler KI-Aufgabencheck für digitale Arbeitsergebnisse (sofern aktiviert)
+
+Wenn die Lehrkraft diese Funktion für eine Klasse aktiviert hat, können Schülerinnen und Schüler ihre digitalen Arbeitsergebnisse (z.B. Präsentationen) freiwillig auf Vollständigkeit prüfen lassen. Der Ablauf:
+
+1. Die App extrahiert den Text aus der Datei und entfernt alle erkennbaren Personenangaben (Name → „[Schüler/in]")
+2. Die Schülerinnen und Schüler sehen eine **Vorschau** des übermittelten Textes, bevor etwas gesendet wird
+3. Erst nach der Bestätigung wird der anonymisierte Text an einen KI-Dienst übermittelt
+4. Die Originaldatei wird nicht gespeichert; nur das Ergebnis (Kriterien erfüllt: Ja/Nein) wird festgehalten
+5. Die KI gibt eine Rückmeldung zur Vollständigkeit — die Note setzt ausschließlich die Lehrkraft
+
+Der KI-Dienst wird bei einem deutschen oder europäischen Anbieter betrieben (kein US-amerikanischer Dienst). Die Daten werden nicht für das Training von KI-Modellen verwendet. Die Verarbeitung erfolgt auf Grundlage von Art. 6 Abs. 1 lit. e DSGVO (Bildungsauftrag). Eltern und Erziehungsberechtigte können der Nutzung dieser Funktion für ihr Kind jederzeit widersprechen (Art. 21 DSGVO) — wenden Sie sich dazu an die Lehrkraft.
 
 - Es werden **keine** Namen, Pseudonyme, Klassenzugehörigkeiten oder sonstige personenbezogene Daten übermittelt
 - Die übermittelten Daten sind **vollständig anonym** und unterliegen daher nicht der DSGVO (Erwägungsgrund 26)
+- OVHcloud ist ein EU-Unternehmen mit Serverstandort in Frankreich — keine Drittlandübermittlung
 - Der Dienst wird nicht mit Schülerdaten trainiert
 
 ### 6. Speicherung und Löschung
 
-- Daten werden auf einem verschlüsselten Server in [Standort des Hosters, z.B. „Deutschland" / „EU"] gespeichert
-- Die Datenbank ist zusätzlich mit SQLCipher verschlüsselt
+- Daten werden auf einem Server von Strato AG gespeichert (Rechenzentren in Deutschland und der EU)
+- Serverzugriff ausschließlich durch die zuständige Lehrkraft
 - Daten werden am Ende des Schuljahres gelöscht, sofern kein berechtigtes Aufbewahrungsinteresse besteht
 - Die Zuordnungsdatei auf dem Lehrergerät wird nach Abschluss der Notenvergabe gelöscht
 
@@ -67,8 +85,8 @@ Für bestimmte Aufgabentypen (Lückentext, Kurzantwort) wird eine automatisierte
 
 | Empfänger | Zweck | Grundlage |
 |---|---|---|
-| Hosting-Anbieter ([Name]) | Serverbetrieb | AV-Vertrag gem. Art. 28 DSGVO |
-| Anthropic (nur anonyme Daten) | Automatische Bewertung | Keine personenbezogenen Daten — DSGVO nicht anwendbar |
+| Strato AG | Serverbetrieb | AV-Vertrag gem. Art. 28 DSGVO |
+| OVHcloud (nur anonyme Daten) | Automatische Auswertung von Übungsantworten | Keine personenbezogenen Daten — DSGVO nicht anwendbar |
 
 Darüber hinaus werden keine Daten an Dritte weitergegeben.
 

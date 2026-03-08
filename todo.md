@@ -2,9 +2,7 @@
 
 ## High Priority
 
-- **UX fixes (P0–P7) + fertig_wenn** — deployed 2026-02-23. P4 dot legend TODO(human) still pending before deploying. `fertig_wenn` feature implemented (migration + UI), needs deployment.
-- **P4: Dot legend** — TODO(human) in `klasse.html` — waiting for implementation before deploying
-- **Deploy**: run `migrate_006_add_fertig_wenn.py` on server before deploying code
+- **Deploy**: run `migrate_009_artifact_feedback.py` on server before deploying Phase 2 (artifact feedback)
 - ~~Code Review / Admin simplification~~ → analysis done (`docs/2026-02-13_admin_simplification_analysis.md`), integrated into combined plan
 - ~~Phase 0 cleanup~~ → removed dead `current_subtask_id` system, debug prints, raw SQL in routes, added `subtask_visibility` to `init_db()`
 
@@ -42,7 +40,7 @@
 Combined plan: `~/.claude/plans/fuzzy-wiggling-unicorn.md`
 Spec: `docs/2026-02-13_lernmanager_curriculum_spec.md`
 
-Three cumulative paths: 🟢 Wanderweg ⊂ 🔵 Bergweg ⊂ ⭐ Gipfeltour. Implemented:
+Three cumulative paths: 🟢 Wanderweg ⊂ 🔵 Bergweg ⊂ ⭐ Gipfeltour. Plus 🚡 Seilbahn (non-cumulative, parallel). Implemented:
 - [x] DB columns: `subtask.path`, `subtask.path_model`, `subtask.hidden`, `student.lernpfad`
 - [x] Path-based completion logic (`is_subtask_required_for_path()`)
 - [x] Student path selection (Settings page, bidirectional)
@@ -51,8 +49,9 @@ Three cumulative paths: 🟢 Wanderweg ⊂ 🔵 Bergweg ⊂ ⭐ Gipfeltour. Impl
 - [x] Import/export: path fields validated and round-tripped
 - [x] Removed old visibility management (4 routes, 6 model functions, 421-line template)
 - [x] Simplified admin class/student detail pages
+- [x] Seilbahn (Einfache Sprache): non-cumulative fourth path, `VALID_PATHS` isolation (`2d71cef`)
 
-Future: per-topic path override, graded artifact UI, spaced repetition
+Future: per-topic path override, graded artifact UI
 
 ## Topic Queue (Implemented — Phase 4 Done)
 
@@ -65,15 +64,34 @@ Optional per-class topic ordering for self-paced progression.
 
 Future: drag-and-drop reordering, queue auto-suggestions
 
-## Artifact Feedback + Step Checkboxes (Planned)
+## Artifact Feedback (Decisions confirmed, ready to implement)
 
 Design plan: `docs/2026-02-24_artifact_feedback_plan.md`
+Implementation plan: `~/.claude/plans/artifact-feedback-impl.md`
 
-- [ ] Per-step checkboxes in task descriptions (JS + new step_state DB table)
-- [ ] Per-task artifact upload with formative LLM checklist feedback (no gating, no score)
-- [ ] Growing rubric authoring convention (task N = task N-1 criteria + new)
-- [ ] Admin capstone review + manual grade entry
-- [ ] Rubric format change: scoring rubric → checklist criteria in `graded_artifact_json`
+**Phase 1 — Infrastructure: ✅ DONE**
+- [✅] `migrate_009_artifact_feedback.py` — run locally 2026-03-04
+- [✅] `artifact_processor.py` — pptx/odp extraction + anonymization
+- [✅] `llm_grading.py` — `grade_artifact_checklist()` + prompt
+
+**Phase 2 — Student upload flow: ✅ DONE**
+- [✅] Routes: `POST /artefakt/vorschau` + `POST /artefakt/feedback`
+- [✅] Task page UI: upload widget + preview + checklist (AJAX)
+- [✅] Admin: per-class toggle (`klasse_detail.html`) + student feedback history (`schueler_detail.html`)
+
+**Testing & polish (session 2026-03-04): ✅ DONE**
+- [✅] End-to-end test with real .odp file — filename fix, timeout fix, Einfache Sprache prompt
+- [✅] UI: split green box (checkbox left / KI-Check right), button loading state, completeness hint
+- [✅] Rate limiting: 10 artifact checks/hour, separate from quiz counter, warning at ≤3 remaining
+- [✅] OVHcloud pricing documented in config.py (~€0.0002–0.0004/call)
+- [✅] Criteria fix: accept .pptx or .odp in filename criterion (all 8 occurrences)
+
+**Next steps:**
+- [ ] **Deploy** (BLOCKER): run `migrate_009` on server + push code + `update.sh`
+- [ ] Other units: add `criteria` arrays to catchup_B, kapitel_01, kapitel_02
+
+**DSGVO before enabling for any class:** AV-Vertrag (IONOS or OVHcloud) + Informationsschreiben sent + Verarbeitungsverzeichnis updated
+**Benchmark needed:** IONOS GPT-OSS 120B vs Mistral Small 24B vs OVHcloud Qwen3-32B on Unit 4 rubric
 
 ## Graded Artifacts (DB Ready, UI Pending)
 
@@ -126,16 +144,9 @@ Login warm-up (2-4 questions) + dedicated practice mode. Low-stakes, skippable.
 
 See `docs/research/2026-02-07_learning_paths_and_quiz_evolution.md` (Section 5)
 - Rechtsgrundlage: Bildungsauftrag (Art. 6 Abs. 1 lit. e), keine Einwilligung nötig
-- Informationsschreiben (teilw. aktualisiert): `docs/vorlagen/informationsschreiben_lernmanager.md`
-
-### Klarnamen vom Server entfernen ← geplant, noch nicht implementiert
-Plan: `~/.claude/plans/composed-greeting-boot.md`
-- [ ] `migrate_009_remove_real_names.py` erstellen + auf Server laufen lassen
-- [ ] `models.py`: vorname/nachname aus Schema + 7 Model-Funktionen entfernen
-- [ ] `app.py`: Session-Key, Flash-Messages, Batch-Erstellung, PDF-Dateinamen
-- [ ] 5 Admin-Templates + `base.html` + `dashboard.html`: username statt Klarname
-- [ ] `utils.py` + `anonymize_db.py` anpassen
-- [ ] DSGVO-Docs finalisieren (Informationsschreiben + Risikotabelle)
+- Klarnamen werden gespeichert (notwendig für Lernpfad-Zuweisung und Verwaltung) — kein DSGVO-Problem, da Rechtsgrundlage gegeben
+- Informationsschreiben aktualisiert: `docs/vorlagen/informationsschreiben_lernmanager.md`
+- [✅] Student views (nav, dashboard, welcome flash) show pseudonym (`username`), not real name — commits `c682129`, `0edaa53`
 
 ### Rechtliche Schritte
 - [ ] Informationsschreiben vom DSB der Schule prüfen lassen

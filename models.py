@@ -2973,16 +2973,95 @@ def set_bool_setting(key, value):
 # ============ LLM Usage Tracking ============
 
 def check_llm_rate_limit(student_id):
-    """Check if student is within their hourly LLM call limit.
+    """Check if student is within their hourly quiz/warmup LLM call limit.
 
     Returns True if calls are allowed, False if rate limit exceeded.
+    Artifact checks use a separate counter (check_artifact_rate_limit).
     """
     with db_session() as conn:
         row = conn.execute(
-            "SELECT COUNT(*) as cnt FROM llm_usage WHERE student_id = ? AND timestamp > datetime('now', '-1 hour')",
+            "SELECT COUNT(*) as cnt FROM llm_usage "
+            "WHERE student_id = ? AND question_type != 'artifact_feedback' "
+            "AND timestamp > datetime('now', '-1 hour')",
             (student_id,)
         ).fetchone()
         return row['cnt'] < config.LLM_MAX_CALLS_PER_STUDENT_PER_HOUR
+
+
+def get_artifact_checks_remaining(student_id):
+    """Return how many artifact KI-Checks the student can still do this hour."""
+    with db_session() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) as cnt FROM llm_usage "
+            "WHERE student_id = ? AND question_type = 'artifact_feedback' "
+            "AND timestamp > datetime('now', '-1 hour')",
+            (student_id,)
+        ).fetchone()
+        return max(0, config.LLM_MAX_ARTIFACT_CHECKS_PER_STUDENT_PER_HOUR - row['cnt'])
+
+
+# --- Artifact feedback ---
+
+def save_artifact_feedback(student_id, subtask_id, feedback_list, timezone='Europe/Berlin'):
+    """Store one LLM checklist result. Each upload creates a new row (history preserved)."""
+    timestamp_local = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
+    with db_session() as conn:
+        conn.execute(
+            "INSERT INTO artifact_feedback (student_id, subtask_id, timestamp_local, timezone, feedback_json) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (student_id, subtask_id, timestamp_local, timezone, json.dumps(feedback_list))
+        )
+
+
+def get_artifact_feedback(student_id, subtask_id):
+    """Return the most recent feedback row for a student+subtask, or None."""
+    with db_session() as conn:
+        row = conn.execute(
+            "SELECT id, timestamp_local, timezone, feedback_json FROM artifact_feedback "
+            "WHERE student_id = ? AND subtask_id = ? ORDER BY id DESC LIMIT 1",
+            (student_id, subtask_id)
+        ).fetchone()
+    if not row:
+        return None
+    return {
+        'id': row[0],
+        'timestamp_local': row[1],
+        'timezone': row[2],
+        'feedback': json.loads(row[3]),
+    }
+
+
+def get_all_artifact_feedback_for_student(student_id):
+    """Return all artifact_feedback rows for a student, newest first, enriched with subtask name."""
+    with db_session() as conn:
+        rows = conn.execute(
+            "SELECT af.id, af.timestamp_local, af.timezone, af.feedback_json, "
+            "       s.beschreibung, af.subtask_id "
+            "FROM artifact_feedback af "
+            "JOIN subtask s ON s.id = af.subtask_id "
+            "WHERE af.student_id = ? ORDER BY af.id DESC",
+            (student_id,)
+        ).fetchall()
+    return [
+        {
+            'id': r[0],
+            'timestamp_local': r[1],
+            'timezone': r[2],
+            'feedback': json.loads(r[3]),
+            'subtask_beschreibung': r[4],
+            'subtask_id': r[5],
+        }
+        for r in rows
+    ]
+
+
+def set_klasse_llm_feedback(klasse_id, enabled: bool):
+    """Enable or disable LLM artifact feedback for a class."""
+    with db_session() as conn:
+        conn.execute(
+            "UPDATE klasse SET llm_artifact_feedback_enabled = ? WHERE id = ?",
+            (1 if enabled else 0, klasse_id)
+        )
 
 
 def record_llm_usage(student_id, question_type, tokens_used=0):

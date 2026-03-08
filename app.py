@@ -13,6 +13,7 @@ import markdown as md
 import config
 import models
 import llm_grading
+import artifact_processor
 from utils import generate_username, generate_password, allowed_file, generate_credentials_pdf, generate_student_self_report_pdf, slugify
 from import_task import validate_task_structure, check_duplicate, import_task as do_import_task, overwrite_task_from_import, ValidationError
 
@@ -290,6 +291,17 @@ def admin_klasse_detail(klasse_id):
                            has_queue=bool(queue), sidequests=sidequests)
 
 
+@app.route('/admin/klasse/<int:klasse_id>/llm-feedback', methods=['POST'])
+@admin_required
+def admin_klasse_llm_feedback_toggle(klasse_id):
+    """Toggle LLM artifact feedback for a class."""
+    enabled = request.form.get('enabled') == '1'
+    models.set_klasse_llm_feedback(klasse_id, enabled)
+    state = 'aktiviert' if enabled else 'deaktiviert'
+    flash(f'KI-Artefakt-Feedback {state}.', 'success')
+    return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id))
+
+
 @app.route('/admin/klasse/<int:klasse_id>/loeschen', methods=['POST'])
 @admin_required
 def admin_klasse_loeschen(klasse_id):
@@ -473,12 +485,15 @@ def admin_schueler_detail(student_id):
     for klasse in klassen:
         student_tasks[klasse['id']] = models.get_student_task(student_id, klasse['id'])
 
+    artifact_feedback = models.get_all_artifact_feedback_for_student(student_id)
+
     return render_template('admin/schueler_detail.html',
                            student=student,
                            klassen=klassen,
                            all_klassen=all_klassen,
                            tasks=tasks,
-                           student_tasks=student_tasks)
+                           student_tasks=student_tasks,
+                           artifact_feedback=artifact_feedback)
 
 
 @app.route('/admin/schueler/<int:student_id>/loeschen', methods=['POST'])
@@ -1591,6 +1606,16 @@ def student_klasse(slug):
     if task and task.get('abgeschlossen'):
         next_topic = models.get_next_queued_topic(klasse_id, task['task_id'])
 
+    # Parse graded_artifact_json for the active subtask (criteria-based upload widget)
+    graded_artifact = None
+    if current_subtask and current_subtask.get('graded_artifact_json'):
+        try:
+            ga = json.loads(current_subtask['graded_artifact_json'])
+            if ga.get('criteria') and klasse and klasse.get('llm_artifact_feedback_enabled'):
+                graded_artifact = ga
+        except (json.JSONDecodeError, TypeError):
+            pass
+
     return render_template('student/klasse.html',
                            student=student,
                            klasse=klasse,
@@ -1604,6 +1629,7 @@ def student_klasse(slug):
                            subtask_quiz_status=subtask_quiz_status,
                            quiz_bestanden=quiz_bestanden,
                            next_topic=next_topic,
+                           graded_artifact=graded_artifact,
                            student_path=student.get('lernpfad') if student else None)
 
 
@@ -1663,6 +1689,127 @@ def student_toggle_subtask(slug, position):
         return jsonify({'status': 'ok', 'task_complete': True})
 
     return jsonify({'status': 'ok', 'task_complete': False})
+
+
+@app.route('/schueler/thema/<slug>/aufgabe-<int:position>/artefakt/vorschau', methods=['POST'])
+@student_required
+def student_artifact_preview(slug, position):
+    """Step 1: receive upload, extract text, return preview. No LLM, no DB write."""
+    student_id = session['student_id']
+    task, klasse = _resolve_student_topic(student_id, slug)
+    if not task:
+        return jsonify({'error': 'Thema nicht gefunden'}), 404
+
+    all_subtasks = models.get_student_subtask_progress(task['id'])
+    visible = models.get_visible_subtasks_for_student(student_id, klasse['id'], task['task_id'])
+    visible_ids = {s['id'] for s in visible}
+    subtasks = [st for st in all_subtasks if st['id'] in visible_ids]
+    subtask = _resolve_subtask_by_position(subtasks, position)
+    if not subtask:
+        return jsonify({'error': 'Aufgabe nicht gefunden'}), 404
+
+    graded = subtask.get('graded_artifact_json')
+    if not graded:
+        return jsonify({'error': 'Diese Aufgabe hat kein Artefakt-Feedback'}), 400
+    graded = json.loads(graded) if isinstance(graded, str) else graded
+    allowed_formats = [f.lower() for f in graded.get('format', [])]
+
+    f = request.files.get('file')
+    if not f or not f.filename:
+        return jsonify({'error': 'Keine Datei ausgewählt'}), 400
+
+    filename = f.filename
+    ext = ('.' + filename.rsplit('.', 1)[-1].lower()) if '.' in filename else ''
+    if ext not in artifact_processor.ACCEPTED_FORMATS:
+        return jsonify({'error': f'Format {ext} wird nicht unterstützt'}), 400
+    if allowed_formats and ext not in allowed_formats:
+        return jsonify({'error': f'Erwartet: {", ".join(allowed_formats)}'}), 400
+
+    file_bytes = f.read()
+    if ext == '.pptx':
+        file_bytes = artifact_processor.strip_pptx_metadata(file_bytes)
+
+    try:
+        extracted = artifact_processor.extract_artifact(file_bytes, filename)
+    except Exception as e:
+        return jsonify({'error': f'Datei konnte nicht gelesen werden: {e}'}), 400
+
+    student = models.get_student(student_id)
+    full_name = f"{student['vorname']} {student['nachname']}" if student else ''
+    # Prepend filename so LLM can check naming criterion; anonymize together
+    anonymized = artifact_processor.anonymize(f"[Dateiname: {filename}]\n\n{extracted}", full_name)
+
+    return jsonify({
+        'preview_text': anonymized,
+        'filename': filename,
+        'subtask_id': subtask['id'],
+    })
+
+
+@app.route('/schueler/thema/<slug>/aufgabe-<int:position>/artefakt/feedback', methods=['POST'])
+@student_required
+def student_artifact_feedback(slug, position):
+    """Step 2: receive anonymized text, call LLM checklist, store and return result."""
+    student_id = session['student_id']
+    task, klasse = _resolve_student_topic(student_id, slug)
+    if not task:
+        return jsonify({'error': 'Thema nicht gefunden'}), 404
+
+    all_subtasks = models.get_student_subtask_progress(task['id'])
+    visible = models.get_visible_subtasks_for_student(student_id, klasse['id'], task['task_id'])
+    visible_ids = {s['id'] for s in visible}
+    subtasks = [st for st in all_subtasks if st['id'] in visible_ids]
+    subtask = _resolve_subtask_by_position(subtasks, position)
+    if not subtask:
+        return jsonify({'error': 'Aufgabe nicht gefunden'}), 404
+
+    graded = subtask.get('graded_artifact_json')
+    if not graded:
+        return jsonify({'error': 'Keine Kriterienliste für diese Aufgabe'}), 400
+    graded = json.loads(graded) if isinstance(graded, str) else graded
+
+    student = models.get_student(student_id)
+    student_path = (student or {}).get('lernpfad') or 'wanderweg'
+    criteria = _get_criteria_for_path(graded, student_path)
+
+    body = request.get_json(silent=True) or {}
+    anonymized_text = body.get('text', '').strip()
+    if not anonymized_text:
+        return jsonify({'error': 'Kein Text empfangen'}), 400
+
+    # If LLM feedback is disabled for this class, return empty (upload-only mode)
+    if not klasse.get('llm_artifact_feedback_enabled'):
+        return jsonify({'feedback': [], 'llm_disabled': True})
+
+    checks_remaining = models.get_artifact_checks_remaining(student_id)
+    if checks_remaining <= 0:
+        return jsonify({'rate_limited': True}), 429
+
+    feedback = llm_grading.grade_artifact_checklist(anonymized_text, criteria)
+    if feedback:
+        models.save_artifact_feedback(student_id, subtask['id'], feedback)
+        models.record_llm_usage(student_id, 'artifact_feedback', 0)
+
+    checks_remaining = models.get_artifact_checks_remaining(student_id)
+    return jsonify({'feedback': feedback, 'checks_remaining': checks_remaining})
+
+
+def _get_criteria_for_path(graded_artifact, student_path):
+    """Select the best matching criteria array for the student's learning path.
+
+    Cascade: criteria_gipfeltour → criteria_bergweg → criteria (wanderweg baseline).
+    Falls back to the next lower path if the specific array is not defined.
+    """
+    cascade = {
+        'gipfeltour': ['criteria_gipfeltour', 'criteria_bergweg', 'criteria'],
+        'bergweg':    ['criteria_bergweg', 'criteria'],
+        'wanderweg':  ['criteria'],
+        'seilbahn':   ['criteria'],
+    }
+    for key in cascade.get(student_path or 'wanderweg', ['criteria']):
+        if graded_artifact.get(key):
+            return graded_artifact[key]
+    return []
 
 
 def _handle_quiz(student_id, student, task, slug, quiz_json_str, subtask_id=None, position=None):

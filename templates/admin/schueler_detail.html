@@ -144,5 +144,26 @@
     </div>
 </div>
 {% endif %}
+
+<!-- Artifact Feedback History -->
+{% if artifact_feedback %}
+<div class="card mt-2">
+    <div class="card-header">📎 Artefakt-Feedback ({{ artifact_feedback|length }} Uploads)</div>
+    {% for entry in artifact_feedback %}
+    <div style="padding: 0.75rem; border-bottom: 1px solid #e5e7eb;">
+        <div style="font-size: 0.85rem; color: #6b7280; margin-bottom: 0.4rem;">
+            {{ entry.timestamp_local[:16] }} ({{ entry.timezone }}) —
+            Aufgabe #{{ entry.subtask_id }}: {{ entry.subtask_beschreibung[:60] }}{% if entry.subtask_beschreibung|length > 60 %}…{% endif %}
+        </div>
+        {% for item in entry.feedback %}
+        <div style="margin: 0.25rem 0; font-size: 0.9rem; border-left: 3px solid {{ '#10b981' if item.passed else '#ef4444' }}; padding-left: 0.5rem;">
+            {{ '✅' if item.passed else '❌' }} {{ item.criterion }}
+            {% if item.note %}<span style="color:#4b5563;"> — {{ item.note }}</span>{% endif %}
+        </div>
+        {% endfor %}
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
 {% endblock %}
 

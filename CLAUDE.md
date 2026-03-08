@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Lernmanager is a German-language learning progress tracker for schools. It allows teachers (admins) to manage classes, students, and learning topics (Themen), while students can track their progress on assigned tasks (Aufgaben), complete them with quizzes, and take topic-level quizzes.
 
+**Pedagogical foundation**: [Formative Assessment](https://www.bpb.de/lernen/digitale-bildung/werkstatt/255718/formative-assessment-bewerten-um-des-lernens-willen/) — assessment FOR learning. Summary + project mapping: `docs/research/formative_assessment_bpb.md`.
+
 **Repository**: https://github.com/patrickfiedler/lernmanager
 
 ### Shared Decisions
@@ -39,6 +41,9 @@ See `docs/shared/README.md` for structure and how to add new projects.
 
 ### Development
 ```bash
+# Activate venv first
+source venv/bin/activate
+
 # Run development server (port 5000, debug mode)
 python app.py
 
@@ -48,6 +53,7 @@ python run.py
 
 ### Dependencies
 ```bash
+source venv/bin/activate
 pip install -r requirements.txt
 ```
 

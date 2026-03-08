@@ -81,6 +81,28 @@
     </form>
 </div>
 
+<!-- LLM Artifact Feedback Toggle -->
+<div class="card mb-2">
+    <div class="card-header">🤖 KI-Artefakt-Feedback</div>
+    <div style="padding: 0.75rem;">
+        <p style="margin-bottom: 0.75rem; font-size: 0.9rem; color: #4b5563;">
+            Schüler können Dateien hochladen und von der KI auf Kriterien prüfen lassen.
+            Erst aktivieren, wenn alle DSGVO-Voraussetzungen erfüllt sind (AV-Vertrag, Informationsschreiben, DSB-Freigabe).
+        </p>
+        <form method="POST" action="{{ url_for('admin_klasse_llm_feedback_toggle', klasse_id=klasse.id) }}" class="flex gap-1 flex-center">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="enabled" value="{{ '0' if klasse.llm_artifact_feedback_enabled else '1' }}">
+            {% if klasse.llm_artifact_feedback_enabled %}
+            <button type="submit" class="btn btn-danger" onclick="return confirm('KI-Feedback deaktivieren?')">🔴 Deaktivieren</button>
+            <span style="color: #10b981; font-weight: 500;">✅ Aktiviert</span>
+            {% else %}
+            <button type="submit" class="btn btn-secondary" onclick="return confirm('KI-Feedback aktivieren? Nur nach Abschluss aller DSGVO-Schritte.')">Aktivieren</button>
+            <span style="color: #6b7280;">⬜ Deaktiviert</span>
+            {% endif %}
+        </form>
+    </div>
+</div>
+
 <!-- Students List -->
 <div class="card">
     <div class="card-header">👥 Schüler ({{ students|length }})</div>

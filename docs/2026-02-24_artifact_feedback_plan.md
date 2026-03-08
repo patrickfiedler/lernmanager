@@ -1,8 +1,21 @@
 # Artifact Feedback & Step Checkboxes — Design Plan
 
-**Status:** Draft — needs refinement
-**Date:** 2026-02-24
-**Origin:** Design discussion session
+**Status:** Decisions confirmed 2026-03-04
+**Date:** 2026-02-24 | **Updated:** 2026-03-04
+**Origin:** Design discussion session + implementation discussion
+
+## Confirmed Decisions (2026-03-04)
+
+| # | Decision |
+|---|---|
+| 0 | Copy & adapt relevant parts from grading-with-llm into new `artifact_processor.py` (~200 lines). No shared dependency — divergence risk is acceptable for stable extraction code. |
+| 1 | Rubric source: structured `criteria` array in `graded_artifact_json`. Not fertig_wenn prose (too informal for reliable LLM grading). |
+| 2 | Store feedback result (✓/✗ + one sentence per criterion + `timestamp_local` + `timezone`) in `artifact_feedback` table. Original file and extracted text never touch disk. |
+| 3 | File format priority: `.pptx`/`.odp` first (Unit 4 uses these), `.sb3` second, `.docx`/`.odt` third. |
+| 4 | Opt-in: teacher enables per-class toggle. Parents informed via Art. 13 (Informationsschreiben). Objections via Art. 21 Widerspruchsrecht — teacher disables per student in admin. No consent stored in DB. |
+| 5 | LLM backend: benchmark IONOS GPT-OSS 120B (🇩🇪, ~€0.14/mo), IONOS Mistral Small 24B (🇩🇪, ~€0.08/mo), OVHcloud Qwen3-32B (🇫🇷, ~€0.06/mo) on a Unit 4 rubric. IONOS preferred for German school sovereignty. AWS Bedrock EU only as last resort (CLOUD Act risk). |
+
+**Implementation plan:** `~/.claude/plans/artifact-feedback-impl.md`
 
 ---
 
@@ -112,13 +125,15 @@ Before any API call, the student sees the extracted + pseudonymized text in a co
 
 This serves both DSGVO transparency and pedagogy — Unit 4 is literally about data privacy. Seeing this in action is a teaching moment.
 
-### Opt-in: teacher enables LLM feedback per class
+### Opt-in: teacher enables LLM feedback per class (Decision 4)
 
-Admin setting per Klasse: "KI-Aufgabencheck aktiviert" (off by default).
+Admin setting per Klasse: "KI-Aufgabencheck aktiviert" (off by default). Stored as column on `klasse` table.
 
 - When off: upload + preview work, no API call made, no feedback shown
 - When on: full Flow A with checklist feedback
-- Teacher is responsible for having resolved DSGVO requirements before enabling
+- Teacher enables after DSGVO prerequisites are met (see below)
+
+**No per-student consent stored in DB.** Legal basis is Art. 6(1)(e) — parental consent (Einwilligung) is not the correct mechanism and would create a *Scheineinwilligung*. Parents are informed via Art. 13 Informationsschreiben. If a parent objects (Art. 21 Widerspruchsrecht), the teacher disables the feature for that student via the existing admin student detail page.
 
 ### Legal basis analysis
 
@@ -196,18 +211,21 @@ Die DSGVO unterscheidet zwischen der *Rechtsgrundlage der Verarbeitung* (Art. 6)
 
 ### Was vor der Aktivierung für eine Klasse erledigt sein muss
 
-**Bei EU-Anbieter (empfohlen: OVHcloud oder Mistral):**
-- [ ] AV-Vertrag (Art. 28) mit gewähltem Anbieter abschließen
-- [ ] Keine Modelltrainierung mit API-Eingaben — im AV-Vertrag bestätigen
-- [ ] Datenschutzerklärung der Schule ergänzen (Art. 13)
+**Bei EU-Anbieter (IONOS oder OVHcloud — empfohlen):**
+- [ ] AV-Vertrag (Art. 28) mit gewähltem Anbieter abschließen (IONOS und OVHcloud stellen ihn bereit)
+- [ ] Keine Modelltrainierung mit API-Eingaben — im AV-Vertrag bestätigen (IONOS: explizit bestätigt in Docs)
+- [ ] Informationsschreiben Eltern aktualisieren (Art. 13 Transparenzpflicht)
 - [ ] Verarbeitungsverzeichnis aktualisieren (Art. 30)
-- [ ] DSB kurz informieren — DPIA wahrscheinlich nicht erforderlich, aber absichern
+- [ ] DSB kurz informieren — DPIA wahrscheinlich nicht erforderlich
 - [ ] Genehmigung Schulleitung
 
-**Zusätzlich bei US-Anbieter (Anthropic):**
-- [ ] DPF-Zertifizierung prüfen oder SCC im AV-Vertrag bestätigen
-- [ ] Thüringer DSB-Leitlinien zu Schul-Cloud-Diensten prüfen
-- [ ] Datenschutz-Folgenabschätzung (DPIA, Art. 35) durchführen
+**Zusätzlich bei AWS Bedrock EU (nur als letzter Ausweg):**
+- [ ] AWS DPA (Art. 28 AVV) abschließen
+- [ ] CLOUD Act-Risiko dokumentieren und DSB-Freigabe einholen
+- [ ] DPIA (Art. 35) wahrscheinlich erforderlich
+- [ ] Thüringer DSB-Leitlinien zu US-Schul-Cloud-Diensten prüfen
+
+**Kein Consent von Eltern nötig** — Rechtsgrundlage ist Art. 6 lit. e (Bildungsauftrag). Eltern haben Widerspruchsrecht (Art. 21); Lehrkraft deaktiviert Feature für betreffende Schüler im Admin.
 
 **Das Feature darf für keine Klasse aktiviert werden, bevor diese Schritte abgeschlossen sind.**
 
@@ -223,37 +241,41 @@ Two backends are supported. The choice determines DSGVO complexity.
 
 Cost estimates below assume 70 students × 2 uploads/week, ~1000 input + ~150 output tokens per student (560 requests/month).
 
-| Provider | EU company? | Model | Input/MTok | Output/MTok | Est. €/month |
-|----------|------------|-------|-----------|------------|-------------|
-| Anthropic | No (US) | Haiku 4.5 | $0.80 | $4.00 | ~€1.20 |
-| Mistral AI | Yes (FR) | Large 3 | €0.50 | €1.50 | ~€0.40 |
-| OVHcloud | Yes (FR) | Llama-3.3-70B | €0.67 | €0.67 | ~€0.43 |
-| **OVHcloud** | **Yes (FR)** | **Qwen3-32B** | **€0.08** | **€0.23** | **~€0.06** |
-| OVHcloud | Yes (FR) | Mistral-Nemo-12B | €0.13 | €0.13 | ~€0.08 |
-| Mac Mini + WireGuard | Yes (local) | Qwen2.5-14B | €599 one-time | — | ~€10 amort. |
+Cost estimate: 70 students × 2 uploads/week, ~1000 input + 150 output tokens, 560 requests/month.
 
-### Option A: Anthropic cloud API (Haiku 4.5)
+| Provider | Country | CLOUD Act | Model | Size | Input €/MTok | Output €/MTok | Est. €/month |
+|----------|---------|-----------|-------|------|-------------|--------------|-------------|
+| **IONOS** | 🇩🇪 DE | None | GPT-OSS 120B | 120B | €0.15 | €0.65 | ~€0.14 |
+| **IONOS** | 🇩🇪 DE | None | Mistral Small 24B | 24B | €0.10 | €0.30 | ~€0.08 |
+| **OVHcloud** | 🇫🇷 FR | None | Qwen3-32B | 32B | €0.08 | €0.23 | ~€0.06 |
+| IONOS | 🇩🇪 DE | None | Llama 3.3 70B | 70B | €0.65 | €0.65 | ~€0.42 |
+| AWS Bedrock EU | 🇺🇸 US | Yes | Claude Haiku 4.5 | — | ~€0.72 | ~€3.60 | ~€1.20 |
+| Anthropic direct | 🇺🇸 US | Yes | Claude Haiku 4.5 | — | $0.80 | $4.00 | ~€1.20 |
+| Mac Mini + WireGuard | local | None | Qwen2.5-14B | 14B | €599 one-time | — | ~€10 amort. |
 
-- Accuracy: 98.3%, speed: ~10 students in 1.2 min
-- Cost: ~€1.20/month
-- **DSGVO blocker:** Chapter V international transfer to US company — requires DPA, DPF/SCC verification, DPIA, DSB sign-off before use (see Privacy section)
+At this scale, cost differences are negligible (cents/month). Decision is quality and legal sovereignty.
 
-### Option B-1: Mistral AI (Paris, France)
+### Option A: IONOS AI Model Hub (Berlin, Germany) — **benchmark candidate 1** (Decision 5)
 
-- EU company — no CLOUD Act risk, no Chapter V transfer (EU→EU)
-- DPA (Data Processing Addendum) explicitly available
-- ISO 27001 certified, strong German language support
-- Mistral Large 3: €0.50/€1.50 per MTok → ~€0.40/month — cheaper than Haiku at flagship quality
-- DSGVO process: DPA + Verarbeitungsverzeichnis + Art. 13 notice + DSB sign-off. No DPIA likely needed. Significantly lighter than Anthropic path.
+- **German company, Berlin data center** — strongest legal position for German schools. No CLOUD Act risk.
+- **Stateless**: prompts and outputs discarded at session end (confirmed in docs)
+- Data not used for training — confirmed
+- ISO 27001 certified, DPA (Art. 28 AVV) available
+- **GPT-OSS 120B**: €0.15/€0.65 per MTok → ~€0.14/month — large model, good reasoning
+- **Mistral Small 24B**: €0.10/€0.30 per MTok → ~€0.08/month — explicitly European multilingual
+- **Teuken 7B**: German-specific model (OpenGPT-X), likely weaker on structured tasks but worth noting
+- DSGVO process: DPA + Art. 13 notice + DSB sign-off. No DPIA likely needed.
+- API: OpenAI-compatible endpoint
 
-### Option B-2: OVHcloud AI Endpoints (Roubaix, France) — recommended
+### Option B: OVHcloud AI Endpoints (Roubaix, France) — **benchmark candidate 2** (Decision 5)
 
-- EU company, 100% EU infrastructure, no US dependencies, ISO 27001
-- Runs open-source models: Qwen3, Llama 3.3, Mistral variants
-- **Qwen3-32B: €0.08/€0.23 per MTok → ~€0.06/month** — 32B reasoning model at negligible cost
-- Qwen3 reasoning mode (extended thinking) likely excellent for structured checklist grading
-- DSGVO process: same as Mistral — DPA + transparency + DSB sign-off, no DPIA likely needed
-- Open question: German language quality of Qwen3-32B on OVHcloud vs. Mistral Large — benchmark needed
+- French company, 100% EU infrastructure, no US dependencies, ISO 27001
+- **Qwen3-32B: €0.08/€0.23 per MTok → ~€0.06/month** — 32B reasoning model, cheapest option
+- Qwen3 reasoning mode (extended thinking) may help for structured checklist grading
+- DSGVO process: DPA + Art. 13 notice + DSB sign-off, no DPIA likely needed
+- Already in use for quiz LLM grading — no new integration work needed
+
+**Benchmark required:** Compare IONOS GPT-OSS 120B, IONOS Mistral Small 24B, and OVHcloud Qwen3-32B on a Unit 4 rubric (German-language checklist) before committing to a provider.
 
 ### Option C: Ollama on teacher's Mac Mini via WireGuard
 
@@ -305,25 +327,29 @@ M4 Pro (24GB, ~€1,399) would open 32B models but is not justified for this use
 
 ## Code Reuse: grading-with-llm
 
-**Reuse as a pattern, not a direct dependency.**
+**Copy & adapt into `artifact_processor.py` — no shared dependency.** (Decision 0)
 
-| Component | Reuse approach |
-|-----------|---------------|
-| `src/file_handlers/docx_processor.py` | Already works — adapt into Lernmanager directly |
-| `src/file_handlers/odt_processor.py` | Already works — adapt into Lernmanager directly |
-| `src/llm/prompt_builder.py` + `src/grading/micro_grader.py` | Copy micro-prompting pattern into extended `llm_grading.py` |
-| `src/llm/anthropic_client.py` | Not needed — Lernmanager already calls Anthropic API directly |
-| Batch API + CLI workflow | Flow B only — grading-with-llm runs as-is on teacher's machine |
+Rationale: Lernmanager's use case (one student, one file, formative checklist, real-time) is fundamentally simpler than grading-with-llm (batch CLI, CSV output, divide-and-conquer, StudentIDMapper). The full modules are 600–970 lines; the needed surface is ~200 lines. File extraction code is stable — divergence risk is low.
+
+| Component | Approach | Adapted size |
+|-----------|----------|-------------|
+| `docx_processor.py` (668 lines) | Extract text + tables only; drop images, metadata, full-structure mode | ~80 lines |
+| `odt_processor.py` (637 lines) | Same | ~80 lines |
+| `anonymizer.py` (370 lines) | Single function: replace student name → `[Schüler/in]` | ~15 lines |
+| `prompt_builder.py` + `micro_grader.py` | Not copied — `llm_grading.py` extended with checklist prompt style | 0 lines |
+| Batch API + CLI workflow | Flow B only — grading-with-llm runs as-is on teacher's machine | — |
 
 ## Supported File Formats
 
-| Format | Library | What's extracted | Notes |
-|--------|---------|-----------------|-------|
-| `.docx` | `python-docx` | Paragraphs + tables | Already in grading-with-llm — direct reuse |
-| `.odt` | `odfpy` | Paragraphs + tables | Already in grading-with-llm — direct reuse |
-| `.pptx` | `python-pptx` | Slide text per slide | New dependency needed on Lernmanager server |
-| `.odp` | `python-pptx` or unzip+XML | Slide text per slide | Same pattern as .pptx |
-| `.sb3` | `zipfile` + `json` | Block graph → readable summary | Feasible but needs transformation layer (see below) |
+Priority order (Decision 3): `.pptx`/`.odp` first (Unit 4 uses these), `.sb3` second, `.docx`/`.odt` third.
+
+| Format | Library | What's extracted | Priority |
+|--------|---------|-----------------|---------|
+| `.pptx` | `python-pptx` | Slide text per slide | **Phase 1** |
+| `.odp` | `python-pptx` or unzip+XML | Slide text per slide | **Phase 1** |
+| `.sb3` | `zipfile` + `json` | Block graph → readable summary | **Phase 2** |
+| `.docx` | `python-docx` | Paragraphs + tables | Phase 3 |
+| `.odt` | `odfpy` | Paragraphs + tables | Phase 3 |
 
 ### .sb3 (Scratch 3 project files)
 

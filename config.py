@@ -35,6 +35,11 @@ LLM_PROVIDER = os.environ.get('LLM_PROVIDER', 'anthropic')
 LLM_API_KEY = os.environ.get('LLM_API_KEY', '')
 LLM_BASE_URL = os.environ.get('LLM_BASE_URL', None)
 LLM_MODEL = os.environ.get('LLM_MODEL', 'claude-haiku-4-5-20251001')
-LLM_TIMEOUT = 5  # seconds
-LLM_MAX_CALLS_PER_STUDENT_PER_HOUR = 20
+LLM_TIMEOUT = 5  # seconds (quiz grading — short answers)
+LLM_ARTIFACT_TIMEOUT = 60  # seconds (artifact checklist — up to 20 criteria)
+LLM_MAX_CALLS_PER_STUDENT_PER_HOUR = 20          # quiz/warmup answers
+LLM_MAX_ARTIFACT_CHECKS_PER_STUDENT_PER_HOUR = 10  # artifact KI-Check uploads
 LLM_ENABLED = bool(LLM_API_KEY)
+# OVHcloud Qwen3-32B fp8 pricing (per 1M tokens, as of 2026-03):
+#   input: €0.09 | output: €0.27
+# Cost per artifact check: ~€0.0002 (9 criteria) to ~€0.0004 (23 criteria)

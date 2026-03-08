@@ -117,8 +117,52 @@
             </div>
             {% endif %}
 
-            <!-- Checkbox to mark complete -->
+            <!-- Completion zone: checkbox (left) + optional KI-Check (right) -->
             {% if active_subtask and not task.abgeschlossen %}
+            {% if graded_artifact %}
+            <div class="task-complete {% if active_subtask.fertig_wenn %}has-fertig-wenn{% endif %} has-artifact">
+                <!-- Left: completion checkbox -->
+                <div class="task-complete-left" onclick="document.getElementById('subtask-checkbox-{{ active_subtask.id }}').click()">
+                    <input type="checkbox"
+                           id="subtask-checkbox-{{ active_subtask.id }}"
+                           class="subtask-checkbox"
+                           {% if active_subtask.erledigt %}checked{% endif %}
+                           onchange="toggleSubtask({{ current_index + 1 }}, this.checked)"
+                           onclick="event.stopPropagation()">
+                    <label for="subtask-checkbox-{{ active_subtask.id }}">Ich habe das geschafft! ✓</label>
+                </div>
+                <!-- Right: KI artifact check -->
+                <div class="task-complete-right" onclick="event.stopPropagation()">
+                    <div class="artifact-upload-header">📎 KI-Check</div>
+                    <p class="artifact-completeness-hint">Die KI schaut nur: Ist alles da? Ob du alles richtig gemacht hast, prüft die Lehrkraft.</p>
+                    <div class="artifact-accepted-formats">Akzeptiert:
+                        {% for fmt in graded_artifact.get('format', []) %}<code>{{ fmt }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
+                    </div>
+                    <div class="artifact-file-row">
+                        <input type="file"
+                               id="artifact-file-input"
+                               class="artifact-file-input"
+                               accept="{{ graded_artifact.get('format', [])|join(',') }}"
+                               onchange="handleArtifactUpload({{ current_index + 1 }})">
+                        <label for="artifact-file-input" class="btn btn-secondary artifact-upload-btn">Datei auswählen</label>
+                        <span id="artifact-filename" class="artifact-filename"></span>
+                    </div>
+                    <details id="artifact-preview-details" style="display:none;" class="artifact-preview-details">
+                        <summary>Das sieht die KI: <span id="artifact-preview-filename"></span></summary>
+                        <div class="artifact-preview-notice">Dein Name und persönliche Daten wurden ersetzt.</div>
+                        <pre id="artifact-preview-text" class="artifact-preview-text"></pre>
+                    </details>
+                    <button id="artifact-feedback-btn"
+                            class="btn btn-primary artifact-feedback-btn"
+                            style="display:none;"
+                            onclick="requestArtifactFeedback({{ current_index + 1 }})">
+                        KI-Check starten →
+                    </button>
+                    <div id="artifact-checklist" class="artifact-checklist" style="display:none;"></div>
+                    <div id="artifact-status" class="artifact-status"></div>
+                </div>
+            </div>
+            {% else %}
             <div class="task-complete {% if active_subtask.fertig_wenn %}has-fertig-wenn{% endif %}" onclick="document.getElementById('subtask-checkbox-{{ active_subtask.id }}').click()">
                 <input type="checkbox"
                        id="subtask-checkbox-{{ active_subtask.id }}"
@@ -129,13 +173,14 @@
                 <label for="subtask-checkbox-{{ active_subtask.id }}">Ich habe das geschafft! ✓</label>
             </div>
             {% endif %}
+            {% endif %}
 
             <!-- Subtask Quiz Card (shown when subtask done but quiz pending) -->
             {% if active_subtask and active_subtask.erledigt and active_subtask.quiz_json and not subtask_quiz_status.get(active_subtask.id, false) and task.subtask_quiz_required %}
             <div class="quiz-card mt-1">
                 <div class="quiz-header">❓ Aufgaben-Quiz</div>
                 <p>Beantworte die Fragen, bevor du zur nächsten Aufgabe weitergehst.</p>
-                <p class="text-muted" style="font-size: 0.875rem; margin-top: 0.25rem;">Du kannst das Quiz beliebig oft wiederholen.</p>
+                <p class="text-muted" style="font-size: 0.875rem; margin-top: 0.25rem;">Du kannst so oft wiederholen, wie du willst.</p>
                 <a href="{{ url_for('student_quiz_subtask', slug=task.name|slugify, position=current_index + 1) }}" class="btn btn-primary mt-1">Quiz starten</a>
             </div>
             {% endif %}
@@ -427,6 +472,120 @@ function handleDotKeydown(event) {
 
         dots[nextIndex].focus();
     }
+}
+
+// --- Artifact upload flow ---
+
+let artifactPreviewText = '';
+
+function handleArtifactUpload(position) {
+    const fileInput = document.getElementById('artifact-file-input');
+    const file = fileInput.files[0];
+    if (!file) return;
+
+    document.getElementById('artifact-filename').textContent = file.name;
+    document.getElementById('artifact-status').textContent = 'Wird gelesen …';
+    const feedbackBtn = document.getElementById('artifact-feedback-btn');
+    feedbackBtn.style.display = 'none';
+    feedbackBtn.textContent = 'KI-Check starten →';
+    feedbackBtn.disabled = false;
+    document.getElementById('artifact-checklist').style.display = 'none';
+    document.getElementById('artifact-preview-details').style.display = 'none';
+
+    const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+    const formData = new FormData();
+    formData.append('file', file);
+
+    fetch(`/schueler/thema/${topicSlug}/aufgabe-${position}/artefakt/vorschau`, {
+        method: 'POST',
+        headers: {'X-CSRFToken': csrfToken},
+        body: formData,
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.error) {
+            document.getElementById('artifact-status').textContent = '⚠️ ' + data.error;
+            return;
+        }
+        artifactPreviewText = data.preview_text;
+        document.getElementById('artifact-preview-text').textContent = data.preview_text;
+        document.getElementById('artifact-preview-filename').textContent = data.filename;
+        document.getElementById('artifact-preview-details').style.display = '';
+        document.getElementById('artifact-preview-details').open = true;
+        document.getElementById('artifact-feedback-btn').style.display = '';
+        document.getElementById('artifact-status').textContent = '';
+    })
+    .catch(() => {
+        document.getElementById('artifact-status').textContent = '⚠️ Fehler beim Lesen der Datei.';
+    });
+}
+
+function requestArtifactFeedback(position) {
+    const btn = document.getElementById('artifact-feedback-btn');
+    const statusEl = document.getElementById('artifact-status');
+    btn.disabled = true;
+    btn.textContent = '⏳ KI prüft …';
+    statusEl.textContent = '';
+
+    const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+    fetch(`/schueler/thema/${topicSlug}/aufgabe-${position}/artefakt/feedback`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
+        body: JSON.stringify({text: artifactPreviewText}),
+    })
+    .then(r => r.json())
+    .then(data => {
+        statusEl.textContent = '';
+        if (data.rate_limited) {
+            btn.textContent = 'KI-Check starten →';
+            btn.disabled = true;
+            statusEl.innerHTML = '⏰ Du hast heute schon 10 Mal geprüft. Warte eine Stunde — dann kannst du wieder prüfen.';
+            return;
+        }
+        btn.textContent = 'Erneut prüfen →';
+        btn.disabled = false;
+        if (data.error) {
+            statusEl.textContent = '⚠️ ' + data.error;
+            return;
+        }
+        if (data.llm_disabled) {
+            statusEl.textContent = 'ℹ️ KI-Feedback ist für diese Klasse nicht aktiviert.';
+            return;
+        }
+        if (data.checks_remaining !== undefined && data.checks_remaining <= 3 && data.checks_remaining > 0) {
+            statusEl.textContent = `Noch ${data.checks_remaining} Check${data.checks_remaining === 1 ? '' : 's'} in dieser Stunde übrig.`;
+        }
+        renderArtifactChecklist(data.feedback);
+    })
+    .catch(() => {
+        btn.textContent = 'KI-Check starten →';
+        btn.disabled = false;
+        statusEl.textContent = '⚠️ Verbindungsfehler. Bitte nochmal versuchen.';
+    });
+}
+
+function renderArtifactChecklist(feedback) {
+    const container = document.getElementById('artifact-checklist');
+    if (!feedback || feedback.length === 0) {
+        container.innerHTML = '<p style="color:#ef4444;">⚠️ KI konnte die Datei nicht auswerten. Bitte nochmal versuchen.</p>';
+        container.style.display = '';
+        return;
+    }
+    const items = feedback.map(item => {
+        const icon = item.passed ? '✅' : '❌';
+        const borderColor = item.passed ? '#10b981' : '#ef4444';
+        return `<div class="checklist-item" style="border-left: 3px solid ${borderColor}; padding: 0.5rem 0.75rem; margin: 0.4rem 0; background: #f9fafb;">
+            <div style="font-weight:500;">${icon} ${escapeHtml(item.criterion)}</div>
+            ${item.note ? `<div style="font-size:0.875rem; color:#4b5563; margin-top:0.2rem;">💬 ${escapeHtml(item.note)}</div>` : ''}
+        </div>`;
+    }).join('');
+    container.innerHTML = `<div class="checklist-header">KI-Feedback:</div>${items}
+        <p style="font-size:0.8rem;color:#6b7280;margin-top:0.5rem;">Note wird von der Lehrkraft gesetzt.</p>`;
+    container.style.display = '';
+}
+
+function escapeHtml(str) {
+    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 // Smooth scroll to element on page load if hash is present
