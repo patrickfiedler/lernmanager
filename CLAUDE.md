@@ -128,6 +128,10 @@ In commit messages and docs, use the **UI terminology** (Thema/topic, Aufgabe/ta
 
 ### Content Formatting
 
+**Public documents** (Elternbriefe, Informationsschreiben, Datenschutzerklärung, Schulkonzept):
+- Use only ASCII dashes: `--` for em dash, `-` for en dash/ranges. Never `—` or `–`.
+- No horizontal lines (`---` in Markdown, `<hr>` in HTML). Use blank lines or headings for structure.
+
 **Markdown rendering** (`app.py`, `markdown_filter`): All text fields are rendered as Markdown with extensions `nl2br` (single `\n` = `<br>`), `fenced_code`, `tables`, `sane_lists`.
 
 **Subtask descriptions** follow a structured format:
