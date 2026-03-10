@@ -45,11 +45,24 @@ Die Verarbeitung erfolgt auf Grundlage von **Art. 6 Abs. 1 lit. e DSGVO** in Ver
 | Vor- und Nachname | Zur Identifikation durch die Lehrkraft erforderlich |
 | Pseudonymisierter Benutzername | Automatisch generiert (z.B. „happypanda"), wird für den Login und als Anzeigename verwendet |
 | Lernfortschritt | Bearbeitete Aufgaben, Ergebnisse von Übungsquizzes (nicht benotet) |
-| Übungshistorie | Ergebnisse von Wiederholungsübungen (Warmup / Spaced Repetition), gespeichert pro Frage und Schüler |
+| Übungshistorie | Ergebnisse von Aufwärm-Quiz und Wiederholungsübungen (verteiltes Üben), gespeichert pro Frage und Schüler |
 | Lernpfad | Zugewiesene Schwierigkeitsstufe (von der Lehrkraft vergeben) |
 | Aktivitätsprotokoll | Zeitpunkte der Nutzung |
 
 Vor- und Nachname werden auf dem Server gespeichert, da die Lehrkraft die Lernwege und optionalen Aufgaben einzelnen Schülerinnen und Schülern zuweisen muss. Die Speicherung erfolgt auf Grundlage des schulischen Bildungsauftrags (Art. 6 Abs. 1 lit. e DSGVO). Schülerinnen und Schüler melden sich mit ihrem Pseudonym an; der Klarname erscheint nur in der Verwaltungsansicht der Lehrkraft.
+
+**Die erfassten Daten werden ausschließlich zur Lernbegleitung verwendet und fließen nicht in die Benotung ein.** Quizzes und Lernstandserhebungen in dieser Plattform sind Übungsformate ohne Notenrelevanz. Die Note setzt ausschließlich die Lehrkraft auf Basis des Unterrichts und ggf. abgegebener Arbeitsergebnisse fest.
+
+**Folgende Daten werden ausdrücklich nicht gespeichert oder verarbeitet:**
+
+- **IP-Adressen** — Webserver-Zugriffsprotokolle sind deaktiviert
+- **Passwörter im Klartext** — Passwörter werden ausschließlich als kryptografischer Hash gespeichert
+- **Geräteinformationen** — keine Browser-, Geräte- oder Betriebssystemdaten
+- **Standortdaten** — keine Ortungsfeatures
+- **Hochgeladene Dateien** — beim optionalen KI-Aufgabencheck wird die Originaldatei nicht gespeichert; nur die Vollständigkeitsrückmeldung (Checkliste: Ja/Nein pro Kriterium) wird festgehalten
+- **Kommunikation** — die Plattform hat keine Nachrichten- oder Chatfunktion
+
+*Hinweis: Quizantworten (Text und Auswahl) werden gespeichert, damit die Lehrkraft Lernstände nachvollziehen kann. Sie fließen nicht in die Benotung ein.*
 
 ### 5. Automatisierte Auswertung durch KI
 
@@ -64,7 +77,7 @@ Wenn die Lehrkraft diese Funktion für eine Klasse aktiviert hat, können Schül
 1. Die App extrahiert den Text aus der Datei und entfernt alle erkennbaren Personenangaben (Name → „[Schüler/in]")
 2. Die Schülerinnen und Schüler sehen eine **Vorschau** des übermittelten Textes, bevor etwas gesendet wird
 3. Erst nach der Bestätigung wird der anonymisierte Text an einen KI-Dienst übermittelt
-4. Die Originaldatei wird nicht gespeichert; nur das Ergebnis (Kriterien erfüllt: Ja/Nein) wird festgehalten
+4. Die Originaldatei wird nicht gespeichert; nur die Vollständigkeitsrückmeldung (Checkliste: Ja/Nein pro Kriterium) wird festgehalten
 5. Die KI gibt eine Rückmeldung zur Vollständigkeit — die Note setzt ausschließlich die Lehrkraft
 
 Der KI-Dienst wird bei einem deutschen oder europäischen Anbieter betrieben (kein US-amerikanischer Dienst). Die Daten werden nicht für das Training von KI-Modellen verwendet. Die Verarbeitung erfolgt auf Grundlage von Art. 6 Abs. 1 lit. e DSGVO (Bildungsauftrag). Eltern und Erziehungsberechtigte können der Nutzung dieser Funktion für ihr Kind jederzeit widersprechen (Art. 21 DSGVO) — wenden Sie sich dazu an die Lehrkraft.
@@ -78,7 +91,7 @@ Der KI-Dienst wird bei einem deutschen oder europäischen Anbieter betrieben (ke
 
 - Daten werden auf einem Server von Strato AG gespeichert (Rechenzentren in Deutschland und der EU)
 - Serverzugriff ausschließlich durch die zuständige Lehrkraft
-- Daten werden am Ende des Schuljahres gelöscht, sofern kein berechtigtes Aufbewahrungsinteresse besteht
+- Daten werden am Ende des Schuljahres zuzüglich zwei Monate gelöscht, sofern kein berechtigtes Aufbewahrungsinteresse besteht
 - Die Zuordnungsdatei auf dem Lehrergerät wird nach Abschluss der Notenvergabe gelöscht
 
 ### 7. Empfänger der Daten

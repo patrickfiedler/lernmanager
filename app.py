@@ -150,6 +150,13 @@ def student_required(f):
     return decorated
 
 
+# ============ Public Routes ============
+
+@app.route('/datenschutz')
+def datenschutz():
+    return render_template('datenschutz.html')
+
+
 # ============ Auth Routes ============
 
 @app.route('/')

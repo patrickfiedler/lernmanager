@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% block title %}Datenschutzerklärung – Lernmanager{% endblock %}
+{% block content %}
+<h1>Datenschutzerklärung</h1>
+<p class="text-muted">Informationen gemäß Art. 13 DSGVO zur Nutzung der Lernplattform „Lernmanager"</p>
+
+<div class="card mt-3">
+  <div class="card-body">
+
+    <h2>1. Verantwortlicher</h2>
+    <p>
+      <strong>[Schulname]</strong>, vertreten durch [Schulleiter/in]<br>
+      [Adresse]<br>
+      E-Mail: [E-Mail-Adresse]
+    </p>
+    <p>Datenschutzbeauftragte/r der Schule: [Name], [Kontakt]</p>
+
+    <h2>2. Zweck der Verarbeitung</h2>
+    <ul>
+      <li>Bereitstellung und Verwaltung von Lernaufgaben</li>
+      <li>Nachverfolgung des individuellen Lernfortschritts</li>
+      <li>Durchführung und Auswertung von Lernzielkontrollen (Quizzes)</li>
+      <li>Erstellung von Fortschrittsberichten für die Lehrkraft</li>
+    </ul>
+
+    <h2>3. Rechtsgrundlage</h2>
+    <p>
+      Die Verarbeitung erfolgt auf Grundlage von <strong>Art. 6 Abs. 1 lit. e DSGVO</strong>
+      in Verbindung mit dem schulischen Bildungs- und Erziehungsauftrag.
+      Eine Einwilligung ist daher nicht erforderlich.
+    </p>
+
+    <h2>4. Verarbeitete Daten</h2>
+    <table>
+      <thead>
+        <tr><th>Datenkategorie</th><th>Beschreibung</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Vor- und Nachname</td><td>Zur Identifikation durch die Lehrkraft erforderlich</td></tr>
+        <tr><td>Pseudonymisierter Benutzername</td><td>Automatisch generiert (z.B. „happypanda"), wird für Login und Anzeige verwendet</td></tr>
+        <tr><td>Lernfortschritt</td><td>Bearbeitete Aufgaben, Ergebnisse von Übungsquizzes (nicht benotet)</td></tr>
+        <tr><td>Übungshistorie</td><td>Ergebnisse von Aufwärm-Quiz und Wiederholungsübungen (verteiltes Üben), gespeichert pro Frage und Schüler</td></tr>
+        <tr><td>Lernpfad</td><td>Zugewiesene Schwierigkeitsstufe (von der Lehrkraft vergeben)</td></tr>
+        <tr><td>Aktivitätsprotokoll</td><td>Zeitpunkte der Nutzung (keine Inhalte)</td></tr>
+      </tbody>
+    </table>
+    <p class="mt-2">
+      Schülerinnen und Schüler melden sich mit ihrem Pseudonym an.
+      Der Klarname erscheint ausschließlich in der Verwaltungsansicht der Lehrkraft.
+    </p>
+    <h3>Was nicht gespeichert oder verarbeitet wird</h3>
+    <ul>
+      <li><strong>IP-Adressen</strong> — Webserver-Zugriffsprotokolle sind deaktiviert</li>
+      <li><strong>Passwörter im Klartext</strong> — Passwörter werden ausschließlich als kryptografischer Hash gespeichert</li>
+      <li><strong>Geräteinformationen</strong> — keine Browser-, Geräte- oder Betriebssystemdaten</li>
+      <li><strong>Standortdaten</strong> — keine Ortungsfeatures</li>
+      <li><strong>Hochgeladene Dateien</strong> — beim optionalen KI-Aufgabencheck wird die Originaldatei nicht gespeichert; nur die Vollständigkeitsrückmeldung (Checkliste: Ja/Nein pro Kriterium) wird festgehalten</li>
+      <li><strong>Kommunikation</strong> — die Plattform hat keine Nachrichten- oder Chatfunktion</li>
+    </ul>
+    <p class="text-muted" style="font-size:0.9em;">Hinweis: Quizantworten (Text und Auswahl) werden gespeichert, damit die Lehrkraft Lernstände nachvollziehen kann. Sie fließen nicht in die Benotung ein.</p>
+
+    <p>
+      <strong>Die erfassten Daten werden ausschließlich zur Lernbegleitung verwendet und fließen nicht in die Benotung ein.</strong>
+      Quizzes und Lernstandserhebungen in dieser Plattform sind Übungsformate ohne Notenrelevanz.
+      Die Note setzt ausschließlich die Lehrkraft auf Basis des Unterrichts und ggf. abgegebener Arbeitsergebnisse fest.
+    </p>
+
+    <h2>5. Automatisierte Auswertung durch KI</h2>
+
+    <h3>5a. Freitextantworten (Quiz)</h3>
+    <p>
+      Für bestimmte Aufgabentypen (Lückentext, Kurzantwort) wird eine automatisierte Auswertung eingesetzt.
+      Dabei werden <strong>ausschließlich die Aufgabenstellung und die Schülerantwort</strong> — ohne
+      jeglichen Personenbezug — an einen externen KI-Dienst übermittelt (OVHcloud AI Endpoints, Frankreich, EU).
+    </p>
+
+    <h3>5b. Optionaler KI-Aufgabencheck für digitale Arbeitsergebnisse</h3>
+    <p>
+      Wenn die Lehrkraft diese Funktion für eine Klasse aktiviert hat, können Schülerinnen und Schüler
+      ihre digitalen Arbeitsergebnisse freiwillig auf Vollständigkeit prüfen lassen:
+    </p>
+    <ol>
+      <li>Die App extrahiert Text und entfernt alle erkennbaren Personenangaben (Name → „[Schüler/in]")</li>
+      <li>Schülerinnen und Schüler sehen eine <strong>Vorschau</strong> des zu sendenden Textes</li>
+      <li>Erst nach Bestätigung wird der anonymisierte Text übermittelt</li>
+      <li>Die Originaldatei wird nicht gespeichert; nur die Vollständigkeitsrückmeldung (Checkliste: Ja/Nein pro Kriterium) wird festgehalten</li>
+    </ol>
+    <p>
+      Der KI-Dienst wird bei einem europäischen Anbieter betrieben (OVHcloud, Frankreich — keine Drittlandübermittlung).
+      Die Daten werden nicht für das Training von KI-Modellen verwendet.
+      Eltern können der Nutzung dieser Funktion jederzeit widersprechen (Art. 21 DSGVO) — wenden Sie sich
+      dazu an die Lehrkraft.
+    </p>
+
+    <h2>6. Speicherung und Löschung</h2>
+    <ul>
+      <li>Daten werden auf einem Server der <strong>Strato AG</strong> gespeichert (Rechenzentren in Deutschland und der EU)</li>
+      <li>Serverzugriff ausschließlich durch die zuständige Lehrkraft</li>
+      <li>Daten werden <strong>am Ende des Schuljahres zuzüglich zwei Monate</strong> gelöscht</li>
+    </ul>
+
+    <h2>7. Empfänger der Daten</h2>
+    <table>
+      <thead>
+        <tr><th>Empfänger</th><th>Zweck</th><th>Grundlage</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Strato AG</td>
+          <td>Serverbetrieb</td>
+          <td>AV-Vertrag gem. Art. 28 DSGVO</td>
+        </tr>
+        <tr>
+          <td>OVHcloud (nur anonyme Daten)</td>
+          <td>Automatische Auswertung von Übungsantworten und KI-Aufgabencheck</td>
+          <td>Keine personenbezogenen Daten — DSGVO nicht anwendbar</td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="mt-2">Darüber hinaus werden keine Daten an Dritte weitergegeben.</p>
+
+    <h2>8. Ihre Rechte</h2>
+    <p>Sie haben gemäß DSGVO folgende Rechte:</p>
+    <ul>
+      <li><strong>Auskunft</strong> (Art. 15) — Welche Daten sind gespeichert?</li>
+      <li><strong>Berichtigung</strong> (Art. 16) — Korrektur falscher Daten</li>
+      <li><strong>Löschung</strong> (Art. 17) — Soweit keine Aufbewahrungspflicht besteht</li>
+      <li><strong>Einschränkung der Verarbeitung</strong> (Art. 18)</li>
+      <li><strong>Widerspruch</strong> (Art. 21) — Insbesondere gegen den KI-Aufgabencheck</li>
+      <li><strong>Beschwerde</strong> bei der zuständigen Aufsichtsbehörde: [Landesbeauftragter für Datenschutz]</li>
+    </ul>
+    <p>Zur Ausübung Ihrer Rechte wenden Sie sich bitte an: <strong>[Kontakt der Lehrkraft oder der Schule]</strong></p>
+
+  </div>
+</div>
+
+<p class="text-muted mt-3" style="font-size: 0.85em;">
+  Stand: Schuljahr 2025/26 · Dieses Schreiben dient der Information gemäß Art. 13 DSGVO.
+  Eine Einwilligung ist nicht erforderlich, da die Datenverarbeitung auf dem schulischen Bildungsauftrag beruht.
+</p>
+{% endblock %}

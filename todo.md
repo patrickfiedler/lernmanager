@@ -140,6 +140,15 @@ Login warm-up (2-4 questions) + dedicated practice mode. Low-stakes, skippable.
 - **Deploy**: run `migrate_007_add_tipps.py` on server before deploying code
 - **Content work needed**: reauthor existing task `beschreibung` to move tips into `tipps` field in JSON
 
+## DSGVO / Datenschutz (Go-Public)
+
+- [✅] Nginx: `access_log off` — IP not logged for normal requests, error log kept
+- [✅] Datenschutzerklärung: route `/datenschutz` + footer link — **placeholders still need school-specific info**
+- [ ] **Data retention** (not critical now): auto-delete student data after school year end + 2 months (August/September). Script or cron: delete students + cascade (student_task, student_subtask, quiz_attempt, warmup_history, warmup_session, analytics_events) for students in classes not updated since cutoff date. Consider dry-run mode.
+- [ ] **Data deletion/export** (separate plan, Art. 17/20): admin UI to delete a single student's data on request + export as JSON/CSV. Cascade: student row, student_task, student_subtask, quiz_attempt, warmup_history, warmup_session, analytics_events. See `docs/vorlagen/informationsschreiben_lernmanager.md` §8 for the rights being fulfilled.
+- [ ] **Elternbrief finalisieren**: draft exists at `docs/vorlagen/elternbrief_lernmanager.md` — fill placeholders (Schulname, Fach, Klasse, Lehrkraft, Datum), replace "Wiederholungsdurchlauf" with "Aufwärm-Quiz" (line 43), send alongside Informationsschreiben
+- [ ] Datenschutzerklärung: fill in school-specific placeholders (school name, DSB contact, state-specific Schulgesetz)
+
 ## DSGVO / Datenschutz
 
 See `docs/research/2026-02-07_learning_paths_and_quiz_evolution.md` (Section 5)
