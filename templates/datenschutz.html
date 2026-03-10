@@ -9,11 +9,11 @@
 
     <h2>1. Verantwortlicher</h2>
     <p>
-      <strong>[Schulname]</strong>, vertreten durch [Schulleiter/in]<br>
-      [Adresse]<br>
-      E-Mail: [E-Mail-Adresse]
+      <strong>{{ school_name }}</strong><br>
+      {{ school_address }}<br>
+      E-Mail: {{ school_email }}
     </p>
-    <p>Datenschutzbeauftragte/r der Schule: [Name], [Kontakt]</p>
+    <p>Datenschutzbeauftragte/r der Schule: {{ dsb_contact }}</p>
 
     <h2>2. Zweck der Verarbeitung</h2>
     <ul>
@@ -130,9 +130,9 @@
       <li><strong>Löschung</strong> (Art. 17) -- Soweit keine Aufbewahrungspflicht besteht</li>
       <li><strong>Einschränkung der Verarbeitung</strong> (Art. 18)</li>
       <li><strong>Widerspruch</strong> (Art. 21) -- Insbesondere gegen den KI-Aufgabencheck</li>
-      <li><strong>Beschwerde</strong> bei der zuständigen Aufsichtsbehörde: [Landesbeauftragter für Datenschutz]</li>
+      <li><strong>Beschwerde</strong> bei der zuständigen Aufsichtsbehörde: {{ privacy_authority }}</li>
     </ul>
-    <p>Zur Ausübung Ihrer Rechte wenden Sie sich bitte an: <strong>[Kontakt der Lehrkraft oder der Schule]</strong></p>
+    <p>Zur Ausübung Ihrer Rechte wenden Sie sich bitte an: <strong>{{ school_email }}</strong></p>
 
   </div>
 </div>

@@ -154,7 +154,13 @@ def student_required(f):
 
 @app.route('/datenschutz')
 def datenschutz():
-    return render_template('datenschutz.html')
+    return render_template('datenschutz.html',
+        school_name=config.SCHOOL_NAME,
+        school_address=config.SCHOOL_ADDRESS,
+        school_email=config.SCHOOL_EMAIL,
+        dsb_contact=config.DSB_CONTACT,
+        privacy_authority=config.PRIVACY_AUTHORITY,
+    )
 
 
 # ============ Auth Routes ============

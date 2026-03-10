@@ -14,6 +14,13 @@ if not SECRET_KEY:
         # Development fallback - insecure but convenient
         SECRET_KEY = 'dev-secret-key-not-for-production'
         print("WARNING: Using insecure development SECRET_KEY. Set SECRET_KEY env var for production.", file=sys.stderr)
+# School identity (shown in Datenschutzerklärung)
+SCHOOL_NAME = os.environ.get('SCHOOL_NAME', '[Schulname]')
+SCHOOL_ADDRESS = os.environ.get('SCHOOL_ADDRESS', '[Adresse]')
+SCHOOL_EMAIL = os.environ.get('SCHOOL_EMAIL', '[E-Mail-Adresse]')
+DSB_CONTACT = os.environ.get('DSB_CONTACT', '[Datenschutzbeauftragte/r: Name, Kontakt]')
+PRIVACY_AUTHORITY = os.environ.get('PRIVACY_AUTHORITY', '[Landesbeauftragter für Datenschutz]')
+
 DATABASE = os.path.join(BASE_DIR, 'data', 'mbi_tracker.db')
 # Store uploads outside static/ to require authentication for access
 UPLOAD_FOLDER = os.path.join(BASE_DIR, 'instance', 'uploads')
