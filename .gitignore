@@ -7,6 +7,9 @@ task_definitions/
 # Internal scripts (kept locally, not public)
 anonymize_db.py
 deploy/db_crypto.py
+run-local.sh
+crontab_weekly_reports.txt
+*.tar.gz
 benchmark_app.py
 benchmark_logging.py
 benchmark.sh
