@@ -77,7 +77,7 @@ Key environment variables (set in systemd service or `.env`):
 
 ## License
 
-MIT
+AGPL-3.0
 
 ## Author
 
