@@ -1375,10 +1375,35 @@ tr.unsaved-row td {
     background: #10b981;
 }
 
-/* Zusatz task dots — diamond shape (rotated square) for colorblind-accessible distinction */
+/* Zusatz task dots — hollow diamond with dashed border for colorblind-accessible distinction */
 .dot.dot-subtask.optional {
     border-radius: 2px;
     transform: rotate(45deg);
+    background: white;
+    border: 2px dashed #9ca3af;
+}
+
+.dot.dot-subtask.optional .dot-num {
+    color: #6b7280;
+}
+
+.dot.dot-subtask.optional.completed {
+    background: #10b981;
+    border: 2px dashed rgba(255, 255, 255, 0.6);
+}
+
+.dot.dot-subtask.optional.completed .dot-num {
+    color: rgba(255, 255, 255, 0.85);
+}
+
+.dot.dot-subtask.optional.current:not(.completed) {
+    background: #3b82f6;
+    border: 2px dashed rgba(255, 255, 255, 0.6);
+    transform: rotate(45deg) scale(1.2);
+}
+
+.dot.dot-subtask.optional.current:not(.completed) .dot-num {
+    color: rgba(255, 255, 255, 0.85);
 }
 
 .dot.dot-subtask.optional:hover {
@@ -1386,10 +1411,6 @@ tr.unsaved-row td {
 }
 
 .dot.dot-subtask.optional:focus {
-    transform: rotate(45deg) scale(1.2);
-}
-
-.dot.dot-subtask.optional.current:not(.completed) {
     transform: rotate(45deg) scale(1.2);
 }
 
