@@ -7,6 +7,11 @@ task_definitions/
 # Internal scripts (kept locally, not public)
 anonymize_db.py
 deploy/db_crypto.py
+benchmark_app.py
+benchmark_logging.py
+benchmark.sh
+run_benchmark.sh
+migrate_to_sqlcipher.py
 
 # Internal docs (kept locally, not public)
 docs/

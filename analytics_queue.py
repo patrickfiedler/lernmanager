@@ -79,28 +79,11 @@ def background_worker():
     import sqlite3
     import os
 
-    # Determine if using SQLCipher
-    SQLCIPHER_KEY = os.environ.get('SQLCIPHER_KEY')
-    USE_SQLCIPHER = False
-
-    if SQLCIPHER_KEY:
-        try:
-            from sqlcipher3 import dbapi2 as sqlite3
-            USE_SQLCIPHER = True
-        except ImportError:
-            import sqlite3
-    else:
-        import sqlite3
-
     # Database connection context manager (local to worker thread)
     @contextmanager
     def db_connection():
         conn = sqlite3.connect(config.DATABASE, timeout=20)
         try:
-            if USE_SQLCIPHER and SQLCIPHER_KEY:
-                safe_key = SQLCIPHER_KEY.replace('"', '""')
-                conn.execute(f'PRAGMA key = "{safe_key}"')
-
             # Use the same optimizations as main connection
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA synchronous=NORMAL")

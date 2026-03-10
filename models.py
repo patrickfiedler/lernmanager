@@ -12,20 +12,7 @@ import config
 #   Aufgabe (task)      → subtask table
 #   Schüler-Thema       → student_task table
 
-# SQLCipher support: Use encrypted database if SQLCIPHER_KEY is set
-SQLCIPHER_KEY = os.environ.get('SQLCIPHER_KEY')
-USE_SQLCIPHER = False
-
-if SQLCIPHER_KEY:
-    try:
-        from sqlcipher3 import dbapi2 as sqlite3
-        USE_SQLCIPHER = True
-    except ImportError:
-        import sqlite3
-        print("WARNING: SQLCIPHER_KEY is set but sqlcipher3 is not installed.", file=sys.stderr)
-        print("Database will NOT be encrypted. Install with: pip install sqlcipher3-binary", file=sys.stderr)
-else:
-    import sqlite3
+import sqlite3
 
 
 def hash_password(password):
@@ -59,11 +46,6 @@ def get_db():
     """Get database connection with optimized performance settings."""
     conn = sqlite3.connect(config.DATABASE)
     conn.row_factory = sqlite3.Row
-    if USE_SQLCIPHER and SQLCIPHER_KEY:
-        # Set encryption key - escape any double quotes in key
-        safe_key = SQLCIPHER_KEY.replace('"', '""')
-        conn.execute(f'PRAGMA key = "{safe_key}"')
-
     # Performance optimizations for analytics logging
     # WAL mode: Write-Ahead Logging improves write concurrency and reduces fsync calls
     # synchronous=NORMAL: Safe with WAL mode, significantly faster than FULL
