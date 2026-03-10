@@ -25,15 +25,13 @@ FALLBACK_RESULT = {
 }
 
 
-_OVHCLOUD_BASE_URL = "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1"
-
-
 def _get_client():
     """Create LLM client. Anthropic SDK for 'anthropic' provider, OpenAI SDK for 'ovhcloud'."""
     if config.LLM_PROVIDER == 'ovhcloud':
         from openai import OpenAI
-        base_url = config.LLM_BASE_URL or _OVHCLOUD_BASE_URL
-        return OpenAI(base_url=base_url, api_key=config.LLM_API_KEY)
+        if not config.LLM_BASE_URL:
+            raise ValueError("LLM_BASE_URL must be set when LLM_PROVIDER=ovhcloud")
+        return OpenAI(base_url=config.LLM_BASE_URL, api_key=config.LLM_API_KEY)
     import anthropic
     kwargs = {"api_key": config.LLM_API_KEY}
     if config.LLM_BASE_URL:

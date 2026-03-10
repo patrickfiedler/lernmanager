@@ -24,13 +24,13 @@ ALLOWED_EXTENSIONS = {'pdf', 'png', 'jpg', 'jpeg', 'gif'}
 
 # Subject and level options
 SUBJECTS = ['Englisch', 'Chemie', 'MBI', 'Geographie']
-LEVELS = ['5/6', '7/8', '9/10', '11s', '11/12']
+LEVELS = ['5/6', '7/8', '9/10', '11s', '11/12', 'Seilbahn']
 
 # LLM grading (for free-text quiz questions)
 # LLM_PROVIDER: 'anthropic' (default) or 'ovhcloud'
 #   anthropic: uses Anthropic SDK. LLM_BASE_URL can point to Ollama (Anthropic-compat mode).
 #   ovhcloud:  uses OpenAI-compatible SDK. Set LLM_API_KEY to OVH_AI_ENDPOINTS_ACCESS_TOKEN.
-#              LLM_BASE_URL defaults to OVHcloud's kepler endpoint.
+#              Set LLM_BASE_URL to the OVHcloud kepler endpoint (no default — must be explicit).
 LLM_PROVIDER = os.environ.get('LLM_PROVIDER', 'anthropic')
 LLM_API_KEY = os.environ.get('LLM_API_KEY', '')
 LLM_BASE_URL = os.environ.get('LLM_BASE_URL', None)
