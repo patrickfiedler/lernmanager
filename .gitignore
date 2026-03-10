@@ -4,6 +4,10 @@ static/uploads/*
 !static/uploads/.gitkeep
 task_definitions/
 
+# Internal scripts (kept locally, not public)
+anonymize_db.py
+deploy/db_crypto.py
+
 # Internal docs (kept locally, not public)
 docs/
 archive/
