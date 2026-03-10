@@ -193,7 +193,7 @@ def login():
         student = models.verify_student(username, password)
         if student:
             session['student_id'] = student['id']
-            session['student_name'] = student['username']
+            session['student_name'] = student['vorname']
             # Log login event
             models.log_analytics_event(
                 event_type='login',

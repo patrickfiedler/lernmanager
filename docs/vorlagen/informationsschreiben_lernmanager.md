@@ -45,7 +45,7 @@ Die Verarbeitung erfolgt auf Grundlage von **Art. 6 Abs. 1 lit. e DSGVO** in Ver
 | Lernpfad | Zugewiesene Schwierigkeitsstufe (von der Lehrkraft vergeben) |
 | Aktivitätsprotokoll | Zeitpunkte der Nutzung |
 
-Vor- und Nachname werden auf dem Server gespeichert, da die Lehrkraft die Lernwege und optionalen Aufgaben einzelnen Schülerinnen und Schülern zuweisen muss. Die Speicherung erfolgt auf Grundlage des schulischen Bildungsauftrags (Art. 6 Abs. 1 lit. e DSGVO). Schülerinnen und Schüler melden sich mit ihrem Pseudonym an; der Klarname erscheint nur in der Verwaltungsansicht der Lehrkraft.
+Vor- und Nachname werden auf dem Server gespeichert, da die Lehrkraft die Lernwege und optionalen Aufgaben einzelnen Schülerinnen und Schülern zuweisen muss. Die Speicherung erfolgt auf Grundlage des schulischen Bildungsauftrags (Art. 6 Abs. 1 lit. e DSGVO). Schülerinnen und Schüler melden sich mit ihrem Pseudonym an und sehen ihren Vornamen in der Plattform; der vollständige Klarname erscheint nur in der Verwaltungsansicht der Lehrkraft.
 
 **Die erfassten Daten werden ausschließlich zur Lernbegleitung verwendet und fließen nicht in die Benotung ein.** Quizzes und Lernstandserhebungen in dieser Plattform sind Übungsformate ohne Notenrelevanz. Die Note setzt ausschließlich die Lehrkraft auf Basis des Unterrichts und ggf. abgegebener Arbeitsergebnisse fest.
 
