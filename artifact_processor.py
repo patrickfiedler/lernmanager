@@ -93,29 +93,68 @@ def extract_odp(file_bytes: bytes) -> str:
 
 # --- Pseudonymization ---
 
-def anonymize(text: str, student_name: str) -> str:
-    """Replace student name occurrences with [Schüler/in].
+def anonymize(text: str, student_name: str, class_name: str = '') -> str:
+    """Replace student name and class name occurrences with placeholders.
 
     student_name should be "Vorname Nachname" or just one name.
     Handles first name, last name, and combined forms separately.
+    class_name (e.g. "5a") is replaced with [Klasse].
 
-    If student_name is empty, returns text unchanged.
+    If student_name is empty, name replacement is skipped.
     """
     parts = student_name.split()
-    if not parts:
-        return text
+    if parts:
+        # Build patterns: each individual name part + both combined orders
+        candidates = list(parts)
+        if len(parts) >= 2:
+            candidates.append(r'\s+'.join(re.escape(p) for p in parts))           # First Last
+            candidates.append(r'\s+'.join(re.escape(p) for p in reversed(parts))) # Last First
 
-    # Build patterns: each individual name part + both combined orders
-    candidates = list(parts)
-    if len(parts) >= 2:
-        candidates.append(r'\s+'.join(re.escape(p) for p in parts))           # First Last
-        candidates.append(r'\s+'.join(re.escape(p) for p in reversed(parts))) # Last First
+        # Apply longest patterns first to avoid partial replacements
+        for pattern in sorted(candidates, key=len, reverse=True):
+            escaped = pattern if r'\s+' in pattern else re.escape(pattern)
+            text = re.sub(r'\b' + escaped + r'\b', '[Schüler/in]', text, flags=re.IGNORECASE)
 
-    # Apply longest patterns first to avoid partial replacements
-    for pattern in sorted(candidates, key=len, reverse=True):
-        escaped = pattern if r'\s+' in pattern else re.escape(pattern)
-        text = re.sub(r'\b' + escaped + r'\b', '[Schüler/in]', text, flags=re.IGNORECASE)
+    if class_name.strip():
+        for pattern in _class_name_patterns(class_name.strip()):
+            text = re.sub(pattern, '[Klasse]', text, flags=re.IGNORECASE)
+
     return text
+
+
+def _class_name_patterns(class_name: str) -> list[str]:
+    """Build regex patterns for a class name, including typographic variants.
+
+    Handles:
+    - Exact match:                  "Ginkgo-Haie-Urvögel 5"
+    - Hyphens/spaces interchangeable: "Ginkgo Haie Urvögel 5"
+    - Without trailing grade number:  "Ginkgo-Haie-Urvögel" / "Ginkgo Haie Urvögel"
+    """
+    # Split on hyphens and whitespace to get tokens
+    tokens = re.split(r'[\s\-]+', class_name)
+    # Trailing token is the grade number if it's purely numeric
+    has_grade = tokens and tokens[-1].isdigit()
+    name_tokens = tokens[:-1] if has_grade else tokens
+    grade_token = tokens[-1] if has_grade else None
+
+    sep = r'[\s\-]+'  # flexible separator
+
+    def joined(parts, include_grade=True):
+        t = list(parts) + ([grade_token] if include_grade and grade_token else [])
+        return r'\b' + sep.join(re.escape(p) for p in t) + r'\b'
+
+    patterns = []
+    if name_tokens:
+        patterns.append(joined(name_tokens, include_grade=True))   # full name + grade
+        if has_grade:
+            patterns.append(joined(name_tokens, include_grade=False))  # name without grade
+        # Individual compound parts (skip grade number — too common)
+        for token in name_tokens:
+            patterns.append(r'\b' + re.escape(token) + r'\b')
+    else:
+        patterns.append(r'\b' + re.escape(class_name) + r'\b')
+
+    return patterns
 
 
 # --- .docx extraction ---

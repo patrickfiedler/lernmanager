@@ -21,6 +21,8 @@
       <li>Nachverfolgung des individuellen Lernfortschritts</li>
       <li>Durchführung und Auswertung von Lernzielkontrollen (Quizzes)</li>
       <li>Erstellung von Fortschrittsberichten für die Lehrkraft</li>
+      <li>Automatisierte Auswertung von Freitextantworten durch einen KI-Dienst (anonymisiert, ohne Personenbezug)</li>
+      <li>Optionale Vollständigkeitsprüfung digitaler Arbeitsergebnisse durch einen KI-Dienst (anonymisiert, freiwillig, sofern von der Lehrkraft aktiviert)</li>
     </ul>
 
     <h2>3. Rechtsgrundlage</h2>
@@ -80,13 +82,14 @@
       ihre digitalen Arbeitsergebnisse freiwillig auf Vollständigkeit prüfen lassen:
     </p>
     <ol>
-      <li>Die App extrahiert Text und entfernt alle erkennbaren Personenangaben (Name → „[Schüler/in]")</li>
+      <li>Die App extrahiert Text und entfernt alle erkennbaren Personenangaben (Name → „[Schüler/in]", Klasse → „[Klasse]")</li>
       <li>Schülerinnen und Schüler sehen eine <strong>Vorschau</strong> des zu sendenden Textes</li>
       <li>Erst nach Bestätigung wird der anonymisierte Text übermittelt</li>
       <li>Die Originaldatei wird nicht gespeichert; nur die Vollständigkeitsrückmeldung (Checkliste: Ja/Nein pro Kriterium) wird festgehalten</li>
     </ol>
     <p>
       Der KI-Dienst wird bei einem europäischen Anbieter betrieben (OVHcloud, Frankreich -- keine Drittlandübermittlung).
+      Es werden ausschließlich quelloffene KI-Modelle eingesetzt (derzeit: Qwen-Familie), deren Gewichte öffentlich einsehbar sind.
       Die Daten werden nicht für das Training von KI-Modellen verwendet.
       Eltern können der Nutzung dieser Funktion jederzeit widersprechen (Art. 21 DSGVO) -- wenden Sie sich
       dazu an die Lehrkraft.

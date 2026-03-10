@@ -1778,7 +1778,7 @@ def student_artifact_preview(slug, position):
     student = models.get_student(student_id)
     full_name = f"{student['vorname']} {student['nachname']}" if student else ''
     # Prepend filename so LLM can check naming criterion; anonymize together
-    anonymized = artifact_processor.anonymize(f"[Dateiname: {filename}]\n\n{extracted}", full_name)
+    anonymized = artifact_processor.anonymize(f"[Dateiname: {filename}]\n\n{extracted}", full_name, klasse['name'])
 
     return jsonify({
         'preview_text': anonymized,
