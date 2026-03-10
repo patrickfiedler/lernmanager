@@ -785,9 +785,106 @@ def move_student_to_klasse(student_id, from_klasse_id, to_klasse_id):
 
 
 def delete_student(student_id):
-    """Delete a student."""
+    """Delete a student and all associated data."""
     with db_session() as conn:
+        # Tables without ON DELETE CASCADE must be cleaned up explicitly
+        conn.execute(
+            "DELETE FROM analytics_events WHERE user_id = ? AND user_type = 'student'",
+            (student_id,)
+        )
+        conn.execute("DELETE FROM artifact_feedback WHERE student_id = ?", (student_id,))
         conn.execute("DELETE FROM student WHERE id = ?", (student_id,))
+
+
+def delete_all_students_in_klasse(klasse_id):
+    """Delete all students in a class (DSGVO year-end cleanup)."""
+    with db_session() as conn:
+        rows = conn.execute(
+            "SELECT student_id FROM student_klasse WHERE klasse_id = ?", (klasse_id,)
+        ).fetchall()
+    for row in rows:
+        delete_student(row['student_id'])
+
+
+def get_student_data_summary(student_id):
+    """Return record counts for a student (Art. 15 DSGVO Auskunft)."""
+    with db_session() as conn:
+        task_ids = [r['id'] for r in conn.execute(
+            "SELECT id FROM student_task WHERE student_id = ?", (student_id,)
+        ).fetchall()]
+        placeholders = ','.join('?' * len(task_ids)) if task_ids else '0'
+        quiz_count = conn.execute(
+            f"SELECT COUNT(*) FROM quiz_attempt WHERE student_task_id IN ({placeholders})",
+            task_ids
+        ).fetchone()[0] if task_ids else 0
+        return {
+            'quiz_attempts': quiz_count,
+            'warmup_sessions': conn.execute(
+                "SELECT COUNT(*) FROM warmup_session WHERE student_id = ?", (student_id,)
+            ).fetchone()[0],
+            'analytics_events': conn.execute(
+                "SELECT COUNT(*) FROM analytics_events WHERE user_id = ? AND user_type = 'student'",
+                (student_id,)
+            ).fetchone()[0],
+            'llm_quiz_gradings': conn.execute(
+                "SELECT COUNT(*) FROM llm_usage WHERE student_id = ? AND question_type != 'artifact_feedback'",
+                (student_id,)
+            ).fetchone()[0],
+            'ki_aufgabenchecks': conn.execute(
+                "SELECT COUNT(*) FROM artifact_feedback WHERE student_id = ?", (student_id,)
+            ).fetchone()[0],
+        }
+
+
+def get_student_data_export(student_id):
+    """Return all stored data for a student as a dict (Art. 15 / Art. 17 DSGVO)."""
+    with db_session() as conn:
+        student = dict(conn.execute(
+            "SELECT id, vorname, nachname, username, lernpfad FROM student WHERE id = ?",
+            (student_id,)
+        ).fetchone())
+
+        task_rows = conn.execute(
+            "SELECT id, task_id FROM student_task WHERE student_id = ?", (student_id,)
+        ).fetchall()
+        task_ids = [r['id'] for r in task_rows]
+        placeholders = ','.join('?' * len(task_ids)) if task_ids else '0'
+
+        quiz_attempts = [dict(r) for r in conn.execute(
+            f"SELECT qa.timestamp, qa.punkte, qa.max_punkte, qa.bestanden "
+            f"FROM quiz_attempt qa WHERE qa.student_task_id IN ({placeholders})",
+            task_ids
+        ).fetchall()] if task_ids else []
+
+        warmup_sessions = [dict(r) for r in conn.execute(
+            "SELECT timestamp, session_type, questions_shown, questions_correct "
+            "FROM warmup_session WHERE student_id = ?", (student_id,)
+        ).fetchall()]
+
+        analytics_events = [dict(r) for r in conn.execute(
+            "SELECT timestamp, event_type, metadata FROM analytics_events "
+            "WHERE user_id = ? AND user_type = 'student' ORDER BY timestamp DESC",
+            (student_id,)
+        ).fetchall()]
+
+        llm_usage = [dict(r) for r in conn.execute(
+            "SELECT timestamp, question_type, tokens_used FROM llm_usage "
+            "WHERE student_id = ? ORDER BY timestamp DESC", (student_id,)
+        ).fetchall()]
+
+        artifact_feedback = [dict(r) for r in conn.execute(
+            "SELECT timestamp_local, subtask_id, feedback_json FROM artifact_feedback "
+            "WHERE student_id = ? ORDER BY timestamp_local DESC", (student_id,)
+        ).fetchall()]
+
+    return {
+        'student': student,
+        'quiz_attempts': quiz_attempts,
+        'warmup_sessions': warmup_sessions,
+        'analytics_events': analytics_events,
+        'llm_usage': llm_usage,
+        'artifact_feedback': artifact_feedback,
+    }
 
 
 def reset_student_password(student_id, new_password):

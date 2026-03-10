@@ -184,6 +184,22 @@
     </form>
 </div>
 
+<!-- DSGVO: Year-end bulk delete -->
+<details class="card mt-2" style="border: 1px solid #fca5a5;">
+    <summary class="card-header" style="cursor: pointer; background: #fff1f2; color: #991b1b;">⚠️ Gefahrenzone: Alle Schülerdaten löschen (DSGVO Schuljahresende)</summary>
+    <div style="padding: 1rem;">
+        <p>Löscht alle Schülerinnen und Schüler dieser Klasse und alle zugehörigen Daten unwiderruflich (Lernfortschritt, Quizversuche, Aktivitätsprotokolle, KI-Auswertungen). Die Klasse selbst und ihre Themen bleiben erhalten.</p>
+        <form method="POST" action="{{ url_for('admin_klasse_alle_schueler_loeschen', klasse_id=klasse.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <label style="display:block; margin-bottom:0.5rem; font-weight:600;">Klassenname zur Bestätigung eingeben: <code>{{ klasse.name }}</code></label>
+            <div class="flex gap-1">
+                <input type="text" name="confirm_name" class="form-control" placeholder="{{ klasse.name }}" autocomplete="off" style="max-width: 20rem;">
+                <button type="submit" class="btn btn-danger">🗑️ Alle Schüler löschen</button>
+            </div>
+        </form>
+    </div>
+</details>
+
 <!-- Active Sidequests Overview -->
 {% if sidequests %}
 <div class="card mt-2">

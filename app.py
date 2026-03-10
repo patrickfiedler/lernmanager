@@ -319,6 +319,22 @@ def admin_klasse_loeschen(klasse_id):
     return redirect(url_for('admin_klassen'))
 
 
+@app.route('/admin/klasse/<int:klasse_id>/alle-schueler-loeschen', methods=['POST'])
+@admin_required
+def admin_klasse_alle_schueler_loeschen(klasse_id):
+    klasse = models.get_klasse(klasse_id)
+    if not klasse:
+        flash('Klasse nicht gefunden.', 'danger')
+        return redirect(url_for('admin_klassen'))
+    confirmation = request.form.get('confirm_name', '').strip()
+    if confirmation != klasse['name']:
+        flash('Bestätigung fehlgeschlagen — Klassenname stimmt nicht überein.', 'danger')
+        return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id))
+    models.delete_all_students_in_klasse(klasse_id)
+    flash(f'Alle Schülerdaten der Klasse „{klasse["name"]}" wurden gelöscht (DSGVO).', 'success')
+    return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id))
+
+
 @app.route('/admin/klasse/<int:klasse_id>/schedule', methods=['POST'])
 @admin_required
 def admin_klasse_schedule(klasse_id):
@@ -493,6 +509,7 @@ def admin_schueler_detail(student_id):
         student_tasks[klasse['id']] = models.get_student_task(student_id, klasse['id'])
 
     artifact_feedback = models.get_all_artifact_feedback_for_student(student_id)
+    data_summary = models.get_student_data_summary(student_id)
 
     return render_template('admin/schueler_detail.html',
                            student=student,
@@ -500,7 +517,8 @@ def admin_schueler_detail(student_id):
                            all_klassen=all_klassen,
                            tasks=tasks,
                            student_tasks=student_tasks,
-                           artifact_feedback=artifact_feedback)
+                           artifact_feedback=artifact_feedback,
+                           data_summary=data_summary)
 
 
 @app.route('/admin/schueler/<int:student_id>/loeschen', methods=['POST'])
@@ -509,6 +527,22 @@ def admin_schueler_loeschen(student_id):
     models.delete_student(student_id)
     flash('Schüler gelöscht.', 'success')
     return redirect(request.referrer or url_for('admin_klassen'))
+
+
+@app.route('/admin/schueler/<int:student_id>/datenauszug')
+@admin_required
+def admin_schueler_datenauszug(student_id):
+    student = models.get_student(student_id)
+    if not student:
+        flash('Schüler nicht gefunden.', 'danger')
+        return redirect(url_for('admin_klassen'))
+    data = models.get_student_data_export(student_id)
+    filename = f"datenauszug-{student['username']}.json"
+    return Response(
+        json.dumps(data, ensure_ascii=False, indent=2, default=str),
+        mimetype='application/json',
+        headers={'Content-Disposition': f'attachment; filename="{filename}"'}
+    )
 
 
 @app.route('/admin/schueler/<int:student_id>/passwort-reset', methods=['POST'])

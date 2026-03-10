@@ -18,6 +18,7 @@
             <a href="{{ url_for('admin_schueler_bericht', student_id=student.id, type='summary') }}" class="btn btn-success">📄 Bericht (Zusammenfassung)</a>
             <a href="{{ url_for('admin_schueler_bericht', student_id=student.id, type='complete') }}" class="btn btn-success">📋 Bericht (Vollständig)</a>
         </div>
+        <a href="{{ url_for('admin_schueler_datenauszug', student_id=student.id) }}" class="btn btn-secondary">⬇️ Datenauszug</a>
         <form method="POST" action="{{ url_for('admin_schueler_loeschen', student_id=student.id) }}" onsubmit="return confirm('Schüler wirklich löschen?');" style="display: inline;">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button type="submit" class="btn btn-danger">🗑️ Löschen</button>
@@ -144,6 +145,24 @@
     </div>
 </div>
 {% endif %}
+
+<!-- Art. 15 DSGVO Data Summary -->
+<details class="card mt-2">
+    <summary class="card-header" style="cursor: pointer;">🔒 Gespeicherte Daten (Art. 15 DSGVO)</summary>
+    <table class="table mt-1">
+        <thead><tr><th>Datenkategorie</th><th>Einträge</th><th>Hinweis</th></tr></thead>
+        <tbody>
+            <tr><td>Quiz-Versuche</td><td>{{ data_summary.quiz_attempts }}</td><td>Fragen, Antworten, Punkte</td></tr>
+            <tr><td>Aufwärm-Sitzungen</td><td>{{ data_summary.warmup_sessions }}</td><td>Zeitpunkt, richtig/falsch</td></tr>
+            <tr><td>Aktivitätsprotokolle</td><td>{{ data_summary.analytics_events }}</td><td>Zeitpunkte der Nutzung</td></tr>
+            <tr><td>KI-bewertete Quizantworten</td><td>{{ data_summary.llm_quiz_gradings }}</td><td>Antworttext anonym an OVHcloud übermittelt</td></tr>
+            <tr><td>KI-Aufgabenchecks</td><td>{{ data_summary.ki_aufgabenchecks }}</td><td>Anonymisierter Dateitext an OVHcloud übermittelt</td></tr>
+        </tbody>
+    </table>
+    <p class="text-muted" style="font-size:0.85em; padding: 0 0.5rem 0.5rem;">
+        Vollständiger Datenauszug: <a href="{{ url_for('admin_schueler_datenauszug', student_id=student.id) }}">JSON herunterladen</a>
+    </p>
+</details>
 
 <!-- Artifact Feedback History -->
 {% if artifact_feedback %}
