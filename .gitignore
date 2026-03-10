@@ -4,7 +4,24 @@ static/uploads/*
 !static/uploads/.gitkeep
 task_definitions/
 
-# Planning files
+# Internal docs (kept locally, not public)
+docs/
+archive/
+CLAUDE.md
+deploy/*.md
+go_on_from_here.md
+todo.md
+TESTING_CHECKLIST.md
+PROJECT_HISTORY.md
+BENCHMARKING.md
+benchmark_analysis_2026-01-28.md
+UX_TIER1_SUMMARY.md
+query_optimization_analysis.md
+aes_ni_investigation.md
+caching_investigation.md
+font_*.md
+frontend_patterns.md
+redirect_loop_*.md
 task_plan.md
 notes.md
 
