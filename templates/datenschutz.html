@@ -11,7 +11,7 @@
     <p>
       <strong>{{ school_name }}</strong><br>
       {{ school_address }}<br>
-      E-Mail: {{ school_email }}
+      E-Mail: <a class="obfuscated-email" data-email="{{ school_email|b64encode }}"></a>
     </p>
     <p>Datenschutzbeauftragte/r der Schule: {{ dsb_contact }}</p>
 
@@ -132,7 +132,7 @@
       <li><strong>Widerspruch</strong> (Art. 21) -- Insbesondere gegen den KI-Aufgabencheck</li>
       <li><strong>Beschwerde</strong> bei der zuständigen Aufsichtsbehörde: {{ privacy_authority }}</li>
     </ul>
-    <p>Zur Ausübung Ihrer Rechte wenden Sie sich bitte an: <strong>{{ school_email }}</strong></p>
+    <p>Zur Ausübung Ihrer Rechte wenden Sie sich bitte an: <strong><a class="obfuscated-email" data-email="{{ school_email|b64encode }}"></a></strong></p>
 
   </div>
 </div>
@@ -141,4 +141,11 @@
   Stand: Schuljahr 2025/26 · Dieses Schreiben dient der Information gemäß Art. 13 DSGVO.
   Eine Einwilligung ist nicht erforderlich, da die Datenverarbeitung auf dem schulischen Bildungsauftrag beruht.
 </p>
+{% endblock %}
+{% block scripts %}
+document.querySelectorAll('.obfuscated-email').forEach(el => {
+  const e = atob(el.dataset.email);
+  el.textContent = e;
+  el.href = 'mailto:' + e;
+});
 {% endblock %}

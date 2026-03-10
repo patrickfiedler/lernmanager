@@ -54,6 +54,13 @@ def slugify_filter(text):
     return slugify(text)
 
 
+@app.template_filter('b64encode')
+def b64encode_filter(text):
+    """Base64-encode a string for client-side email obfuscation."""
+    import base64
+    return base64.b64encode(text.encode()).decode()
+
+
 # ============ Helpers ============
 
 def validate_quiz_json(raw):
