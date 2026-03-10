@@ -1,210 +1,84 @@
 # Lernmanager
 
-A German-language learning progress tracker for schools. Teachers manage classes, students, and learning tasks, while students track their progress, complete subtasks, and take quizzes.
+A German-language learning progress tracker for schools. Teachers manage classes, students, and learning topics; students track their progress and take quizzes.
 
 ## Features
 
-### For Teachers (Admin)
+### For Teachers
 
-- **Class Management**
-  - Create and manage classes with schedules
-  - Batch import students (simple "Nachname, Vorname" format)
-  - Auto-generated student credentials
-
-- **Task Management**
-  - Create learning tasks with subtasks and materials
-  - Attach files and links as learning materials
-  - Build interactive quizzes with multiple-choice questions
-  - Assign tasks to entire classes or individual students
-  - Assign specific subtasks (not just entire tasks)
-
-- **Progress Tracking**
-  - Dashboard with today's scheduled classes
-  - View student progress in real-time
-  - Track task completion and quiz results
-  - Lesson attendance and evaluation system
-
-- **Analytics & Reports** (NEW)
-  - **Error Logging**: Track application errors with detailed tracebacks (30-day retention)
-  - **Usage Analytics**: Monitor platform usage, active users, and popular pages
-  - **Activity Logs**: Individual student activity tracking (210-day retention)
-  - **PDF Reports**:
-    - Class progress reports (student list with task status)
-    - Individual student reports (summary or complete with activity log)
-    - Export for parent-teacher conferences
+- Create and manage classes with weekly schedules
+- Batch-import students ("Nachname, Vorname" per line) — credentials auto-generated
+- Create topics (Themen) with tasks (Aufgaben), materials, and quizzes
+- Three question types: multiple choice, fill-in-the-blank, short answer (LLM-graded)
+- Assign topics to individual students or entire classes
+- Define learning paths per student: 🟢 Wanderweg · 🔵 Bergweg · ⭐ Gipfeltour · 🚡 Seilbahn
+- Set a topic queue per class for self-paced progression
+- Track lesson attendance and per-student evaluations
+- PDF progress reports for class and individual students
+- Optional AI-based completeness check for student artifacts (per-class toggle)
+- DSGVO-compliant: no IP logging, data export and deletion per Art. 15/17
 
 ### For Students
 
-- **Task Completion**
-  - View assigned tasks with clear progress indicators
-  - Complete subtasks step-by-step (see only current subtask)
-  - Access learning materials (files and links)
-  - Take quizzes (80% pass threshold)
+- Step-by-step task completion with progress indicators
+- Per-task and topic-level quizzes (70% pass threshold)
+- Login warm-up: 2–4 spaced-repetition questions on previously learned material
+- Practice mode: random, weakness-focused, or topic-filtered question sets
+- Optional AI completeness check for uploaded artifacts (preview before sending)
+- Datenschutzerklärung accessible without login
 
-- **Progress Reports** (NEW)
-  - Download personal progress reports (PDF)
-  - Positive, encouraging language focused on growth
-  - View learning days, completed tasks, and quiz scores
-
-## Technology Stack
+## Technology
 
 - **Backend**: Python 3, Flask
-- **Database**: SQLite with SQLCipher encryption
-- **Server**: Waitress WSGI server
-- **PDF Generation**: ReportLab
+- **Database**: SQLite
+- **Server**: Waitress WSGI
 - **Frontend**: Bootstrap 5, vanilla JavaScript
-- **Deployment**: systemd service, automated deployment scripts
+- **LLM grading**: OpenAI-compatible API endpoint (e.g. OVHcloud AI Endpoints with open-source models)
+- **PDF**: ReportLab
 
 ## Installation
 
 ### Local Development
 
-1. Clone the repository:
 ```bash
 git clone https://github.com/patrickfiedler/lernmanager.git
 cd lernmanager
-```
-
-2. Create virtual environment and install dependencies:
-```bash
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+source venv/bin/activate
 pip install -r requirements.txt
-```
-
-3. Run development server:
-```bash
 python app.py
 ```
 
-The app will be available at `http://localhost:5000`
+App runs at `http://localhost:5000`.
 
-### Docker
-
-```bash
-docker compose up --build
-```
-
-### Production Deployment
+### Production
 
 **One-command setup:**
 ```bash
 curl -sSL https://raw.githubusercontent.com/patrickfiedler/lernmanager/main/deploy/setup.sh | sudo bash
 ```
 
-This automatically:
-- Creates lernmanager user
-- Clones repository
-- Sets up Python virtual environment
-- Generates secure SECRET_KEY
-- Configures systemd service
-- Starts the application
-
 **Updates:**
 ```bash
 ssh user@server 'sudo /opt/lernmanager/deploy/update.sh'
 ```
 
-The update script:
-- Pulls latest code from GitHub
-- Detects and installs new dependencies
-- Updates systemd service if needed
-- Restarts application
-- Automatically rolls back on failure
-
-## Project Structure
-
-```
-lernmanager/
-├── app.py              # Main Flask application with routes
-├── models.py           # Database layer (SQLite with raw SQL)
-├── config.py           # Configuration constants
-├── utils.py            # Helper functions (username/password generators, PDF generation)
-├── run.py              # Production server entry point
-├── templates/
-│   ├── admin/          # Teacher interface templates
-│   └── student/        # Student interface templates
-├── static/
-│   ├── css/            # Stylesheets
-│   ├── js/             # JavaScript files
-│   └── uploads/        # User-uploaded materials
-├── deploy/
-│   ├── setup.sh        # Initial server setup script
-│   └── update.sh       # Update deployment script
-└── data/               # SQLite database (gitignored)
-```
-
-## Database Schema
-
-Key tables:
-- `admin` - Teacher accounts
-- `klasse` - Classes
-- `student` - Student accounts
-- `task` - Learning tasks with optional quizzes
-- `subtask` - Task subdivisions
-- `material` - Files and links attached to tasks
-- `student_task` - Task assignments (many-to-many)
-- `unterricht` - Lesson attendance/evaluation
-- `analytics_events` - Usage analytics and activity tracking (210-day retention)
-- `error_log` - Application error logging (30-day retention)
-- `saved_reports` - PDF report metadata
-
-## Recent Updates
-
-### January 2026 - Major Feature Release
-
-- **German Date Format**: Date pickers now use dd.mm.yyyy format
-- **Smart Dashboard**: "Unterricht heute" now shows only classes scheduled for today
-- **Error Logging System**: Complete error tracking with admin UI, 30-day retention
-- **Analytics & Activity Tracking**: Unified system for usage stats and student progress (210-day retention)
-- **PDF Report Generation**: Class and student progress reports with positive framing
-- **Subtask-Level Assignment**: Assign specific subtasks, not just entire tasks
-- **Bugfixes**: Subtask auto-advancement, database locking issues
-
 ## Configuration
 
-### Environment Variables
+Key environment variables (set in systemd service or `.env`):
 
-- `SECRET_KEY` - Flask secret key (auto-generated in production)
-- `FLASK_ENV` - Set to `development` for debug mode
-
-### Key Settings (config.py)
-
-- Database path: `data/lernmanager.db`
-- Upload folder: `static/uploads`
-- Max file size: 16MB
-- Subjects: Informatik, Mathematik, Naturwissenschaft, Deutsch, Englisch, etc.
-- Levels: Stufe 1-10
-
-## Security
-
-- Password-based authentication (no OAuth)
-- Session-based authorization with role decorators
-- SQLCipher database encryption
-- No IP address logging (GDPR-friendly)
-- 210-day data retention for analytics
-- Upload file type restrictions
-
-## Development Workflow
-
-1. Work on **main** branch
-2. Commit and push to GitHub
-3. SSH to server and run update script
-4. Changes deployed automatically
-
-## Contributing
-
-This is a personal project for educational use. Feel free to fork and adapt for your needs.
+| Variable | Description |
+|---|---|
+| `SECRET_KEY` | Flask session secret (auto-generated on first deploy) |
+| `LLM_PROVIDER` | LLM provider name (default: `ovhcloud`) |
+| `LLM_API_KEY` | API key for the LLM provider |
+| `LLM_BASE_URL` | Provider endpoint URL (required for `ovhcloud`) |
+| `LLM_MODEL` | Model name |
 
 ## License
 
-[Add license information]
+MIT
 
 ## Author
 
-Patrick Fiedler
-- GitHub: [@patrickfiedler](https://github.com/patrickfiedler)
-
-## Acknowledgments
-
-Built with Claude Code for efficient development and testing.
+Patrick Fiedler · [@patrickfiedler](https://github.com/patrickfiedler)

@@ -26,15 +26,14 @@ ALLOWED_EXTENSIONS = {'pdf', 'png', 'jpg', 'jpeg', 'gif'}
 SUBJECTS = ['Englisch', 'Chemie', 'MBI', 'Geographie']
 LEVELS = ['5/6', '7/8', '9/10', '11s', '11/12', 'Seilbahn']
 
-# LLM grading (for free-text quiz questions)
-# LLM_PROVIDER: 'anthropic' (default) or 'ovhcloud'
-#   anthropic: uses Anthropic SDK. LLM_BASE_URL can point to Ollama (Anthropic-compat mode).
-#   ovhcloud:  uses OpenAI-compatible SDK. Set LLM_API_KEY to OVH_AI_ENDPOINTS_ACCESS_TOKEN.
-#              Set LLM_BASE_URL to the OVHcloud kepler endpoint (no default — must be explicit).
-LLM_PROVIDER = os.environ.get('LLM_PROVIDER', 'anthropic')
+# LLM grading (for free-text quiz questions and artifact completeness checks)
+# Uses any OpenAI-compatible API endpoint (e.g. OVHcloud AI Endpoints).
+# Set LLM_API_KEY to the provider access token.
+# Set LLM_BASE_URL to the provider endpoint URL (required).
+LLM_PROVIDER = os.environ.get('LLM_PROVIDER', 'ovhcloud')
 LLM_API_KEY = os.environ.get('LLM_API_KEY', '')
 LLM_BASE_URL = os.environ.get('LLM_BASE_URL', None)
-LLM_MODEL = os.environ.get('LLM_MODEL', 'claude-haiku-4-5-20251001')
+LLM_MODEL = os.environ.get('LLM_MODEL', 'Qwen/Qwen3-32B-FP8')
 LLM_TIMEOUT = 5  # seconds (quiz grading — short answers)
 LLM_ARTIFACT_TIMEOUT = 60  # seconds (artifact checklist — up to 20 criteria)
 LLM_MAX_CALLS_PER_STUDENT_PER_HOUR = 20          # quiz/warmup answers

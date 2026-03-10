@@ -1,6 +1,6 @@
 """LLM grading for free-text quiz questions.
 
-Supports both Anthropic cloud (Claude Haiku) and local Ollama.
+Uses any OpenAI-compatible API endpoint (e.g. OVHcloud AI Endpoints).
 Only question text, rubric, and student answer are sent to the API — never any student metadata.
 """
 
@@ -26,17 +26,11 @@ FALLBACK_RESULT = {
 
 
 def _get_client():
-    """Create LLM client. Anthropic SDK for 'anthropic' provider, OpenAI SDK for 'ovhcloud'."""
-    if config.LLM_PROVIDER == 'ovhcloud':
-        from openai import OpenAI
-        if not config.LLM_BASE_URL:
-            raise ValueError("LLM_BASE_URL must be set when LLM_PROVIDER=ovhcloud")
-        return OpenAI(base_url=config.LLM_BASE_URL, api_key=config.LLM_API_KEY)
-    import anthropic
-    kwargs = {"api_key": config.LLM_API_KEY}
-    if config.LLM_BASE_URL:
-        kwargs["base_url"] = config.LLM_BASE_URL
-    return anthropic.Anthropic(**kwargs)
+    """Create OpenAI-compatible client."""
+    from openai import OpenAI
+    if not config.LLM_BASE_URL:
+        raise ValueError("LLM_BASE_URL must be set")
+    return OpenAI(base_url=config.LLM_BASE_URL, api_key=config.LLM_API_KEY)
 
 
 def _call_llm(question_text, expected_or_rubric, student_answer):
@@ -51,43 +45,21 @@ def _call_llm(question_text, expected_or_rubric, student_answer):
     )
 
     client = _get_client()
-
-    if config.LLM_PROVIDER == 'ovhcloud':
-        response = client.chat.completions.create(
-            model=config.LLM_MODEL,
-            max_tokens=150,
-            temperature=0,
-            response_format={"type": "json_object"},
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ],
-            timeout=config.LLM_TIMEOUT,
-        )
-        text = response.choices[0].message.content.strip() if response.choices else ""
-        if not text:
-            print("LLM grading (ovhcloud): empty response", file=sys.stderr)
-            return None
-    else:
-        # Anthropic path
-        response = client.messages.create(
-            model=config.LLM_MODEL,
-            max_tokens=150,
-            system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": user_prompt}],
-            timeout=config.LLM_TIMEOUT,
-        )
-        if not response.content:
-            print(f"LLM grading: empty response (stop_reason={response.stop_reason})", file=sys.stderr)
-            return None
-        text = response.content[0].text.strip()
-        if not text:
-            print(f"LLM grading: empty response (stop_reason={response.stop_reason})", file=sys.stderr)
-            return None
-        # Strip markdown code fences (LLMs often wrap JSON in ```json ... ```)
-        if text.startswith('```'):
-            text = text.split('\n', 1)[-1]
-            text = text.rsplit('```', 1)[0].strip()
+    response = client.chat.completions.create(
+        model=config.LLM_MODEL,
+        max_tokens=150,
+        temperature=0,
+        response_format={"type": "json_object"},
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ],
+        timeout=config.LLM_TIMEOUT,
+    )
+    text = response.choices[0].message.content.strip() if response.choices else ""
+    if not text:
+        print("LLM grading: empty response", file=sys.stderr)
+        return None
 
     # Parse JSON — if it fails, the answer can't be graded
     result = json.loads(text)
@@ -131,31 +103,18 @@ def grade_artifact_checklist(extracted_text: str, criteria: list) -> list:
 
     client = _get_client()
     try:
-        if config.LLM_PROVIDER == 'ovhcloud':
-            response = client.chat.completions.create(
-                model=config.LLM_MODEL,
-                max_tokens=1200,
-                temperature=0,
-                response_format={"type": "json_object"},
-                messages=[
-                    {"role": "system", "content": ARTIFACT_CHECKLIST_SYSTEM_PROMPT},
-                    {"role": "user", "content": user_prompt},
-                ],
-                timeout=config.LLM_ARTIFACT_TIMEOUT,
-            )
-            text = response.choices[0].message.content.strip() if response.choices else ""
-        else:
-            response = client.messages.create(
-                model=config.LLM_MODEL,
-                max_tokens=1200,
-                system=ARTIFACT_CHECKLIST_SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": user_prompt}],
-                timeout=config.LLM_ARTIFACT_TIMEOUT,
-            )
-            text = response.content[0].text.strip() if response.content else ""
-            if text.startswith('```'):
-                text = text.split('\n', 1)[-1]
-                text = text.rsplit('```', 1)[0].strip()
+        response = client.chat.completions.create(
+            model=config.LLM_MODEL,
+            max_tokens=1200,
+            temperature=0,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": ARTIFACT_CHECKLIST_SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
+            timeout=config.LLM_ARTIFACT_TIMEOUT,
+        )
+        text = response.choices[0].message.content.strip() if response.choices else ""
 
         if not text:
             print("LLM artifact checklist: empty response", file=sys.stderr)
