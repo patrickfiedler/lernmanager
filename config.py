@@ -18,7 +18,7 @@ if not SECRET_KEY:
 SCHOOL_NAME = os.environ.get('SCHOOL_NAME', '[Schulname]')
 SCHOOL_ADDRESS = os.environ.get('SCHOOL_ADDRESS', '[Adresse]')
 SCHOOL_EMAIL = os.environ.get('SCHOOL_EMAIL', '[E-Mail-Adresse]')
-DSB_CONTACT = os.environ.get('DSB_CONTACT', '[Datenschutzbeauftragte/r: Name, Kontakt]')
+DSB_CONTACT = os.environ.get('DSB_CONTACT', '')
 PRIVACY_AUTHORITY = os.environ.get('PRIVACY_AUTHORITY', '[Landesbeauftragter für Datenschutz]')
 
 DATABASE = os.path.join(BASE_DIR, 'data', 'mbi_tracker.db')

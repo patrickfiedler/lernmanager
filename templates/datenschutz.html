@@ -13,7 +13,7 @@
       {{ school_address }}<br>
       E-Mail: <a class="obfuscated-email" data-email="{{ school_email|b64encode }}"></a>
     </p>
-    <p>Datenschutzbeauftragte/r der Schule: {{ dsb_contact }}</p>
+    {% if dsb_contact %}<p>Datenschutzbeauftragte/r der Schule: {{ dsb_contact }}</p>{% endif %}
 
     <h2>2. Zweck der Verarbeitung</h2>
     <ul>
