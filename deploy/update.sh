@@ -268,7 +268,7 @@ main() {
 
     # Find migration scripts not yet recorded as done
     PENDING_MIGRATIONS=()
-    for migration in "$APP_DIR"/migrate_*.py; do
+    for migration in "$APP_DIR"/migrate/migrate_*.py; do
         if [ -f "$migration" ]; then
             MIGRATION_NAME=$(basename "$migration")
             if ! grep -qxF "$MIGRATION_NAME" "$MIGRATIONS_DONE_FILE"; then
