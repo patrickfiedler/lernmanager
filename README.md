@@ -32,7 +32,7 @@ A German-language learning progress tracker for schools. Teachers manage classes
 - **Backend**: Python 3, Flask
 - **Database**: SQLite
 - **Server**: Waitress WSGI
-- **Frontend**: Bootstrap 5, vanilla JavaScript
+- **Frontend**: Custom CSS, vanilla JavaScript
 - **LLM grading**: OpenAI-compatible API endpoint (e.g. OVHcloud AI Endpoints with open-source models)
 - **PDF**: ReportLab
 
