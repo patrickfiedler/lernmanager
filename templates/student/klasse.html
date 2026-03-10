@@ -60,7 +60,10 @@
             <div class="dot-legend">
                 <span><span style="display:inline-block; width:0.7rem; height:0.7rem; border-radius:50%; background:#d1d5db; vertical-align:middle;"></span> offen</span>
                 <span><span style="display:inline-block; width:0.7rem; height:0.7rem; border-radius:50%; background:#10b981; vertical-align:middle;"></span> erledigt</span>
-                <span><span style="display:inline-block; width:0.7rem; height:0.7rem; border-radius:50%; background:#f59e0b; vertical-align:middle; font-size:0.55rem; color:white; text-align:center; line-height:0.7rem;">?</span> Quiz</span>
+                <span><span style="display:inline-block; width:0.7rem; height:0.7rem; border-radius:50%; background:#d1d5db; vertical-align:middle; font-size:0.55rem; color:white; text-align:center; line-height:0.7rem;">?</span> Quiz</span>
+                {% if subtasks|rejectattr('required')|list %}
+                <span><span style="display:inline-block; width:0.7rem; height:0.7rem; border-radius:2px; background:white; border:1.5px dashed #9ca3af; transform:rotate(45deg); vertical-align:middle;"></span> Zusatz</span>
+                {% endif %}
             </div>
             </div>
         </div>
