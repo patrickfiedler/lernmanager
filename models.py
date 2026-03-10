@@ -1369,102 +1369,91 @@ def delete_subtask(subtask_id):
 def update_subtasks(task_id, subtasks_list, estimated_minutes_list=None, quiz_json_list=None,
                     path_list=None, path_model_list=None, graded_artifact_json_list=None,
                     fertig_wenn_list=None, tipps_list=None):
-    """Replace all subtasks for a task.
+    """Update subtasks for a task in-place by position.
 
-    Preserves material assignments by matching subtask order/position.
-    Orphans quiz_attempt records by setting subtask_id=NULL before deleting old subtasks.
+    UPDATEs existing subtasks at matching positions (preserves their IDs and thus
+    student_subtask completion records). INSERTs new positions, DELETEs removed ones.
+    Material assignments are preserved for existing subtasks automatically.
     """
     with db_session() as conn:
-        # Step 0: Orphan quiz_attempt subtask references before deleting subtasks
-        old_subtask_ids = [r['id'] for r in conn.execute(
-            "SELECT id FROM subtask WHERE task_id = ?", (task_id,)
-        ).fetchall()]
-        if old_subtask_ids:
-            placeholders = ','.join('?' * len(old_subtask_ids))
-            conn.execute(f"""
-                UPDATE quiz_attempt SET subtask_id = NULL
-                WHERE subtask_id IN ({placeholders})
-            """, old_subtask_ids)
+        # Load existing subtasks keyed by position
+        old_rows = conn.execute(
+            "SELECT * FROM subtask WHERE task_id = ? ORDER BY reihenfolge", (task_id,)
+        ).fetchall()
+        old_by_pos = {r['reihenfolge']: dict(r) for r in old_rows}
 
-        # Step 1: Save material-subtask assignments by position
-        old_mat_assignments = conn.execute("""
-            SELECT ms.material_id, s.reihenfolge
-            FROM material_subtask ms
-            JOIN subtask s ON ms.subtask_id = s.id
-            WHERE s.task_id = ?
-        """, (task_id,)).fetchall()
-
-        mat_assignments_by_position = {}
-        for row in old_mat_assignments:
-            mid = row['material_id']
-            if mid not in mat_assignments_by_position:
-                mat_assignments_by_position[mid] = set()
-            mat_assignments_by_position[mid].add(row['reihenfolge'])
-
-        # Step 2: Delete old material assignments and subtasks
-        conn.execute("""
-            DELETE FROM material_subtask
-            WHERE subtask_id IN (SELECT id FROM subtask WHERE task_id = ?)
-        """, (task_id,))
-        conn.execute("DELETE FROM subtask WHERE task_id = ?", (task_id,))
-
-        # Step 3: Create new subtasks and track their IDs by position
-        new_subtask_ids_by_position = {}
+        new_positions = set()
 
         for i, beschreibung in enumerate(subtasks_list):
-            if beschreibung.strip():
-                estimated_minutes = None
-                if estimated_minutes_list and i < len(estimated_minutes_list):
-                    try:
-                        minutes = estimated_minutes_list[i].strip()
-                        estimated_minutes = int(minutes) if minutes else None
-                    except (ValueError, AttributeError):
-                        estimated_minutes = None
+            if not beschreibung.strip():
+                continue
+            new_positions.add(i)
 
-                subtask_quiz = None
-                if quiz_json_list and i < len(quiz_json_list):
-                    qj = quiz_json_list[i].strip() if quiz_json_list[i] else ''
-                    subtask_quiz = qj if qj else None
+            # Parse all fields from parallel lists
+            estimated_minutes = None
+            if estimated_minutes_list and i < len(estimated_minutes_list):
+                try:
+                    minutes = estimated_minutes_list[i].strip()
+                    estimated_minutes = int(minutes) if minutes else None
+                except (ValueError, AttributeError):
+                    pass
 
-                path = None
-                if path_list and i < len(path_list):
-                    p = path_list[i].strip() if path_list[i] else ''
-                    path = p if p else None
+            subtask_quiz = None
+            if quiz_json_list and i < len(quiz_json_list):
+                qj = quiz_json_list[i].strip() if quiz_json_list[i] else ''
+                subtask_quiz = qj if qj else None
 
-                path_model = 'skip'
-                if path_model_list and i < len(path_model_list):
-                    pm = path_model_list[i].strip() if path_model_list[i] else ''
-                    path_model = pm if pm in ('skip', 'depth') else 'skip'
+            path = None
+            if path_list and i < len(path_list):
+                p = path_list[i].strip() if path_list[i] else ''
+                path = p if p else None
 
-                graded_artifact = None
-                if graded_artifact_json_list and i < len(graded_artifact_json_list):
-                    ga = graded_artifact_json_list[i].strip() if graded_artifact_json_list[i] else ''
-                    graded_artifact = ga if ga else None
+            path_model = 'skip'
+            if path_model_list and i < len(path_model_list):
+                pm = path_model_list[i].strip() if path_model_list[i] else ''
+                path_model = pm if pm in ('skip', 'depth') else 'skip'
 
-                fertig_wenn = None
-                if fertig_wenn_list and i < len(fertig_wenn_list):
-                    fw = fertig_wenn_list[i].strip() if fertig_wenn_list[i] else ''
-                    fertig_wenn = fw if fw else None
+            graded_artifact = None
+            if graded_artifact_json_list and i < len(graded_artifact_json_list):
+                ga = graded_artifact_json_list[i].strip() if graded_artifact_json_list[i] else ''
+                graded_artifact = ga if ga else None
 
-                tipps = None
-                if tipps_list and i < len(tipps_list):
-                    tp = tipps_list[i].strip() if tipps_list[i] else ''
-                    tipps = tp if tp else None
+            fertig_wenn = None
+            if fertig_wenn_list and i < len(fertig_wenn_list):
+                fw = fertig_wenn_list[i].strip() if fertig_wenn_list[i] else ''
+                fertig_wenn = fw if fw else None
 
-                cursor = conn.execute(
+            tipps = None
+            if tipps_list and i < len(tipps_list):
+                tp = tipps_list[i].strip() if tipps_list[i] else ''
+                tipps = tp if tp else None
+
+            if i in old_by_pos:
+                # UPDATE in-place — preserves subtask ID and student_subtask records
+                conn.execute("""
+                    UPDATE subtask SET beschreibung=?, estimated_minutes=?,
+                    quiz_json=?, path=?, path_model=?, graded_artifact_json=?,
+                    fertig_wenn=?, tipps=?
+                    WHERE id=?
+                """, (beschreibung.strip(), estimated_minutes, subtask_quiz,
+                      path, path_model, graded_artifact, fertig_wenn, tipps,
+                      old_by_pos[i]['id']))
+            else:
+                # INSERT new subtask at this position
+                conn.execute(
                     "INSERT INTO subtask (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json, fertig_wenn, tipps) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (task_id, beschreibung.strip(), i, estimated_minutes, subtask_quiz, path, path_model, graded_artifact, fertig_wenn, tipps)
+                    (task_id, beschreibung.strip(), i, estimated_minutes, subtask_quiz,
+                     path, path_model, graded_artifact, fertig_wenn, tipps)
                 )
-                new_subtask_ids_by_position[i] = cursor.lastrowid
 
-        # Step 4: Restore material-subtask assignments for matching positions
-        for material_id, old_positions in mat_assignments_by_position.items():
-            for old_pos in old_positions:
-                if old_pos in new_subtask_ids_by_position:
-                    conn.execute(
-                        "INSERT INTO material_subtask (material_id, subtask_id) VALUES (?, ?)",
-                        (material_id, new_subtask_ids_by_position[old_pos])
-                    )
+        # DELETE subtasks at positions no longer present
+        for old_pos, old_sub in old_by_pos.items():
+            if old_pos not in new_positions:
+                sub_id = old_sub['id']
+                # Orphan quiz_attempt references before deleting
+                conn.execute("UPDATE quiz_attempt SET subtask_id = NULL WHERE subtask_id = ?", (sub_id,))
+                conn.execute("DELETE FROM material_subtask WHERE subtask_id = ?", (sub_id,))
+                conn.execute("DELETE FROM subtask WHERE id = ?", (sub_id,))
 
 
 def update_subtasks_from_import(task_id, subtasks_data):
