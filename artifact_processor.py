@@ -247,41 +247,56 @@ def _sb3_collect_opcodes(blocks: dict) -> list[str]:
     return result
 
 
-def _sb3_format_target_summary(
-    name: str,
-    is_stage: bool,
-    costumes: int,
-    sounds: int,
-    opcodes: list[str],
-) -> str:
-    """Format a per-target summary section for LLM consumption."""
-    label = "Bühne" if is_stage else f"Figur: {name}"
-    used = [_SB3_CATEGORIES[p] for p in _SB3_CATEGORIES
-            if any(op.startswith(p + '_') for op in opcodes)]
-    lines = [
-        f"[{label}]",
-        f"Kostüme: {costumes}, Töne: {sounds}",
-        f"Kategorien: {', '.join(used) if used else '(keine)'}",
-    ]
-    return "\n".join(lines)
+
+def _sb3_count_scripts(blocks: dict) -> int:
+    """Count top-level blocks (= scripts) in a target's blocks dict."""
+    return sum(1 for b in blocks.values() if isinstance(b, dict) and b.get('topLevel', False))
 
 
-def extract_sb3(file_bytes: bytes) -> str:
+def _sb3_variable_names(target: dict) -> list[str]:
+    """Return variable names defined on a target (stage = global, sprite = local)."""
+    return [v[0] for v in target.get('variables', {}).values() if isinstance(v, list)]
+
+
+def extract_sb3(file_bytes: bytes, filename: str = '') -> str:
     """Extract a readable project summary from a Scratch .sb3 file.
 
     .sb3 is a ZIP archive containing project.json. We collect per-target info
-    (sprite name, opcode categories, costume/sound counts) and format it as
-    structured text for LLM checklist evaluation.
+    (sprite name, opcode categories, costume/sound counts, variables, script count)
+    and format it as structured text for LLM checklist evaluation.
+
+    Level 1 criteria (block presence/counts) are fully supported.
+    Level 2 criteria (script ordering, pseudo-code) require a future upgrade.
     """
     import json
     with zipfile.ZipFile(io.BytesIO(file_bytes)) as z:
         project = json.loads(z.read('project.json'))
 
     targets = project.get('targets', [])
+    stage = next((t for t in targets if t.get('isStage', False)), None)
     sprites = [t for t in targets if not t.get('isStage', False)]
+    extensions = project.get('extensions', [])
 
-    header = f"[Scratch-Projekt]\nFiguren: {len(sprites)}"
-    sections = [header]
+    # Header counts
+    backgrounds = len(stage.get('costumes', [])) if stage else 0
+    global_vars = _sb3_variable_names(stage) if stage else []
+    total_scripts = sum(_sb3_count_scripts(t.get('blocks', {})) for t in targets)
+    total_blocks = sum(len([b for b in t.get('blocks', {}).values() if isinstance(b, dict)])
+                       for t in targets)
+
+    header_lines = ["[Scratch-Projekt]"]
+    if filename:
+        header_lines.append(f"Dateiname: {filename}")
+    header_lines.append(
+        f"Figuren: {len(sprites)} | Skripte: {total_scripts} | "
+        f"Blöcke: {total_blocks} | Hintergründe: {backgrounds}"
+    )
+    if global_vars:
+        header_lines.append(f"Globale Variablen: {', '.join(global_vars)}")
+    header_lines.append(
+        f"Erweiterungen: {', '.join(extensions) if extensions else '(keine)'}"
+    )
+    sections = ["\n".join(header_lines)]
 
     for target in targets:
         name = target.get('name', 'Unbekannt')
@@ -289,10 +304,23 @@ def extract_sb3(file_bytes: bytes) -> str:
         costumes = len(target.get('costumes', []))
         sounds = len(target.get('sounds', []))
         opcodes = _sb3_collect_opcodes(target.get('blocks', {}))
+        local_vars = _sb3_variable_names(target) if not is_stage else []
+        scripts = _sb3_count_scripts(target.get('blocks', {}))
 
-        summary = _sb3_format_target_summary(name, is_stage, costumes, sounds, opcodes)
-        if summary:
-            sections.append(summary)
+        label = "Bühne" if is_stage else f"Figur: {name}"
+        used = [_SB3_CATEGORIES[p] for p in _SB3_CATEGORIES
+                if any(op.startswith(p + '_') for op in opcodes)]
+
+        lines = [f"[{label}]"]
+        if is_stage:
+            lines.append(f"Hintergründe: {costumes}, Töne: {sounds}")
+        else:
+            lines.append(f"Skripte: {scripts}, Kostüme: {costumes}, Töne: {sounds}")
+        lines.append(f"Kategorien: {', '.join(used) if used else '(keine)'}")
+        if local_vars:
+            lines.append(f"Lokale Variablen: {', '.join(local_vars)}")
+
+        sections.append("\n".join(lines))
 
     return '\n\n'.join(sections)
 
@@ -313,4 +341,6 @@ def extract_artifact(file_bytes: bytes, filename: str) -> str:
     ext = '.' + filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
     if ext not in ACCEPTED_FORMATS:
         raise ValueError(f"Unsupported format: {ext!r}. Accepted: {', '.join(ACCEPTED_FORMATS)}")
+    if ext == '.sb3':
+        return extract_sb3(file_bytes, filename)
     return ACCEPTED_FORMATS[ext](file_bytes)
