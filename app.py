@@ -2440,9 +2440,9 @@ def student_practice():
 
     # Select questions based on mode
     if mode == 'schwaechen':
-        questions = models.select_warmup_questions(student_id, pool, difficulty='hard', count=5)
+        questions = models.select_warmup_questions(student_id, pool, difficulty='hard', count=5, respect_intervals=False)
     else:
-        questions = models.select_warmup_questions(student_id, pool, difficulty='mixed', count=5)
+        questions = models.select_warmup_questions(student_id, pool, difficulty='mixed', count=5, respect_intervals=False)
 
     if not questions:
         flash('Keine passenden Fragen gefunden.', 'info')

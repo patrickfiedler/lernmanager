@@ -1827,10 +1827,23 @@ def toggle_student_subtask(student_task_id, subtask_id, erledigt):
     """
     result = {'quiz_pending': False, 'subtask_id': subtask_id}
     with db_session() as conn:
-        conn.execute('''
-            INSERT OR REPLACE INTO student_subtask (student_task_id, subtask_id, erledigt)
-            VALUES (?, ?, ?)
-        ''', (student_task_id, subtask_id, 1 if erledigt else 0))
+        existing = conn.execute(
+            'SELECT id, completed_at FROM student_subtask WHERE student_task_id = ? AND subtask_id = ?',
+            (student_task_id, subtask_id)
+        ).fetchone()
+        now = datetime.now().strftime('%Y-%m-%d')
+        if existing:
+            # Preserve first completion timestamp; don't overwrite if already set
+            new_completed_at = existing['completed_at'] or (now if erledigt else None)
+            conn.execute(
+                'UPDATE student_subtask SET erledigt = ?, completed_at = ? WHERE id = ?',
+                (1 if erledigt else 0, new_completed_at, existing['id'])
+            )
+        else:
+            conn.execute(
+                'INSERT INTO student_subtask (student_task_id, subtask_id, erledigt, completed_at) VALUES (?, ?, ?, ?)',
+                (student_task_id, subtask_id, 1 if erledigt else 0, now if erledigt else None)
+            )
 
         # If marking as complete, check if subtask has a quiz that blocks advancement
         if erledigt:
@@ -3180,7 +3193,8 @@ def get_warmup_question_pool(student_id):
         # Exclude first subtask per topic (intro tasks have chapter-specific
         # questions that don't make sense out of context in warm-up)
         completed_subtasks = conn.execute('''
-            SELECT DISTINCT sub.id as subtask_id, sub.task_id, sub.quiz_json, t.name as topic_name
+            SELECT DISTINCT sub.id as subtask_id, sub.task_id, sub.quiz_json, t.name as topic_name,
+                   ss.completed_at
             FROM student_subtask ss
             JOIN student_task st ON ss.student_task_id = st.id
             JOIN subtask sub ON ss.subtask_id = sub.id
@@ -3206,13 +3220,18 @@ def get_warmup_question_pool(student_id):
                     'subtask_id': sub['subtask_id'],
                     'question_index': i,
                     'question': q,
-                    'topic_name': sub['topic_name']
+                    'topic_name': sub['topic_name'],
+                    'completed_at': sub['completed_at']
                 })
 
     return pool
 
 
-def select_warmup_questions(student_id, pool, difficulty='easy', count=2):
+# Leitner box intervals (days to wait before re-showing), indexed by streak (capped at 4)
+LEITNER_INTERVALS = [0, 1, 3, 7, 14]
+
+
+def select_warmup_questions(student_id, pool, difficulty='easy', count=2, respect_intervals=True):
     """Select questions from pool based on difficulty and history.
 
     Difficulty (per-student, not per-question):
@@ -3220,13 +3239,12 @@ def select_warmup_questions(student_id, pool, difficulty='easy', count=2):
       - 'hard': questions with streak < 2 AND seen before
       - 'mixed': no filter (for practice mode)
 
-    TODO(human): Implement prioritization within the difficulty bucket.
+    respect_intervals: if True, only "due" questions are eligible (Leitner intervals).
+      Set False for practice mode where students actively seek extra review.
     """
-    import random
     if not pool:
         return []
 
-    # Load history for this student
     with db_session() as conn:
         history_rows = conn.execute(
             'SELECT task_id, subtask_id, question_index, times_shown, times_correct, last_shown, streak '
@@ -3234,68 +3252,71 @@ def select_warmup_questions(student_id, pool, difficulty='easy', count=2):
             (student_id,)
         ).fetchall()
 
-    # Build lookup: (task_id, subtask_id, question_index) → history dict
     history = {}
     for h in history_rows:
         key = (h['task_id'], h['subtask_id'], h['question_index'])
         history[key] = dict(h)
 
-    # Split pool into difficulty buckets
+    today = datetime.now().date()
+
     bucket = []
     for q in pool:
         key = (q['task_id'], q['subtask_id'], q['question_index'])
         h = history.get(key)
 
+        # Leitner interval gate: skip questions not yet due
+        if respect_intervals and h is not None:
+            streak = h['streak']
+            interval = LEITNER_INTERVALS[min(streak, len(LEITNER_INTERVALS) - 1)]
+            if h['last_shown']:
+                last = datetime.strptime(h['last_shown'], '%Y-%m-%d').date()
+                days_since = (today - last).days
+            else:
+                days_since = 999
+            if days_since < interval:
+                continue  # not due yet
+
         if difficulty == 'mixed':
             bucket.append(q)
         elif difficulty == 'easy':
-            # Never seen OR streak >= 2
             if h is None or h['streak'] >= 2:
                 bucket.append(q)
         elif difficulty == 'hard':
-            # Seen before AND streak < 2
             if h is not None and h['streak'] < 2:
                 bucket.append(q)
 
     if not bucket:
         return []
 
-    # Prioritize within bucket
-    today = datetime.now().strftime('%Y-%m-%d')
-    selected = _prioritize_questions(bucket, history, today, count)
-    return selected
+    return _prioritize_questions(bucket, history, today.strftime('%Y-%m-%d'), count)
 
 
 def _prioritize_questions(bucket, history, today, count):
     """Prioritize questions within a difficulty bucket.
 
-    Priority order:
-    1. Previously incorrect (times_correct < times_shown) AND not shown today
-    2. Not recently shown (last_shown is NULL or > 3 days ago)
-    3. Random from rest
+    Tier 1: Previously incorrect (need reinforcement most)
+    Tier 2: Recently completed task (within 7 days) AND never seen in warmup
+            → surface new learning while still fresh
+    Tier 3: Everything else due
 
     Returns up to `count` questions.
     """
     import random
-    from datetime import datetime as dt, timedelta
 
-    three_days_ago = (dt.now() - timedelta(days=3)).strftime('%Y-%m-%d')
+    recent_cutoff = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
 
-    tier1 = []  # previously incorrect, not shown today
-    tier2 = []  # not recently shown
+    tier1 = []  # previously incorrect
+    tier2 = []  # new learning, not yet seen in warmup
     tier3 = []  # everything else
 
     for q in bucket:
         key = (q['task_id'], q['subtask_id'], q['question_index'])
         h = history.get(key)
+        completed_at = q.get('completed_at')
 
-        if h is None:
-            tier2.append(q)
-        elif h['last_shown'] == today:
-            tier3.append(q)
-        elif h['times_correct'] < h['times_shown']:
+        if h is not None and h['times_correct'] < h['times_shown']:
             tier1.append(q)
-        elif h['last_shown'] is None or h['last_shown'] <= three_days_ago:
+        elif h is None and completed_at and completed_at >= recent_cutoff:
             tier2.append(q)
         else:
             tier3.append(q)
