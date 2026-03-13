@@ -12,7 +12,7 @@
 
 <div id="warmup-container">
     <!-- Progress -->
-    <div class="mb-1 text-muted" id="progress-text">Frage 1 von 2</div>
+    <div class="mb-1 text-muted" id="progress-text"></div>
 
     <!-- Question card -->
     <div class="card mb-2" id="question-card">
@@ -44,9 +44,12 @@
     let questions = {{ questions_json|safe }};
     let currentIdx = 0;
     let phase = 'easy';  // 'easy' or 'hard'
+    let round = 1;
+    let roundSize = questions.length;
+    let roundIdx = 0;  // position within current round (0-based)
     let totalCorrect = 0;
     let totalShown = 0;
-    let totalQuestions = questions.length;  // grows when hard round is added
+    let totalQuestions = questions.length;  // used only for session summary
     let easyCorrect = 0;
     let answered = false;
 
@@ -65,7 +68,7 @@
         answered = false;
 
         document.getElementById('progress-text').textContent =
-            'Frage ' + (totalShown + 1) + ' von ' + totalQuestions;
+            'Runde ' + round + ': Frage ' + (roundIdx + 1) + ' von ' + roundSize;
         document.getElementById('topic-label').textContent = q.topic_name;
         document.getElementById('question-text').textContent = q.text;
 
@@ -254,6 +257,7 @@
         .then(r => r.json())
         .then(data => {
             totalShown++;
+            roundIdx++;
             if (data.correct) {
                 totalCorrect++;
                 if (phase === 'easy') easyCorrect++;
@@ -293,6 +297,9 @@
             .then(data => {
                 if (!data.done && data.questions && data.questions.length > 0) {
                     phase = 'hard';
+                    round = 2;
+                    roundSize = data.questions.length;
+                    roundIdx = 0;
                     totalQuestions += data.questions.length;
                     questions = data.questions;
                     currentIdx = 0;
