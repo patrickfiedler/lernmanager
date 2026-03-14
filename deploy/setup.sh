@@ -80,9 +80,9 @@ main() {
     fi
 
     # Check if already installed
-    if [ -d "$APP_DIR" ]; then
-        log_error "Directory $APP_DIR already exists"
-        log_error "If you want to update an existing installation, use deploy/deploy.sh instead"
+    if [ -d "$APP_DIR/.git" ]; then
+        log_error "Lernmanager already installed at $APP_DIR"
+        log_error "If you want to update an existing installation, use deploy/update.sh instead"
         exit 1
     fi
 
