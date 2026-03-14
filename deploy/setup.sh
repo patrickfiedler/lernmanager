@@ -105,7 +105,7 @@ main() {
         log_warn "User $APP_USER already exists"
     else
         log_info "Creating system user: $APP_USER"
-        useradd -r -s /usr/sbin/nologin -m -d "$APP_DIR" "$APP_USER"
+        useradd -r -s /usr/sbin/nologin -M -d "$APP_DIR" "$APP_USER"
         log_info "User created successfully"
     fi
 
