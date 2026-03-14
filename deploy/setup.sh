@@ -176,12 +176,18 @@ FLASK_ENV=production
 # HTTPS-only cookies (uncomment after setting up SSL/TLS with certbot)
 # FORCE_HTTPS=true
 
-# Database encryption key (optional, requires sqlcipher3-binary)
-# To enable encryption:
-# 1. Generate key: python3 -c "import secrets; print(secrets.token_hex(32))"
-# 2. Uncomment and set SQLCIPHER_KEY below
-# 3. Install package: pip install sqlcipher3-binary
-# SQLCIPHER_KEY=CHANGE_ME_TO_RANDOM_STRING
+# School identity (shown in Datenschutzerklärung) — fill in before go-live!
+SCHOOL_NAME=[Schulname]
+SCHOOL_ADDRESS=[Adresse]
+SCHOOL_EMAIL=[E-Mail-Adresse]
+# DSB_CONTACT=  # optional — leave empty if school uses a shared DSB
+PRIVACY_AUTHORITY=[Landesbeauftragter für Datenschutz]
+
+# LLM grading (optional — leave blank to disable AI features)
+# LLM_PROVIDER=ovhcloud
+# LLM_API_KEY=
+# LLM_BASE_URL=https://oai.endpoints.kepler.ai.cloud.ovh.net/v1
+# LLM_MODEL=Qwen/Qwen3-32B-FP8
 EOF
 
     chmod 600 "$ENV_FILE"
@@ -253,10 +259,11 @@ EOF
     echo -e "${BLUE}Next Steps:${NC}"
     echo "  1. Configure Nginx as reverse proxy (see deploy/nginx.conf)"
     echo "  2. Set up HTTPS with: sudo certbot --nginx -d YOUR_DOMAIN"
-    echo "  3. Enable HTTPS-only cookies: Uncomment FORCE_HTTPS in $SYSTEMD_SERVICE"
+    echo "  3. Enable HTTPS-only cookies: Uncomment FORCE_HTTPS in $ENV_FILE, then restart"
     echo "  4. Configure firewall: sudo ufw allow 'Nginx Full' && sudo ufw enable"
-    echo "  5. Login and change admin password"
-    echo "  6. For updates, use: sudo $APP_DIR/deploy/update.sh"
+    echo "  5. Fill in school details in $ENV_FILE (SCHOOL_NAME, SCHOOL_ADDRESS, ...)"
+    echo "  6. Login and change admin password"
+    echo "  7. For updates, use: sudo $APP_DIR/deploy/update.sh"
     echo ""
     echo -e "${BLUE}Useful Commands:${NC}"
     echo "  View logs:       sudo journalctl -u lernmanager -f"
