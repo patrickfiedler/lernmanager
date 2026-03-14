@@ -194,7 +194,7 @@ if __name__ == '__main__':
         db_path = sys.argv[1]
     else:
         # Default path relative to script location
-        script_dir = os.path.dirname(os.path.abspath(__file__))
+        script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         db_path = os.path.join(script_dir, 'data', 'mbi_tracker.db')
 
     if not os.path.exists(db_path):

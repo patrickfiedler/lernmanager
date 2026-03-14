@@ -41,7 +41,7 @@ else:
     print("✓ Using standard SQLite (unencrypted database)")
 
 # Database path
-DATABASE = os.path.join(os.path.dirname(__file__), 'data', 'mbi_tracker.db')
+DATABASE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'mbi_tracker.db')
 
 def backup_database():
     """Create a backup of the database before migration."""
