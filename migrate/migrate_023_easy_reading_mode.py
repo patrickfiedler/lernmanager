@@ -37,15 +37,8 @@ def migrate():
     print("Migration: Add easy reading mode preference")
     print("=" * 70)
 
-    # Create backup
-    print("\nStep 1: Creating backup...")
-    backup_path = f"{DB_PATH}.backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    import shutil
-    shutil.copy2(DB_PATH, backup_path)
-    print(f"✓ Backup created: {backup_path}")
-
     # Connect to database
-    print("\nStep 2: Connecting to database...")
+    print("\nStep 1: Connecting to database...")
     conn = sqlite3.connect(DB_PATH)
     if sqlcipher_key:
         conn.execute(f"PRAGMA key = '{sqlcipher_key}'")
@@ -58,7 +51,7 @@ def migrate():
     cursor = conn.cursor()
 
     # Check if column already exists
-    print("\nStep 3: Checking if column already exists...")
+    print("\nStep 2: Checking if column already exists...")
     cursor.execute("PRAGMA table_info(student)")
     columns = [row[1] for row in cursor.fetchall()]
 
@@ -66,6 +59,13 @@ def migrate():
         print("✓ Column 'easy_reading_mode' already exists - migration already applied")
         conn.close()
         return
+
+    # Create backup only if migration is actually needed
+    print("\nStep 3: Creating backup...")
+    import shutil
+    backup_path = f"{DB_PATH}.backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    shutil.copy2(DB_PATH, backup_path)
+    print(f"✓ Backup created: {backup_path}")
 
     # Add column
     print("\nStep 4: Adding easy_reading_mode column to student table...")
