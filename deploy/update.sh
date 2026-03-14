@@ -282,29 +282,16 @@ main() {
         echo ""
         MIGRATIONS_RUN=true
 
-        # Load SQLCIPHER_KEY if it exists in .env (for encrypted databases)
-        SQLCIPHER_KEY=""
-        if [ -f "$APP_DIR/.env" ] && grep -q "^SQLCIPHER_KEY=" "$APP_DIR/.env"; then
-            SQLCIPHER_KEY=$(grep "^SQLCIPHER_KEY=" "$APP_DIR/.env" | cut -d '=' -f2- | tr -d '"' | tr -d "'")
-            log_info "SQLCIPHER_KEY loaded from $APP_DIR/.env"
-        else
-            log_warn "No SQLCIPHER_KEY found in $APP_DIR/.env - database assumed unencrypted"
-        fi
-
         # Run only pending migrations
         MIGRATION_ERRORS=0
         for migration in "${PENDING_MIGRATIONS[@]}"; do
             MIGRATION_NAME=$(basename "$migration")
             log_info "Executing: $MIGRATION_NAME"
 
-            # Run migration as lernmanager user, passing SQLCIPHER_KEY if set
-            if [ -n "$SQLCIPHER_KEY" ]; then
-                MIGRATION_CMD="sudo -u $APP_USER SQLCIPHER_KEY=\"$SQLCIPHER_KEY\" $APP_DIR/venv/bin/python $migration"
-            else
-                MIGRATION_CMD="sudo -u $APP_USER $APP_DIR/venv/bin/python $migration"
-            fi
-
-            if eval "$MIGRATION_CMD"; then
+            # Run from APP_DIR with PYTHONPATH set:
+            # - fixes "import config/models" (older scripts expect project root in sys.path)
+            # - fixes relative "data/mbi_tracker.db" paths in older scripts
+            if sudo -u "$APP_USER" sh -c "cd '$APP_DIR' && PYTHONPATH='$APP_DIR' '$APP_DIR/venv/bin/python' '$migration'"; then
                 log_info "✓ $MIGRATION_NAME completed"
                 echo "$MIGRATION_NAME" >> "$MIGRATIONS_DONE_FILE"
             else
@@ -313,9 +300,6 @@ main() {
             fi
             echo ""
         done
-
-        # Clear SQLCIPHER_KEY for security
-        SQLCIPHER_KEY=""
 
         if [ $MIGRATION_ERRORS -gt 0 ]; then
             log_error "$MIGRATION_ERRORS migration(s) failed"
