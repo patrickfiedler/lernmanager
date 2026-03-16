@@ -774,6 +774,7 @@ def delete_student(student_id):
             "DELETE FROM analytics_events WHERE user_id = ? AND user_type = 'student'",
             (student_id,)
         )
+        conn.execute("DELETE FROM unterricht_student WHERE student_id = ?", (student_id,))
         conn.execute("DELETE FROM artifact_feedback WHERE student_id = ?", (student_id,))
         conn.execute("DELETE FROM student WHERE id = ?", (student_id,))
 
