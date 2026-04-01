@@ -1803,6 +1803,75 @@ tr.unsaved-row td {
     line-height: 1.5;
 }
 
+/* ── Split Pane Sidebar ─────────────────────────────── */
+
+.btn-split {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    background: var(--gray-100);
+    color: var(--gray-700);
+    border: 1px solid var(--gray-300);
+    border-radius: 0.375rem;
+    padding: 0.2rem 0.55rem;
+    font-size: 0.75rem;
+    cursor: pointer;
+    margin-left: 0.4rem;
+    white-space: nowrap;
+    vertical-align: middle;
+}
+.btn-split:hover { background: var(--primary); color: white; border-color: var(--primary); }
+.btn-split.split-active { background: var(--primary); color: white; border-color: var(--primary); }
+
+#split-pane-sidebar {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    width: 50%;
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    background: white;
+    border-left: 3px solid var(--gray-200);
+    box-shadow: -4px 0 16px rgba(0, 0, 0, 0.1);
+}
+.split-sidebar-header {
+    background: var(--gray-50);
+    border-bottom: 1px solid var(--gray-200);
+    padding: 0.55rem 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-shrink: 0;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--gray-700);
+}
+.split-sidebar-title { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.split-close-btn {
+    background: none; border: none; cursor: pointer;
+    color: var(--gray-400); font-size: 1rem;
+    padding: 0.2rem 0.4rem; border-radius: 0.25rem; line-height: 1;
+}
+.split-close-btn:hover { background: var(--gray-200); color: var(--gray-900); }
+.split-sidebar-resize {
+    position: absolute;
+    left: -4px; top: 0; bottom: 0;
+    width: 8px; cursor: col-resize; z-index: 1;
+}
+.split-sidebar-resize:hover,
+.split-sidebar-resize.dragging { background: var(--primary); opacity: 0.5; }
+.split-viewer-frame { flex: 1; border: none; width: 100%; min-height: 0; }
+.split-viewer-img {
+    flex: 1; object-fit: contain; width: 100%;
+    min-height: 0; padding: 1rem; background: var(--gray-50);
+}
+body.split-pane-active .container {
+    margin-right: var(--split-sidebar-width, 50%);
+    transition: margin-right 0.05s;
+}
+@media (max-width: 768px) { .btn-split { display: none; } }
+
 /* Materials Toggle */
 .materials-toggle,
 .topic-description-toggle,

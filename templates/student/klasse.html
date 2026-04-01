@@ -252,13 +252,28 @@
         <div class="materials-content">
             <ul class="material-list">
                 {% for mat in materials %}
+                {% set ext = mat.pfad.rsplit('.', 1)[-1].lower() if '.' in mat.pfad else '' %}
+                {% set is_image = ext in ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'] %}
+                {% set is_pdf = ext == 'pdf' %}
                 <li class="material-item">
                     {% if mat.typ == 'link' %}
                     <span class="material-icon">🔗</span>
                     <a href="{{ mat.pfad }}" target="_blank">{{ mat.beschreibung or mat.pfad }}</a>
+                    <button class="btn-split js-yt-split" style="display:none"
+                            data-type="youtube"
+                            data-url="{{ mat.pfad }}"
+                            data-title="{{ mat.beschreibung or mat.pfad }}"
+                            onclick="openSplitPane(this)">↔ Hier öffnen</button>
                     {% else %}
-                    <span class="material-icon">📄</span>
+                    <span class="material-icon">{{ '🖼️' if is_image else '📄' }}</span>
                     <a href="{{ url_for('download_material', material_id=mat.id) }}" target="_blank">{{ mat.beschreibung or mat.pfad }}</a>
+                    {% if is_pdf or is_image %}
+                    <button class="btn-split"
+                            data-type="{{ 'image' if is_image else 'pdf' }}"
+                            data-url="{{ url_for('download_material', material_id=mat.id) }}"
+                            data-title="{{ mat.beschreibung or mat.pfad }}"
+                            onclick="openSplitPane(this)">↔ Hier öffnen</button>
+                    {% endif %}
                     {% endif %}
                 </li>
                 {% endfor %}
@@ -318,6 +333,18 @@
     </details>
     {% endif %}
 
+</div>
+
+<!-- Split Pane Sidebar -->
+<div id="split-pane-sidebar" style="display:none">
+    <div class="split-sidebar-resize" id="split-resize-handle"></div>
+    <div class="split-sidebar-header">
+        <span id="split-sidebar-icon">📄</span>
+        <span class="split-sidebar-title" id="split-sidebar-title">Material</span>
+        <button class="split-close-btn" onclick="closeSplitPane()" title="Schließen">✕</button>
+    </div>
+    <iframe id="split-viewer-frame" class="split-viewer-frame" style="display:none" allowfullscreen></iframe>
+    <img id="split-viewer-img" class="split-viewer-img" style="display:none" alt="">
 </div>
 
 {% else %}
@@ -601,5 +628,95 @@ window.addEventListener('DOMContentLoaded', function() {
             }, 100);
         }
     }
+
+    // YouTube: show split button for detected YouTube links
+    function getYoutubeEmbedUrl(url) {
+        const m = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+        return m ? 'https://www.youtube.com/embed/' + m[1] : null;
+    }
+    document.querySelectorAll('.js-yt-split').forEach(function(btn) {
+        const embedUrl = getYoutubeEmbedUrl(btn.dataset.url);
+        if (embedUrl) {
+            btn.dataset.embedUrl = embedUrl;
+            btn.style.display = '';
+        }
+    });
 });
+
+// ── Split Pane ───────────────────────────────────────
+
+function openSplitPane(btn) {
+    const type = btn.dataset.type;
+    const url = type === 'youtube' ? btn.dataset.embedUrl : btn.dataset.url;
+    const title = btn.dataset.title || 'Material';
+    const icons = { pdf: '📄', image: '🖼️', youtube: '▶️' };
+
+    const sidebar = document.getElementById('split-pane-sidebar');
+    const frame = document.getElementById('split-viewer-frame');
+    const img = document.getElementById('split-viewer-img');
+
+    document.getElementById('split-sidebar-icon').textContent = icons[type] || '📄';
+    document.getElementById('split-sidebar-title').textContent = title;
+
+    if (type === 'image') {
+        frame.style.display = 'none';
+        frame.src = '';
+        img.src = url;
+        img.style.display = '';
+    } else {
+        img.style.display = 'none';
+        img.src = '';
+        frame.src = url;
+        frame.style.display = '';
+    }
+
+    // Position below nav
+    const nav = document.querySelector('nav');
+    sidebar.style.top = (nav ? nav.offsetHeight : 0) + 'px';
+    sidebar.style.display = '';
+    document.body.classList.add('split-pane-active');
+
+    document.querySelectorAll('.btn-split').forEach(function(b) { b.classList.remove('split-active'); });
+    btn.classList.add('split-active');
+}
+
+function closeSplitPane() {
+    const sidebar = document.getElementById('split-pane-sidebar');
+    sidebar.style.display = 'none';
+    document.getElementById('split-viewer-frame').src = '';
+    document.getElementById('split-viewer-img').src = '';
+    document.body.classList.remove('split-pane-active');
+    document.body.style.removeProperty('--split-sidebar-width');
+    document.querySelectorAll('.btn-split').forEach(function(b) { b.classList.remove('split-active'); });
+}
+
+// Resize handle drag
+(function() {
+    const handle = document.getElementById('split-resize-handle');
+    if (!handle) return;
+    let dragging = false;
+    handle.addEventListener('mousedown', function(e) {
+        dragging = true;
+        handle.classList.add('dragging');
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+        e.preventDefault();
+    });
+    document.addEventListener('mousemove', function(e) {
+        if (!dragging) return;
+        const pct = ((window.innerWidth - e.clientX) / window.innerWidth * 100);
+        if (pct >= 20 && pct <= 80) {
+            const val = pct.toFixed(1) + '%';
+            document.getElementById('split-pane-sidebar').style.width = val;
+            document.body.style.setProperty('--split-sidebar-width', val);
+        }
+    });
+    document.addEventListener('mouseup', function() {
+        if (!dragging) return;
+        dragging = false;
+        handle.classList.remove('dragging');
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+    });
+})();
 {% endblock %}
