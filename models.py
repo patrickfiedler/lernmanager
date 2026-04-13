@@ -85,7 +85,8 @@ def init_db():
             -- Classes (Klassen)
             CREATE TABLE IF NOT EXISTS klasse (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL
+                name TEXT NOT NULL,
+                llm_artifact_feedback_enabled INTEGER NOT NULL DEFAULT 0
             );
 
             -- Students (Schüler)
@@ -95,7 +96,8 @@ def init_db():
                 vorname TEXT NOT NULL,
                 username TEXT UNIQUE NOT NULL,
                 password_hash TEXT NOT NULL,
-                lernpfad TEXT DEFAULT 'bergweg'  -- wanderweg/bergweg/gipfeltour/seilbahn
+                lernpfad TEXT DEFAULT 'bergweg',  -- wanderweg/bergweg/gipfeltour/seilbahn
+                easy_reading_mode INTEGER DEFAULT 0
             );
 
             -- Student-Class relationship (many-to-many)
@@ -180,6 +182,8 @@ def init_db():
                 path_model TEXT DEFAULT 'skip',  -- skip: lower paths skip; depth: all paths do it
                 graded_artifact_json TEXT,  -- JSON: {keyword, format, rubric}
                 hidden INTEGER DEFAULT 0,  -- 1=hidden from all students (admin override)
+                fertig_wenn TEXT,
+                tipps TEXT,
                 FOREIGN KEY (task_id) REFERENCES task(id) ON DELETE CASCADE
             );
 
@@ -471,6 +475,23 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_llm_usage_student_time
             ON llm_usage(student_id, timestamp);
 
+            -- ============ Artifact Feedback ============
+
+            -- Per-upload LLM checklist results for graded artifacts
+            CREATE TABLE IF NOT EXISTS artifact_feedback (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_id INTEGER NOT NULL,
+                subtask_id INTEGER NOT NULL,
+                timestamp_local TEXT NOT NULL,
+                timezone TEXT NOT NULL,
+                feedback_json TEXT NOT NULL,
+                FOREIGN KEY (student_id) REFERENCES student(id),
+                FOREIGN KEY (subtask_id) REFERENCES subtask(id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_artifact_feedback_student_subtask
+            ON artifact_feedback(student_id, subtask_id);
+
             -- ============ Warmup / Spaced Repetition ============
 
             -- Per-student per-question stats for spaced repetition
@@ -499,6 +520,7 @@ def init_db():
                 questions_shown INTEGER NOT NULL DEFAULT 0,
                 questions_correct INTEGER NOT NULL DEFAULT 0,
                 skipped INTEGER NOT NULL DEFAULT 0,
+                session_type TEXT NOT NULL DEFAULT 'warmup',  -- warmup/practice
                 FOREIGN KEY (student_id) REFERENCES student(id) ON DELETE CASCADE
             );
         ''')
