@@ -225,6 +225,7 @@ def init_db():
                 student_task_id INTEGER NOT NULL,
                 subtask_id INTEGER NOT NULL,
                 erledigt INTEGER NOT NULL DEFAULT 0,
+                completed_at DATETIME,
                 UNIQUE(student_task_id, subtask_id),
                 FOREIGN KEY (student_task_id) REFERENCES student_task(id) ON DELETE CASCADE,
                 FOREIGN KEY (subtask_id) REFERENCES subtask(id) ON DELETE CASCADE
