@@ -1,5 +1,7 @@
 import os
+import io
 import json
+import zipfile
 import traceback
 from functools import wraps
 from datetime import date, datetime
@@ -716,6 +718,40 @@ def admin_thema_export(task_id):
         json.dumps(data, ensure_ascii=False, indent=2),
         mimetype='application/json',
         headers={'Content-Disposition': f'attachment; filename=thema_{task_id}_export.json'}
+    )
+
+
+@app.route('/admin/thema/<int:task_id>/export-zip')
+@admin_required
+def admin_thema_export_zip(task_id):
+    task_data = models.export_task_to_dict(task_id)
+    if not task_data:
+        flash('Thema nicht gefunden.', 'danger')
+        return redirect(url_for('admin_themen'))
+
+    export = {
+        'version': '1.0',
+        'exported_at': datetime.now().isoformat(),
+        'task': task_data
+    }
+    json_bytes = json.dumps(export, ensure_ascii=False, indent=2).encode('utf-8')
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr('thema.json', json_bytes)
+        for mat in task_data.get('materials', []):
+            if mat['typ'] == 'datei':
+                filepath = os.path.join(config.UPLOAD_FOLDER, mat['pfad'])
+                if os.path.isfile(filepath):
+                    zf.write(filepath, f"files/{mat['pfad']}")
+
+    buf.seek(0)
+    safe_name = slugify(task_data['name'])
+    timestamp = datetime.now().strftime('%Y%m%d')
+    return Response(
+        buf.read(),
+        mimetype='application/zip',
+        headers={'Content-Disposition': f'attachment; filename=thema_{safe_name}_{timestamp}.zip'}
     )
 
 

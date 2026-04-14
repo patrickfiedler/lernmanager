@@ -11,7 +11,8 @@
         {% else %}
         <span class="badge badge-primary">Pflicht</span>
         {% endif %}
-        <a href="{{ url_for('admin_thema_export', task_id=task.id) }}" class="btn btn-secondary">📥 Export</a>
+        <a href="{{ url_for('admin_thema_export', task_id=task.id) }}" class="btn btn-secondary">📥 JSON</a>
+        <a href="{{ url_for('admin_thema_export_zip', task_id=task.id) }}" class="btn btn-secondary">📦 ZIP</a>
         <form method="POST" action="{{ url_for('admin_thema_loeschen', task_id=task.id) }}" onsubmit="return confirm('Thema wirklich löschen?');">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button type="submit" class="btn btn-danger">🗑️ Löschen</button>
