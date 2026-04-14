@@ -375,10 +375,16 @@
     <div class="split-sidebar-header">
         <span id="split-sidebar-icon">📕</span>
         <span class="split-sidebar-title" id="split-sidebar-title">Material</span>
+        <div id="split-zoom-controls" style="display:none" class="split-zoom-controls">
+            <button onclick="adjustZoom(-25)" title="Verkleinern">−</button>
+            <button onclick="adjustZoom(25)" title="Vergrößern">+</button>
+        </div>
         <button class="split-close-btn" onclick="closeSplitPane()" title="Schließen">✕</button>
     </div>
     <iframe id="split-viewer-frame" class="split-viewer-frame" style="display:none" allowfullscreen></iframe>
-    <img id="split-viewer-img" class="split-viewer-img" style="display:none" alt="">
+    <div id="split-viewer-img-wrap" class="split-viewer-img-wrap" style="display:none">
+        <img id="split-viewer-img" class="split-viewer-img" alt="">
+    </div>
 </div>
 
 {% else %}
@@ -689,18 +695,22 @@ function openSplitPane(btn) {
 
     const sidebar = document.getElementById('split-pane-sidebar');
     const frame = document.getElementById('split-viewer-frame');
+    const imgWrap = document.getElementById('split-viewer-img-wrap');
     const img = document.getElementById('split-viewer-img');
 
     document.getElementById('split-sidebar-icon').textContent = icons[type] || '📄';
     document.getElementById('split-sidebar-title').textContent = title;
+    document.getElementById('split-zoom-controls').style.display = type === 'image' ? '' : 'none';
 
     if (type === 'image') {
         frame.style.display = 'none';
         frame.src = '';
+        img.style.width = '100%';
+        img._zoomLevel = 100;
         img.src = url;
-        img.style.display = '';
+        imgWrap.style.display = '';
     } else {
-        img.style.display = 'none';
+        imgWrap.style.display = 'none';
         img.src = '';
         frame.src = url;
         frame.style.display = '';
@@ -726,10 +736,17 @@ function closeSplitPane() {
     sidebar.style.display = 'none';
     document.getElementById('split-viewer-frame').src = '';
     document.getElementById('split-viewer-img').src = '';
+    document.getElementById('split-viewer-img-wrap').style.display = 'none';
     document.body.classList.remove('split-pane-active');
     document.body.style.removeProperty('--split-sidebar-width');
     document.querySelectorAll('.btn-split').forEach(function(b) { b.classList.remove('split-active'); });
     window.removeEventListener('scroll', updateSidebarTop);
+}
+
+function adjustZoom(delta) {
+    const img = document.getElementById('split-viewer-img');
+    img._zoomLevel = Math.min(400, Math.max(25, (img._zoomLevel || 100) + delta));
+    img.style.width = img._zoomLevel + '%';
 }
 
 // Resize handle drag

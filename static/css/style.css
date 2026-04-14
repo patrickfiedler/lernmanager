@@ -1922,10 +1922,19 @@ tr.unsaved-row td {
 .split-sidebar-resize:hover::before,
 .split-sidebar-resize.dragging::before { color: var(--primary); }
 .split-viewer-frame { flex: 1; border: none; width: 100%; min-height: 0; }
-.split-viewer-img {
-    flex: 1; object-fit: contain; width: 100%;
-    min-height: 0; padding: 1rem; background: var(--gray-50);
+.split-viewer-img-wrap {
+    flex: 1; overflow: auto; background: var(--gray-50);
+    padding: 1rem; min-height: 0;
 }
+.split-viewer-img { display: block; width: 100%; height: auto; }
+.split-zoom-controls { display: flex; gap: 0.25rem; }
+.split-zoom-controls button {
+    background: var(--gray-200); border: none; cursor: pointer;
+    width: 1.6rem; height: 1.6rem; border-radius: 0.25rem;
+    font-size: 1rem; line-height: 1; font-weight: 600;
+    color: var(--gray-700);
+}
+.split-zoom-controls button:hover { background: var(--primary); color: white; }
 body.split-pane-active .container {
     margin-right: var(--split-sidebar-width, 50%);
     transition: margin-right 0.05s;
