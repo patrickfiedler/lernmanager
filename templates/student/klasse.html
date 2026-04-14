@@ -701,14 +701,19 @@ function openSplitPane(btn) {
         frame.style.display = '';
     }
 
-    // Position below nav
-    const nav = document.querySelector('nav');
-    sidebar.style.top = (nav ? nav.offsetHeight : 0) + 'px';
     sidebar.style.display = '';
     document.body.classList.add('split-pane-active');
+    updateSidebarTop();
+    window.addEventListener('scroll', updateSidebarTop);
 
     document.querySelectorAll('.btn-split').forEach(function(b) { b.classList.remove('split-active'); });
     btn.classList.add('split-active');
+}
+
+function updateSidebarTop() {
+    const nav = document.querySelector('nav');
+    const top = nav ? Math.max(0, nav.offsetHeight - window.scrollY) : 0;
+    document.getElementById('split-pane-sidebar').style.top = top + 'px';
 }
 
 function closeSplitPane() {
@@ -719,6 +724,7 @@ function closeSplitPane() {
     document.body.classList.remove('split-pane-active');
     document.body.style.removeProperty('--split-sidebar-width');
     document.querySelectorAll('.btn-split').forEach(function(b) { b.classList.remove('split-active'); });
+    window.removeEventListener('scroll', updateSidebarTop);
 }
 
 // Resize handle drag
