@@ -731,6 +731,8 @@ function closeSplitPane() {
         handle.classList.add('dragging');
         document.body.style.cursor = 'col-resize';
         document.body.style.userSelect = 'none';
+        // Prevent iframe from stealing mouse events during drag
+        document.getElementById('split-viewer-frame').style.pointerEvents = 'none';
         e.preventDefault();
     });
     document.addEventListener('mousemove', function(e) {
@@ -748,6 +750,7 @@ function closeSplitPane() {
         handle.classList.remove('dragging');
         document.body.style.cursor = '';
         document.body.style.userSelect = '';
+        document.getElementById('split-viewer-frame').style.pointerEvents = '';
     });
 })();
 {% endblock %}
