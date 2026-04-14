@@ -86,7 +86,8 @@ def init_db():
             CREATE TABLE IF NOT EXISTS klasse (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
-                llm_artifact_feedback_enabled INTEGER NOT NULL DEFAULT 0
+                llm_artifact_feedback_enabled INTEGER NOT NULL DEFAULT 0,
+                llm_transparency_mode INTEGER DEFAULT NULL
             );
 
             -- Students (Schüler)
@@ -97,7 +98,8 @@ def init_db():
                 username TEXT UNIQUE NOT NULL,
                 password_hash TEXT NOT NULL,
                 lernpfad TEXT DEFAULT 'bergweg',  -- wanderweg/bergweg/gipfeltour/seilbahn
-                easy_reading_mode INTEGER DEFAULT 0
+                easy_reading_mode INTEGER DEFAULT 0,
+                llm_transparency_mode INTEGER DEFAULT 0
             );
 
             -- Student-Class relationship (many-to-many)
@@ -934,6 +936,33 @@ def update_student_setting(student_id, setting_name, value):
     """Update a student setting (UX Tier 1: Easy Reading Mode)."""
     with db_session() as conn:
         conn.execute(f"UPDATE student SET {setting_name} = ? WHERE id = ?", (value, student_id))
+
+
+def get_effective_transparency_mode(student_id, klasse_id=None):
+    """Return True if LLM transparency mode is active for this student/class context.
+
+    Class override (NULL=no opinion, 0=force off, 1=force on) takes precedence.
+    Falls back to student's own llm_transparency_mode setting.
+    """
+    with db_session() as conn:
+        if klasse_id:
+            row = conn.execute(
+                "SELECT llm_transparency_mode FROM klasse WHERE id = ?", (klasse_id,)
+            ).fetchone()
+            if row and row['llm_transparency_mode'] is not None:
+                return bool(row['llm_transparency_mode'])
+        row = conn.execute(
+            "SELECT llm_transparency_mode FROM student WHERE id = ?", (student_id,)
+        ).fetchone()
+        return bool(row['llm_transparency_mode']) if row else False
+
+
+def set_klasse_transparency_mode(klasse_id, mode):
+    """Set class-level transparency override. mode: None, 0, or 1."""
+    with db_session() as conn:
+        conn.execute(
+            "UPDATE klasse SET llm_transparency_mode = ? WHERE id = ?", (mode, klasse_id)
+        )
 
 
 def get_student_klassen(student_id):

@@ -585,7 +585,7 @@ function requestArtifactFeedback(position) {
         if (data.checks_remaining !== undefined && data.checks_remaining <= 3 && data.checks_remaining > 0) {
             statusEl.textContent = `Noch ${data.checks_remaining} Check${data.checks_remaining === 1 ? '' : 's'} in dieser Stunde übrig.`;
         }
-        renderArtifactChecklist(data.feedback);
+        renderArtifactChecklist(data.feedback, data.extracted_text);
     })
     .catch(() => {
         btn.textContent = 'KI-Check starten →';
@@ -594,7 +594,7 @@ function requestArtifactFeedback(position) {
     });
 }
 
-function renderArtifactChecklist(feedback) {
+function renderArtifactChecklist(feedback, extractedText) {
     const container = document.getElementById('artifact-checklist');
     if (!feedback || feedback.length === 0) {
         container.innerHTML = '<p style="color:#ef4444;">⚠️ KI konnte die Datei nicht auswerten. Bitte nochmal versuchen.</p>';
@@ -606,11 +606,16 @@ function renderArtifactChecklist(feedback) {
         const borderColor = item.passed ? '#10b981' : '#ef4444';
         return `<div class="checklist-item" style="border-left: 3px solid ${borderColor}; padding: 0.5rem 0.75rem; margin: 0.4rem 0; background: #f9fafb;">
             <div style="font-weight:500;">${icon} ${escapeHtml(item.criterion)}</div>
-            ${item.note ? `<div style="font-size:0.875rem; color:#4b5563; margin-top:0.2rem;">💬 ${escapeHtml(item.note)}</div>` : ''}
+            ${item.note ? `<div style="font-size:0.875rem; color:#4b5563; margin-top:0.2rem;">💬 ${escapeHtml(item.note)} <span style="font-size:0.75rem; color:#6b7280; margin-left:0.4rem;">✨ KI</span></div>` : ''}
         </div>`;
     }).join('');
+    const transparencyBlock = extractedText ? `
+        <details style="margin-top:0.75rem; font-size:0.85rem;">
+            <summary style="color:#6b7280; cursor:pointer;">✨ Was die KI gesehen hat</summary>
+            <div style="background:#f8f9fa; border:1px solid #e5e7eb; border-radius:4px; padding:0.75rem; margin-top:0.25rem; font-family:monospace; white-space:pre-wrap; font-size:0.8rem; color:#374151; max-height:12rem; overflow-y:auto;">${escapeHtml(extractedText)}</div>
+        </details>` : '';
     container.innerHTML = `<div class="checklist-header">KI-Feedback:</div>${items}
-        <p style="font-size:0.8rem;color:#6b7280;margin-top:0.5rem;">Note wird von der Lehrkraft gesetzt.</p>`;
+        <p style="font-size:0.8rem;color:#6b7280;margin-top:0.5rem;">Note wird von der Lehrkraft gesetzt.</p>${transparencyBlock}`;
     container.style.display = '';
 }
 

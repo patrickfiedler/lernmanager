@@ -169,8 +169,21 @@
             var feedbackLine = document.createElement('div');
             feedbackLine.className = 'quiz-option';
             feedbackLine.style.cssText = 'border-left: 4px solid var(--info-color, #17a2b8); padding-left: 1rem; background: #e8f4fd;';
-            feedbackLine.textContent = '💬 ' + (data.feedback || (data.correct ? 'Richtig!' : 'Leider falsch.'));
+            var kiLabel = data.source === 'llm' ? ' <span style="font-size:0.75rem;color:#6b7280;margin-left:0.5rem;">✨ KI</span>' : '';
+            feedbackLine.innerHTML = '💬 ' + (data.feedback || (data.correct ? 'Richtig!' : 'Leider falsch.')) + kiLabel;
             fb.appendChild(feedbackLine);
+
+            // Transparency block
+            if (data.prompt_data) {
+                var details = document.createElement('details');
+                details.style.cssText = 'margin-top:0.25rem;font-size:0.85rem;';
+                details.innerHTML = '<summary style="color:#6b7280;cursor:pointer;">✨ Was die KI gesehen hat</summary>' +
+                    '<div style="background:#f8f9fa;border:1px solid #e5e7eb;border-radius:4px;padding:0.75rem;margin-top:0.25rem;font-family:monospace;white-space:pre-wrap;font-size:0.8rem;color:#374151;">' +
+                    'Frage: ' + escapeHtml(data.prompt_data.question) + '\n' +
+                    'Erwartete Antwort: ' + escapeHtml(data.prompt_data.expected) + '\n' +
+                    'Deine Antwort: ' + escapeHtml(data.prompt_data.student_answer) + '</div>';
+                fb.appendChild(details);
+            }
             fb.style.display = 'block';
 
             // Hide the original input
@@ -362,6 +375,10 @@
             window.location.href = '{{ url_for("student_dashboard") }}';
         });
     });
+
+    function escapeHtml(str) {
+        return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
 
     // Start
     renderQuestion();

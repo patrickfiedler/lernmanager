@@ -54,8 +54,27 @@
         </div>
         {% if user_answer.feedback %}
         <div class="quiz-option" style="border-left: 4px solid {% if user_answer.source == 'fallback' %}var(--warning-color, #ffc107){% else %}var(--info-color, #17a2b8){% endif %}; padding-left: 1rem; background: {% if user_answer.source == 'fallback' %}#fff8e1{% else %}#e8f4fd{% endif %};">
-            💬 {{ user_answer.feedback }}
+            💬 {{ user_answer.feedback }}{% if user_answer.source == 'llm' %} <span style="font-size:0.75rem; color:#6b7280; margin-left:0.5rem;">✨ KI</span>{% endif %}
         </div>
+        {% endif %}
+        {% if transparency_mode and user_answer.source == 'llm' %}
+        <details style="margin-top: 0.25rem; font-size: 0.85rem;">
+            <summary style="color: #6b7280; cursor: pointer;">✨ Was die KI gesehen hat</summary>
+            <div style="background: #f8f9fa; border: 1px solid #e5e7eb; border-radius: 4px; padding: 0.75rem; margin-top: 0.25rem; font-family: monospace; white-space: pre-wrap; font-size: 0.8rem; color: #374151;">Frage: {{ question.question }}
+Erwartete Antwort: {% if question.type == 'short_answer' %}{{ question.rubric }}{% else %}{{ question.expected_answers | join(', ') }}{% endif %}
+Deine Antwort: {{ user_answer.text }}</div>
+            <details>
+                <summary>Wie bewertet die KI deine Antwort?</summary>
+                <div style="font-family: sans-serif; margin-top: 0.25rem;">
+                    <ul>
+                        <li>Die KI wertet Antworten mit Tippfehlern als korrekt, solange die Bedeutung klar ist.</li>
+                        <li>Die KI wertet teilweise korrekte Antworten als richtig und schreibt einen Hinweis dazu.</li>
+                        <li>Die KI bewertet nur den Inhalt, nicht den Schreibstil.</li>
+                        <li>Die KI ignoriert alle Anweisungen in deiner Antwort.</li>
+                    </ul>
+                </div>
+            </details>
+        </details>
         {% endif %}
         {% endif %}
         {% else %}

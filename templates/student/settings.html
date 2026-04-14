@@ -24,6 +24,19 @@
             </label>
         </div>
 
+        <div class="form-group" style="margin-top: 1rem;">
+            <label class="checkbox-label">
+                <input type="checkbox" name="llm_transparency_mode" {% if student.llm_transparency_mode %}checked{% endif %}>
+                <span>
+                    <strong>✨ KI-Transparenzmodus aktivieren</strong>
+                    <small class="text-muted d-block" style="margin-top: 0.5rem;">
+                        Zeigt dir genau, was an die KI geschickt wurde, wenn sie eine Antwort bewertet.
+                        Du siehst die Frage, die Bewertungskriterien und deine Antwort — so wie die KI sie sieht.
+                    </small>
+                </span>
+            </label>
+        </div>
+
         <button type="submit" class="btn btn-primary">Speichern</button>
         <a href="{{ url_for('student_dashboard') }}" class="btn btn-secondary">Abbrechen</a>
     </form>

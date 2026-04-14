@@ -109,7 +109,9 @@ def _build_display_quiz(quiz):
                 'answers': q.get('options', []),
                 'correct': q.get('correct', []),
                 'image': q.get('image'),
-                'type': q.get('type', 'multiple_choice')
+                'type': q.get('type', 'multiple_choice'),
+                'rubric': q.get('rubric', ''),           # for short_answer transparency
+                'expected_answers': q.get('answers', []) # for fill_blank transparency
             }
             for q in quiz['questions']
         ]
@@ -319,6 +321,18 @@ def admin_klasse_llm_feedback_toggle(klasse_id):
     models.set_klasse_llm_feedback(klasse_id, enabled)
     state = 'aktiviert' if enabled else 'deaktiviert'
     flash(f'KI-Artefakt-Feedback {state}.', 'success')
+    return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id))
+
+
+@app.route('/admin/klasse/<int:klasse_id>/transparenzmodus', methods=['POST'])
+@admin_required
+def admin_klasse_transparency_mode(klasse_id):
+    """Set class-level LLM transparency override (None/0/1)."""
+    value = request.form.get('mode')
+    mode = None if value == '' else int(value)
+    models.set_klasse_transparency_mode(klasse_id, mode)
+    labels = {'': 'auf Schüler-Einstellung', '0': 'deaktiviert', '1': 'aktiviert'}
+    flash(f'KI-Transparenzmodus {labels.get(value, "gesetzt")}.', 'success')
     return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id))
 
 
@@ -1845,7 +1859,10 @@ def student_artifact_feedback(slug, position):
         models.record_llm_usage(student_id, 'artifact_feedback', 0)
 
     checks_remaining = models.get_artifact_checks_remaining(student_id)
-    return jsonify({'feedback': feedback, 'checks_remaining': checks_remaining})
+    response = {'feedback': feedback, 'checks_remaining': checks_remaining}
+    if models.get_effective_transparency_mode(student_id, klasse['id']):
+        response['extracted_text'] = anonymized_text
+    return jsonify(response)
 
 
 def _get_criteria_for_path(graded_artifact, student_path):
@@ -2097,6 +2114,7 @@ def student_quiz_result(slug):
         next_topic = models.get_next_queued_topic(klasse['id'], task['task_id'])
 
     display_quiz, antworten = _apply_question_order(_build_display_quiz(quiz), antworten)
+    transparency_mode = models.get_effective_transparency_mode(student_id, klasse['id'] if klasse else None)
     return render_template('student/quiz_result.html',
                            student=student, task=task,
                            quiz=display_quiz,
@@ -2106,7 +2124,8 @@ def student_quiz_result(slug):
                            previous_attempt=attempts[1] if len(attempts) > 1 else None,
                            slug=slug, position=None,
                            quiz_bestanden=ever_passed,
-                           next_topic=next_topic, klasse=klasse)
+                           next_topic=next_topic, klasse=klasse,
+                           transparency_mode=transparency_mode)
 
 
 @app.route('/schueler/thema/<slug>/aufgabe-<int:position>/quiz-ergebnis')
@@ -2151,6 +2170,7 @@ def student_quiz_result_subtask(slug, position):
     quiz_bestanden = any(a['bestanden'] for a in topic_quiz_attempts)
 
     display_quiz, antworten = _apply_question_order(_build_display_quiz(quiz), antworten)
+    transparency_mode = models.get_effective_transparency_mode(student_id, klasse['id'] if klasse else None)
     return render_template('student/quiz_result.html',
                            student=student, task=task,
                            quiz=display_quiz,
@@ -2160,7 +2180,8 @@ def student_quiz_result_subtask(slug, position):
                            previous_attempt=attempts[1] if len(attempts) > 1 else None,
                            slug=slug, position=position,
                            next_position=next_position,
-                           quiz_bestanden=quiz_bestanden)
+                           quiz_bestanden=quiz_bestanden,
+                           transparency_mode=transparency_mode)
 
 
 @app.route('/schueler/unterricht/<int:unterricht_id>/selbstbewertung', methods=['POST'])
@@ -2227,6 +2248,8 @@ def student_settings():
     if request.method == 'POST':
         easy_reading_mode = 1 if request.form.get('easy_reading_mode') == 'on' else 0
         models.update_student_setting(student_id, 'easy_reading_mode', easy_reading_mode)
+        transparency_mode = 1 if request.form.get('llm_transparency_mode') == 'on' else 0
+        models.update_student_setting(student_id, 'llm_transparency_mode', transparency_mode)
 
         flash('Einstellungen gespeichert! ✅', 'success')
         return redirect(url_for('student_settings'))
@@ -2238,26 +2261,27 @@ def student_settings():
 # ============ Warmup / Spaced Repetition ============
 
 def _grade_warmup_answer(question, answer):
-    """Grade a single warmup answer. Returns (correct: bool, feedback: str).
+    """Grade a single warmup answer. Returns (correct: bool, feedback: str, source: str).
 
     MC: compare selected indices to correct set.
     fill_blank: case-insensitive exact match, then LLM fallback.
+    source: 'match' | 'llm' | 'fallback' | 'empty' | 'mc'
     """
     qtype = question.get('type', 'multiple_choice')
 
     if qtype == 'fill_blank':
         student_text = (answer or '').strip()
         if not student_text:
-            return False, 'Keine Antwort.'
+            return False, 'Keine Antwort.', 'empty'
         # Exact match (case-insensitive)
         if student_text.lower() in [a.lower() for a in question['answers']]:
-            return True, 'Richtig!'
+            return True, 'Richtig!', 'match'
         # LLM fallback
         result = llm_grading.grade_answer(
             question['text'], ', '.join(question['answers']),
             student_text, session.get('student_id')
         )
-        return result['correct'], result.get('feedback', '')
+        return result['correct'], result.get('feedback', ''), result.get('source', 'llm')
     else:
         # Multiple choice
         try:
@@ -2266,7 +2290,7 @@ def _grade_warmup_answer(question, answer):
             submitted = set()
         correct_set = set(question.get('correct', []))
         if submitted == correct_set:
-            return True, 'Richtig!'
+            return True, 'Richtig!', 'mc'
         # Build feedback showing correct answer(s)
         options = question.get('options', [])
         correct_texts = []
@@ -2274,7 +2298,7 @@ def _grade_warmup_answer(question, answer):
             if idx < len(options):
                 opt = options[idx]
                 correct_texts.append(opt['text'] if isinstance(opt, dict) else str(opt))
-        return False, f'Richtige Antwort: {", ".join(correct_texts)}'
+        return False, f'Richtige Antwort: {", ".join(correct_texts)}', 'mc'
 
 
 def _serialize_question_for_js(item):
@@ -2352,7 +2376,7 @@ def student_warmup_answer():
     if question is None:
         return jsonify({'error': 'Question not found'}), 404
 
-    correct, feedback = _grade_warmup_answer(question, answer)
+    correct, feedback, source = _grade_warmup_answer(question, answer)
     models.record_warmup_answer(student_id, task_id, subtask_id, question_index, correct)
 
     # Build correct_answer for feedback display
@@ -2366,11 +2390,17 @@ def student_warmup_answer():
     else:
         correct_answer = question.get('correct', [])
 
-    return jsonify({
-        'correct': correct,
-        'feedback': feedback,
-        'correct_answer': correct_answer
-    })
+    response = {'correct': correct, 'feedback': feedback, 'source': source, 'correct_answer': correct_answer}
+
+    # Transparency mode: include prompt data when LLM was used
+    if source == 'llm' and models.get_effective_transparency_mode(student_id):
+        response['prompt_data'] = {
+            'question': question['text'],
+            'expected': ', '.join(question.get('answers', [])),
+            'student_answer': (answer or '').strip(),
+        }
+
+    return jsonify(response)
 
 
 @app.route('/schueler/aufwaermen/weiter', methods=['POST'])

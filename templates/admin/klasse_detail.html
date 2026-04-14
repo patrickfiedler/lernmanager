@@ -103,6 +103,26 @@
     </div>
 </div>
 
+<!-- LLM Transparency Mode -->
+<div class="card mb-2">
+    <div class="card-header">✨ KI-Transparenzmodus</div>
+    <div style="padding: 0.75rem;">
+        <p style="margin-bottom: 0.75rem; font-size: 0.9rem; color: #4b5563;">
+            Schüler können sehen, was genau an die KI geschickt wurde (Frage, Kriterien, Antwort).
+            Klassen-Einstellung überschreibt die individuelle Schüler-Einstellung.
+        </p>
+        <form method="POST" action="{{ url_for('admin_klasse_transparency_mode', klasse_id=klasse.id) }}" class="flex gap-1 flex-center">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <select name="mode" style="padding: 0.4rem 0.6rem; border: 1px solid #d1d5db; border-radius: 4px; font-size: 0.9rem;">
+                <option value="" {% if klasse.llm_transparency_mode is none %}selected{% endif %}>Schüler entscheiden selbst</option>
+                <option value="1" {% if klasse.llm_transparency_mode == 1 %}selected{% endif %}>Für alle aktivieren</option>
+                <option value="0" {% if klasse.llm_transparency_mode == 0 %}selected{% endif %}>Für alle deaktivieren</option>
+            </select>
+            <button type="submit" class="btn btn-secondary">Speichern</button>
+        </form>
+    </div>
+</div>
+
 <!-- Students List -->
 <div class="card">
     <div class="card-header">👥 Schüler ({{ students|length }})</div>
