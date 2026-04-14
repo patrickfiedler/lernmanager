@@ -1885,9 +1885,27 @@ tr.unsaved-row td {
     position: absolute;
     left: -4px; top: 0; bottom: 0;
     width: 8px; cursor: col-resize; z-index: 1;
+    /* Subtle 2px line centered in the 8px hit area */
+    background: linear-gradient(to right, transparent 3px, var(--gray-300) 3px, var(--gray-300) 5px, transparent 5px);
 }
 .split-sidebar-resize:hover,
-.split-sidebar-resize.dragging { background: var(--primary); opacity: 0.5; }
+.split-sidebar-resize.dragging {
+    background: linear-gradient(to right, transparent 3px, var(--primary) 3px, var(--primary) 5px, transparent 5px);
+}
+/* Three-dot grip centered on the line */
+.split-sidebar-resize::before {
+    content: '⋮';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: var(--gray-400);
+    font-size: 1rem;
+    line-height: 1;
+    pointer-events: none;
+}
+.split-sidebar-resize:hover::before,
+.split-sidebar-resize.dragging::before { color: var(--primary); }
 .split-viewer-frame { flex: 1; border: none; width: 100%; min-height: 0; }
 .split-viewer-img {
     flex: 1; object-fit: contain; width: 100%;
