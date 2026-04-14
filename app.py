@@ -14,7 +14,7 @@ import config
 import models
 import llm_grading
 import artifact_processor
-from utils import generate_username, generate_password, allowed_file, generate_credentials_pdf, generate_student_self_report_pdf, slugify
+from utils import generate_username, generate_password, allowed_file, generate_credentials_pdf, generate_student_self_report_pdf, generate_class_report_pdf, generate_student_report_pdf, slugify
 from import_task import validate_task_structure, check_duplicate, import_task as do_import_task, overwrite_task_from_import, ValidationError
 
 app = Flask(__name__)
@@ -392,7 +392,7 @@ def admin_klasse_bericht(klasse_id):
         return redirect(url_for('admin_klassen'))
 
     # Generate PDF
-    pdf_buffer = utils.generate_class_report_pdf(report_data, date_from=date_from, date_to=date_to)
+    pdf_buffer = generate_class_report_pdf(report_data, date_from=date_from, date_to=date_to)
 
     # Prepare filename
     klasse_name = report_data['klasse']['name'].replace(' ', '_')
@@ -659,7 +659,7 @@ def admin_schueler_bericht(student_id):
         return redirect(url_for('admin_dashboard'))
 
     # Generate PDF
-    pdf_buffer = utils.generate_student_report_pdf(report_data, report_type=report_type)
+    pdf_buffer = generate_student_report_pdf(report_data, report_type=report_type)
 
     # Prepare filename
     student = report_data['student']
