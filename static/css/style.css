@@ -1805,6 +1805,33 @@ tr.unsaved-row td {
 
 /* ── Split Pane Sidebar ─────────────────────────────── */
 
+/* Material name as primary split-pane trigger — looks like a plain link */
+.material-name-btn {
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    color: var(--primary, #2563eb);
+    text-decoration: underline;
+    font-size: inherit;
+    text-align: left;
+    flex: 1;
+}
+.material-name-btn:hover { color: var(--primary-dark, #1d4ed8); }
+
+/* Small "open in new tab" link */
+.btn-newtab {
+    display: inline-flex;
+    align-items: center;
+    color: var(--gray-400);
+    font-size: 0.85rem;
+    text-decoration: none;
+    padding: 0.15rem 0.35rem;
+    border-radius: 0.25rem;
+    flex-shrink: 0;
+}
+.btn-newtab:hover { color: var(--primary, #2563eb); background: var(--gray-100); }
+
 .btn-split {
     display: inline-flex;
     align-items: center;

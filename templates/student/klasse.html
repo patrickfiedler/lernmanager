@@ -255,25 +255,54 @@
                 {% set ext = mat.pfad.rsplit('.', 1)[-1].lower() if '.' in mat.pfad else '' %}
                 {% set is_image = ext in ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'] %}
                 {% set is_pdf = ext == 'pdf' %}
+                {% set is_youtube = 'youtube.com' in mat.pfad or 'youtu.be/' in mat.pfad %}
+                {% set label = mat.beschreibung or mat.pfad %}
+                {# Icon by type/extension #}
+                {% if mat.typ == 'link' %}
+                  {% set mat_icon = '▶️' if is_youtube else '🔗' %}
+                {% elif is_pdf %}
+                  {% set mat_icon = '📕' %}
+                {% elif is_image %}
+                  {% set mat_icon = '🖼️' %}
+                {% elif ext in ['doc', 'docx', 'odt', 'ott'] %}
+                  {% set mat_icon = '📝' %}
+                {% elif ext in ['xls', 'xlsx', 'ods'] %}
+                  {% set mat_icon = '📊' %}
+                {% elif ext in ['ppt', 'pptx', 'odp'] %}
+                  {% set mat_icon = '🎞️' %}
+                {% elif ext in ['mp4', 'webm', 'mov', 'avi', 'mkv'] %}
+                  {% set mat_icon = '🎬' %}
+                {% elif ext in ['mp3', 'wav', 'ogg', 'm4a'] %}
+                  {% set mat_icon = '🎵' %}
+                {% elif ext in ['zip', 'tar', 'gz', '7z', 'rar'] %}
+                  {% set mat_icon = '🗜️' %}
+                {% else %}
+                  {% set mat_icon = '📄' %}
+                {% endif %}
                 <li class="material-item">
-                    {% if mat.typ == 'link' %}
-                    <span class="material-icon">🔗</span>
-                    <a href="{{ mat.pfad }}" target="_blank">{{ mat.beschreibung or mat.pfad }}</a>
-                    <button class="btn-split js-yt-split" style="display:none"
+                    <span class="material-icon">{{ mat_icon }}</span>
+                    {% if is_youtube %}
+                    {# YouTube: split pane primary, external link secondary #}
+                    <button class="material-name-btn btn-split js-yt-primary"
                             data-type="youtube"
                             data-url="{{ mat.pfad }}"
-                            data-title="{{ mat.beschreibung or mat.pfad }}"
-                            onclick="openSplitPane(this)">↔ Hier öffnen</button>
-                    {% else %}
-                    <span class="material-icon">{{ '🖼️' if is_image else '📄' }}</span>
-                    <a href="{{ url_for('download_material', material_id=mat.id) }}" target="_blank">{{ mat.beschreibung or mat.pfad }}</a>
-                    {% if is_pdf or is_image %}
-                    <button class="btn-split"
+                            data-title="{{ label }}"
+                            onclick="openSplitPane(this)">{{ label }}</button>
+                    <a href="{{ mat.pfad }}" target="_blank" class="btn-newtab" title="In neuem Tab öffnen">↗</a>
+                    {% elif mat.typ == 'link' %}
+                    {# Other links: plain new-tab link only #}
+                    <a href="{{ mat.pfad }}" target="_blank">{{ label }}</a>
+                    {% elif is_pdf or is_image %}
+                    {# Viewable files: split pane primary, download secondary #}
+                    <button class="material-name-btn btn-split"
                             data-type="{{ 'image' if is_image else 'pdf' }}"
                             data-url="{{ url_for('download_material', material_id=mat.id) }}"
-                            data-title="{{ mat.beschreibung or mat.pfad }}"
-                            onclick="openSplitPane(this)">↔ Hier öffnen</button>
-                    {% endif %}
+                            data-title="{{ label }}"
+                            onclick="openSplitPane(this)">{{ label }}</button>
+                    <a href="{{ url_for('download_material', material_id=mat.id) }}" target="_blank" class="btn-newtab" title="In neuem Tab öffnen">↗</a>
+                    {% else %}
+                    {# Non-viewable files: download/new tab only #}
+                    <a href="{{ url_for('download_material', material_id=mat.id) }}" target="_blank">{{ label }}</a>
                     {% endif %}
                 </li>
                 {% endfor %}
@@ -339,7 +368,7 @@
 <div id="split-pane-sidebar" style="display:none">
     <div class="split-sidebar-resize" id="split-resize-handle"></div>
     <div class="split-sidebar-header">
-        <span id="split-sidebar-icon">📄</span>
+        <span id="split-sidebar-icon">📕</span>
         <span class="split-sidebar-title" id="split-sidebar-title">Material</span>
         <button class="split-close-btn" onclick="closeSplitPane()" title="Schließen">✕</button>
     </div>
@@ -634,17 +663,14 @@ window.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    // YouTube: show split button for detected YouTube links
+    // YouTube: pre-compute embed URLs for split-pane buttons
     function getYoutubeEmbedUrl(url) {
         const m = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
         return m ? 'https://www.youtube.com/embed/' + m[1] : null;
     }
-    document.querySelectorAll('.js-yt-split').forEach(function(btn) {
+    document.querySelectorAll('.js-yt-primary').forEach(function(btn) {
         const embedUrl = getYoutubeEmbedUrl(btn.dataset.url);
-        if (embedUrl) {
-            btn.dataset.embedUrl = embedUrl;
-            btn.style.display = '';
-        }
+        if (embedUrl) btn.dataset.embedUrl = embedUrl;
     });
 });
 
@@ -652,9 +678,9 @@ window.addEventListener('DOMContentLoaded', function() {
 
 function openSplitPane(btn) {
     const type = btn.dataset.type;
-    const url = type === 'youtube' ? btn.dataset.embedUrl : btn.dataset.url;
+    const url = type === 'youtube' ? (btn.dataset.embedUrl || btn.dataset.url) : btn.dataset.url;
     const title = btn.dataset.title || 'Material';
-    const icons = { pdf: '📄', image: '🖼️', youtube: '▶️' };
+    const icons = { pdf: '📕', image: '🖼️', youtube: '▶️' };
 
     const sidebar = document.getElementById('split-pane-sidebar');
     const frame = document.getElementById('split-viewer-frame');
