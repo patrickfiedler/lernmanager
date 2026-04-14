@@ -257,30 +257,35 @@
                 {% set is_pdf = ext == 'pdf' %}
                 {% set is_youtube = 'youtube.com' in mat.pfad or 'youtu.be/' in mat.pfad %}
                 {% set label = mat.beschreibung or mat.pfad %}
-                {# Icon by type/extension #}
+                {# Icon/badge by type/extension #}
                 {% if mat.typ == 'link' %}
                   {% set mat_icon = '▶️' if is_youtube else '🔗' %}
+                  {% set mat_badge = '' %}
                 {% elif is_pdf %}
-                  {% set mat_icon = '📕' %}
-                {% elif is_image %}
-                  {% set mat_icon = '🖼️' %}
+                  {% set mat_icon = '' %}{% set mat_badge = 'PDF' %}
                 {% elif ext in ['doc', 'docx', 'odt', 'ott'] %}
-                  {% set mat_icon = '📝' %}
+                  {% set mat_icon = '' %}{% set mat_badge = 'DOC' %}
                 {% elif ext in ['xls', 'xlsx', 'ods'] %}
-                  {% set mat_icon = '📊' %}
+                  {% set mat_icon = '' %}{% set mat_badge = 'XLS' %}
                 {% elif ext in ['ppt', 'pptx', 'odp'] %}
-                  {% set mat_icon = '🎞️' %}
+                  {% set mat_icon = '' %}{% set mat_badge = 'PPT' %}
+                {% elif is_image %}
+                  {% set mat_icon = '🖼️' %}{% set mat_badge = '' %}
                 {% elif ext in ['mp4', 'webm', 'mov', 'avi', 'mkv'] %}
-                  {% set mat_icon = '🎬' %}
+                  {% set mat_icon = '🎬' %}{% set mat_badge = '' %}
                 {% elif ext in ['mp3', 'wav', 'ogg', 'm4a'] %}
-                  {% set mat_icon = '🎵' %}
+                  {% set mat_icon = '🎵' %}{% set mat_badge = '' %}
                 {% elif ext in ['zip', 'tar', 'gz', '7z', 'rar'] %}
-                  {% set mat_icon = '🗜️' %}
+                  {% set mat_icon = '🗜️' %}{% set mat_badge = '' %}
                 {% else %}
-                  {% set mat_icon = '📄' %}
+                  {% set mat_icon = '📄' %}{% set mat_badge = '' %}
                 {% endif %}
                 <li class="material-item">
+                    {% if mat_badge %}
+                    <span class="material-type-badge badge-{{ mat_badge|lower }}">{{ mat_badge }}</span>
+                    {% else %}
                     <span class="material-icon">{{ mat_icon }}</span>
+                    {% endif %}
                     {% if is_youtube %}
                     {# YouTube: split pane primary, external link secondary #}
                     <button class="material-name-btn btn-split js-yt-primary"

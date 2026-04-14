@@ -746,6 +746,21 @@ tr.unsaved-row td {
     font-size: 1.25rem;
 }
 
+.material-type-badge {
+    display: inline-block;
+    font-size: 0.6rem;
+    font-weight: 700;
+    padding: 0.15rem 0.3rem;
+    border-radius: 0.2rem;
+    letter-spacing: 0.07em;
+    line-height: 1.4;
+    flex-shrink: 0;
+}
+.badge-pdf { background: #dc2626; color: white; }
+.badge-ppt { background: #ea580c; color: white; }
+.badge-doc { background: #2563eb; color: white; }
+.badge-xls { background: #16a34a; color: white; }
+
 /* Quiz */
 .quiz-question {
     background: var(--gray-50);
