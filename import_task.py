@@ -14,6 +14,7 @@ Usage:
 import argparse
 import json
 import sys
+import zipfile
 from pathlib import Path
 
 import config
@@ -38,6 +39,43 @@ def load_task_json(filepath):
             raise ValidationError(f"Invalid JSON: {e}")
 
     return data
+
+
+def load_task_zip(filepath):
+    """Load task data from a flat ZIP bundle. Returns (data, bundled_filenames)."""
+    path = Path(filepath)
+    if not path.exists():
+        raise FileNotFoundError(f"File not found: {filepath}")
+    try:
+        with zipfile.ZipFile(path) as zf:
+            names = zf.namelist()
+            json_entry = 'task.json' if 'task.json' in names else ('thema.json' if 'thema.json' in names else None)
+            if not json_entry:
+                raise ValidationError("ZIP enthält keine 'task.json'.")
+            try:
+                raw = zf.read(json_entry).decode('utf-8')
+                data = json.loads(raw)
+            except (UnicodeDecodeError, json.JSONDecodeError) as e:
+                raise ValidationError(f"Ungültiges JSON in {json_entry}: {e}")
+            bundled = [n for n in names if n not in ('task.json', 'thema.json') and not n.endswith('/')]
+            return data, bundled
+    except zipfile.BadZipFile:
+        raise ValidationError("Ungültige ZIP-Datei.")
+
+
+def extract_zip_materials(zip_path, task_data, dry_run=False):
+    """Copy material files from ZIP to UPLOAD_FOLDER. Returns list of extracted filenames."""
+    extracted = []
+    with zipfile.ZipFile(zip_path) as zf:
+        zip_names = set(zf.namelist())
+        for mat in task_data.get('task', {}).get('materials', []):
+            if mat.get('typ') == 'datei' and mat.get('pfad') in zip_names:
+                if not dry_run:
+                    dest = Path(config.UPLOAD_FOLDER) / mat['pfad']
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    dest.write_bytes(zf.read(mat['pfad']))
+                extracted.append(mat['pfad'])
+    return extracted
 
 
 def _validate_quiz(quiz, prefix="Quiz"):
@@ -508,6 +546,34 @@ Examples:
     if not args.file:
         parser.print_help()
         return 1
+
+    # ZIP bundle
+    if args.file.endswith('.zip'):
+        try:
+            print(f"Loading ZIP: {args.file}")
+            data, bundled = load_task_zip(args.file)
+            validate_task_structure(data)
+            bundled_set = set(bundled)
+            missing = [
+                mat['pfad']
+                for mat in data.get('task', {}).get('materials', [])
+                if mat.get('typ') == 'datei' and mat.get('pfad') not in bundled_set
+            ]
+            if missing:
+                print(f"Error: Fehlende Dateien im ZIP: {', '.join(missing)}", file=sys.stderr)
+                return 1
+            task_id = import_task(data, dry_run=args.dry_run)
+            if task_id:
+                extracted = extract_zip_materials(args.file, data, dry_run=args.dry_run)
+                print(f"Imported: {data['task']['name']} (ID: {task_id})")
+                if extracted:
+                    print(f"  Files: {', '.join(extracted)}")
+            elif not args.dry_run:
+                print("Import skipped (duplicate).")
+        except (FileNotFoundError, ValidationError) as e:
+            print(f"Error: {e}", file=sys.stderr)
+            return 1
+        return 0
 
     try:
         # Load JSON

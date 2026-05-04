@@ -1,6 +1,7 @@
 import os
 import io
 import json
+import uuid
 import zipfile
 import traceback
 from functools import wraps
@@ -738,12 +739,12 @@ def admin_thema_export_zip(task_id):
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr('thema.json', json_bytes)
+        zf.writestr('task.json', json_bytes)
         for mat in task_data.get('materials', []):
             if mat['typ'] == 'datei':
                 filepath = os.path.join(config.UPLOAD_FOLDER, mat['pfad'])
                 if os.path.isfile(filepath):
-                    zf.write(filepath, f"files/{mat['pfad']}")
+                    zf.write(filepath, mat['pfad'])
 
     buf.seek(0)
     safe_name = slugify(task_data['name'])
@@ -755,7 +756,54 @@ def admin_thema_export_zip(task_id):
     )
 
 
-def _build_topic_preview(task_data):
+_IMPORT_TMP_DIR = os.path.join(os.path.dirname(config.UPLOAD_FOLDER), 'import_tmp')
+
+
+def _save_import_zip(file_bytes):
+    """Save uploaded ZIP bytes to a temp file. Returns tmp_id string."""
+    os.makedirs(_IMPORT_TMP_DIR, exist_ok=True)
+    now = datetime.now().timestamp()
+    for fname in os.listdir(_IMPORT_TMP_DIR):
+        fpath = os.path.join(_IMPORT_TMP_DIR, fname)
+        if os.path.isfile(fpath) and now - os.path.getmtime(fpath) > 7200:
+            try:
+                os.remove(fpath)
+            except OSError:
+                pass
+    tmp_id = uuid.uuid4().hex
+    with open(os.path.join(_IMPORT_TMP_DIR, f'{tmp_id}.zip'), 'wb') as f:
+        f.write(file_bytes)
+    return tmp_id
+
+
+def _extract_import_zip_files(tmp_id, task_list):
+    """Extract material files from temp ZIP to UPLOAD_FOLDER. Always removes temp. Returns list of extracted filenames."""
+    if not tmp_id:
+        return []
+    tmp_path = os.path.join(_IMPORT_TMP_DIR, f'{tmp_id}.zip')
+    if not os.path.isfile(tmp_path):
+        return []
+    extracted = []
+    try:
+        with zipfile.ZipFile(tmp_path) as zf:
+            zip_names = set(zf.namelist())
+            os.makedirs(config.UPLOAD_FOLDER, exist_ok=True)
+            for task_data in task_list:
+                for mat in task_data['task'].get('materials', []):
+                    if mat.get('typ') == 'datei' and mat.get('pfad') in zip_names:
+                        dest = os.path.join(config.UPLOAD_FOLDER, mat['pfad'])
+                        with zf.open(mat['pfad']) as src, open(dest, 'wb') as dst:
+                            dst.write(src.read())
+                        extracted.append(mat['pfad'])
+    finally:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+    return extracted
+
+
+def _build_topic_preview(task_data, bundled_files=None):
     """Build a preview dict for one topic from import JSON."""
     task = task_data['task']
     subtasks = task.get('subtasks', [])
@@ -765,6 +813,7 @@ def _build_topic_preview(task_data):
         if p in path_counts:
             path_counts[p] += 1
     existing_id = check_duplicate(task_data)
+    file_mat_count = sum(1 for m in task.get('materials', []) if m.get('typ') == 'datei')
     return {
         'name': task['name'],
         'fach': task['fach'],
@@ -774,6 +823,8 @@ def _build_topic_preview(task_data):
         'subtask_count': len(subtasks),
         'path_counts': path_counts,
         'material_count': len(task.get('materials', [])),
+        'file_material_count': file_mat_count,
+        'bundled_files': bundled_files,
         'topic_quiz_count': len(task['quiz']['questions']) if task.get('quiz') else 0,
         'subtask_quiz_count': sum(1 for s in subtasks if s.get('quiz')),
         'is_duplicate': existing_id is not None,
@@ -792,16 +843,39 @@ def admin_themen_import():
     # --- Preview phase: parse uploaded file ---
     if action == 'preview':
         file = request.files.get('json_file')
-        if not file or not file.filename.endswith('.json'):
-            flash('Bitte eine JSON-Datei auswählen.', 'danger')
+        fname = file.filename if file else ''
+        if not file or not (fname.endswith('.json') or fname.endswith('.zip')):
+            flash('Bitte eine JSON- oder ZIP-Datei auswählen.', 'danger')
             return render_template('admin/themen_import.html', preview=False)
 
-        try:
-            raw = file.read().decode('utf-8')
-            data = json.loads(raw)
-        except (UnicodeDecodeError, json.JSONDecodeError) as e:
-            return render_template('admin/themen_import.html', preview=True,
-                                   errors=[f'Ungültiges JSON: {e}'])
+        file_bytes = file.read()
+        zip_tmp_id = None
+        bundled_filenames = None
+
+        if fname.endswith('.zip'):
+            try:
+                with zipfile.ZipFile(io.BytesIO(file_bytes)) as zf:
+                    names = zf.namelist()
+                    json_entry = 'task.json' if 'task.json' in names else ('thema.json' if 'thema.json' in names else None)
+                    if not json_entry:
+                        return render_template('admin/themen_import.html', preview=True,
+                                               errors=["ZIP enthält keine 'task.json'."])
+                    raw = zf.read(json_entry).decode('utf-8')
+                    data = json.loads(raw)
+                    bundled_filenames = [n for n in names if n not in ('task.json', 'thema.json') and not n.endswith('/')]
+            except zipfile.BadZipFile:
+                return render_template('admin/themen_import.html', preview=True,
+                                       errors=["Ungültige ZIP-Datei."])
+            except (UnicodeDecodeError, json.JSONDecodeError) as e:
+                return render_template('admin/themen_import.html', preview=True,
+                                       errors=[f"Ungültiges JSON in task.json: {e}"])
+        else:
+            try:
+                raw = file_bytes.decode('utf-8')
+                data = json.loads(raw)
+            except (UnicodeDecodeError, json.JSONDecodeError) as e:
+                return render_template('admin/themen_import.html', preview=True,
+                                       errors=[f'Ungültiges JSON: {e}'])
 
         # Normalize to list of {"task": {...}} dicts
         task_list = []
@@ -823,11 +897,26 @@ def admin_themen_import():
         else:
             errors.append("JSON muss 'task' oder 'tasks' als Wurzelelement enthalten.")
 
+        # For ZIP: verify all required material files are bundled
+        if bundled_filenames is not None and task_list and not errors:
+            bundled_set = set(bundled_filenames)
+            missing = [
+                mat['pfad']
+                for td in task_list
+                for mat in td['task'].get('materials', [])
+                if mat.get('typ') == 'datei' and mat.get('pfad') not in bundled_set
+            ]
+            if missing:
+                errors.append(f"Fehlende Dateien im ZIP: {', '.join(missing)}")
+
         if errors:
             return render_template('admin/themen_import.html', preview=True, errors=errors)
 
+        if bundled_filenames is not None:
+            zip_tmp_id = _save_import_zip(file_bytes)
+
         # Build preview for each topic
-        topics_preview = [_build_topic_preview(td) for td in task_list]
+        topics_preview = [_build_topic_preview(td, bundled_files=bundled_filenames) for td in task_list]
         warnings = []
         for tp in topics_preview:
             if tp['is_duplicate']:
@@ -842,14 +931,17 @@ def admin_themen_import():
 
         return render_template('admin/themen_import.html', preview=True,
                                topics_preview=topics_preview, warnings=warnings,
-                               json_data=json_data, existing_tasks=existing_tasks)
+                               json_data=json_data, existing_tasks=existing_tasks,
+                               zip_tmp_id=zip_tmp_id)
 
     # --- Confirm phase: actually import ---
     if action == 'confirm':
         raw = request.form.get('json_data', '')
+        zip_tmp_id = request.form.get('zip_tmp_id', '')
         try:
             data = json.loads(raw)
         except json.JSONDecodeError:
+            _extract_import_zip_files(zip_tmp_id, [])  # clean up temp file
             flash('Ungültige Daten. Bitte erneut hochladen.', 'danger')
             return redirect(url_for('admin_themen_import'))
 
@@ -890,6 +982,12 @@ def admin_themen_import():
             flash(f"{len(overwritten_reset)} überschrieben + Fortschritte zurückgesetzt: {', '.join(overwritten_reset)}", 'success')
         for w in warnings:
             flash(w, 'warning')
+
+        if zip_tmp_id:
+            task_list_all = [{'task': t} for t in data.get('tasks', [])]
+            extracted = _extract_import_zip_files(zip_tmp_id, task_list_all)
+            if extracted:
+                flash(f"{len(extracted)} Datei(en) importiert: {', '.join(extracted)}", 'success')
 
         return redirect(url_for('admin_themen'))
 
