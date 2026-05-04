@@ -986,9 +986,22 @@ def admin_themen_import():
 
         if zip_tmp_id:
             task_list_all = [{'task': t} for t in data.get('tasks', [])]
-            extracted = _extract_import_zip_files(zip_tmp_id, task_list_all)
-            if extracted:
-                flash(f"{len(extracted)} Datei(en) importiert: {', '.join(extracted)}", 'success')
+            expected_files = [
+                mat['pfad']
+                for t in task_list_all
+                for mat in t['task'].get('materials', [])
+                if mat.get('typ') == 'datei' and mat.get('pfad')
+            ]
+            tmp_path = os.path.join(_IMPORT_TMP_DIR, f'{zip_tmp_id}.zip')
+            if not os.path.isfile(tmp_path):
+                flash('ZIP-Datei nicht mehr verfügbar (Server-Neustart?). Bitte erneut als ZIP importieren, um die Dateien zu übertragen.', 'warning')
+            else:
+                extracted = _extract_import_zip_files(zip_tmp_id, task_list_all)
+                if extracted:
+                    flash(f"{len(extracted)} Datei(en) importiert: {', '.join(extracted)}", 'success')
+                not_extracted = [f for f in expected_files if f not in extracted]
+                if not_extracted:
+                    flash(f"Warnung: {len(not_extracted)} Datei(en) fehlen noch: {', '.join(not_extracted)}", 'warning')
 
         return redirect(url_for('admin_themen'))
 
