@@ -756,7 +756,8 @@ def admin_thema_export_zip(task_id):
     )
 
 
-_IMPORT_TMP_DIR = os.path.join(os.path.dirname(config.UPLOAD_FOLDER), 'import_tmp')
+import tempfile as _tempfile
+_IMPORT_TMP_DIR = os.path.join(_tempfile.gettempdir(), 'lernmanager_import')
 
 
 def _save_import_zip(file_bytes):
