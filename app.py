@@ -2477,7 +2477,7 @@ def _serialize_question_for_js(item):
 @app.route('/schueler/aufwaermen')
 @student_required
 def student_warmup():
-    """Warmup page — 2 easy questions, optionally 2 hard if both correct."""
+    """Warmup page — 3 mixed questions."""
     student_id = session['student_id']
     student = models.get_student(student_id)
 
@@ -2489,11 +2489,11 @@ def student_warmup():
     if not pool:
         return redirect(url_for('student_dashboard'))
 
-    easy_questions = models.select_warmup_questions(student_id, pool, difficulty='easy', count=2)
-    if not easy_questions:
+    questions = models.select_warmup_questions(student_id, pool, difficulty='mixed', count=3)
+    if not questions:
         return redirect(url_for('student_dashboard'))
 
-    questions_json = json.dumps([_serialize_question_for_js(q) for q in easy_questions])
+    questions_json = json.dumps([_serialize_question_for_js(q) for q in questions])
     return render_template('student/warmup.html', student=student,
                            questions_json=questions_json)
 
@@ -2551,33 +2551,6 @@ def student_warmup_answer():
 
     return jsonify(response)
 
-
-@app.route('/schueler/aufwaermen/weiter', methods=['POST'])
-@student_required
-def student_warmup_continue():
-    """AJAX: after easy round all correct, return 2 hard questions."""
-    student_id = session['student_id']
-    data = request.get_json() or {}
-
-    # Exclude questions already shown in the easy round
-    shown = data.get('shown', [])
-    shown_keys = set()
-    for s in shown:
-        shown_keys.add((s.get('task_id'), s.get('subtask_id'), s.get('question_index')))
-
-    pool = models.get_warmup_question_pool(student_id)
-    pool = [q for q in pool
-            if (q['task_id'], q['subtask_id'], q['question_index']) not in shown_keys]
-
-    hard_questions = models.select_warmup_questions(student_id, pool, difficulty='hard', count=2)
-
-    if not hard_questions:
-        return jsonify({'done': True})
-
-    return jsonify({
-        'done': False,
-        'questions': [_serialize_question_for_js(q) for q in hard_questions]
-    })
 
 
 @app.route('/schueler/aufwaermen/fertig', methods=['POST'])

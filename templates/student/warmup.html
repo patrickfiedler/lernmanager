@@ -43,14 +43,8 @@
     const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
     let questions = {{ questions_json|safe }};
     let currentIdx = 0;
-    let phase = 'easy';  // 'easy' or 'hard'
-    let round = 1;
-    let roundSize = questions.length;
-    let roundIdx = 0;  // position within current round (0-based)
     let totalCorrect = 0;
     let totalShown = 0;
-    let totalQuestions = questions.length;  // used only for session summary
-    let easyCorrect = 0;
     let answered = false;
 
     function shuffleIndices(length) {
@@ -68,7 +62,7 @@
         answered = false;
 
         document.getElementById('progress-text').textContent =
-            'Runde ' + round + ': Frage ' + (roundIdx + 1) + ' von ' + roundSize;
+            'Frage ' + (currentIdx + 1) + ' von ' + questions.length;
         document.getElementById('topic-label').textContent = q.topic_name;
         document.getElementById('question-text').textContent = q.text;
 
@@ -263,18 +257,13 @@
                 task_id: q.task_id,
                 subtask_id: q.subtask_id,
                 question_index: q.question_index,
-                answer: answer,
-                phase: phase
+                answer: answer
             })
         })
         .then(r => r.json())
         .then(data => {
             totalShown++;
-            roundIdx++;
-            if (data.correct) {
-                totalCorrect++;
-                if (phase === 'easy') easyCorrect++;
-            }
+            if (data.correct) totalCorrect++;
 
             showQuizFeedback(q, data);
 
@@ -285,42 +274,8 @@
 
     window.nextQuestion = function() {
         currentIdx++;
-
         if (currentIdx < questions.length) {
             renderQuestion();
-            return;
-        }
-
-        // End of current batch
-        if (phase === 'easy' && easyCorrect === 2) {
-            // Both easy correct → try to get hard questions
-            fetch('{{ url_for("student_warmup_continue") }}', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRFToken': csrfToken
-                },
-                body: JSON.stringify({
-                    shown: questions.map(function(q) {
-                        return {task_id: q.task_id, subtask_id: q.subtask_id, question_index: q.question_index};
-                    })
-                })
-            })
-            .then(r => r.json())
-            .then(data => {
-                if (!data.done && data.questions && data.questions.length > 0) {
-                    phase = 'hard';
-                    round = 2;
-                    roundSize = data.questions.length;
-                    roundIdx = 0;
-                    totalQuestions += data.questions.length;
-                    questions = data.questions;
-                    currentIdx = 0;
-                    renderQuestion();
-                } else {
-                    showSummary();
-                }
-            });
         } else {
             showSummary();
         }
