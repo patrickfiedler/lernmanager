@@ -349,8 +349,10 @@
 
         if (totalCorrect === totalShown) {
             document.getElementById('summary-title').textContent = '🎉 Alles richtig!';
-        } else {
+        } else if (totalCorrect > 0 && totalCorrect >= totalShown / 2) {
             document.getElementById('summary-title').textContent = '💪 Gut gemacht!';
+        } else {
+            document.getElementById('summary-title').textContent = '📚 Das lohnt sich noch zu üben.';
         }
         document.getElementById('summary-score').textContent =
             totalCorrect + ' von ' + totalShown + ' richtig';

@@ -7,9 +7,14 @@
     {% if bestanden %}
     <h1>🎉 Bestanden!</h1>
     <p class="text-success" style="font-size: 1.5rem;">Du hast {{ punkte }} von {{ max_punkte }} Punkten erreicht.</p>
-    {% else %}
+    {% elif punkte > 0 and punkte * 2 >= max_punkte %}
     <h1>💪 Fast geschafft!</h1>
     <p style="font-size: 1.5rem;">Du hast {{ punkte }} von {{ max_punkte }} Punkten erreicht.</p>
+    {% else %}
+    <h1>📚 Noch nicht ganz.</h1>
+    <p style="font-size: 1.5rem;">Du hast {{ punkte }} von {{ max_punkte }} Punkten erreicht.</p>
+    {% endif %}
+    {% if not bestanden %}
     {% if ever_passed %}
     <div class="alert alert-success" style="margin-top: 1rem;">✅ Du hast dieses Quiz bereits bestanden — dieser Durchlauf zählt nur als Übung.</div>
     {% else %}
