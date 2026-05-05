@@ -2125,10 +2125,11 @@ def _handle_quiz(student_id, student, task, slug, quiz_json_str, subtask_id=None
             return redirect(url_for('student_quiz_result_subtask', slug=slug, position=position))
         return redirect(url_for('student_quiz_result', slug=slug))
 
-    # GET: Filter out LLM questions if rate limit exceeded
+    # GET: Filter out short_answer (LLM-required) if rate limit exceeded.
+    # fill_blank is kept — it grades via exact match, LLM is only a fallback.
     llm_available = models.check_llm_rate_limit(student_id)
     if not llm_available:
-        quiz['questions'] = [q for q in quiz['questions'] if q.get('type', 'multiple_choice') == 'multiple_choice']
+        quiz['questions'] = [q for q in quiz['questions'] if q.get('type', 'multiple_choice') != 'short_answer']
         if not quiz['questions']:
             flash('Du hast dein Quiz-Limit erreicht. Versuche es später erneut.', 'warning')
             return redirect(url_for('student_klasse', slug=slug))
