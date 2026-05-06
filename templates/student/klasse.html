@@ -33,7 +33,7 @@
                      data-required="{{ 'true' if sub.get('required', true) else 'false' }}"
                      onclick="navigateToSubtask({{ loop.index }})"
                      onkeydown="handleDotKeydown(event)"
-                     title="Aufgabe {{ disp }}{% if not sub.get('required', true) %} (Zusatz){% endif %}"><span class="dot-num">{{ disp }}</span></div>
+                     title="Aufgabe {{ disp }}{% if not sub.get('required', true) %} (Zusatz){% endif %}"><span class="dot-num">{% if not sub.get('required', true) %}★&nbsp;{% endif %}{{ disp }}</span></div>
                 {% if has_quiz %}
                 <div class="dot dot-subtask-quiz {% if quiz_passed %}completed{% elif sub.erledigt %}available{% endif %}"
                      role="button"
@@ -63,7 +63,7 @@
                 <span><span style="display:inline-block; width:0.7rem; height:0.7rem; border-radius:50%; background:#10b981; vertical-align:middle;"></span> erledigt</span>
                 <span><span style="display:inline-block; width:0.7rem; height:0.7rem; border-radius:50%; background:#d1d5db; vertical-align:middle; font-size:0.55rem; color:white; text-align:center; line-height:0.7rem;">?</span> Quiz</span>
                 {% if subtasks|rejectattr('required')|list %}
-                <span><span style="color:#9ca3af; font-size:0.85rem; vertical-align:middle; line-height:1;">◇</span> Zusatz</span>
+                <span><span style="color:#9ca3af; font-size:0.85rem; vertical-align:middle; line-height:1;">★</span> Zusatz</span>
                 {% endif %}
             </div>
             </div>

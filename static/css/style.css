@@ -1314,10 +1314,6 @@ tr.unsaved-row td {
     pointer-events: none;
 }
 
-/* Counter-rotate number in diamond (optional) dots so it stays upright */
-.dot.dot-subtask.optional .dot-num {
-    transform: rotate(-45deg);
-}
 
 .dot:hover {
     transform: scale(1.2);
@@ -1391,16 +1387,15 @@ tr.unsaved-row td {
     background: #10b981;
 }
 
-/* Zusatz task dots — hollow diamond with dashed border for colorblind-accessible distinction */
+/* Zusatz task dots — circle with dashed border, ★ prefix in number */
 .dot.dot-subtask.optional {
-    border-radius: 2px;
-    transform: rotate(45deg);
     background: white;
     border: 2px dashed #9ca3af;
 }
 
 .dot.dot-subtask.optional .dot-num {
     color: #6b7280;
+    font-size: 0.5rem;
 }
 
 .dot.dot-subtask.optional.completed {
@@ -1408,30 +1403,14 @@ tr.unsaved-row td {
     border: 2px dashed rgba(255, 255, 255, 0.6);
 }
 
-.dot.dot-subtask.optional.completed .dot-num {
-    color: rgba(255, 255, 255, 0.85);
-}
-
 .dot.dot-subtask.optional.current:not(.completed) {
     background: #3b82f6;
     border: 2px dashed rgba(255, 255, 255, 0.6);
-    transform: rotate(45deg) scale(1.2);
 }
 
-.dot.dot-subtask.optional.current:not(.completed) .dot-num {
+.dot.dot-subtask.optional.completed .dot-num,
+.dot.dot-subtask.optional.current .dot-num {
     color: rgba(255, 255, 255, 0.85);
-}
-
-.dot.dot-subtask.optional:hover {
-    transform: rotate(45deg) scale(1.2);
-}
-
-.dot.dot-subtask.optional:focus {
-    transform: rotate(45deg) scale(1.2);
-}
-
-.dot.dot-subtask.optional.current.completed {
-    transform: rotate(45deg) scale(1.2);
 }
 
 /* Quiz images */
