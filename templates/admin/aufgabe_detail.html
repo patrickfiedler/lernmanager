@@ -152,17 +152,21 @@
     {% if materials %}
     <ul class="material-list mb-2">
         {% for mat in materials %}
-        <li class="material-item flex flex-between">
-            <div>
+        <li class="material-item flex flex-between" data-mat-id="{{ mat.id }}">
+            <div class="flex flex-center gap-1" style="min-width: 0;">
                 {% if mat.typ == 'link' %}
                 <span class="material-icon">🔗</span>
-                <a href="{{ mat.pfad }}" target="_blank">{{ mat.beschreibung or mat.pfad }}</a>
+                <a class="mat-label" href="{{ mat.pfad }}" target="_blank">{{ mat.beschreibung or mat.pfad }}</a>
                 {% else %}
                 <span class="material-icon">📄</span>
-                <a href="{{ url_for('download_material', material_id=mat.id) }}" target="_blank">{{ mat.beschreibung or mat.pfad }}</a>
+                <a class="mat-label" href="{{ url_for('download_material', material_id=mat.id) }}" target="_blank">{{ mat.beschreibung or mat.pfad }}</a>
                 {% endif %}
+                <input class="mat-input form-control" type="text" value="{{ mat.beschreibung or mat.pfad }}" style="display:none; width: 220px;" data-mat-id="{{ mat.id }}">
+                <button class="btn btn-sm mat-save" style="display:none;" onclick="saveMaterialName({{ mat.id }})">✓</button>
+                <button class="btn btn-sm mat-cancel" style="display:none;" onclick="cancelMaterialEdit({{ mat.id }})">✗</button>
+                <button class="btn btn-sm mat-edit" onclick="startMaterialEdit({{ mat.id }})" title="Namen bearbeiten">✏️</button>
             </div>
-            <form method="POST" action="{{ url_for('admin_material_loeschen', material_id=mat.id) }}" style="display: inline;">
+            <form method="POST" action="{{ url_for('admin_material_loeschen', material_id=mat.id) }}" style="display: inline; flex-shrink: 0;">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <button type="submit" class="btn btn-sm btn-danger">🗑️</button>
             </form>
@@ -417,6 +421,46 @@ function handleAssignmentChange(matId) {
     const alleCheckbox = document.querySelector(`[data-mat-alle="${matId}"]`);
     const allChecked = Array.from(checkboxes).every(cb => cb.checked);
     alleCheckbox.checked = allChecked;
+}
+
+function startMaterialEdit(matId) {
+    const li = document.querySelector(`li[data-mat-id="${matId}"]`);
+    li.querySelector('.mat-label').style.display = 'none';
+    li.querySelector('.mat-edit').style.display = 'none';
+    li.querySelector('.mat-input').style.display = '';
+    li.querySelector('.mat-save').style.display = '';
+    li.querySelector('.mat-cancel').style.display = '';
+    li.querySelector('.mat-input').focus();
+}
+
+function cancelMaterialEdit(matId) {
+    const li = document.querySelector(`li[data-mat-id="${matId}"]`);
+    li.querySelector('.mat-label').style.display = '';
+    li.querySelector('.mat-edit').style.display = '';
+    li.querySelector('.mat-input').style.display = 'none';
+    li.querySelector('.mat-save').style.display = 'none';
+    li.querySelector('.mat-cancel').style.display = 'none';
+}
+
+async function saveMaterialName(matId) {
+    const li = document.querySelector(`li[data-mat-id="${matId}"]`);
+    const input = li.querySelector('.mat-input');
+    const name = input.value.trim();
+    if (!name) { alert('Name darf nicht leer sein.'); return; }
+    const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+    const res = await fetch(`/admin/material/${matId}/umbenennen`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+        body: JSON.stringify({ beschreibung: name })
+    });
+    if (res.ok) {
+        const label = li.querySelector('.mat-label');
+        label.textContent = name;
+        cancelMaterialEdit(matId);
+    } else {
+        const data = await res.json();
+        alert(data.error || 'Fehler beim Speichern.');
+    }
 }
 
 // Subtask management

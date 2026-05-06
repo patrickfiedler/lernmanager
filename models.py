@@ -1622,6 +1622,11 @@ def delete_material(material_id):
         conn.execute("DELETE FROM material WHERE id = ?", (material_id,))
 
 
+def update_material_beschreibung(material_id, beschreibung):
+    with db_session() as conn:
+        conn.execute("UPDATE material SET beschreibung = ? WHERE id = ?", (beschreibung, material_id))
+
+
 def get_materials_for_subtask(task_id, subtask_id):
     """Get materials visible for a specific Aufgabe.
 

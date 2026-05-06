@@ -1212,6 +1212,17 @@ def admin_material_loeschen(material_id):
     return redirect(request.referrer or url_for('admin_themen'))
 
 
+@app.route('/admin/material/<int:material_id>/umbenennen', methods=['POST'])
+@admin_required
+def admin_material_umbenennen(material_id):
+    data = request.get_json()
+    beschreibung = (data.get('beschreibung') or '').strip()
+    if not beschreibung:
+        return jsonify({'error': 'Name darf nicht leer sein.'}), 400
+    models.update_material_beschreibung(material_id, beschreibung)
+    return jsonify({'ok': True})
+
+
 @app.route('/admin/thema/<int:task_id>/material-zuordnung', methods=['POST'])
 @admin_required
 def admin_material_zuordnung(task_id):
