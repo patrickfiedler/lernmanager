@@ -23,27 +23,28 @@
                 {% for sub in subtasks %}
                 {% set has_quiz = sub.quiz_json %}
                 {% set quiz_passed = subtask_quiz_status.get(sub.id, false) %}
+                {% set disp = 'E' if loop.index == 1 else (loop.index - 1)|string %}
                 <div class="dot dot-subtask {% if sub.erledigt %}completed {% endif %}{% if current_subtask and sub.id == current_subtask.id %}current{% endif %}{% if not sub.get('required', true) %} optional{% endif %}"
                      role="button"
                      tabindex="0"
-                     aria-label="Aufgabe {{ loop.index }}: {{ sub.beschreibung[:50] }}{% if sub.beschreibung|length > 50 %}...{% endif %}{% if sub.erledigt %} - Erledigt{% endif %}{% if not sub.get('required', true) %} (Zusatz){% endif %}"
+                     aria-label="Aufgabe {{ disp }}: {{ sub.beschreibung[:50] }}{% if sub.beschreibung|length > 50 %}...{% endif %}{% if sub.erledigt %} - Erledigt{% endif %}{% if not sub.get('required', true) %} (Zusatz){% endif %}"
                      {% if current_subtask and sub.id == current_subtask.id %}aria-current="true"{% endif %}
                      data-subtask-position="{{ loop.index }}"
                      data-required="{{ 'true' if sub.get('required', true) else 'false' }}"
                      onclick="navigateToSubtask({{ loop.index }})"
                      onkeydown="handleDotKeydown(event)"
-                     title="Aufgabe {{ loop.index }}{% if not sub.get('required', true) %} (Zusatz){% endif %}"><span class="dot-num">{{ loop.index }}</span></div>
+                     title="Aufgabe {{ disp }}{% if not sub.get('required', true) %} (Zusatz){% endif %}"><span class="dot-num">{{ disp }}</span></div>
                 {% if has_quiz %}
                 <div class="dot dot-subtask-quiz {% if quiz_passed %}completed{% elif sub.erledigt %}available{% endif %}"
                      role="button"
                      tabindex="0"
-                     aria-label="Quiz zu Aufgabe {{ loop.index }}{% if quiz_passed %} - Bestanden{% elif sub.erledigt %} - Verfügbar{% else %} - Gesperrt{% endif %}"
+                     aria-label="Quiz zu Aufgabe {{ disp }}{% if quiz_passed %} - Bestanden{% elif sub.erledigt %} - Verfügbar{% else %} - Gesperrt{% endif %}"
                      data-quiz-position="{{ loop.index }}"
                      data-quiz-passed="{{ 'true' if quiz_passed else 'false' }}"
                      data-quiz-available="{{ 'true' if sub.erledigt else 'false' }}"
                      onclick="navigateToSubtaskQuiz({{ loop.index }}, {{ 'true' if quiz_passed else 'false' }}, {{ 'true' if sub.erledigt else 'false' }})"
                      onkeydown="handleDotKeydown(event)"
-                     title="Quiz zu Aufgabe {{ loop.index }}{% if quiz_passed %} (bestanden){% elif sub.erledigt %} (verfügbar){% endif %}">?</div>
+                     title="Quiz zu Aufgabe {{ disp }}{% if quiz_passed %} (bestanden){% elif sub.erledigt %} (verfügbar){% endif %}">?</div>
                 {% endif %}
                 {% endfor %}
                 {% if task.quiz_json %}
@@ -91,7 +92,8 @@
         <div class="current-task">
             {% if active_subtask %}
             <div class="task-badge-group">
-                <div class="task-badge">Aufgabe {{ current_index + 1 }} von {{ subtasks|length }}</div>
+                {% set badge_num = 'E' if current_index == 0 else current_index %}
+                <div class="task-badge">Aufgabe {{ badge_num }} von {{ subtasks|length - 1 }}</div>
                 {% if active_subtask.estimated_minutes %}
                 <div class="task-badge time-estimate">⏱️ ~{{ active_subtask.estimated_minutes }} Min</div>
                 {% endif %}
