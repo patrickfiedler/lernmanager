@@ -127,7 +127,7 @@
             {% endif %}
 
             {% if active_subtask and active_subtask.fertig_wenn %}
-            <div class="fertig-wenn-callout">
+            <div class="fertig-wenn-callout {% if inline_gate and not inline_gate_passed %}fertig-wenn-callout--standalone{% endif %}">
                 {{ active_subtask.fertig_wenn | markdown }}
             </div>
             {% endif %}

@@ -1538,6 +1538,11 @@ tr.unsaved-row td {
 
 .fertig-wenn-callout p { margin-bottom: 0; }
 
+.fertig-wenn-callout--standalone {
+    border-bottom: 2px solid #10b981;
+    border-radius: 0.5rem;
+}
+
 .task-complete.has-fertig-wenn {
     background: #f0fdf4;
     border: 2px solid #10b981;
