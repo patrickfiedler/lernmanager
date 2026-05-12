@@ -496,6 +496,21 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_artifact_feedback_student_subtask
             ON artifact_feedback(student_id, subtask_id);
 
+            CREATE TABLE IF NOT EXISTS artifact_gate_attempt (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_id INTEGER NOT NULL,
+                subtask_id INTEGER NOT NULL,
+                timestamp_local TEXT NOT NULL,
+                timezone TEXT NOT NULL,
+                passed INTEGER NOT NULL,
+                details_json TEXT NOT NULL,
+                FOREIGN KEY (student_id) REFERENCES student(id),
+                FOREIGN KEY (subtask_id) REFERENCES subtask(id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_gate_attempt_student_subtask
+            ON artifact_gate_attempt(student_id, subtask_id);
+
             -- ============ Warmup / Spaced Repetition ============
 
             -- Per-student per-question stats for spaced repetition
@@ -2030,6 +2045,23 @@ def save_artifact_gate_result(student_task_id: int, subtask_id: int, passed: boo
                 (student_task_id, subtask_id, val)
             )
 
+
+
+def log_artifact_gate_attempt(student_id: int, subtask_id: int, passed: bool, details: list, timezone: str = 'Europe/Berlin'):
+    """Append one gate check attempt with its failed criteria list."""
+    import json as _json
+    from datetime import datetime
+    try:
+        import pytz
+        ts = datetime.now(pytz.timezone(timezone)).strftime('%Y-%m-%d %H:%M:%S')
+    except Exception:
+        ts = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+        timezone = 'UTC'
+    with db_session() as conn:
+        conn.execute(
+            'INSERT INTO artifact_gate_attempt (student_id, subtask_id, timestamp_local, timezone, passed, details_json) VALUES (?, ?, ?, ?, ?, ?)',
+            (student_id, subtask_id, ts, timezone, 1 if passed else 0, _json.dumps(details, ensure_ascii=False))
+        )
 
 
 def mark_task_complete(student_task_id, manual=False):

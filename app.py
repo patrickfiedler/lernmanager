@@ -2089,6 +2089,7 @@ def student_artifact_gate_check(slug, position):
         return jsonify({'error': f'Datei konnte nicht gelesen werden: {e}'}), 400
 
     models.save_artifact_gate_result(task['id'], subtask['id'], result['passed'])
+    models.log_artifact_gate_attempt(student_id, subtask['id'], result['passed'], result.get('details', []))
 
     # If gate passes and LLM artifact feedback is configured and enabled, run it now.
     # This makes the checkpoint card the single upload point for both checks.
