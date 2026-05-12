@@ -3254,6 +3254,31 @@ def get_all_artifact_feedback_for_student(student_id):
     ]
 
 
+def get_artifact_gate_attempts_for_student(student_id):
+    """Return all gate attempts for a student, newest first, with subtask task name."""
+    with db_session() as conn:
+        rows = conn.execute(
+            "SELECT a.id, a.timestamp_local, a.passed, a.details_json, "
+            "       t.name as task_name, s.reihenfolge as subtask_pos "
+            "FROM artifact_gate_attempt a "
+            "JOIN subtask s ON s.id = a.subtask_id "
+            "JOIN task t ON t.id = s.task_id "
+            "WHERE a.student_id = ? ORDER BY a.id DESC",
+            (student_id,)
+        ).fetchall()
+    return [
+        {
+            'id': r['id'],
+            'timestamp_local': r['timestamp_local'],
+            'passed': bool(r['passed']),
+            'details': json.loads(r['details_json']),
+            'task_name': r['task_name'],
+            'subtask_pos': r['subtask_pos'],
+        }
+        for r in rows
+    ]
+
+
 def set_klasse_llm_feedback(klasse_id, enabled: bool):
     """Enable or disable LLM artifact feedback for a class."""
     with db_session() as conn:

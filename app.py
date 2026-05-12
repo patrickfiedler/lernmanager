@@ -1526,6 +1526,8 @@ def admin_student_activity(student_id):
         date_to=date_to
     )
 
+    gate_attempts = models.get_artifact_gate_attempts_for_student(student_id)
+
     return render_template('admin/student_activity.html',
                          student=student,
                          events=events,
@@ -1534,7 +1536,8 @@ def admin_student_activity(student_id):
                          total_pages=total_pages,
                          total_count=total_count,
                          date_from=date_from,
-                         date_to=date_to)
+                         date_to=date_to,
+                         gate_attempts=gate_attempts)
 
 
 # ============ Admin: Unterricht (Lessons) ============

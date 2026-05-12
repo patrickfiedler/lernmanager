@@ -57,6 +57,45 @@
     </form>
 </div>
 
+<!-- Artifact Gate Attempts -->
+{% if gate_attempts %}
+<div class="card mb-2">
+    <div class="card-header">📎 Abgabe-Prüfungen ({{ gate_attempts|length }})</div>
+    <table class="table">
+        <thead>
+            <tr>
+                <th style="width:150px;">Datum & Zeit</th>
+                <th style="width:120px;">Ergebnis</th>
+                <th>Thema / Aufgabe</th>
+                <th>Nicht erfüllt</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for a in gate_attempts %}
+            <tr>
+                <td style="font-size:0.9rem;">{{ a.timestamp_local[:19] }}</td>
+                <td>
+                    {% if a.passed %}
+                        <span class="badge badge-success">✓ Bestanden</span>
+                    {% else %}
+                        <span class="badge badge-danger">✗ Nicht bestanden</span>
+                    {% endif %}
+                </td>
+                <td style="font-size:0.9rem;">{{ a.task_name }} — Aufgabe {{ a.subtask_pos }}</td>
+                <td style="font-size:0.85rem;color:#6b7280;">
+                    {% if a.details %}
+                        {{ a.details | join(', ') }}
+                    {% else %}
+                        —
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
 <!-- Activity Log -->
 {% if events %}
 <div class="card">
