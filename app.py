@@ -17,6 +17,7 @@ import config
 import models
 import llm_grading
 import artifact_processor
+import artifact_checker
 from utils import generate_username, generate_password, allowed_file, generate_credentials_pdf, generate_student_self_report_pdf, generate_class_report_pdf, generate_student_report_pdf, slugify
 from import_task import validate_task_structure, check_duplicate, import_task as do_import_task, overwrite_task_from_import, ValidationError
 
@@ -1843,6 +1844,21 @@ def student_klasse(slug):
         except (json.JSONDecodeError, TypeError):
             pass
 
+    # Artifact gate: find the gate subtask and its pass status for this student
+    gate_subtask = None
+    gate_passed = False
+    gate_position = None
+    for i, sub in enumerate(subtasks):
+        if sub.get('artifact_gate_json'):
+            gate_subtask = sub
+            gate_passed = bool(sub.get('artifact_gate_passed'))
+            gate_position = i + 1  # 1-based position
+            try:
+                gate_subtask['artifact_gate'] = json.loads(sub['artifact_gate_json'])
+            except (json.JSONDecodeError, TypeError):
+                gate_subtask = None
+            break
+
     return render_template('student/klasse.html',
                            student=student,
                            klasse=klasse,
@@ -1857,6 +1873,9 @@ def student_klasse(slug):
                            quiz_bestanden=quiz_bestanden,
                            next_topic=next_topic,
                            graded_artifact=graded_artifact,
+                           gate_subtask=gate_subtask,
+                           gate_passed=gate_passed,
+                           gate_position=gate_position,
                            student_path=student.get('lernpfad') if student else None)
 
 
@@ -2022,6 +2041,48 @@ def student_artifact_feedback(slug, position):
     if models.get_effective_transparency_mode(student_id, klasse['id']):
         response['extracted_text'] = anonymized_text
     return jsonify(response)
+
+
+@app.route('/schueler/thema/<slug>/aufgabe-<int:position>/abgabe-pruefen', methods=['POST'])
+@student_required
+def student_artifact_gate_check(slug, position):
+    """Deterministic gate check on artifact upload. No LLM. Saves result."""
+    student_id = session['student_id']
+    task, klasse = _resolve_student_topic(student_id, slug)
+    if not task:
+        return jsonify({'error': 'Thema nicht gefunden'}), 404
+
+    all_subtasks = models.get_student_subtask_progress(task['id'])
+    visible = models.get_visible_subtasks_for_student(student_id, klasse['id'], task['task_id'])
+    visible_ids = {s['id'] for s in visible}
+    subtasks = [st for st in all_subtasks if st['id'] in visible_ids]
+    subtask = _resolve_subtask_by_position(subtasks, position)
+    if not subtask:
+        return jsonify({'error': 'Aufgabe nicht gefunden'}), 404
+
+    gate_raw = subtask.get('artifact_gate_json')
+    if not gate_raw:
+        return jsonify({'error': 'Keine Abgabe-Prüfung für diese Aufgabe'}), 400
+    gate_config = json.loads(gate_raw) if isinstance(gate_raw, str) else gate_raw
+
+    f = request.files.get('file')
+    if not f or not f.filename:
+        return jsonify({'error': 'Keine Datei ausgewählt'}), 400
+
+    filename = f.filename
+    ext = ('.' + filename.rsplit('.', 1)[-1].lower()) if '.' in filename else ''
+    allowed = [fmt.lower() for fmt in gate_config.get('format', [])]
+    if allowed and ext not in allowed:
+        return jsonify({'error': f'Erwartet: {", ".join(allowed)}'}), 400
+
+    file_bytes = f.read()
+    try:
+        result = artifact_checker.check_gate(file_bytes, filename, gate_config)
+    except Exception as e:
+        return jsonify({'error': f'Datei konnte nicht gelesen werden: {e}'}), 400
+
+    models.save_artifact_gate_result(task['id'], subtask['id'], result['passed'])
+    return jsonify(result)
 
 
 def _get_criteria_for_path(graded_artifact, student_path):

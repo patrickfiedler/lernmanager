@@ -1681,6 +1681,45 @@ tr.unsaved-row td {
     .task-complete-left { border-radius: 0; min-width: 0; width: 100%; }
 }
 
+/* Artifact Gate dot */
+.dot.dot-gate {
+    background: #d1d5db;
+    color: white;
+    font-size: 0.85rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.75rem;
+    height: 1.75rem;
+}
+.dot.dot-gate.available { background: #f59e0b; }
+.dot.dot-gate.completed { background: #10b981; }
+
+/* Artifact Gate card */
+.gate-card {
+    background: #fffbeb;
+    border: 1.5px solid #fcd34d;
+    border-radius: 0.5rem;
+    padding: 1rem 1.25rem;
+}
+.gate-card.gate-passed {
+    background: #f0fdf4;
+    border-color: #86efac;
+}
+.gate-card.gate-ready { border-color: #f59e0b; }
+.gate-header {
+    font-weight: 600;
+    font-size: 1rem;
+    margin-bottom: 0.4rem;
+}
+.gate-success-msg { color: #16a34a; margin: 0; }
+.gate-desc, .gate-formats { font-size: 0.875rem; color: #4b5563; margin-bottom: 0.4rem; }
+.gate-upload-row { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
+.gate-result { margin-top: 0.75rem; }
+.gate-fail-msg { font-weight: 600; color: #b45309; margin-bottom: 0.25rem; }
+.gate-error { color: #dc2626; }
+.gate-issues { margin: 0.25rem 0 0 1.25rem; font-size: 0.875rem; color: #374151; }
+
 /* Success Banner */
 .success-banner {
     background: #10b981;

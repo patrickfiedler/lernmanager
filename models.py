@@ -183,6 +183,7 @@ def init_db():
                 path TEXT,  -- wanderweg/bergweg/gipfeltour/seilbahn (lowest path that includes this task)
                 path_model TEXT DEFAULT 'skip',  -- skip: lower paths skip; depth: all paths do it
                 graded_artifact_json TEXT,  -- JSON: {keyword, format, rubric}
+                artifact_gate_json TEXT,  -- JSON: deterministic gate config (no LLM)
                 hidden INTEGER DEFAULT 0,  -- 1=hidden from all students (admin override)
                 fertig_wenn TEXT,
                 tipps TEXT,
@@ -232,6 +233,7 @@ def init_db():
                 subtask_id INTEGER NOT NULL,
                 erledigt INTEGER NOT NULL DEFAULT 0,
                 completed_at DATETIME,
+                artifact_gate_passed INTEGER DEFAULT NULL,
                 UNIQUE(student_task_id, subtask_id),
                 FOREIGN KEY (student_task_id) REFERENCES student_task(id) ON DELETE CASCADE,
                 FOREIGN KEY (subtask_id) REFERENCES subtask(id) ON DELETE CASCADE
@@ -1231,6 +1233,8 @@ def export_task_to_dict(task_id):
                 st_data['quiz'] = json.loads(subtask['quiz_json'])
             if subtask.get('graded_artifact_json'):
                 st_data['graded_artifact'] = json.loads(subtask['graded_artifact_json'])
+            if subtask.get('artifact_gate_json'):
+                st_data['artifact_gate'] = json.loads(subtask['artifact_gate_json'])
             subtasks_data.append(st_data)
 
         materials_data = []
@@ -1403,12 +1407,13 @@ def get_subtasks(task_id):
 
 
 def create_subtask(task_id, beschreibung, reihenfolge=0, estimated_minutes=None, quiz_json=None,
-                   path=None, path_model='skip', graded_artifact_json=None, fertig_wenn=None, tipps=None):
+                   path=None, path_model='skip', graded_artifact_json=None, fertig_wenn=None, tipps=None,
+                   artifact_gate_json=None):
     """Create a subtask."""
     with db_session() as conn:
         cursor = conn.execute(
-            "INSERT INTO subtask (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json, fertig_wenn, tipps) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json, fertig_wenn, tipps)
+            "INSERT INTO subtask (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json, artifact_gate_json, fertig_wenn, tipps) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json, artifact_gate_json, fertig_wenn, tipps)
         )
         return cursor.lastrowid
 
@@ -1541,6 +1546,7 @@ def update_subtasks_from_import(task_id, subtasks_data):
             new_positions.add(pos)
             quiz_json = json.dumps(sub['quiz'], ensure_ascii=False) if sub.get('quiz') else None
             ga_json = json.dumps(sub['graded_artifact'], ensure_ascii=False) if sub.get('graded_artifact') else None
+            gate_json = json.dumps(sub['artifact_gate'], ensure_ascii=False) if sub.get('artifact_gate') else None
             path = sub.get('path')
             path_model = sub.get('path_model', 'skip')
             estimated_minutes = sub.get('estimated_minutes')
@@ -1553,16 +1559,17 @@ def update_subtasks_from_import(task_id, subtasks_data):
                 sub_id = old_by_pos[pos]['id']
                 conn.execute("""
                     UPDATE subtask SET beschreibung=?, estimated_minutes=?,
-                    quiz_json=?, path=?, path_model=?, graded_artifact_json=?, fertig_wenn=?, tipps=?
+                    quiz_json=?, path=?, path_model=?, graded_artifact_json=?, artifact_gate_json=?,
+                    fertig_wenn=?, tipps=?
                     WHERE id=?
                 """, (sub['beschreibung'], estimated_minutes, quiz_json,
-                      path, path_model, ga_json, fertig_wenn, tipps, sub_id))
+                      path, path_model, ga_json, gate_json, fertig_wenn, tipps, sub_id))
                 subtask_id_by_position[pos] = sub_id
             else:
                 # INSERT new subtask at this position
                 cursor = conn.execute(
-                    "INSERT INTO subtask (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json, fertig_wenn, tipps) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (task_id, sub['beschreibung'], pos, estimated_minutes, quiz_json, path, path_model, ga_json, fertig_wenn, tipps)
+                    "INSERT INTO subtask (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json, artifact_gate_json, fertig_wenn, tipps) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (task_id, sub['beschreibung'], pos, estimated_minutes, quiz_json, path, path_model, ga_json, gate_json, fertig_wenn, tipps)
                 )
                 subtask_id_by_position[pos] = cursor.lastrowid
 
@@ -1867,7 +1874,8 @@ def get_student_subtask_progress(student_task_id):
     """Get subtask completion status for a student's task."""
     with db_session() as conn:
         rows = conn.execute('''
-            SELECT sub.*, COALESCE(ss.erledigt, 0) as erledigt
+            SELECT sub.*, COALESCE(ss.erledigt, 0) as erledigt,
+                   ss.artifact_gate_passed as artifact_gate_passed
             FROM subtask sub
             JOIN student_task st ON sub.task_id = st.task_id
             LEFT JOIN student_subtask ss ON sub.id = ss.subtask_id AND ss.student_task_id = ?
@@ -2001,6 +2009,26 @@ def advance_to_next_subtask(student_task_id, current_subtask_id):
     """
     with db_session() as conn:
         _advance_to_next_subtask_internal(conn, student_task_id, current_subtask_id)
+
+
+def save_artifact_gate_result(student_task_id: int, subtask_id: int, passed: bool):
+    """Persist the deterministic gate check result for a student's subtask."""
+    with db_session() as conn:
+        existing = conn.execute(
+            'SELECT id FROM student_subtask WHERE student_task_id = ? AND subtask_id = ?',
+            (student_task_id, subtask_id)
+        ).fetchone()
+        val = 1 if passed else 0
+        if existing:
+            conn.execute(
+                'UPDATE student_subtask SET artifact_gate_passed = ? WHERE id = ?',
+                (val, existing['id'])
+            )
+        else:
+            conn.execute(
+                'INSERT INTO student_subtask (student_task_id, subtask_id, erledigt, artifact_gate_passed) VALUES (?, ?, 0, ?)',
+                (student_task_id, subtask_id, val)
+            )
 
 
 

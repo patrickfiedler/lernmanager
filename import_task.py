@@ -290,11 +290,12 @@ def import_task(task_data, dry_run=False, warnings=None):
         path = sub.get('path')
         path_model = sub.get('path_model', 'skip')
         graded_artifact_json = json.dumps(sub['graded_artifact'], ensure_ascii=False) if sub.get('graded_artifact') else None
+        artifact_gate_json = json.dumps(sub['artifact_gate'], ensure_ascii=False) if sub.get('artifact_gate') else None
         fertig_wenn = sub.get('fertig_wenn') or None
         tipps = sub.get('tipps') or None
         sub_id = models.create_subtask(task_id, sub['beschreibung'], reihenfolge, estimated_minutes, sub_quiz_json,
                                        path=path, path_model=path_model, graded_artifact_json=graded_artifact_json,
-                                       fertig_wenn=fertig_wenn, tipps=tipps)
+                                       fertig_wenn=fertig_wenn, tipps=tipps, artifact_gate_json=artifact_gate_json)
         subtask_id_by_position[reihenfolge] = sub_id
 
     # Create materials and restore subtask assignments

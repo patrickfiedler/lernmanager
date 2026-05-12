@@ -47,8 +47,18 @@
                      title="Quiz zu Aufgabe {{ disp }}{% if quiz_passed %} (bestanden){% elif sub.erledigt %} (verfügbar){% endif %}">?</div>
                 {% endif %}
                 {% endfor %}
+                {% if gate_subtask %}
+                {% set all_done = subtasks|selectattr('erledigt')|list|length == subtasks|length %}
+                <div class="dot dot-gate {% if gate_passed %}completed{% elif all_done %}available{% endif %}"
+                     role="button"
+                     tabindex="0"
+                     aria-label="Abgabe einreichen{% if gate_passed %} - Geprüft{% elif all_done %} - Bereit{% endif %}"
+                     title="Abgabe einreichen"
+                     onclick="document.getElementById('gate-card').scrollIntoView({behavior:'smooth'})"
+                     onkeydown="handleDotKeydown(event)">📎</div>
+                {% endif %}
                 {% if task.quiz_json %}
-                <div class="dot dot-quiz {% if quiz_bestanden %}completed{% endif %}"
+                <div class="dot dot-quiz {% if quiz_bestanden %}completed{% elif gate_passed or not gate_subtask %}available{% endif %}"
                      role="button"
                      tabindex="0"
                      aria-label="Abschlussquiz{% if quiz_bestanden %} - Bestanden{% endif %}"
@@ -318,10 +328,37 @@
     </details>
     {% endif %}
 
+    <!-- Artifact Gate Checkpoint -->
+    {% if gate_subtask %}
+    {% set all_done = subtasks|selectattr('erledigt')|list|length == subtasks|length %}
+    {% set gate_formats = gate_subtask.artifact_gate.get('format', []) %}
+    <div id="gate-card" class="gate-card mt-2 {% if gate_passed %}gate-passed{% elif all_done %}gate-ready{% endif %}">
+        {% if gate_passed %}
+        <div class="gate-header">📎 Abgabe geprüft ✓</div>
+        <p class="gate-success-msg">Deine Datei wurde erfolgreich geprüft.</p>
+        {% else %}
+        <div class="gate-header">📎 Abgabe einreichen</div>
+        <p class="gate-desc">Lade deine fertige Arbeit hoch, bevor du mit dem Quiz weitermachst.</p>
+        {% if gate_formats %}<p class="gate-formats">Akzeptiert: {% for f in gate_formats %}<code>{{ f }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</p>{% endif %}
+        <div class="gate-upload-row">
+            <input type="file" id="gate-file-input" class="artifact-file-input"
+                   {% if gate_formats %}accept="{{ gate_formats|join(',') }}"{% endif %}>
+            <label for="gate-file-input" class="btn btn-secondary artifact-upload-btn">Datei auswählen</label>
+            <span id="gate-filename" class="artifact-filename"></span>
+        </div>
+        <button id="gate-submit-btn" class="btn btn-primary mt-1" disabled
+                data-url="{{ url_for('student_artifact_gate_check', slug=task.name|slugify, position=gate_position) }}">
+            Abgabe prüfen
+        </button>
+        <div id="gate-result" class="gate-result" style="display:none;"></div>
+        {% endif %}
+    </div>
+    {% endif %}
+
     <!-- Quiz Section (if all subtasks complete) -->
     {% if task.quiz_json %}
     {% set all_complete = (all_subtasks|selectattr('erledigt')|list|length == all_subtasks|length) %}
-    {% if all_complete and not task.abgeschlossen %}
+    {% if all_complete and not task.abgeschlossen and (gate_passed or not gate_subtask) %}
     <div class="quiz-card mt-2">
         <div class="quiz-header">❓ Quiz</div>
         {% if quiz_attempts %}
@@ -350,7 +387,7 @@
     {% endif %}
 
     <!-- Next topic from queue -->
-    {% if task.abgeschlossen and next_topic %}
+    {% if task.abgeschlossen and next_topic and (gate_passed or not gate_subtask) %}
     <div class="card mt-2" style="border-left: 4px solid #22c55e;">
         <div class="card-header">🎯 Nächstes Thema: {{ next_topic.name }}</div>
         <form method="POST" action="{{ url_for('student_start_next_topic') }}">
@@ -783,4 +820,62 @@ function adjustZoom(delta) {
         document.getElementById('split-viewer-frame').style.pointerEvents = '';
     });
 })();
+
+// --- Artifact Gate ---
+{% if gate_subtask and not gate_passed %}
+(function() {
+    const fileInput = document.getElementById('gate-file-input');
+    const filenameSpan = document.getElementById('gate-filename');
+    const submitBtn = document.getElementById('gate-submit-btn');
+    const resultDiv = document.getElementById('gate-result');
+    if (!fileInput) return;
+
+    fileInput.addEventListener('change', function() {
+        const name = fileInput.files[0] ? fileInput.files[0].name : '';
+        filenameSpan.textContent = name;
+        submitBtn.disabled = !name;
+    });
+
+    submitBtn.addEventListener('click', function() {
+        if (!fileInput.files[0]) return;
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Wird geprüft…';
+        resultDiv.style.display = 'none';
+
+        const formData = new FormData();
+        formData.append('file', fileInput.files[0]);
+        formData.append('csrf_token', document.querySelector('meta[name="csrf-token"]').content);
+
+        fetch(submitBtn.dataset.url, { method: 'POST', body: formData })
+            .then(r => r.json())
+            .then(data => {
+                if (data.error) {
+                    resultDiv.innerHTML = `<p class="gate-error">⚠️ ${data.error}</p>`;
+                    resultDiv.style.display = 'block';
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Abgabe prüfen';
+                    return;
+                }
+                if (data.passed) {
+                    location.reload();
+                } else {
+                    let html = `<p class="gate-fail-msg">${data.message}</p>`;
+                    if (data.details && data.details.length) {
+                        html += '<ul class="gate-issues">' + data.details.map(d => `<li>${d}</li>`).join('') + '</ul>';
+                    }
+                    resultDiv.innerHTML = html;
+                    resultDiv.style.display = 'block';
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Abgabe prüfen';
+                }
+            })
+            .catch(() => {
+                resultDiv.innerHTML = '<p class="gate-error">⚠️ Verbindungsfehler. Bitte nochmal versuchen.</p>';
+                resultDiv.style.display = 'block';
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Abgabe prüfen';
+            });
+    });
+})();
+{% endif %}
 {% endblock %}
