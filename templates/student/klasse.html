@@ -52,8 +52,8 @@
                 <div class="dot dot-gate {% if capstone_gate_passed %}completed{% elif all_done %}available{% endif %}"
                      role="button"
                      tabindex="0"
-                     aria-label="Abgabe einreichen{% if capstone_gate_passed %} - Geprüft{% elif all_done %} - Bereit{% endif %}"
-                     title="Abgabe einreichen"
+                     aria-label="Datei prüfen{% if capstone_gate_passed %} - Geprüft{% elif all_done %} - Bereit{% endif %}"
+                     title="Datei prüfen"
                      onclick="navigateToSubtask({{ capstone_gate_position }})"
                      onkeydown="handleDotKeydown(event)">📎</div>
                 {% endif %}
@@ -141,8 +141,8 @@
                 <p class="gate-success-msg">Deine Datei wurde erfolgreich geprüft.</p>
                 <p class="gate-desc" style="margin-top:0.75rem;">Neue Version einreichen:</p>
                 {% else %}
-                <div class="gate-header">📎 Abgabe einreichen</div>
-                <p class="gate-desc">Lade deine fertige Arbeit hoch, um diese Aufgabe abzuschließen.</p>
+                <div class="gate-header">📎 Datei prüfen</div>
+                <p class="gate-desc">Lade deine aktuelle Datei hoch, um deinen Fortschritt zu überprüfen.</p>
                 {% endif %}
                 {% if inline_gate_formats %}<p class="gate-formats">Akzeptiert: {% for f in inline_gate_formats %}<code>{{ f }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</p>{% endif %}
                 <div class="gate-upload-row">
@@ -153,7 +153,7 @@
                 </div>
                 <button id="inline-gate-submit-btn" class="btn btn-primary mt-1" disabled
                         data-url="{{ url_for('student_artifact_gate_check', slug=task.name|slugify, position=inline_gate_position) }}">
-                    Abgabe prüfen
+                    Datei prüfen
                 </button>
                 <div id="inline-gate-result" class="gate-result" style="display:none;"></div>
             </div>
@@ -376,8 +376,8 @@
         {% endif %}
         <p class="gate-desc" style="margin-top:0.75rem;">Neue Version einreichen:</p>
         {% else %}
-        <div class="gate-header">📎 Abgabe einreichen</div>
-        <p class="gate-desc">Lade deine fertige Arbeit hoch, bevor du mit dem Quiz weitermachst.</p>
+        <div class="gate-header">📎 Datei prüfen</div>
+        <p class="gate-desc">Lade deine Datei hoch – sie muss geprüft sein, bevor du das Thema abschließen kannst.</p>
         {% endif %}
         {% if gate_formats %}<p class="gate-formats">Akzeptiert: {% for f in gate_formats %}<code>{{ f }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</p>{% endif %}
         <div class="gate-upload-row">
@@ -388,7 +388,7 @@
         </div>
         <button id="gate-submit-btn" class="btn btn-primary mt-1" disabled
                 data-url="{{ url_for('student_artifact_gate_check', slug=task.name|slugify, position=capstone_gate_position) }}">
-            Abgabe prüfen
+            Datei prüfen
         </button>
         <div id="gate-result" class="gate-result" style="display:none;"></div>
     </div>
@@ -903,7 +903,7 @@ function adjustZoom(delta) {
                     resultDiv.innerHTML = `<p class="gate-error">⚠️ ${data.error}</p>`;
                     resultDiv.style.display = 'block';
                     submitBtn.disabled = false;
-                    submitBtn.textContent = 'Abgabe prüfen';
+                    submitBtn.textContent = 'Datei prüfen';
                     return;
                 }
                 if (data.passed) {
@@ -939,14 +939,14 @@ function adjustZoom(delta) {
                     resultDiv.innerHTML = html;
                     resultDiv.style.display = 'block';
                     submitBtn.disabled = false;
-                    submitBtn.textContent = 'Abgabe prüfen';
+                    submitBtn.textContent = 'Datei prüfen';
                 }
             })
             .catch(() => {
                 resultDiv.innerHTML = '<p class="gate-error">⚠️ Verbindungsfehler. Bitte nochmal versuchen.</p>';
                 resultDiv.style.display = 'block';
                 submitBtn.disabled = false;
-                submitBtn.textContent = 'Abgabe prüfen';
+                submitBtn.textContent = 'Datei prüfen';
             });
     });
 })();
@@ -984,7 +984,7 @@ function adjustZoom(delta) {
                     resultDiv.innerHTML = `<p class="gate-error">⚠️ ${data.error}</p>`;
                     resultDiv.style.display = 'block';
                     submitBtn.disabled = false;
-                    submitBtn.textContent = 'Abgabe prüfen';
+                    submitBtn.textContent = 'Datei prüfen';
                     return;
                 }
                 if (data.passed) {
@@ -1000,14 +1000,14 @@ function adjustZoom(delta) {
                     resultDiv.innerHTML = html;
                     resultDiv.style.display = 'block';
                     submitBtn.disabled = false;
-                    submitBtn.textContent = 'Abgabe prüfen';
+                    submitBtn.textContent = 'Datei prüfen';
                 }
             })
             .catch(() => {
                 resultDiv.innerHTML = '<p class="gate-error">⚠️ Verbindungsfehler. Bitte nochmal versuchen.</p>';
                 resultDiv.style.display = 'block';
                 submitBtn.disabled = false;
-                submitBtn.textContent = 'Abgabe prüfen';
+                submitBtn.textContent = 'Datei prüfen';
             });
     });
 })();
