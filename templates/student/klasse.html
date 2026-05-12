@@ -349,9 +349,6 @@
         {% endif %}
         {% else %}
         <div class="gate-header">📎 Abgabe einreichen</div>
-        {% if gate_subtask.fertig_wenn %}
-        <div class="fertig-wenn-callout" style="margin-bottom:0.75rem;">{{ gate_subtask.fertig_wenn | markdown }}</div>
-        {% endif %}
         <p class="gate-desc">Lade deine fertige Arbeit hoch, bevor du mit dem Quiz weitermachst.</p>
         {% if gate_formats %}<p class="gate-formats">Akzeptiert: {% for f in gate_formats %}<code>{{ f }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</p>{% endif %}
         <div class="gate-upload-row">
@@ -452,6 +449,8 @@
 {% block scripts %}
 const topicSlug = '{{ task.name|slugify }}';
 const subtaskCount = {{ subtasks|length }};
+const gatePosition = {{ gate_position or 'null' }};
+const gatePassed = {{ 'true' if gate_passed else 'false' }};
 
 function toggleSubtask(position, checked) {
     const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
@@ -560,6 +559,10 @@ function navigateToSubtask(position) {
 }
 
 function navigateToQuiz(passed) {
+    if (!passed && gatePosition && !gatePassed) {
+        navigateToSubtask(gatePosition);
+        return;
+    }
     if (passed) {
         window.location.href = `/schueler/thema/${topicSlug}/quiz-ergebnis`;
     } else {
