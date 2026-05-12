@@ -1793,10 +1793,14 @@ def get_visible_subtasks_for_student(student_id, klasse_id, task_id):
                 WHERE task_id = ? AND COALESCE(hidden, 0) = 0
                 ORDER BY reihenfolge
             ''', (task_id,)).fetchall()
+            subtasks = [dict(r) for r in rows]
+            # If the topic is a pure Seilbahn topic, treat all its tasks as required
+            # regardless of the student's global lernpfad — they were assigned this topic.
+            all_seilbahn = subtasks and all(s.get('path') == 'seilbahn' for s in subtasks)
+            effective_path = 'seilbahn' if all_seilbahn else student_path
             result = []
-            for r in rows:
-                d = dict(r)
-                d['required'] = is_subtask_required_for_path(d, student_path)
+            for d in subtasks:
+                d['required'] = is_subtask_required_for_path(d, effective_path)
                 result.append(d)
             return result
         else:
