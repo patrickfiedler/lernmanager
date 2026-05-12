@@ -41,8 +41,9 @@ notes.md
 # Flask instance folder
 instance/
 
-# Test scripts
+# Test scripts (root-level only — tests/ directory is tracked)
 test_*.py
+!tests/test_*.py
 check_*.py
 diagnose_*.py
 profile_*.py

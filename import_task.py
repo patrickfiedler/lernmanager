@@ -223,17 +223,26 @@ def validate_task_structure(data, warnings=None):
     return True
 
 
+def _is_seilbahn_topic(subtasks):
+    """True if topic is a pure Seilbahn topic (all subtasks have path='seilbahn')."""
+    return bool(subtasks) and all(s.get('path') == 'seilbahn' for s in subtasks)
+
+
 def check_duplicate(task_data, warnings=None):
-    """Check if a task with the same name, fach, and stufe already exists.
+    """Check if a task with the same name, fach, stufe, and path type already exists.
     Returns existing task ID if duplicate found, None otherwise.
     If warnings list provided, appends warning message instead of printing."""
     task = task_data['task']
+    imported_is_seilbahn = _is_seilbahn_topic(task.get('subtasks', []))
     existing_tasks = models.get_all_tasks()
 
     for existing in existing_tasks:
         if (existing['name'] == task['name'] and
             existing['fach'] == task['fach'] and
             existing['stufe'] == task['stufe']):
+            existing_subs = models.get_subtasks(existing['id'])
+            if _is_seilbahn_topic(existing_subs) != imported_is_seilbahn:
+                continue  # same name but different path type — not a duplicate
             msg = f"Thema '{task['name']}' ({task['fach']} {task['stufe']}) existiert bereits (ID: {existing['id']})"
             if warnings is not None:
                 warnings.append(msg)
