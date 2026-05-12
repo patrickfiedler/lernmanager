@@ -2107,7 +2107,9 @@ def student_artifact_gate_check(slug, position):
     except Exception as e:
         return jsonify({'error': f'Datei konnte nicht gelesen werden: {e}'}), 400
 
-    models.save_artifact_gate_result(task['id'], subtask['id'], result['passed'])
+    already_passed = bool(subtask.get('artifact_gate_passed'))
+    if not already_passed or result['passed']:
+        models.save_artifact_gate_result(task['id'], subtask['id'], result['passed'])
     models.log_artifact_gate_attempt(student_id, subtask['id'], result['passed'], result.get('details', []))
 
     # Inline gate (non-capstone): auto-complete the subtask on pass
