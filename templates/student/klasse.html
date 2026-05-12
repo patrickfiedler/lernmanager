@@ -560,7 +560,12 @@ function navigateToSubtask(position) {
 
 function navigateToQuiz(passed) {
     if (!passed && gatePosition && !gatePassed) {
-        navigateToSubtask(gatePosition);
+        const gateCard = document.getElementById('gate-card');
+        if (gateCard) {
+            gateCard.scrollIntoView({behavior: 'smooth'});
+        } else {
+            navigateToSubtask(gatePosition);
+        }
         return;
     }
     if (passed) {
