@@ -1837,25 +1837,35 @@ def student_klasse(slug):
     if task and task.get('abgeschlossen'):
         next_topic = models.get_next_queued_topic(klasse_id, task['task_id'])
 
-    # Artifact gate: find the gate subtask and its pass status for this student
-    gate_subtask = None
-    gate_passed = False
-    gate_position = None
-    gate_llm_feedback = None
-    for i, sub in enumerate(subtasks):
-        if sub.get('artifact_gate_json'):
-            gate_subtask = sub
-            gate_passed = bool(sub.get('artifact_gate_passed'))
-            gate_position = i + 1  # 1-based position
-            try:
-                gate_subtask['artifact_gate'] = json.loads(sub['artifact_gate_json'])
-            except (json.JSONDecodeError, TypeError):
-                gate_subtask = None
-                break
-            if gate_passed and sub.get('graded_artifact_json'):
-                fb = models.get_artifact_feedback(student_id, sub['id'])
-                gate_llm_feedback = fb['feedback'] if fb else None
-            break
+    # Capstone gate: gate on the last visible subtask (bottom card, blocks quiz/next-topic)
+    capstone_gate = None
+    capstone_gate_passed = False
+    capstone_gate_position = None
+    capstone_gate_llm_feedback = None
+    if subtasks and subtasks[-1].get('artifact_gate_json'):
+        last = subtasks[-1]
+        try:
+            last['artifact_gate'] = json.loads(last['artifact_gate_json'])
+            capstone_gate = last
+            capstone_gate_passed = bool(last.get('artifact_gate_passed'))
+            capstone_gate_position = len(subtasks)
+            if capstone_gate_passed and last.get('graded_artifact_json'):
+                fb = models.get_artifact_feedback(student_id, last['id'])
+                capstone_gate_llm_feedback = fb['feedback'] if fb else None
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    # Inline gate: gate on the current subtask when it is NOT the last subtask
+    inline_gate = None
+    inline_gate_passed = False
+    inline_gate_position = None
+    if current_subtask and current_subtask.get('artifact_gate_json') and subtasks and current_subtask is not subtasks[-1]:
+        try:
+            inline_gate = json.loads(current_subtask['artifact_gate_json'])
+            inline_gate_passed = bool(current_subtask.get('artifact_gate_passed'))
+            inline_gate_position = subtasks.index(current_subtask) + 1
+        except (json.JSONDecodeError, TypeError, ValueError):
+            pass
 
     # Parse graded_artifact_json for the active subtask (criteria-based upload widget).
     # Suppressed when the subtask has a gate — checkpoint card handles the upload instead.
@@ -1882,10 +1892,13 @@ def student_klasse(slug):
                            quiz_bestanden=quiz_bestanden,
                            next_topic=next_topic,
                            graded_artifact=graded_artifact,
-                           gate_subtask=gate_subtask,
-                           gate_passed=gate_passed,
-                           gate_position=gate_position,
-                           gate_llm_feedback=gate_llm_feedback,
+                           capstone_gate=capstone_gate,
+                           capstone_gate_passed=capstone_gate_passed,
+                           capstone_gate_position=capstone_gate_position,
+                           capstone_gate_llm_feedback=capstone_gate_llm_feedback,
+                           inline_gate=inline_gate,
+                           inline_gate_passed=inline_gate_passed,
+                           inline_gate_position=inline_gate_position,
                            student_path=student.get('lernpfad') if student else None)
 
 
@@ -2093,6 +2106,25 @@ def student_artifact_gate_check(slug, position):
 
     models.save_artifact_gate_result(task['id'], subtask['id'], result['passed'])
     models.log_artifact_gate_attempt(student_id, subtask['id'], result['passed'], result.get('details', []))
+
+    # Inline gate (non-capstone): auto-complete the subtask on pass
+    is_capstone = (position == len(subtasks))
+    if result['passed'] and not is_capstone:
+        toggle_result = models.toggle_student_subtask(task['id'], subtask['id'], True)
+        models.log_analytics_event(
+            event_type='subtask_complete',
+            user_id=student_id,
+            user_type='student',
+            metadata={'student_task_id': task['id'], 'subtask_id': subtask['id']}
+        )
+        if not toggle_result.get('quiz_pending') and models.check_task_completion(task['id']):
+            models.mark_task_complete(task['id'])
+            models.log_analytics_event(
+                event_type='task_complete',
+                user_id=student_id,
+                user_type='student',
+                metadata={'student_task_id': task['id']}
+            )
 
     # If gate passes and LLM artifact feedback is configured and enabled, run it now.
     # This makes the checkpoint card the single upload point for both checks.

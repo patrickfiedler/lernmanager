@@ -47,18 +47,18 @@
                      title="Quiz zu Aufgabe {{ disp }}{% if quiz_passed %} (bestanden){% elif sub.erledigt %} (verfügbar){% endif %}">?</div>
                 {% endif %}
                 {% endfor %}
-                {% if gate_subtask %}
+                {% if capstone_gate %}
                 {% set all_done = subtasks|selectattr('erledigt')|list|length == subtasks|length %}
-                <div class="dot dot-gate {% if gate_passed %}completed{% elif all_done %}available{% endif %}"
+                <div class="dot dot-gate {% if capstone_gate_passed %}completed{% elif all_done %}available{% endif %}"
                      role="button"
                      tabindex="0"
-                     aria-label="Abgabe einreichen{% if gate_passed %} - Geprüft{% elif all_done %} - Bereit{% endif %}"
+                     aria-label="Abgabe einreichen{% if capstone_gate_passed %} - Geprüft{% elif all_done %} - Bereit{% endif %}"
                      title="Abgabe einreichen"
-                     onclick="navigateToSubtask({{ gate_position }})"
+                     onclick="navigateToSubtask({{ capstone_gate_position }})"
                      onkeydown="handleDotKeydown(event)">📎</div>
                 {% endif %}
                 {% if task.quiz_json %}
-                <div class="dot dot-quiz {% if quiz_bestanden %}completed{% elif gate_passed or not gate_subtask %}available{% endif %}"
+                <div class="dot dot-quiz {% if quiz_bestanden %}completed{% elif capstone_gate_passed or not capstone_gate %}available{% endif %}"
                      role="button"
                      tabindex="0"
                      aria-label="Abschlussquiz{% if quiz_bestanden %} - Bestanden{% endif %}"
@@ -132,8 +132,35 @@
             </div>
             {% endif %}
 
+            <!-- Inline gate card (non-capstone subtask gate) -->
+            {% if inline_gate and not task.abgeschlossen %}
+            {% set inline_gate_formats = inline_gate.get('format', []) %}
+            <div id="inline-gate-card" class="gate-card gate-inline mt-2 {% if inline_gate_passed %}gate-passed{% else %}gate-ready{% endif %}">
+                {% if inline_gate_passed %}
+                <div class="gate-header">📎 Abgabe geprüft ✓</div>
+                <p class="gate-success-msg">Deine Datei wurde erfolgreich geprüft.</p>
+                <p class="gate-desc" style="margin-top:0.75rem;">Neue Version einreichen:</p>
+                {% else %}
+                <div class="gate-header">📎 Abgabe einreichen</div>
+                <p class="gate-desc">Lade deine fertige Arbeit hoch, um diese Aufgabe abzuschließen.</p>
+                {% endif %}
+                {% if inline_gate_formats %}<p class="gate-formats">Akzeptiert: {% for f in inline_gate_formats %}<code>{{ f }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</p>{% endif %}
+                <div class="gate-upload-row">
+                    <input type="file" id="inline-gate-file-input" class="artifact-file-input"
+                           {% if inline_gate_formats %}accept="{{ inline_gate_formats|join(',') }}"{% endif %}>
+                    <label for="inline-gate-file-input" class="btn btn-secondary artifact-upload-btn">Datei auswählen</label>
+                    <span id="inline-gate-filename" class="artifact-filename"></span>
+                </div>
+                <button id="inline-gate-submit-btn" class="btn btn-primary mt-1" disabled
+                        data-url="{{ url_for('student_artifact_gate_check', slug=task.name|slugify, position=inline_gate_position) }}">
+                    Abgabe prüfen
+                </button>
+                <div id="inline-gate-result" class="gate-result" style="display:none;"></div>
+            </div>
+            {% endif %}
+
             <!-- Completion zone: checkbox (left) + optional KI-Check (right) -->
-            {% if active_subtask and not task.abgeschlossen %}
+            {% if active_subtask and not task.abgeschlossen and (not inline_gate or inline_gate_passed) %}
             {% if graded_artifact %}
             <div class="task-complete {% if active_subtask.fertig_wenn %}has-fertig-wenn{% endif %} has-artifact">
                 <!-- Left: completion checkbox -->
@@ -328,17 +355,17 @@
     </details>
     {% endif %}
 
-    <!-- Artifact Gate Checkpoint — only shown when student is on the gate subtask or already passed -->
-    {% if gate_subtask and (gate_passed or (active_subtask and active_subtask.id == gate_subtask.id)) %}
-    {% set gate_formats = gate_subtask.artifact_gate.get('format', []) %}
-    <div id="gate-card" class="gate-card mt-2 {% if gate_passed %}gate-passed{% else %}gate-ready{% endif %}">
-        {% if gate_passed %}
+    <!-- Capstone Gate Checkpoint — shown when on the last subtask or already passed -->
+    {% if capstone_gate and (capstone_gate_passed or (active_subtask and active_subtask.id == capstone_gate.id)) %}
+    {% set gate_formats = capstone_gate.artifact_gate.get('format', []) %}
+    <div id="gate-card" class="gate-card mt-2 {% if capstone_gate_passed %}gate-passed{% else %}gate-ready{% endif %}">
+        {% if capstone_gate_passed %}
         <div class="gate-header">📎 Abgabe geprüft ✓</div>
         <p class="gate-success-msg">Deine Datei wurde erfolgreich geprüft.</p>
-        {% if gate_llm_feedback %}
+        {% if capstone_gate_llm_feedback %}
         <div class="artifact-checklist" style="margin-top:0.75rem;">
             <div class="checklist-header">KI-Feedback:</div>
-            {% for item in gate_llm_feedback %}
+            {% for item in capstone_gate_llm_feedback %}
             <div class="checklist-item" style="border-left:3px solid {% if item.passed %}#10b981{% else %}#ef4444{% endif %}; padding:0.5rem 0.75rem; margin:0.4rem 0; background:#f9fafb;">
                 <div style="font-weight:500;">{% if item.passed %}✅{% else %}❌{% endif %} {{ item.criterion }}</div>
                 {% if item.note %}<div style="font-size:0.875rem;color:#4b5563;margin-top:0.2rem;">💬 {{ item.note }} <span style="font-size:0.75rem;color:#6b7280;margin-left:0.4rem;">✨ KI</span></div>{% endif %}
@@ -360,7 +387,7 @@
             <span id="gate-filename" class="artifact-filename"></span>
         </div>
         <button id="gate-submit-btn" class="btn btn-primary mt-1" disabled
-                data-url="{{ url_for('student_artifact_gate_check', slug=task.name|slugify, position=gate_position) }}">
+                data-url="{{ url_for('student_artifact_gate_check', slug=task.name|slugify, position=capstone_gate_position) }}">
             Abgabe prüfen
         </button>
         <div id="gate-result" class="gate-result" style="display:none;"></div>
@@ -370,7 +397,7 @@
     <!-- Quiz Section (if all subtasks complete) -->
     {% if task.quiz_json %}
     {% set all_complete = (all_subtasks|selectattr('erledigt')|list|length == all_subtasks|length) %}
-    {% if all_complete and not task.abgeschlossen and (gate_passed or not gate_subtask) %}
+    {% if all_complete and not task.abgeschlossen and (capstone_gate_passed or not capstone_gate) %}
     <div class="quiz-card mt-2">
         <div class="quiz-header">❓ Quiz</div>
         {% if quiz_attempts %}
@@ -399,7 +426,7 @@
     {% endif %}
 
     <!-- Next topic from queue -->
-    {% if task.abgeschlossen and next_topic and (gate_passed or not gate_subtask) %}
+    {% if task.abgeschlossen and next_topic and (capstone_gate_passed or not capstone_gate) %}
     <div class="card mt-2" style="border-left: 4px solid #22c55e;">
         <div class="card-header">🎯 Nächstes Thema: {{ next_topic.name }}</div>
         <form method="POST" action="{{ url_for('student_start_next_topic') }}">
@@ -450,8 +477,8 @@
 {% block scripts %}
 const topicSlug = '{{ task.name|slugify }}';
 const subtaskCount = {{ subtasks|length }};
-const gatePosition = {{ gate_position or 'null' }};
-const gatePassed = {{ 'true' if gate_passed else 'false' }};
+const gatePosition = {{ capstone_gate_position or 'null' }};
+const gatePassed = {{ 'true' if capstone_gate_passed else 'false' }};
 
 function toggleSubtask(position, checked) {
     const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
@@ -844,8 +871,8 @@ function adjustZoom(delta) {
     });
 })();
 
-// --- Artifact Gate ---
-{% if gate_subtask and not gate_passed %}
+// --- Capstone Gate ---
+{% if capstone_gate %}
 (function() {
     const fileInput = document.getElementById('gate-file-input');
     const filenameSpan = document.getElementById('gate-filename');
@@ -901,6 +928,64 @@ function adjustZoom(delta) {
                     } else {
                         location.reload();
                     }
+                } else {
+                    let html = `<p class="gate-fail-msg">${data.message}</p>`;
+                    if (data.details && data.details.length) {
+                        html += '<ul class="gate-issues">' + data.details.map(d => `<li>${d}</li>`).join('') + '</ul>';
+                    }
+                    resultDiv.innerHTML = html;
+                    resultDiv.style.display = 'block';
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Abgabe prüfen';
+                }
+            })
+            .catch(() => {
+                resultDiv.innerHTML = '<p class="gate-error">⚠️ Verbindungsfehler. Bitte nochmal versuchen.</p>';
+                resultDiv.style.display = 'block';
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Abgabe prüfen';
+            });
+    });
+})();
+{% endif %}
+
+// --- Inline Gate ---
+{% if inline_gate %}
+(function() {
+    const fileInput = document.getElementById('inline-gate-file-input');
+    const filenameSpan = document.getElementById('inline-gate-filename');
+    const submitBtn = document.getElementById('inline-gate-submit-btn');
+    const resultDiv = document.getElementById('inline-gate-result');
+    if (!fileInput) return;
+
+    fileInput.addEventListener('change', function() {
+        const name = fileInput.files[0] ? fileInput.files[0].name : '';
+        filenameSpan.textContent = name;
+        submitBtn.disabled = !name;
+    });
+
+    submitBtn.addEventListener('click', function() {
+        if (!fileInput.files[0]) return;
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Wird geprüft…';
+        resultDiv.style.display = 'none';
+
+        const formData = new FormData();
+        formData.append('file', fileInput.files[0]);
+        formData.append('csrf_token', document.querySelector('meta[name="csrf-token"]').content);
+
+        fetch(submitBtn.dataset.url, { method: 'POST', body: formData })
+            .then(r => r.json())
+            .then(data => {
+                if (data.error) {
+                    resultDiv.innerHTML = `<p class="gate-error">⚠️ ${data.error}</p>`;
+                    resultDiv.style.display = 'block';
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Abgabe prüfen';
+                    return;
+                }
+                if (data.passed) {
+                    location.reload();
                 } else {
                     let html = `<p class="gate-fail-msg">${data.message}</p>`;
                     if (data.details && data.details.length) {
