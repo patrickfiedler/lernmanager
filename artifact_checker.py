@@ -1,7 +1,8 @@
 """Deterministic artifact gate checks — no LLM, no external services.
 
 Called on upload when a subtask has artifact_gate_json set.
-Returns {passed, message, details} — student sees message + details on failure.
+Returns {passed, message, details, matches} — student sees both what's missing
+and what already looks good.
 """
 
 import io
@@ -19,17 +20,17 @@ def check_gate(file_bytes: bytes, filename: str, gate_config: dict) -> dict:
         return _check_document(file_bytes, ext, gate_config)
     if ext == '.sb3':
         return _check_scratch(file_bytes, gate_config)
-    return {'passed': True, 'message': '', 'details': []}
+    return {'passed': True, 'message': '', 'details': [], 'matches': []}
 
 
 def _fuzzy_match(a: str, b: str) -> float:
     return SequenceMatcher(None, a.lower().strip(), b.lower().strip()).ratio()
 
 
-def _result(issues: list) -> dict:
+def _result(issues: list, matches: list = None) -> dict:
     passed = not issues
     message = "Abgabe sieht vollständig aus ✓" if passed else "Abgabe noch nicht vollständig"
-    return {'passed': passed, 'message': message, 'details': issues}
+    return {'passed': passed, 'message': message, 'details': issues, 'matches': matches or []}
 
 
 def _check_presentation(file_bytes: bytes, ext: str, config: dict) -> dict:
@@ -43,6 +44,7 @@ def _check_presentation(file_bytes: bytes, ext: str, config: dict) -> dict:
       min_chars_per_slide (int)
     """
     issues = []
+    matches = []
     threshold = config.get('title_match_threshold', 0.6)
 
     if ext == '.odp':
@@ -56,12 +58,15 @@ def _check_presentation(file_bytes: bytes, ext: str, config: dict) -> dict:
             with zipfile.ZipFile(io.BytesIO(file_bytes)) as z:
                 root = ET.fromstring(z.read('content.xml'))
         except Exception:
-            return {'passed': False, 'message': 'Datei konnte nicht gelesen werden', 'details': ['Ungültige .odp-Datei']}
+            return {'passed': False, 'message': 'Datei konnte nicht gelesen werden', 'details': ['Ungültige .odp-Datei'], 'matches': []}
 
         pages = root.findall('.//draw:page', NS)
         slide_count = len(pages)
-        if slide_count < config.get('min_slides', 0):
-            issues.append(f"Zu wenig Folien ({slide_count}, erwartet: {config['min_slides']})")
+        if config.get('min_slides', 0):
+            if slide_count < config['min_slides']:
+                issues.append(f"Zu wenig Folien ({slide_count}, erwartet: {config['min_slides']})")
+            else:
+                matches.append(f"{slide_count} Folien ✓")
 
         titles = []
         for page in pages:
@@ -76,6 +81,8 @@ def _check_presentation(file_bytes: bytes, ext: str, config: dict) -> dict:
         for req in config.get('required_slide_titles', []):
             if max((_fuzzy_match(req, t) for t in titles), default=0) < threshold:
                 issues.append(f'Folie fehlt: „{req}"')
+            else:
+                matches.append(f'Folie gefunden: „{req}" ✓')
 
         min_chars = config.get('min_chars_per_slide', 0)
         if min_chars:
@@ -89,17 +96,22 @@ def _check_presentation(file_bytes: bytes, ext: str, config: dict) -> dict:
         try:
             prs = Presentation(io.BytesIO(file_bytes))
         except Exception:
-            return {'passed': False, 'message': 'Datei konnte nicht gelesen werden', 'details': ['Ungültige .pptx-Datei']}
+            return {'passed': False, 'message': 'Datei konnte nicht gelesen werden', 'details': ['Ungültige .pptx-Datei'], 'matches': []}
 
         slides = prs.slides
         slide_count = len(slides)
-        if slide_count < config.get('min_slides', 0):
-            issues.append(f"Zu wenig Folien ({slide_count}, erwartet: {config['min_slides']})")
+        if config.get('min_slides', 0):
+            if slide_count < config['min_slides']:
+                issues.append(f"Zu wenig Folien ({slide_count}, erwartet: {config['min_slides']})")
+            else:
+                matches.append(f"{slide_count} Folien ✓")
 
         titles = [slide.shapes.title.text if slide.shapes.title else '' for slide in slides]
         for req in config.get('required_slide_titles', []):
             if max((_fuzzy_match(req, t) for t in titles), default=0) < threshold:
                 issues.append(f'Folie fehlt: „{req}"')
+            else:
+                matches.append(f'Folie gefunden: „{req}" ✓')
 
         min_chars = config.get('min_chars_per_slide', 0)
         if min_chars:
@@ -108,7 +120,7 @@ def _check_presentation(file_bytes: bytes, ext: str, config: dict) -> dict:
                 if len(text) < min_chars:
                     issues.append(f"Folie {i} hat zu wenig Text ({len(text)} Zeichen, erwartet: {min_chars})")
 
-    return _result(issues)
+    return _result(issues, matches)
 
 
 def _check_document(file_bytes: bytes, ext: str, config: dict) -> dict:
@@ -127,19 +139,24 @@ def _check_document(file_bytes: bytes, ext: str, config: dict) -> dict:
         return {'passed': False, 'message': 'Datei konnte nicht gelesen werden', 'details': ['Ungültige Datei']}
 
     issues = []
+    matches = []
     threshold = config.get('title_match_threshold', 0.6)
     min_words = config.get('min_words', 0)
     if min_words:
         word_count = len(extracted.split())
         if word_count < min_words:
             issues.append(f"Zu wenig Text ({word_count} Wörter, erwartet: {min_words})")
+        else:
+            matches.append(f"{word_count} Wörter ✓")
 
     heading_texts = [l.lstrip('#').strip() for l in extracted.splitlines() if l.startswith('#')]
     for req in config.get('required_headings', []):
         if max((_fuzzy_match(req, h) for h in heading_texts), default=0) < threshold:
             issues.append(f'Abschnitt fehlt: „{req}"')
+        else:
+            matches.append(f'Abschnitt gefunden: „{req}" ✓')
 
-    return _result(issues)
+    return _result(issues, matches)
 
 
 def _check_scratch(file_bytes: bytes, config: dict) -> dict:
@@ -151,16 +168,23 @@ def _check_scratch(file_bytes: bytes, config: dict) -> dict:
         return {'passed': False, 'message': 'Datei konnte nicht gelesen werden', 'details': ['Ungültige .sb3-Datei']}
 
     issues = []
+    matches = []
     sprites = [t for t in project.get('targets', []) if not t.get('isStage')]
 
-    if len(sprites) < config.get('min_sprites', 0):
-        issues.append(f"Zu wenig Figuren ({len(sprites)}, erwartet: {config['min_sprites']})")
+    if config.get('min_sprites', 0):
+        if len(sprites) < config['min_sprites']:
+            issues.append(f"Zu wenig Figuren ({len(sprites)}, erwartet: {config['min_sprites']})")
+        else:
+            matches.append(f"{len(sprites)} Figuren ✓")
 
     script_count = sum(
         sum(1 for b in s.get('blocks', {}).values() if isinstance(b, dict) and b.get('topLevel'))
         for s in sprites
     )
-    if script_count < config.get('min_scripts', 0):
-        issues.append(f"Zu wenig Skripte ({script_count}, erwartet: {config['min_scripts']})")
+    if config.get('min_scripts', 0):
+        if script_count < config['min_scripts']:
+            issues.append(f"Zu wenig Skripte ({script_count}, erwartet: {config['min_scripts']})")
+        else:
+            matches.append(f"{script_count} Skripte ✓")
 
-    return _result(issues)
+    return _result(issues, matches)

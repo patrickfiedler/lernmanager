@@ -1724,6 +1724,7 @@ tr.unsaved-row td {
 .gate-fail-msg { font-weight: 600; color: #b45309; margin-bottom: 0.25rem; }
 .gate-error { color: #dc2626; }
 .gate-issues { margin: 0.25rem 0 0 1.25rem; font-size: 0.875rem; color: #374151; }
+.gate-matches { margin: 0.25rem 0 0.5rem 1.25rem; font-size: 0.875rem; color: #16a34a; }
 
 /* Success Banner */
 .success-banner {

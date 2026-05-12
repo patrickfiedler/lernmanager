@@ -930,6 +930,9 @@ function adjustZoom(delta) {
                     }
                 } else {
                     let html = `<p class="gate-fail-msg">${data.message}</p>`;
+                    if (data.matches && data.matches.length) {
+                        html += '<ul class="gate-matches">' + data.matches.map(m => `<li>${m}</li>`).join('') + '</ul>';
+                    }
                     if (data.details && data.details.length) {
                         html += '<ul class="gate-issues">' + data.details.map(d => `<li>${d}</li>`).join('') + '</ul>';
                     }
@@ -988,6 +991,9 @@ function adjustZoom(delta) {
                     location.reload();
                 } else {
                     let html = `<p class="gate-fail-msg">${data.message}</p>`;
+                    if (data.matches && data.matches.length) {
+                        html += '<ul class="gate-matches">' + data.matches.map(m => `<li>${m}</li>`).join('') + '</ul>';
+                    }
                     if (data.details && data.details.length) {
                         html += '<ul class="gate-issues">' + data.details.map(d => `<li>${d}</li>`).join('') + '</ul>';
                     }
