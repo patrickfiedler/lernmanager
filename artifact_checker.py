@@ -124,11 +124,12 @@ def _check_presentation(file_bytes: bytes, ext: str, config: dict) -> dict:
 
 
 def _check_document(file_bytes: bytes, ext: str, config: dict) -> dict:
-    """Check required headings (fuzzy) and minimum word count.
+    """Check required headings (fuzzy), minimum word count, and minimum image count.
 
     config keys:
       format (list[str]) — accepted extensions, checked by caller
       min_words (int)
+      min_images (int)
       required_headings (list[str])
       title_match_threshold (float) — fuzzy ratio, default 0.6
     """
@@ -148,6 +149,23 @@ def _check_document(file_bytes: bytes, ext: str, config: dict) -> dict:
             issues.append(f"Zu wenig Text ({word_count} Wörter, erwartet: {min_words})")
         else:
             matches.append(f"{word_count} Wörter ✓")
+
+    min_images = config.get('min_images', 0)
+    if min_images:
+        image_exts = {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.wmf', '.emf', '.svg'}
+        prefix = 'word/media/' if ext == '.docx' else 'Pictures/'
+        try:
+            with zipfile.ZipFile(io.BytesIO(file_bytes)) as z:
+                image_count = sum(
+                    1 for name in z.namelist()
+                    if name.startswith(prefix) and ('.' + name.rsplit('.', 1)[-1].lower()) in image_exts
+                )
+        except Exception:
+            image_count = 0
+        if image_count < min_images:
+            issues.append(f"Zu wenig Bilder ({image_count}, erwartet: {min_images})")
+        else:
+            matches.append(f"{image_count} Bild{'er' if image_count != 1 else ''} ✓")
 
     heading_texts = [l.lstrip('#').strip() for l in extracted.splitlines() if l.startswith('#')]
     for req in config.get('required_headings', []):
