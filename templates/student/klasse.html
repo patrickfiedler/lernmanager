@@ -765,7 +765,7 @@ function openSplitPane(btn) {
     } else {
         imgWrap.style.display = 'none';
         img.src = '';
-        frame.src = url;
+        frame.src = (type === 'pdf') ? url + '#navpanes=0&pagemode=none' : url;
         frame.style.display = '';
     }
 
