@@ -3322,7 +3322,7 @@ def get_warmup_question_pool(student_id):
             except (json.JSONDecodeError, TypeError):
                 continue
             for i, q in enumerate(quiz.get('questions', [])):
-                if q.get('type') == 'short_answer':
+                if q.get('type') in ('short_answer', 'long_answer'):
                     continue
                 pool.append({
                     'task_id': topic['task_id'],
@@ -3356,7 +3356,7 @@ def get_warmup_question_pool(student_id):
             except (json.JSONDecodeError, TypeError):
                 continue
             for i, q in enumerate(quiz.get('questions', [])):
-                if q.get('type') == 'short_answer':
+                if q.get('type') in ('short_answer', 'long_answer'):
                     continue
                 pool.append({
                     'task_id': sub['task_id'],
