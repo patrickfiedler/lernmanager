@@ -1,5 +1,6 @@
 import os
 import io
+import re
 import json
 import uuid
 import zipfile
@@ -58,6 +59,15 @@ def slugify_filter(text):
     return slugify(text)
 
 
+@app.template_filter('topic_slug')
+def topic_slug(task):
+    """URL slug for a topic. Seilbahn topics get 's' after the leading number (e.g. '5s-...')."""
+    name = task['name']
+    if task.get('is_seilbahn'):
+        name = re.sub(r'^(\d+)', r'\1s', name)
+    return slugify(name)
+
+
 @app.template_filter('b64encode')
 def b64encode_filter(text):
     """Base64-encode a string for client-side email obfuscation."""
@@ -92,7 +102,7 @@ def _resolve_student_topic(student_id, slug):
     for klasse in klassen:
         tasks = models.get_all_student_tasks(student_id, klasse['id'])
         for task in tasks:
-            if slugify(task['name']) == slug:
+            if topic_slug(task) == slug:
                 return task, klasse
     return None, None
 

@@ -1826,11 +1826,19 @@ def get_visible_subtasks_for_student(student_id, klasse_id, task_id):
             return result
 
 
+_IS_SEILBAHN_SQL = """
+    CASE WHEN (SELECT COUNT(*) FROM subtask WHERE task_id = t.id) > 0
+              AND (SELECT COUNT(*) FROM subtask WHERE task_id = t.id AND path != 'seilbahn') = 0
+    THEN 1 ELSE 0 END as is_seilbahn
+"""
+
+
 def get_student_task(student_id, klasse_id):
     """Get student's active primary topic for a class."""
     with db_session() as conn:
-        row = conn.execute('''
-            SELECT st.*, t.name, t.beschreibung, t.lernziel, t.fach, t.stufe, t.kategorie, t.quiz_json, t.why_learn_this, t.subtask_quiz_required
+        row = conn.execute(f'''
+            SELECT st.*, t.name, t.beschreibung, t.lernziel, t.fach, t.stufe, t.kategorie, t.quiz_json, t.why_learn_this, t.subtask_quiz_required,
+                {_IS_SEILBAHN_SQL}
             FROM student_task st
             JOIN task t ON st.task_id = t.id
             WHERE st.student_id = ? AND st.klasse_id = ?
@@ -1847,8 +1855,9 @@ def get_all_student_tasks(student_id, klasse_id):
     Used by slug resolution — a student might view a completed topic's quiz results.
     """
     with db_session() as conn:
-        rows = conn.execute('''
-            SELECT st.*, t.name, t.beschreibung, t.lernziel, t.fach, t.stufe, t.kategorie, t.quiz_json, t.why_learn_this, t.subtask_quiz_required
+        rows = conn.execute(f'''
+            SELECT st.*, t.name, t.beschreibung, t.lernziel, t.fach, t.stufe, t.kategorie, t.quiz_json, t.why_learn_this, t.subtask_quiz_required,
+                {_IS_SEILBAHN_SQL}
             FROM student_task st
             JOIN task t ON st.task_id = t.id
             WHERE st.student_id = ? AND st.klasse_id = ?
@@ -1875,8 +1884,9 @@ def get_sidequests_for_klasse(klasse_id):
 def get_student_sidequests(student_id, klasse_id):
     """Get active sidequests for a student in a class."""
     with db_session() as conn:
-        rows = conn.execute('''
-            SELECT st.*, t.name, t.beschreibung, t.fach, t.stufe, t.kategorie, t.quiz_json
+        rows = conn.execute(f'''
+            SELECT st.*, t.name, t.beschreibung, t.fach, t.stufe, t.kategorie, t.quiz_json,
+                {_IS_SEILBAHN_SQL}
             FROM student_task st
             JOIN task t ON st.task_id = t.id
             WHERE st.student_id = ? AND st.klasse_id = ? AND st.rolle = 'sidequest' AND st.abgeschlossen = 0

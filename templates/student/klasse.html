@@ -152,7 +152,7 @@
                     <span id="inline-gate-filename" class="artifact-filename"></span>
                 </div>
                 <button id="inline-gate-submit-btn" class="btn btn-primary mt-1" disabled
-                        data-url="{{ url_for('student_artifact_gate_check', slug=task.name|slugify, position=inline_gate_position) }}">
+                        data-url="{{ url_for('student_artifact_gate_check', slug=task|topic_slug, position=inline_gate_position) }}">
                     Datei prüfen
                 </button>
                 <div id="inline-gate-result" class="gate-result" style="display:none;"></div>
@@ -223,7 +223,7 @@
                 <div class="quiz-header">❓ Aufgaben-Quiz</div>
                 <p>Beantworte die Fragen, bevor du zur nächsten Aufgabe weitergehst.</p>
                 <p class="text-muted" style="font-size: 0.875rem; margin-top: 0.25rem;">Du kannst so oft wiederholen, wie du willst.</p>
-                <a href="{{ url_for('student_quiz_subtask', slug=task.name|slugify, position=current_index + 1) }}" class="btn btn-primary mt-1">Quiz starten</a>
+                <a href="{{ url_for('student_quiz_subtask', slug=task|topic_slug, position=current_index + 1) }}" class="btn btn-primary mt-1">Quiz starten</a>
             </div>
             {% endif %}
 
@@ -387,7 +387,7 @@
             <span id="gate-filename" class="artifact-filename"></span>
         </div>
         <button id="gate-submit-btn" class="btn btn-primary mt-1" disabled
-                data-url="{{ url_for('student_artifact_gate_check', slug=task.name|slugify, position=capstone_gate_position) }}">
+                data-url="{{ url_for('student_artifact_gate_check', slug=task|topic_slug, position=capstone_gate_position) }}">
             Datei prüfen
         </button>
         <div id="gate-result" class="gate-result" style="display:none;"></div>
@@ -416,7 +416,7 @@
         </div>
         {% endif %}
         <p class="text-muted" style="font-size: 0.875rem; margin-top: 0.25rem;">Du kannst so oft wiederholen, wie du willst.</p>
-        <a href="{{ url_for('student_quiz', slug=task.name|slugify) }}" class="btn btn-primary mt-1">Quiz starten</a>
+        <a href="{{ url_for('student_quiz', slug=task|topic_slug) }}" class="btn btn-primary mt-1">Quiz starten</a>
     </div>
     {% elif task.abgeschlossen %}
     <div class="alert alert-success mt-2">
@@ -475,7 +475,7 @@
 {% endblock %}
 
 {% block scripts %}
-const topicSlug = '{{ task.name|slugify }}';
+const topicSlug = '{{ task|topic_slug }}';
 const subtaskCount = {{ subtasks|length }};
 const gatePosition = {{ capstone_gate_position or 'null' }};
 const gatePassed = {{ 'true' if capstone_gate_passed else 'false' }};

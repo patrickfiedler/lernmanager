@@ -54,7 +54,7 @@
     {% endif %}
 
     <div class="mt-1">
-        <a href="{{ url_for('student_klasse', slug=task.name|slugify) }}" class="btn btn-primary btn-block">
+        <a href="{{ url_for('student_klasse', slug=task|topic_slug) }}" class="btn btn-primary btn-block">
             {% if task.abgeschlossen %}Details ansehen →{% else %}Weiter lernen →{% endif %}
         </a>
     </div>
@@ -107,7 +107,7 @@
     <a class="description-toggle" onclick="toggleDesc(this)" style="display:none;">Mehr anzeigen ▾</a>
     {% endif %}
     <div class="text-right">
-        <a href="{{ url_for('student_klasse', slug=sq.name|slugify) }}" class="btn btn-primary">Weiter lernen →</a>
+        <a href="{{ url_for('student_klasse', slug=sq|topic_slug) }}" class="btn btn-primary">Weiter lernen →</a>
     </div>
 </div>
 {% endfor %}
