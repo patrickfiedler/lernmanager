@@ -78,6 +78,19 @@ def extract_zip_materials(zip_path, task_data, dry_run=False):
     return extracted
 
 
+def _validate_artifact_gate(gate, label):
+    """Check artifact_gate config. Returns (gate_or_none, warning_or_none).
+
+    Returns the gate dict unchanged if valid, None + a warning string if invalid.
+    Absence of artifact_gate is fine — callers pass None only when present.
+    """
+    if not isinstance(gate, dict):
+        return None, f"{label}: artifact_gate muss ein Objekt sein — Gate wird ignoriert"
+    if not gate.get('format') or not isinstance(gate['format'], list):
+        return None, f"{label}: artifact_gate.format fehlt oder ist keine Liste — Gate wird ignoriert"
+    return gate, None
+
+
 def _validate_quiz(quiz, prefix="Quiz"):
     """Validate quiz JSON structure. Returns list of error strings."""
     errors = []
@@ -117,8 +130,12 @@ def _validate_quiz(quiz, prefix="Quiz"):
     return errors
 
 
-def validate_task_structure(data):
-    """Validate required fields are present and valid."""
+def validate_task_structure(data, warnings=None):
+    """Validate required fields are present and valid.
+
+    Hard errors raise ValidationError. Soft issues (e.g. invalid artifact_gate)
+    are appended to warnings if provided; the import proceeds without that field.
+    """
     errors = []
 
     if 'task' not in data:
@@ -175,6 +192,11 @@ def validate_task_structure(data):
                             errors.append(f"Subtask {i+1} graded_artifact missing 'format'")
                 if 'quiz' in sub and sub['quiz']:
                     errors.extend(_validate_quiz(sub['quiz'], f"Subtask {i+1} quiz"))
+                # artifact_gate is optional — invalid config is a soft warning, not a hard error
+                if 'artifact_gate' in sub and sub['artifact_gate']:
+                    _, warn = _validate_artifact_gate(sub['artifact_gate'], f"Subtask {i+1}")
+                    if warn and warnings is not None:
+                        warnings.append(warn)
 
     # Validate materials
     if 'materials' in task:
@@ -290,7 +312,14 @@ def import_task(task_data, dry_run=False, warnings=None):
         path = sub.get('path')
         path_model = sub.get('path_model', 'skip')
         graded_artifact_json = json.dumps(sub['graded_artifact'], ensure_ascii=False) if sub.get('graded_artifact') else None
-        artifact_gate_json = json.dumps(sub['artifact_gate'], ensure_ascii=False) if sub.get('artifact_gate') else None
+        raw_gate = sub.get('artifact_gate')
+        if raw_gate:
+            valid_gate, warn = _validate_artifact_gate(raw_gate, f"Subtask {i+1}")
+            if warn:
+                (warnings if warnings is not None else []).append(warn)
+            artifact_gate_json = json.dumps(valid_gate, ensure_ascii=False) if valid_gate else None
+        else:
+            artifact_gate_json = None
         fertig_wenn = sub.get('fertig_wenn') or None
         tipps = sub.get('tipps') or None
         sub_id = models.create_subtask(task_id, sub['beschreibung'], reihenfolge, estimated_minutes, sub_quiz_json,
@@ -329,7 +358,7 @@ def _create_materials(task_id, materials_data, subtask_id_by_position):
                 models.set_material_subtask_assignments(mat_id, assigned_ids)
 
 
-def overwrite_task_from_import(existing_task_id, task_data, reset_progress=False):
+def overwrite_task_from_import(existing_task_id, task_data, reset_progress=False, warnings=None):
     """Overwrite an existing topic with imported data.
 
     Preserves student_task assignments. Updates subtasks in-place by position
@@ -369,9 +398,20 @@ def overwrite_task_from_import(existing_task_id, task_data, reset_progress=False
         lernziel_schueler=task.get('lernziel_schueler')
     )
 
+    # Validate artifact_gate on each subtask; strip invalid gates before storing
+    sanitized_subtasks = []
+    for i, sub in enumerate(task.get('subtasks', [])):
+        sub = dict(sub)  # shallow copy — don't mutate original
+        if sub.get('artifact_gate'):
+            valid_gate, warn = _validate_artifact_gate(sub['artifact_gate'], f"Subtask {i+1}")
+            if warn:
+                (warnings if warnings is not None else []).append(warn)
+            sub['artifact_gate'] = valid_gate  # None if invalid
+        sanitized_subtasks.append(sub)
+
     # Update subtasks in-place by position (preserves student_subtask)
     subtask_id_by_position = models.update_subtasks_from_import(
-        existing_task_id, task.get('subtasks', [])
+        existing_task_id, sanitized_subtasks
     )
 
     # Replace all materials (no student-side progress to preserve)

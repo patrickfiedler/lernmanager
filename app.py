@@ -882,17 +882,18 @@ def admin_themen_import():
         # Normalize to list of {"task": {...}} dicts
         task_list = []
         errors = []
+        soft_warnings = []  # non-fatal issues (e.g. invalid artifact_gate)
         if 'tasks' in data and isinstance(data['tasks'], list):
             for t in data['tasks']:
                 wrapped = {'task': t}
                 try:
-                    validate_task_structure(wrapped)
+                    validate_task_structure(wrapped, warnings=soft_warnings)
                     task_list.append(wrapped)
                 except ValidationError as e:
                     errors.append(f"{t.get('name', '?')}: {e}")
         elif 'task' in data:
             try:
-                validate_task_structure(data)
+                validate_task_structure(data, warnings=soft_warnings)
                 task_list.append(data)
             except ValidationError as e:
                 errors.append(str(e))
@@ -919,7 +920,7 @@ def admin_themen_import():
 
         # Build preview for each topic
         topics_preview = [_build_topic_preview(td, bundled_files=bundled_filenames) for td in task_list]
-        warnings = []
+        warnings = list(soft_warnings)  # start with gate/soft warnings from validation
         for tp in topics_preview:
             if tp['is_duplicate']:
                 warnings.append(f"'{tp['name']}' ({tp['fach']} {tp['stufe']}) existiert bereits.")
@@ -961,7 +962,9 @@ def admin_themen_import():
                 # Overwrite existing topic
                 try:
                     target_id = int(action_value)
-                    overwrite_task_from_import(target_id, wrapped, reset_progress=reset)
+                    w = []
+                    overwrite_task_from_import(target_id, wrapped, reset_progress=reset, warnings=w)
+                    warnings.extend(w)
                     if reset:
                         overwritten_reset.append(task_entry['name'])
                     else:
