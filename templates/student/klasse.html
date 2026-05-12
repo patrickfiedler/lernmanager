@@ -54,7 +54,7 @@
                      tabindex="0"
                      aria-label="Abgabe einreichen{% if gate_passed %} - Geprüft{% elif all_done %} - Bereit{% endif %}"
                      title="Abgabe einreichen"
-                     onclick="document.getElementById('gate-card').scrollIntoView({behavior:'smooth'})"
+                     onclick="navigateToSubtask({{ gate_position }})"
                      onkeydown="handleDotKeydown(event)">📎</div>
                 {% endif %}
                 {% if task.quiz_json %}
@@ -328,11 +328,10 @@
     </details>
     {% endif %}
 
-    <!-- Artifact Gate Checkpoint -->
-    {% if gate_subtask %}
-    {% set all_done = subtasks|selectattr('erledigt')|list|length == subtasks|length %}
+    <!-- Artifact Gate Checkpoint — only shown when student is on the gate subtask or already passed -->
+    {% if gate_subtask and (gate_passed or (active_subtask and active_subtask.id == gate_subtask.id)) %}
     {% set gate_formats = gate_subtask.artifact_gate.get('format', []) %}
-    <div id="gate-card" class="gate-card mt-2 {% if gate_passed %}gate-passed{% elif all_done %}gate-ready{% endif %}">
+    <div id="gate-card" class="gate-card mt-2 {% if gate_passed %}gate-passed{% else %}gate-ready{% endif %}">
         {% if gate_passed %}
         <div class="gate-header">📎 Abgabe geprüft ✓</div>
         <p class="gate-success-msg">Deine Datei wurde erfolgreich geprüft.</p>
@@ -350,6 +349,9 @@
         {% endif %}
         {% else %}
         <div class="gate-header">📎 Abgabe einreichen</div>
+        {% if gate_subtask.fertig_wenn %}
+        <div class="fertig-wenn-callout" style="margin-bottom:0.75rem;">{{ gate_subtask.fertig_wenn | markdown }}</div>
+        {% endif %}
         <p class="gate-desc">Lade deine fertige Arbeit hoch, bevor du mit dem Quiz weitermachst.</p>
         {% if gate_formats %}<p class="gate-formats">Akzeptiert: {% for f in gate_formats %}<code>{{ f }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</p>{% endif %}
         <div class="gate-upload-row">
