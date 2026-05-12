@@ -347,9 +347,11 @@
             <p style="font-size:0.8rem;color:#6b7280;margin-top:0.5rem;">Note wird von der Lehrkraft gesetzt.</p>
         </div>
         {% endif %}
+        <p class="gate-desc" style="margin-top:0.75rem;">Neue Version einreichen:</p>
         {% else %}
         <div class="gate-header">📎 Abgabe einreichen</div>
         <p class="gate-desc">Lade deine fertige Arbeit hoch, bevor du mit dem Quiz weitermachst.</p>
+        {% endif %}
         {% if gate_formats %}<p class="gate-formats">Akzeptiert: {% for f in gate_formats %}<code>{{ f }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</p>{% endif %}
         <div class="gate-upload-row">
             <input type="file" id="gate-file-input" class="artifact-file-input"
@@ -362,7 +364,6 @@
             Abgabe prüfen
         </button>
         <div id="gate-result" class="gate-result" style="display:none;"></div>
-        {% endif %}
     </div>
     {% endif %}
 
