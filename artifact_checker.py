@@ -36,20 +36,14 @@ def _check_presentation(file_bytes: bytes, ext: str, config: dict) -> dict:
     """Check slide count, required titles (fuzzy), and min chars per slide.
 
     config keys:
+      format (list[str]) — accepted extensions, checked by caller
       min_slides (int)
-      required_slide_titles (list[str]) — fuzzy threshold 0.6
+      required_slide_titles (list[str])
+      title_match_threshold (float) — fuzzy ratio, default 0.6
       min_chars_per_slide (int)
-
-    TODO(human): implement the .pptx branch below.
-    Hints:
-      - from pptx import Presentation; prs = Presentation(io.BytesIO(file_bytes))
-      - slide_count = len(prs.slides)
-      - title of a slide: slide.shapes.title.text  (check slide.shapes.title first)
-      - all text on a slide: ' '.join(s.text for s in slide.shapes if hasattr(s, 'text'))
-      - use _fuzzy_match(required, actual) >= 0.6 to match titles
-      - append to issues[] for each failing check; _result(issues) builds the return value
     """
     issues = []
+    threshold = config.get('title_match_threshold', 0.6)
 
     if ext == '.odp':
         import xml.etree.ElementTree as ET
@@ -80,7 +74,7 @@ def _check_presentation(file_bytes: bytes, ext: str, config: dict) -> dict:
             titles.append(title_text)
 
         for req in config.get('required_slide_titles', []):
-            if max((_fuzzy_match(req, t) for t in titles), default=0) < 0.6:
+            if max((_fuzzy_match(req, t) for t in titles), default=0) < threshold:
                 issues.append(f'Folie fehlt: „{req}"')
 
         min_chars = config.get('min_chars_per_slide', 0)
@@ -104,7 +98,7 @@ def _check_presentation(file_bytes: bytes, ext: str, config: dict) -> dict:
 
         titles = [slide.shapes.title.text if slide.shapes.title else '' for slide in slides]
         for req in config.get('required_slide_titles', []):
-            if max((_fuzzy_match(req, t) for t in titles), default=0) < 0.6:
+            if max((_fuzzy_match(req, t) for t in titles), default=0) < threshold:
                 issues.append(f'Folie fehlt: „{req}"')
 
         min_chars = config.get('min_chars_per_slide', 0)
@@ -118,7 +112,14 @@ def _check_presentation(file_bytes: bytes, ext: str, config: dict) -> dict:
 
 
 def _check_document(file_bytes: bytes, ext: str, config: dict) -> dict:
-    """Check required headings (fuzzy) and minimum word count."""
+    """Check required headings (fuzzy) and minimum word count.
+
+    config keys:
+      format (list[str]) — accepted extensions, checked by caller
+      min_words (int)
+      required_headings (list[str])
+      title_match_threshold (float) — fuzzy ratio, default 0.6
+    """
     import artifact_processor
     try:
         extracted = artifact_processor.extract_docx(file_bytes) if ext == '.docx' else artifact_processor.extract_odt(file_bytes)
@@ -126,6 +127,7 @@ def _check_document(file_bytes: bytes, ext: str, config: dict) -> dict:
         return {'passed': False, 'message': 'Datei konnte nicht gelesen werden', 'details': ['Ungültige Datei']}
 
     issues = []
+    threshold = config.get('title_match_threshold', 0.6)
     min_words = config.get('min_words', 0)
     if min_words:
         word_count = len(extracted.split())
@@ -134,7 +136,7 @@ def _check_document(file_bytes: bytes, ext: str, config: dict) -> dict:
 
     heading_texts = [l.lstrip('#').strip() for l in extracted.splitlines() if l.startswith('#')]
     for req in config.get('required_headings', []):
-        if max((_fuzzy_match(req, h) for h in heading_texts), default=0) < 0.6:
+        if max((_fuzzy_match(req, h) for h in heading_texts), default=0) < threshold:
             issues.append(f'Abschnitt fehlt: „{req}"')
 
     return _result(issues)
