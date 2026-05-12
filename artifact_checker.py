@@ -34,11 +34,12 @@ def _result(issues: list, matches: list = None) -> dict:
 
 
 def _check_presentation(file_bytes: bytes, ext: str, config: dict) -> dict:
-    """Check slide count, required titles (fuzzy), and min chars per slide.
+    """Check slide count, required titles (fuzzy), min chars per slide, and min images.
 
     config keys:
       format (list[str]) — accepted extensions, checked by caller
       min_slides (int)
+      min_images (int)
       required_slide_titles (list[str])
       title_match_threshold (float) — fuzzy ratio, default 0.6
       min_chars_per_slide (int)
@@ -119,6 +120,23 @@ def _check_presentation(file_bytes: bytes, ext: str, config: dict) -> dict:
                 text = ' '.join(s.text for s in slide.shapes if hasattr(s, 'text')).strip()
                 if len(text) < min_chars:
                     issues.append(f"Folie {i} hat zu wenig Text ({len(text)} Zeichen, erwartet: {min_chars})")
+
+    min_images = config.get('min_images', 0)
+    if min_images:
+        image_exts = {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.wmf', '.emf', '.svg'}
+        prefix = 'Pictures/' if ext == '.odp' else 'ppt/media/'
+        try:
+            with zipfile.ZipFile(io.BytesIO(file_bytes)) as z:
+                image_count = sum(
+                    1 for name in z.namelist()
+                    if name.startswith(prefix) and ('.' + name.rsplit('.', 1)[-1].lower()) in image_exts
+                )
+        except Exception:
+            image_count = 0
+        if image_count < min_images:
+            issues.append(f"Zu wenig Bilder ({image_count}, erwartet: {min_images})")
+        else:
+            matches.append(f"{image_count} Bild{'er' if image_count != 1 else ''} ✓")
 
     return _result(issues, matches)
 
