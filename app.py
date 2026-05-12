@@ -1834,20 +1834,11 @@ def student_klasse(slug):
     if task and task.get('abgeschlossen'):
         next_topic = models.get_next_queued_topic(klasse_id, task['task_id'])
 
-    # Parse graded_artifact_json for the active subtask (criteria-based upload widget)
-    graded_artifact = None
-    if current_subtask and current_subtask.get('graded_artifact_json'):
-        try:
-            ga = json.loads(current_subtask['graded_artifact_json'])
-            if ga.get('criteria') and klasse and klasse.get('llm_artifact_feedback_enabled'):
-                graded_artifact = ga
-        except (json.JSONDecodeError, TypeError):
-            pass
-
     # Artifact gate: find the gate subtask and its pass status for this student
     gate_subtask = None
     gate_passed = False
     gate_position = None
+    gate_llm_feedback = None
     for i, sub in enumerate(subtasks):
         if sub.get('artifact_gate_json'):
             gate_subtask = sub
@@ -1857,7 +1848,22 @@ def student_klasse(slug):
                 gate_subtask['artifact_gate'] = json.loads(sub['artifact_gate_json'])
             except (json.JSONDecodeError, TypeError):
                 gate_subtask = None
+                break
+            if gate_passed and sub.get('graded_artifact_json'):
+                fb = models.get_artifact_feedback(student_id, sub['id'])
+                gate_llm_feedback = fb['feedback'] if fb else None
             break
+
+    # Parse graded_artifact_json for the active subtask (criteria-based upload widget).
+    # Suppressed when the subtask has a gate — checkpoint card handles the upload instead.
+    graded_artifact = None
+    if current_subtask and current_subtask.get('graded_artifact_json') and not current_subtask.get('artifact_gate_json'):
+        try:
+            ga = json.loads(current_subtask['graded_artifact_json'])
+            if ga.get('criteria') and klasse and klasse.get('llm_artifact_feedback_enabled'):
+                graded_artifact = ga
+        except (json.JSONDecodeError, TypeError):
+            pass
 
     return render_template('student/klasse.html',
                            student=student,
@@ -1876,6 +1882,7 @@ def student_klasse(slug):
                            gate_subtask=gate_subtask,
                            gate_passed=gate_passed,
                            gate_position=gate_position,
+                           gate_llm_feedback=gate_llm_feedback,
                            student_path=student.get('lernpfad') if student else None)
 
 
@@ -2082,6 +2089,36 @@ def student_artifact_gate_check(slug, position):
         return jsonify({'error': f'Datei konnte nicht gelesen werden: {e}'}), 400
 
     models.save_artifact_gate_result(task['id'], subtask['id'], result['passed'])
+
+    # If gate passes and LLM artifact feedback is configured and enabled, run it now.
+    # This makes the checkpoint card the single upload point for both checks.
+    if result['passed'] and klasse.get('llm_artifact_feedback_enabled'):
+        graded_raw = subtask.get('graded_artifact_json')
+        if graded_raw:
+            graded = json.loads(graded_raw) if isinstance(graded_raw, str) else graded_raw
+            checks_remaining = models.get_artifact_checks_remaining(student_id)
+            if checks_remaining > 0:
+                try:
+                    extract_bytes = artifact_processor.strip_pptx_metadata(file_bytes) if ext == '.pptx' else file_bytes
+                    extracted = artifact_processor.extract_artifact(extract_bytes, filename)
+                    student = models.get_student(student_id)
+                    full_name = f"{student['vorname']} {student['nachname']}" if student else ''
+                    anonymized = artifact_processor.anonymize(f"[Dateiname: {filename}]\n\n{extracted}", full_name, klasse['name'])
+                    student_path = (student or {}).get('lernpfad') or 'wanderweg'
+                    criteria = _get_criteria_for_path(graded, student_path)
+                    if criteria:
+                        feedback = llm_grading.grade_artifact_checklist(anonymized, criteria)
+                        if feedback:
+                            models.save_artifact_feedback(student_id, subtask['id'], feedback)
+                            models.record_llm_usage(student_id, 'artifact_feedback', 0)
+                        checks_remaining = models.get_artifact_checks_remaining(student_id)
+                        result['llm_feedback'] = feedback
+                        result['checks_remaining'] = checks_remaining
+                        if models.get_effective_transparency_mode(student_id, klasse['id']):
+                            result['extracted_text'] = anonymized
+                except Exception:
+                    pass  # LLM failure is non-blocking; gate result stands
+
     return jsonify(result)
 
 
