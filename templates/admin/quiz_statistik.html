@@ -136,6 +136,8 @@
 {% endblock %}
 
 {% block scripts %}
+const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+
 async function filterBlock(btn) {
     const qid = btn.dataset.qid;
     const tableDiv = document.getElementById('answer-table-' + qid);
@@ -156,7 +158,7 @@ async function filterBlock(btn) {
     try {
         const resp = await fetch('/admin/quiz-statistik/filter-noise', {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
+            headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
             body: JSON.stringify({question, answers})
         });
         const data = await resp.json();
