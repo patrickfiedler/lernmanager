@@ -232,6 +232,12 @@
                 <span class="success-icon">✓</span>
                 <div>Gut gemacht! Aufgabe erledigt.</div>
             </div>
+
+            {% if active_subtask %}
+            <div style="text-align:right; margin-top:0.75rem;">
+                <a href="{{ url_for('student_print_subtask', slug=task|topic_slug, position=current_index + 1) }}" target="_blank" style="font-size:0.8rem; color:#9ca3af; text-decoration:none;">🖨 Diese Aufgabe drucken</a>
+            </div>
+            {% endif %}
         </div>
 
         <!-- Desktop: Right Button -->

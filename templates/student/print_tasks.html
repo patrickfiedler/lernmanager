@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ task.name }}{% if single %} – Aufgabe{% endif %} – Drucken</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 1.5rem 2rem;
+            color: #111;
+            font-size: 0.95rem;
+        }
+        h1 {
+            font-size: 1.4rem;
+            margin: 0 0 1.5rem 0;
+            color: #1f2937;
+        }
+        .task-item {
+            margin-bottom: 2.5rem;
+            page-break-inside: avoid;
+        }
+        .task-header {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            margin-bottom: 0.75rem;
+        }
+        .task-checkbox {
+            width: 1.1rem;
+            height: 1.1rem;
+            flex-shrink: 0;
+            accent-color: #10b981;
+        }
+        .task-num {
+            font-size: 0.75rem;
+            color: #6b7280;
+            background: #f3f4f6;
+            padding: 0.15rem 0.45rem;
+            border-radius: 4px;
+            font-weight: 500;
+        }
+        .badge-zusatz {
+            font-size: 0.75rem;
+            color: #92400e;
+            background: #fef3c7;
+            padding: 0.15rem 0.45rem;
+            border-radius: 4px;
+        }
+        .task-content {
+            margin-left: 1.75rem;
+            line-height: 1.6;
+        }
+        .task-content h3 { font-size: 1rem; margin: 0 0 0.5rem 0; }
+        .task-content p { margin: 0.4rem 0; }
+        .task-content ul, .task-content ol { margin: 0.4rem 0; padding-left: 1.25rem; }
+        .task-content code { background: #f3f4f6; padding: 0.1rem 0.3rem; border-radius: 3px; font-size: 0.85em; }
+        .print-btn {
+            display: inline-block;
+            margin-bottom: 1.5rem;
+            font-size: 0.875rem;
+            color: #6b7280;
+            text-decoration: none;
+            cursor: pointer;
+        }
+        .print-btn:hover { color: #374151; }
+        @media print {
+            .print-btn { display: none; }
+            body { padding: 0; }
+        }
+    </style>
+</head>
+<body>
+    <a href="javascript:window.print()" class="print-btn">🖨 Drucken</a>
+    <h1>{{ task.name }}</h1>
+
+    {% for sub in subtasks %}
+    <div class="task-item">
+        <div class="task-header">
+            <input type="checkbox" class="task-checkbox">
+            <span class="task-num">Aufgabe {{ loop.index }}</span>
+            {% if not sub.get('required', true) %}
+            <span class="badge-zusatz">Zusatz</span>
+            {% endif %}
+        </div>
+        <div class="task-content">
+            {{ sub.beschreibung | markdown }}
+        </div>
+    </div>
+    {% endfor %}
+</body>
+</html>

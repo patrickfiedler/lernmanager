@@ -714,6 +714,17 @@ def admin_themen_export():
     )
 
 
+@app.route('/admin/thema/<int:task_id>/drucken')
+@admin_required
+def admin_thema_drucken(task_id):
+    task = models.get_task(task_id)
+    if not task:
+        flash('Thema nicht gefunden.', 'danger')
+        return redirect(url_for('admin_themen'))
+    subtasks = [s for s in models.get_subtasks(task_id) if not s.get('hidden')]
+    return render_template('student/print_tasks.html', task=task, subtasks=subtasks, single=False)
+
+
 @app.route('/admin/thema/<int:task_id>/export')
 @admin_required
 def admin_thema_export(task_id):
@@ -2600,6 +2611,31 @@ def student_quiz_result_subtask(slug, position):
                            next_position=next_position,
                            quiz_bestanden=quiz_bestanden,
                            transparency_mode=transparency_mode)
+
+
+@app.route('/schueler/thema/<slug>/drucken')
+@student_required
+def student_print_topic(slug):
+    student_id = session['student_id']
+    task, klasse = _resolve_student_topic(student_id, slug)
+    if not task or not klasse:
+        return redirect(url_for('student_dashboard'))
+    subtasks = models.get_visible_subtasks_for_student(student_id, klasse['id'], task['task_id'])
+    return render_template('student/print_tasks.html', task=task, subtasks=subtasks, single=False)
+
+
+@app.route('/schueler/thema/<slug>/aufgabe-<int:position>/drucken')
+@student_required
+def student_print_subtask(slug, position):
+    student_id = session['student_id']
+    task, klasse = _resolve_student_topic(student_id, slug)
+    if not task or not klasse:
+        return redirect(url_for('student_dashboard'))
+    subtasks = models.get_visible_subtasks_for_student(student_id, klasse['id'], task['task_id'])
+    subtask = _resolve_subtask_by_position(subtasks, position)
+    if not subtask:
+        return redirect(url_for('student_klasse', slug=slug))
+    return render_template('student/print_tasks.html', task=task, subtasks=[subtask], single=True)
 
 
 @app.route('/schueler/unterricht/<int:unterricht_id>/selbstbewertung', methods=['POST'])

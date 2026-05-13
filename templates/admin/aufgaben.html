@@ -43,6 +43,7 @@
                 </td>
                 <td>
                     <a href="{{ url_for('admin_thema_detail', task_id=task.id) }}" class="btn btn-sm btn-secondary">Bearbeiten</a>
+                    <a href="{{ url_for('admin_thema_drucken', task_id=task.id) }}" target="_blank" class="btn btn-sm btn-secondary" title="Aufgabenblatt drucken">🖨</a>
                 </td>
             </tr>
             {% endfor %}
