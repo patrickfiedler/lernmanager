@@ -1454,6 +1454,76 @@ def admin_quiz_statistik():
                            llm_enabled=config.LLM_ENABLED)
 
 
+@app.route('/admin/quiz-statistik/export.json')
+@admin_required
+def admin_quiz_statistik_export():
+    """Export full quiz stats as JSON for offline analysis and question redesign."""
+    from datetime import datetime
+    klasse_id = request.args.get('klasse_id', type=int)
+    task_id = request.args.get('task_id', type=int)
+    only_attempted = request.args.get('attempted', '1') != '0'
+
+    stats = models.get_quiz_stats_by_topic(klasse_id=klasse_id, task_id=task_id,
+                                           only_attempted=only_attempted, for_export=True)
+
+    klasse_name = None
+    task_name = None
+    if klasse_id:
+        klassen = models.get_all_klassen()
+        match = next((k for k in klassen if k['id'] == klasse_id), None)
+        klasse_name = match['name'] if match else None
+    if task_id:
+        tasks = models.get_all_tasks()
+        match = next((t for t in tasks if t['id'] == task_id), None)
+        task_name = match['name'] if match else None
+
+    def build_section_label(sec):
+        if sec['is_topic_quiz']:
+            return 'Thema-Quiz'
+        return f"Aufgabe {sec['subtask_position']}"
+
+    def build_question(q):
+        out = {
+            'type': q['type'],
+            'text': q['text'],
+            'total_attempts': q['total'],
+            'correct_count': q['correct_count'],
+            'pass_rate': round(q['correct_count'] / q['total'], 2) if q['total'] else 0.0,
+        }
+        if q['type'] == 'multiple_choice':
+            out['options'] = q.get('options', [])
+        else:
+            out['answers'] = q.get('answers', [])
+        return out
+
+    export = {
+        'exported_at': datetime.now().strftime('%Y-%m-%dT%H:%M:%S'),
+        'filters': {
+            'klasse': klasse_name,
+            'topic': task_name,
+            'only_attempted': only_attempted,
+        },
+        'topics': [
+            {
+                'name': topic['task_name'],
+                'sections': [
+                    {
+                        'label': build_section_label(sec),
+                        'questions': [build_question(q) for q in sec['questions']],
+                    }
+                    for sec in topic['sections']
+                ],
+            }
+            for topic in stats
+        ],
+    }
+
+    filename = f"quiz-export-{datetime.now().strftime('%Y-%m-%d')}.json"
+    response = jsonify(export)
+    response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return response
+
+
 @app.route('/admin/quiz-statistik/filter-noise', methods=['POST'])
 @admin_required
 def admin_filter_noise():

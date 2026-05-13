@@ -2329,7 +2329,7 @@ def _question_hash(q_def):
     return sha256('|'.join(parts).encode()).hexdigest()[:16]
 
 
-def get_quiz_stats_by_topic(klasse_id=None, task_id=None, only_attempted=True):
+def get_quiz_stats_by_topic(klasse_id=None, task_id=None, only_attempted=True, for_export=False):
     """Aggregate quiz attempt stats grouped by topic → subtask (by position) → question.
 
     Buckets answers by question hash (not index), using quiz_snapshot_json when available
@@ -2473,7 +2473,11 @@ def get_quiz_stats_by_topic(klasse_id=None, task_id=None, only_attempted=True):
                 for ans in b['answers']:
                     text = (ans.get('text', '') if isinstance(ans, dict) else '').strip() or '(leer)'
                     freq[text] = freq.get(text, 0) + 1
-                q['answer_dist'] = sorted(freq.items(), key=lambda x: -x[1])[:10]
+                if for_export:
+                    q['answers'] = [{'text': t, 'count': c}
+                                     for t, c in sorted(freq.items(), key=lambda x: -x[1])]
+                else:
+                    q['answer_dist'] = sorted(freq.items(), key=lambda x: -x[1])[:10]
             questions.append(q)
         # Sort by question text for stable ordering (index no longer meaningful)
         return sorted(questions, key=lambda q: q['text'])

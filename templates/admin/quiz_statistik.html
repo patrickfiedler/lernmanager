@@ -35,6 +35,10 @@
                 🔍 Alle freien Antworten filtern
             </button>
             {% endif %}
+            <a href="{{ url_for('admin_quiz_statistik_export', klasse_id=klasse_id or '', task_id=task_id or '', attempted=0 if not only_attempted else '') }}"
+               class="btn btn-sm" style="font-size: 0.8rem;" download>
+                ⬇ Export JSON
+            </a>
         </div>
     </form>
 </div>
