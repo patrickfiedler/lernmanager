@@ -28,11 +28,19 @@
             </label>
             <button type="submit" class="btn btn-primary btn-sm">Filtern</button>
         </div>
-        <div class="text-muted" style="font-size: 0.9rem;">{{ stats|length }} Thema(en)</div>
+        <div class="flex flex-center gap-1">
+            <span class="text-muted" style="font-size: 0.9rem;">{{ stats|length }} Thema(en)</span>
+            {% if llm_enabled %}
+            <button type="button" id="filter-all-btn" class="btn btn-sm" style="font-size: 0.8rem;">
+                🔍 Alle freien Antworten filtern
+            </button>
+            {% endif %}
+        </div>
     </form>
 </div>
 
 {% if stats %}
+    {% set ns = namespace(qid=0) %}
     {% for topic in stats %}
     <div class="card mb-2">
         <h2 style="margin: 0 0 1rem 0;">{{ topic.task_name }}</h2>
@@ -55,7 +63,7 @@
                         </span>
                         {{ q.text }}
                     </div>
-                    <div style="white-space: nowrap; flex-shrink: 0;">
+                    <div class="flex flex-center gap-1" style="white-space: nowrap; flex-shrink: 0;">
                         {% if q.total > 0 %}
                             {% set pct = (q.correct_count / q.total * 100)|int %}
                             <span class="badge {% if pct >= 70 %}badge-success{% elif pct >= 50 %}badge-warning{% else %}badge-danger{% endif %}">
@@ -63,6 +71,15 @@
                             </span>
                         {% else %}
                             <span class="badge badge-secondary">Keine Versuche</span>
+                        {% endif %}
+                        {% if llm_enabled and q.type in ('fill_blank', 'short_answer') and q.answer_dist %}
+                            {% set ns.qid = ns.qid + 1 %}
+                            <button type="button"
+                                    class="btn btn-sm noise-filter-btn"
+                                    data-qid="{{ ns.qid }}"
+                                    style="font-size: 0.75rem; padding: 0.15rem 0.5rem;">
+                                🔍 Filtern
+                            </button>
                         {% endif %}
                     </div>
                 </div>
@@ -86,15 +103,23 @@
                 </div>
 
                 {% elif q.answer_dist %}
-                <div style="margin-top: 0.5rem; margin-left: 1.5rem;">
+                {% if llm_enabled and q.type in ('fill_blank', 'short_answer') %}
+                    {# ns.qid already incremented above for the button; we just need the same value #}
+                    <div id="answer-table-{{ ns.qid }}"
+                         data-question="{{ q.text|e }}"
+                         style="margin-top: 0.5rem; margin-left: 1.5rem;">
+                {% else %}
+                    <div style="margin-top: 0.5rem; margin-left: 1.5rem;">
+                {% endif %}
                     <table style="font-size: 0.85rem; border-collapse: collapse;">
                         {% for text, count in q.answer_dist %}
-                        <tr>
+                        <tr data-idx="{{ loop.index0 }}">
                             <td style="padding: 0.1rem 0.75rem 0.1rem 0; color: #888; text-align: right;">{{ count }}×</td>
                             <td style="padding: 0.1rem 0;">{{ text }}</td>
                         </tr>
                         {% endfor %}
                     </table>
+                    <div class="noise-toggle" style="display: none; margin-top: 0.3rem; font-size: 0.8rem; color: #888;"></div>
                 </div>
                 {% endif %}
             </div>
@@ -108,4 +133,92 @@
     <p>Keine Quiz-Daten gefunden.</p>
 </div>
 {% endif %}
+{% endblock %}
+
+{% block scripts %}
+async function filterBlock(btn) {
+    const qid = btn.dataset.qid;
+    const tableDiv = document.getElementById('answer-table-' + qid);
+    if (!tableDiv) return;
+
+    const question = tableDiv.dataset.question;
+    const rows = [...tableDiv.querySelectorAll('tr[data-idx]')];
+    if (!rows.length) return;
+
+    const answers = rows.map(tr => ({
+        text: tr.querySelector('td:last-child').textContent.trim(),
+        count: parseInt(tr.querySelector('td:first-child').textContent)
+    }));
+
+    btn.disabled = true;
+    btn.textContent = '⏳';
+
+    try {
+        const resp = await fetch('/admin/quiz-statistik/filter-noise', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({question, answers})
+        });
+        const data = await resp.json();
+        const noiseSet = new Set(data.noise || []);
+
+        rows.forEach(tr => {
+            if (noiseSet.has(parseInt(tr.dataset.idx))) {
+                tr.dataset.noise = '1';
+                tr.style.display = 'none';
+            }
+        });
+
+        const toggleDiv = tableDiv.querySelector('.noise-toggle');
+        if (noiseSet.size > 0) {
+            btn.textContent = `🔍 ${noiseSet.size} ausgeblendet`;
+            toggleDiv.innerHTML = `<a href="#" class="noise-show-link">Rauschen anzeigen</a>`;
+            toggleDiv.style.display = 'block';
+            toggleDiv.querySelector('.noise-show-link').addEventListener('click', e => {
+                e.preventDefault();
+                const noiseRows = [...tableDiv.querySelectorAll('tr[data-noise]')];
+                const showing = toggleDiv.dataset.showing === '1';
+                noiseRows.forEach(tr => {
+                    if (showing) {
+                        tr.style.display = 'none';
+                        tr.style.opacity = '';
+                        tr.style.textDecoration = '';
+                    } else {
+                        tr.style.display = '';
+                        tr.style.opacity = '0.4';
+                        tr.style.textDecoration = 'line-through';
+                    }
+                });
+                toggleDiv.querySelector('.noise-show-link').textContent = showing
+                    ? 'Rauschen anzeigen' : 'Rauschen ausblenden';
+                toggleDiv.dataset.showing = showing ? '0' : '1';
+            });
+        } else {
+            btn.textContent = '✓ Kein Rauschen';
+            btn.disabled = true;
+        }
+    } catch (e) {
+        btn.textContent = '⚠ Fehler';
+        btn.disabled = false;
+    }
+}
+
+document.querySelectorAll('.noise-filter-btn').forEach(btn => {
+    btn.addEventListener('click', () => filterBlock(btn));
+});
+
+const filterAllBtn = document.getElementById('filter-all-btn');
+if (filterAllBtn) {
+    filterAllBtn.addEventListener('click', async () => {
+        const btns = [...document.querySelectorAll('.noise-filter-btn')];
+        filterAllBtn.disabled = true;
+        filterAllBtn.textContent = `⏳ 0/${btns.length}`;
+        for (let i = 0; i < btns.length; i++) {
+            await filterBlock(btns[i]);
+            filterAllBtn.textContent = `⏳ ${i + 1}/${btns.length}`;
+        }
+        filterAllBtn.textContent = '✓ Fertig';
+        filterAllBtn.disabled = true;
+    });
+}
 {% endblock %}

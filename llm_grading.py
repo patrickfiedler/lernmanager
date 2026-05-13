@@ -75,6 +75,55 @@ def _call_llm(question_text, expected_or_rubric, student_answer):
     return {"correct": bool(result["correct"]), "feedback": str(result["feedback"])}
 
 
+NOISE_SYSTEM_PROMPT = (
+    "Du analysierst Schülerantworten auf einer Lernplattform. "
+    "Identifiziere Einträge, die offensichtlicher Unsinn sind: "
+    "leer, '(leer)', Tastaturgemurmel (asdf, aaaa, xxx, yyy, 123), einzelne Zeichen, "
+    "oder klar themenfremder Inhalt ohne Bezug zur Frage. "
+    "Antworte NUR mit JSON: {\"noise\": [liste der indices]} "
+    "Markiere nur offensichtlichen Unsinn — im Zweifel behalte die Antwort."
+)
+
+
+def filter_noise_answers(question_text: str, answers: list) -> list:
+    """Classify answer_dist entries as noise via LLM.
+
+    Args:
+        question_text: The question text (context for the LLM).
+        answers: List of dicts [{text, count}] in display order.
+
+    Returns: List of noise indices (into answers). Empty list on failure or LLM disabled.
+    """
+    if not config.LLM_ENABLED or not answers:
+        return []
+
+    numbered = "\n".join(f"{i}. {a['text']!r} ({a['count']}×)" for i, a in enumerate(answers))
+    user_prompt = f"Frage: {question_text}\n\nAntworten:\n{numbered}"
+
+    client = _get_client()
+    try:
+        response = client.chat.completions.create(
+            model=config.LLM_MODEL,
+            max_tokens=200,
+            temperature=0,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": NOISE_SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
+            timeout=config.LLM_TIMEOUT,
+        )
+        text = response.choices[0].message.content.strip() if response.choices else ""
+        if not text:
+            return []
+        parsed = json.loads(text)
+        noise = parsed.get("noise", [])
+        return [i for i in noise if isinstance(i, int) and 0 <= i < len(answers)]
+    except Exception as e:
+        print(f"LLM noise filter error: {type(e).__name__}: {e}", file=sys.stderr)
+        return []
+
+
 ARTIFACT_CHECKLIST_SYSTEM_PROMPT = (
     "Du prüfst ein Schülerdokument anhand einer nummerierten Kriterienliste. "
     "Antworte NUR mit JSON: {\"results\": [{\"criterion\": \"...\", \"passed\": true/false, \"note\": \"...\"}]} "

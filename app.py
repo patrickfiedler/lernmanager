@@ -1450,7 +1450,24 @@ def admin_quiz_statistik():
                            tasks=tasks,
                            klasse_id=klasse_id,
                            task_id=task_id,
-                           only_attempted=only_attempted)
+                           only_attempted=only_attempted,
+                           llm_enabled=config.LLM_ENABLED)
+
+
+@app.route('/admin/quiz-statistik/filter-noise', methods=['POST'])
+@admin_required
+def admin_filter_noise():
+    """LLM noise filter for free-text quiz answers. On-demand, admin only."""
+    if not config.LLM_ENABLED:
+        return jsonify({'noise': [], 'error': 'LLM not configured'})
+    data = request.get_json(force=True) or {}
+    question = data.get('question', '').strip()
+    answers = data.get('answers', [])
+    if not question or not answers:
+        return jsonify({'noise': [], 'error': 'missing data'})
+    from llm_grading import filter_noise_answers
+    noise = filter_noise_answers(question, answers)
+    return jsonify({'noise': noise})
 
 
 # ============ Admin: Error Logs ============
