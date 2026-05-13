@@ -2267,7 +2267,8 @@ def _handle_quiz(student_id, student, task, slug, quiz_json_str, subtask_id=None
         if question_order:
             antworten['_question_order'] = question_order
         attempt_id, bestanden = models.save_quiz_attempt(
-            student_task_id, punkte, max_punkte, json.dumps(antworten), subtask_id=subtask_id
+            student_task_id, punkte, max_punkte, json.dumps(antworten),
+            subtask_id=subtask_id, quiz_snapshot=quiz_json_str
         )
 
         llm_answers = [v for v in antworten.values() if isinstance(v, dict) and v.get('source') == 'llm']

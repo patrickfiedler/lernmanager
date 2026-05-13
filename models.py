@@ -248,6 +248,7 @@ def init_db():
                 max_punkte INTEGER NOT NULL,
                 bestanden INTEGER NOT NULL,
                 antworten_json TEXT,
+                quiz_snapshot_json TEXT,
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (student_task_id) REFERENCES student_task(id) ON DELETE CASCADE
             );
@@ -2176,16 +2177,17 @@ def check_task_completion(student_task_id):
 
 # ============ Quiz functions ============
 
-def save_quiz_attempt(student_task_id, punkte, max_punkte, antworten_json, subtask_id=None):
-    """Save a quiz attempt. subtask_id=None means topic-level quiz."""
-    # Pass threshold: floor(70%) of max points, minimum 1
+def save_quiz_attempt(student_task_id, punkte, max_punkte, antworten_json, subtask_id=None, quiz_snapshot=None):
+    """Save a quiz attempt. subtask_id=None means topic-level quiz.
+    quiz_snapshot: full quiz JSON string at attempt time, for accurate stats lookup.
+    """
     min_punkte = max(1, int(max_punkte * 0.7)) if max_punkte > 0 else 1
     bestanden = punkte >= min_punkte if max_punkte > 0 else False
     with db_session() as conn:
         cursor = conn.execute('''
-            INSERT INTO quiz_attempt (student_task_id, subtask_id, punkte, max_punkte, bestanden, antworten_json)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (student_task_id, subtask_id, punkte, max_punkte, 1 if bestanden else 0, antworten_json))
+            INSERT INTO quiz_attempt (student_task_id, subtask_id, punkte, max_punkte, bestanden, antworten_json, quiz_snapshot_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (student_task_id, subtask_id, punkte, max_punkte, 1 if bestanden else 0, antworten_json, quiz_snapshot))
         return cursor.lastrowid, bestanden
 
 
@@ -2308,15 +2310,38 @@ def get_text_quiz_answers(klasse_id=None, only_fallback=False):
     return results
 
 
+def _question_hash(q_def):
+    """Stable 16-char hash of a question's identity for deduplication across quiz versions.
+
+    Two questions are identical iff they have the same type, text, options (in order),
+    and correct answers. A change to any of these produces a different hash and a
+    separate stats row — intentional, since the stats genuinely differ.
+    """
+    qtype = q_def.get('type', 'multiple_choice')
+    parts = [qtype, q_def.get('text', '')]
+    if qtype == 'multiple_choice':
+        parts.append(json.dumps(q_def.get('options', []), ensure_ascii=False))
+        parts.append(json.dumps(sorted(q_def.get('correct', []))))
+    elif qtype == 'fill_blank':
+        parts.append(json.dumps(sorted(a.lower() for a in q_def.get('answers', []))))
+    else:
+        parts.append(q_def.get('rubric', ''))
+    return sha256('|'.join(parts).encode()).hexdigest()[:16]
+
+
 def get_quiz_stats_by_topic(klasse_id=None, task_id=None, only_attempted=True):
     """Aggregate quiz attempt stats grouped by topic → subtask (by position) → question.
+
+    Buckets answers by question hash (not index), using quiz_snapshot_json when available
+    so stats reflect what students actually saw, even if the quiz was later edited.
+    Old attempts without a snapshot fall back to the current quiz_json.
 
     Returns sorted list of topic dicts, each with sections (subtask quizzes first, topic quiz last).
     only_attempted=True omits topics/subtasks with no recorded attempts.
     """
     with db_session() as conn:
         sql = '''
-            SELECT qa.antworten_json, qa.subtask_id,
+            SELECT qa.antworten_json, qa.quiz_snapshot_json, qa.subtask_id,
                    st.task_id,
                    t.name AS task_name, t.quiz_json AS task_quiz_json,
                    sub.quiz_json AS subtask_quiz_json,
@@ -2348,9 +2373,10 @@ def get_quiz_stats_by_topic(klasse_id=None, task_id=None, only_attempted=True):
                 ' WHERE sub.quiz_json IS NOT NULL'
                 + (' AND sub.task_id = ?' if task_id else ''), tp).fetchall()]
 
-    # Build answer buckets keyed by (task_id, subtask_id|None)
-    tasks_meta = {}  # task_id -> {name, quiz_json}
-    sections = {}    # (task_id, subtask_id|None) -> {reihenfolge, quiz_json, buckets}
+    # sections: (task_id, subtask_id|None) -> {reihenfolge, is_topic_quiz, current_quiz_json, buckets}
+    # buckets: question_hash -> {total, correct, answers, q_def}
+    tasks_meta = {}
+    sections = {}
 
     for row in attempt_rows:
         tid, sid = row['task_id'], row['subtask_id']
@@ -2359,18 +2385,36 @@ def get_quiz_stats_by_topic(klasse_id=None, task_id=None, only_attempted=True):
         if key not in sections:
             sections[key] = {
                 'reihenfolge': row['subtask_reihenfolge'] if sid else 9999,
-                'quiz_json': row['subtask_quiz_json'] if sid else row['task_quiz_json'],
                 'is_topic_quiz': sid is None,
+                'current_quiz_json': row['subtask_quiz_json'] if sid else row['task_quiz_json'],
                 'buckets': {},
             }
+
         try:
             antworten = json.loads(row['antworten_json'])
         except (json.JSONDecodeError, TypeError):
             continue
+
+        # Prefer snapshot; fall back to current quiz_json for old attempts
+        snapshot_str = row.get('quiz_snapshot_json') or (
+            row['subtask_quiz_json'] if sid else row['task_quiz_json'])
+        try:
+            q_defs = json.loads(snapshot_str).get('questions', []) if snapshot_str else []
+        except (json.JSONDecodeError, TypeError):
+            q_defs = []
+
         for q_str, answer in antworten.items():
             if q_str == '_question_order':
                 continue
-            b = sections[key]['buckets'].setdefault(q_str, {'total': 0, 'correct': 0, 'answers': []})
+            try:
+                idx = int(q_str)
+            except ValueError:
+                continue
+            q_def = q_defs[idx] if idx < len(q_defs) else None
+            q_hash = _question_hash(q_def) if q_def else f'unknown_{idx}'
+
+            b = sections[key]['buckets'].setdefault(
+                q_hash, {'total': 0, 'correct': 0, 'answers': [], 'q_def': q_def})
             b['total'] += 1
             if isinstance(answer, dict) and answer.get('correct'):
                 b['correct'] += 1
@@ -2378,24 +2422,27 @@ def get_quiz_stats_by_topic(klasse_id=None, task_id=None, only_attempted=True):
 
     for t in extra_topics:
         tasks_meta.setdefault(t['id'], {'name': t['name'], 'quiz_json': t['quiz_json']})
-        sections.setdefault((t['id'], None), {'reihenfolge': 9999, 'quiz_json': t['quiz_json'],
-                                               'is_topic_quiz': True, 'buckets': {}})
+        sections.setdefault((t['id'], None), {'reihenfolge': 9999, 'is_topic_quiz': True,
+                                               'current_quiz_json': t['quiz_json'], 'buckets': {}})
     for sub in extra_subs:
         tid = sub['task_id']
         tasks_meta.setdefault(tid, {'name': sub['task_name'], 'quiz_json': None})
-        sections.setdefault((tid, sub['id']), {'reihenfolge': sub['reihenfolge'], 'quiz_json': sub['quiz_json'],
-                                                'is_topic_quiz': False, 'buckets': {}})
+        sections.setdefault((tid, sub['id']), {'reihenfolge': sub['reihenfolge'], 'is_topic_quiz': False,
+                                                'current_quiz_json': sub['quiz_json'], 'buckets': {}})
 
-    def build_questions(quiz_json_str, buckets):
+    def build_questions(current_quiz_json, buckets):
+        # Seed empty buckets for questions in current quiz that have no attempts yet
         try:
-            q_defs = json.loads(quiz_json_str).get('questions', []) if quiz_json_str else []
+            current_defs = json.loads(current_quiz_json).get('questions', []) if current_quiz_json else []
         except (json.JSONDecodeError, TypeError):
-            q_defs = []
-        all_idx = sorted(set(int(k) for k in buckets) | set(range(len(q_defs))))
+            current_defs = []
+        for q_def in current_defs:
+            h = _question_hash(q_def)
+            buckets.setdefault(h, {'total': 0, 'correct': 0, 'answers': [], 'q_def': q_def})
+
         questions = []
-        for idx in all_idx:
-            q_def = q_defs[idx] if idx < len(q_defs) else None
-            b = buckets.get(str(idx), {'total': 0, 'correct': 0, 'answers': []})
+        for q_hash, b in buckets.items():
+            q_def = b['q_def']
             q_type = (q_def or {}).get('type', 'multiple_choice')
             q = {
                 'text': (q_def or {}).get('text', '(Frage nicht verfügbar)'),
@@ -2428,11 +2475,12 @@ def get_quiz_stats_by_topic(klasse_id=None, task_id=None, only_attempted=True):
                     freq[text] = freq.get(text, 0) + 1
                 q['answer_dist'] = sorted(freq.items(), key=lambda x: -x[1])[:10]
             questions.append(q)
-        return questions
+        # Sort by question text for stable ordering (index no longer meaningful)
+        return sorted(questions, key=lambda q: q['text'])
 
     by_task = {}
     for (tid, sid), sec in sections.items():
-        qs = build_questions(sec['quiz_json'], sec['buckets'])
+        qs = build_questions(sec['current_quiz_json'], sec['buckets'])
         if not qs:
             continue
         by_task.setdefault(tid, []).append({
