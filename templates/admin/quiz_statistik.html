@@ -52,6 +52,8 @@
             </h3>
 
             {% for q in section.questions %}
+            {% set filterable = llm_enabled and q.type in ('fill_blank', 'short_answer') and q.answer_dist %}
+            {% if filterable %}{% set ns.qid = ns.qid + 1 %}{% endif %}
             <div style="margin-bottom: 1.25rem; padding-left: 0.75rem; border-left: 3px solid #e8e8e8;">
                 <div class="flex flex-between flex-center gap-1" style="margin-bottom: 0.4rem; flex-wrap: wrap;">
                     <div style="flex: 1;">
@@ -66,14 +68,14 @@
                     <div class="flex flex-center gap-1" style="white-space: nowrap; flex-shrink: 0;">
                         {% if q.total > 0 %}
                             {% set pct = (q.correct_count / q.total * 100)|int %}
-                            <span class="badge {% if pct >= 70 %}badge-success{% elif pct >= 50 %}badge-warning{% else %}badge-danger{% endif %}">
+                            <span class="badge {% if pct >= 70 %}badge-success{% elif pct >= 50 %}badge-warning{% else %}badge-danger{% endif %}"
+                                  {% if filterable %}id="answer-badge-{{ ns.qid }}" data-correct="{{ q.correct_count }}" data-total="{{ q.total }}"{% endif %}>
                                 {{ q.correct_count }}/{{ q.total }} richtig ({{ pct }}%)
                             </span>
                         {% else %}
                             <span class="badge badge-secondary">Keine Versuche</span>
                         {% endif %}
-                        {% if llm_enabled and q.type in ('fill_blank', 'short_answer') and q.answer_dist %}
-                            {% set ns.qid = ns.qid + 1 %}
+                        {% if filterable %}
                             <button type="button"
                                     class="btn btn-sm noise-filter-btn"
                                     data-qid="{{ ns.qid }}"
@@ -103,8 +105,7 @@
                 </div>
 
                 {% elif q.answer_dist %}
-                {% if llm_enabled and q.type in ('fill_blank', 'short_answer') %}
-                    {# ns.qid already incremented above for the button; we just need the same value #}
+                {% if filterable %}
                     <div id="answer-table-{{ ns.qid }}"
                          data-question="{{ q.text|e }}"
                          style="margin-top: 0.5rem; margin-left: 1.5rem;">
@@ -113,7 +114,7 @@
                 {% endif %}
                     <table style="font-size: 0.85rem; border-collapse: collapse;">
                         {% for text, count in q.answer_dist %}
-                        <tr data-idx="{{ loop.index0 }}">
+                        <tr data-idx="{{ loop.index0 }}" data-count="{{ count }}">
                             <td style="padding: 0.1rem 0.75rem 0.1rem 0; color: #888; text-align: right;">{{ count }}×</td>
                             <td style="padding: 0.1rem 0;">{{ text }}</td>
                         </tr>
@@ -164,12 +165,24 @@ async function filterBlock(btn) {
         const data = await resp.json();
         const noiseSet = new Set(data.noise || []);
 
+        let noiseCount = 0;
         rows.forEach(tr => {
             if (noiseSet.has(parseInt(tr.dataset.idx))) {
                 tr.dataset.noise = '1';
                 tr.style.display = 'none';
+                noiseCount += parseInt(tr.dataset.count || 0);
             }
         });
+
+        const badgeEl = document.getElementById('answer-badge-' + qid);
+        if (badgeEl && noiseCount > 0) {
+            const origTotal = parseInt(badgeEl.dataset.total);
+            const origCorrect = parseInt(badgeEl.dataset.correct);
+            const newTotal = Math.max(0, origTotal - noiseCount);
+            const newCorrect = Math.min(origCorrect, newTotal);
+            const newPct = newTotal > 0 ? Math.round(newCorrect / newTotal * 100) : 0;
+            badgeEl.textContent = `${newCorrect}/${newTotal} richtig (${newPct}%)`;
+        }
 
         const toggleDiv = tableDiv.querySelector('.noise-toggle');
         if (noiseSet.size > 0) {
