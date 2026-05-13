@@ -1,0 +1,111 @@
+{% extends 'base.html' %}
+
+{% block title %}Quiz-Statistik - Lernmanager{% endblock %}
+
+{% block content %}
+<h1>Quiz-Statistik</h1>
+
+<div class="card mb-2">
+    <form method="GET" class="flex flex-between flex-center gap-1 flex-wrap">
+        <div class="flex gap-1 flex-center flex-wrap">
+            <label for="klasse_id"><strong>Klasse:</strong></label>
+            <select name="klasse_id" id="klasse_id">
+                <option value="">Alle Klassen</option>
+                {% for k in klassen %}
+                    <option value="{{ k.id }}" {{ 'selected' if klasse_id == k.id }}>{{ k.name }}</option>
+                {% endfor %}
+            </select>
+            <label for="task_id"><strong>Thema:</strong></label>
+            <select name="task_id" id="task_id">
+                <option value="">Alle Themen</option>
+                {% for t in tasks %}
+                    <option value="{{ t.id }}" {{ 'selected' if task_id == t.id }}>{{ t.name }}</option>
+                {% endfor %}
+            </select>
+            <label class="flex flex-center gap-1" style="cursor: pointer;">
+                <input type="checkbox" name="attempted" value="0" {{ '' if only_attempted else 'checked' }}>
+                Auch ohne Versuche
+            </label>
+            <button type="submit" class="btn btn-primary btn-sm">Filtern</button>
+        </div>
+        <div class="text-muted" style="font-size: 0.9rem;">{{ stats|length }} Thema(en)</div>
+    </form>
+</div>
+
+{% if stats %}
+    {% for topic in stats %}
+    <div class="card mb-2">
+        <h2 style="margin: 0 0 1rem 0;">{{ topic.task_name }}</h2>
+
+        {% for section in topic.sections %}
+        <div {% if not loop.first %}style="margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid #eee;"{% endif %}>
+            <h3 style="font-size: 1rem; color: #555; margin: 0 0 0.75rem 0;">
+                {% if section.is_topic_quiz %}Thema-Quiz{% else %}Aufgabe {{ section.subtask_position }}{% endif %}
+            </h3>
+
+            {% for q in section.questions %}
+            <div style="margin-bottom: 1.25rem; padding-left: 0.75rem; border-left: 3px solid #e8e8e8;">
+                <div class="flex flex-between flex-center gap-1" style="margin-bottom: 0.4rem; flex-wrap: wrap;">
+                    <div style="flex: 1;">
+                        <span class="badge badge-secondary" style="font-size: 0.75rem; margin-right: 0.4rem;">
+                            {% if q.type == 'fill_blank' %}Lückentext
+                            {% elif q.type == 'short_answer' %}Kurzantwort
+                            {% else %}Multiple Choice
+                            {% endif %}
+                        </span>
+                        {{ q.text }}
+                    </div>
+                    <div style="white-space: nowrap; flex-shrink: 0;">
+                        {% if q.total > 0 %}
+                            {% set pct = (q.correct_count / q.total * 100)|int %}
+                            <span class="badge {% if pct >= 70 %}badge-success{% elif pct >= 50 %}badge-warning{% else %}badge-danger{% endif %}">
+                                {{ q.correct_count }}/{{ q.total }} richtig ({{ pct }}%)
+                            </span>
+                        {% else %}
+                            <span class="badge badge-secondary">Keine Versuche</span>
+                        {% endif %}
+                    </div>
+                </div>
+
+                {% if q.type == 'multiple_choice' and q.options %}
+                <div style="margin-top: 0.5rem;">
+                    {% for opt in q.options %}
+                    <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem;">
+                        <span style="min-width: 1rem; color: {% if opt.is_correct %}#2e7d32{% else %}transparent{% endif %}; font-weight: bold;">✓</span>
+                        <div style="flex: 1; background: #f0f0f0; border-radius: 3px; height: 1.6rem; position: relative; overflow: hidden; min-width: 80px;">
+                            {% if q.total > 0 and opt.count > 0 %}
+                            <div style="width: {{ (opt.count / q.total * 100)|int }}%; height: 100%; background: {{ '#c8e6c9' if opt.is_correct else '#e0e0e0' }};"></div>
+                            {% endif %}
+                            <span style="position: absolute; left: 6px; top: 50%; transform: translateY(-50%); font-size: 0.85rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: calc(100% - 40px);">
+                                {{ opt.text }}
+                            </span>
+                        </div>
+                        <span style="min-width: 2rem; font-size: 0.85rem; color: #555; text-align: right;">{{ opt.count }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+
+                {% elif q.answer_dist %}
+                <div style="margin-top: 0.5rem; margin-left: 1.5rem;">
+                    <table style="font-size: 0.85rem; border-collapse: collapse;">
+                        {% for text, count in q.answer_dist %}
+                        <tr>
+                            <td style="padding: 0.1rem 0.75rem 0.1rem 0; color: #888; text-align: right;">{{ count }}×</td>
+                            <td style="padding: 0.1rem 0;">{{ text }}</td>
+                        </tr>
+                        {% endfor %}
+                    </table>
+                </div>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        {% endfor %}
+    </div>
+    {% endfor %}
+{% else %}
+<div class="card text-center text-muted">
+    <p>Keine Quiz-Daten gefunden.</p>
+</div>
+{% endif %}
+{% endblock %}

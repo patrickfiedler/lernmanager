@@ -2308,6 +2308,154 @@ def get_text_quiz_answers(klasse_id=None, only_fallback=False):
     return results
 
 
+def get_quiz_stats_by_topic(klasse_id=None, task_id=None, only_attempted=True):
+    """Aggregate quiz attempt stats grouped by topic → subtask (by position) → question.
+
+    Returns sorted list of topic dicts, each with sections (subtask quizzes first, topic quiz last).
+    only_attempted=True omits topics/subtasks with no recorded attempts.
+    """
+    with db_session() as conn:
+        sql = '''
+            SELECT qa.antworten_json, qa.subtask_id,
+                   st.task_id,
+                   t.name AS task_name, t.quiz_json AS task_quiz_json,
+                   sub.quiz_json AS subtask_quiz_json,
+                   sub.reihenfolge AS subtask_reihenfolge
+            FROM quiz_attempt qa
+            JOIN student_task st ON qa.student_task_id = st.id
+            JOIN task t ON st.task_id = t.id
+            LEFT JOIN subtask sub ON qa.subtask_id = sub.id
+            WHERE qa.antworten_json IS NOT NULL
+        '''
+        params = []
+        if klasse_id:
+            sql += ' AND st.klasse_id = ?'
+            params.append(klasse_id)
+        if task_id:
+            sql += ' AND st.task_id = ?'
+            params.append(task_id)
+        attempt_rows = [dict(r) for r in conn.execute(sql, params).fetchall()]
+
+        extra_topics = extra_subs = []
+        if not only_attempted:
+            tp = [task_id] if task_id else []
+            extra_topics = [dict(r) for r in conn.execute(
+                'SELECT id, name, quiz_json FROM task WHERE quiz_json IS NOT NULL'
+                + (' AND id = ?' if task_id else ''), tp).fetchall()]
+            extra_subs = [dict(r) for r in conn.execute(
+                'SELECT sub.id, sub.task_id, sub.quiz_json, sub.reihenfolge, t.name AS task_name'
+                ' FROM subtask sub JOIN task t ON sub.task_id = t.id'
+                ' WHERE sub.quiz_json IS NOT NULL'
+                + (' AND sub.task_id = ?' if task_id else ''), tp).fetchall()]
+
+    # Build answer buckets keyed by (task_id, subtask_id|None)
+    tasks_meta = {}  # task_id -> {name, quiz_json}
+    sections = {}    # (task_id, subtask_id|None) -> {reihenfolge, quiz_json, buckets}
+
+    for row in attempt_rows:
+        tid, sid = row['task_id'], row['subtask_id']
+        tasks_meta.setdefault(tid, {'name': row['task_name'], 'quiz_json': row['task_quiz_json']})
+        key = (tid, sid)
+        if key not in sections:
+            sections[key] = {
+                'reihenfolge': row['subtask_reihenfolge'] if sid else 9999,
+                'quiz_json': row['subtask_quiz_json'] if sid else row['task_quiz_json'],
+                'is_topic_quiz': sid is None,
+                'buckets': {},
+            }
+        try:
+            antworten = json.loads(row['antworten_json'])
+        except (json.JSONDecodeError, TypeError):
+            continue
+        for q_str, answer in antworten.items():
+            if q_str == '_question_order':
+                continue
+            b = sections[key]['buckets'].setdefault(q_str, {'total': 0, 'correct': 0, 'answers': []})
+            b['total'] += 1
+            if isinstance(answer, dict) and answer.get('correct'):
+                b['correct'] += 1
+            b['answers'].append(answer)
+
+    for t in extra_topics:
+        tasks_meta.setdefault(t['id'], {'name': t['name'], 'quiz_json': t['quiz_json']})
+        sections.setdefault((t['id'], None), {'reihenfolge': 9999, 'quiz_json': t['quiz_json'],
+                                               'is_topic_quiz': True, 'buckets': {}})
+    for sub in extra_subs:
+        tid = sub['task_id']
+        tasks_meta.setdefault(tid, {'name': sub['task_name'], 'quiz_json': None})
+        sections.setdefault((tid, sub['id']), {'reihenfolge': sub['reihenfolge'], 'quiz_json': sub['quiz_json'],
+                                                'is_topic_quiz': False, 'buckets': {}})
+
+    def build_questions(quiz_json_str, buckets):
+        try:
+            q_defs = json.loads(quiz_json_str).get('questions', []) if quiz_json_str else []
+        except (json.JSONDecodeError, TypeError):
+            q_defs = []
+        all_idx = sorted(set(int(k) for k in buckets) | set(range(len(q_defs))))
+        questions = []
+        for idx in all_idx:
+            q_def = q_defs[idx] if idx < len(q_defs) else None
+            b = buckets.get(str(idx), {'total': 0, 'correct': 0, 'answers': []})
+            q_type = (q_def or {}).get('type', 'multiple_choice')
+            q = {
+                'text': (q_def or {}).get('text', '(Frage nicht verfügbar)'),
+                'type': q_type,
+                'total': b['total'],
+                'correct_count': 0,
+            }
+            if q_type == 'multiple_choice':
+                opts_raw = (q_def or {}).get('options', [])
+                opt_texts = [o if isinstance(o, str) else o.get('text', '') for o in opts_raw]
+                correct_set = set((q_def or {}).get('correct', []))
+                counts = [0] * len(opt_texts)
+                correct_n = 0
+                for ans in b['answers']:
+                    if not isinstance(ans, list):
+                        continue
+                    if set(ans) == correct_set:
+                        correct_n += 1
+                    for i in ans:
+                        if 0 <= i < len(counts):
+                            counts[i] += 1
+                q['correct_count'] = correct_n
+                q['options'] = [{'text': opt_texts[i], 'count': counts[i], 'is_correct': i in correct_set}
+                                 for i in range(len(opt_texts))]
+            else:
+                q['correct_count'] = b['correct']
+                freq = {}
+                for ans in b['answers']:
+                    text = (ans.get('text', '') if isinstance(ans, dict) else '').strip() or '(leer)'
+                    freq[text] = freq.get(text, 0) + 1
+                q['answer_dist'] = sorted(freq.items(), key=lambda x: -x[1])[:10]
+            questions.append(q)
+        return questions
+
+    by_task = {}
+    for (tid, sid), sec in sections.items():
+        qs = build_questions(sec['quiz_json'], sec['buckets'])
+        if not qs:
+            continue
+        by_task.setdefault(tid, []).append({
+            'position': sec['reihenfolge'],
+            'is_topic_quiz': sec['is_topic_quiz'],
+            'questions': qs,
+        })
+
+    result = []
+    for tid, secs in by_task.items():
+        sorted_secs = sorted(secs, key=lambda s: s['position'])
+        sub_idx = 0
+        for sec in sorted_secs:
+            if not sec['is_topic_quiz']:
+                sub_idx += 1
+                sec['subtask_position'] = sub_idx
+            else:
+                sec['subtask_position'] = None
+        result.append({'task_id': tid, 'task_name': tasks_meta[tid]['name'], 'sections': sorted_secs})
+
+    return sorted(result, key=lambda t: t['task_name'])
+
+
 # ============ Lesson functions ============
 
 def create_or_get_unterricht(klasse_id, datum):

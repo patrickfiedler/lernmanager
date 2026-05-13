@@ -1432,6 +1432,27 @@ def admin_quiz_antworten():
                          klasse_id=klasse_id)
 
 
+@app.route('/admin/quiz-statistik')
+@admin_required
+def admin_quiz_statistik():
+    """Quiz answer statistics grouped by topic and task."""
+    klasse_id = request.args.get('klasse_id', type=int)
+    task_id = request.args.get('task_id', type=int)
+    only_attempted = request.args.get('attempted', '1') != '0'
+
+    stats = models.get_quiz_stats_by_topic(klasse_id=klasse_id, task_id=task_id, only_attempted=only_attempted)
+    klassen = models.get_all_klassen()
+    tasks = models.get_all_tasks()
+
+    return render_template('admin/quiz_statistik.html',
+                           stats=stats,
+                           klassen=klassen,
+                           tasks=tasks,
+                           klasse_id=klasse_id,
+                           task_id=task_id,
+                           only_attempted=only_attempted)
+
+
 # ============ Admin: Error Logs ============
 
 @app.route('/admin/errors')
