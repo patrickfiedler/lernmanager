@@ -27,10 +27,10 @@ def _fuzzy_match(a: str, b: str) -> float:
     return SequenceMatcher(None, a.lower().strip(), b.lower().strip()).ratio()
 
 
-def _result(issues: list, matches: list = None) -> dict:
+def _result(issues: list, matches: list = None, warnings: list = None) -> dict:
     passed = not issues
     message = "Abgabe sieht vollständig aus ✓" if passed else "Abgabe noch nicht vollständig"
-    return {'passed': passed, 'message': message, 'details': issues, 'matches': matches or []}
+    return {'passed': passed, 'message': message, 'details': issues, 'matches': matches or [], 'warnings': warnings or []}
 
 
 def _check_presentation(file_bytes: bytes, ext: str, config: dict) -> dict:
@@ -159,14 +159,15 @@ def _check_document(file_bytes: bytes, ext: str, config: dict) -> dict:
 
     issues = []
     matches = []
+    warnings = []
     threshold = config.get('title_match_threshold', 0.6)
     min_words = config.get('min_words', 0)
     if min_words:
         word_count = len(extracted.split())
         if word_count < min_words:
-            issues.append(f"Zu wenig Text ({word_count} Wörter, erwartet: {min_words})")
+            warnings.append("wenig Text vorhanden")
         else:
-            matches.append(f"{word_count} Wörter ✓")
+            matches.append("Wortanzahl erreicht")
 
     min_images = config.get('min_images', 0)
     if min_images:
@@ -192,7 +193,7 @@ def _check_document(file_bytes: bytes, ext: str, config: dict) -> dict:
         else:
             matches.append(f'Abschnitt gefunden: „{req}" ✓')
 
-    return _result(issues, matches)
+    return _result(issues, matches, warnings)
 
 
 def _check_scratch(file_bytes: bytes, config: dict) -> dict:

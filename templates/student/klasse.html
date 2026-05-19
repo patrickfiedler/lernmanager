@@ -759,14 +759,15 @@ function escapeHtml(str) {
     return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-function renderGateChecklist(matches, details) {
-    const toItem = (text, passed) => {
-        const icon = passed ? '✅' : '❌';
-        const color = passed ? '#10b981' : '#ef4444';
+function renderGateChecklist(matches, details, warnings) {
+    const toItem = (text, type) => {
+        const icon = type === 'pass' ? '✅' : type === 'warn' ? '⚠️' : '❌';
+        const color = type === 'pass' ? '#10b981' : type === 'warn' ? '#f59e0b' : '#ef4444';
         return `<div class="checklist-item" style="border-left:3px solid ${color};padding:0.5rem 0.75rem;margin:0.4rem 0;background:#f9fafb;"><div style="font-weight:500;">${icon} ${escapeHtml(text)}</div></div>`;
     };
-    return (matches || []).map(m => toItem(m, true)).join('') +
-           (details || []).map(d => toItem(d, false)).join('');
+    return (matches || []).map(m => toItem(m, 'pass')).join('') +
+           (warnings || []).map(w => toItem(w, 'warn')).join('') +
+           (details || []).map(d => toItem(d, 'fail')).join('');
 }
 
 // Smooth scroll to element on page load if hash is present
@@ -944,7 +945,7 @@ function adjustZoom(delta) {
                         submitBtn.style.display = 'none';
                     } else {
                         let html = `<p class="gate-success-msg" style="margin-bottom:0.5rem;">✓ Abgabe geprüft!</p>`;
-                        html += renderGateChecklist(data.matches, data.details);
+                        html += renderGateChecklist(data.matches, data.details, data.warnings);
                         html += `<button class="btn btn-primary mt-1" onclick="location.reload()">Weiter →</button>`;
                         resultDiv.innerHTML = html;
                         resultDiv.style.display = 'block';
@@ -952,7 +953,7 @@ function adjustZoom(delta) {
                     }
                 } else {
                     let html = `<p class="gate-fail-msg">${data.message}</p>`;
-                    html += renderGateChecklist(data.matches, data.details);
+                    html += renderGateChecklist(data.matches, data.details, data.warnings);
                     resultDiv.innerHTML = html;
                     resultDiv.style.display = 'block';
                     submitBtn.disabled = false;
@@ -1006,14 +1007,14 @@ function adjustZoom(delta) {
                 }
                 if (data.passed) {
                     let html = `<p class="gate-success-msg">✓ Abgabe erfolgreich geprüft!</p>`;
-                    html += renderGateChecklist(data.matches, data.details);
+                    html += renderGateChecklist(data.matches, data.details, data.warnings);
                     html += `<button class="btn btn-primary mt-1" onclick="location.reload()">Weiter →</button>`;
                     resultDiv.innerHTML = html;
                     resultDiv.style.display = 'block';
                     submitBtn.style.display = 'none';
                 } else {
                     let html = `<p class="gate-fail-msg">${data.message}</p>`;
-                    html += renderGateChecklist(data.matches, data.details);
+                    html += renderGateChecklist(data.matches, data.details, data.warnings);
                     resultDiv.innerHTML = html;
                     resultDiv.style.display = 'block';
                     submitBtn.disabled = false;
