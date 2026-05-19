@@ -733,6 +733,8 @@ def admin_thema_drucken(task_id):
         flash('Thema nicht gefunden.', 'danger')
         return redirect(url_for('admin_themen'))
     subtasks = [s for s in models.get_subtasks(task_id) if not s.get('hidden')]
+    for sub in subtasks:
+        sub['materials'] = models.get_materials_for_subtask(task_id, sub['id'])
     return render_template('student/print_tasks.html', task=task, subtasks=subtasks, single=False)
 
 
@@ -2633,6 +2635,8 @@ def student_print_topic(slug):
     if not task or not klasse:
         return redirect(url_for('student_dashboard'))
     subtasks = models.get_visible_subtasks_for_student(student_id, klasse['id'], task['task_id'])
+    for sub in subtasks:
+        sub['materials'] = models.get_materials_for_subtask(task['task_id'], sub['id'])
     return render_template('student/print_tasks.html', task=task, subtasks=subtasks, single=False)
 
 
@@ -2647,6 +2651,7 @@ def student_print_subtask(slug, position):
     subtask = _resolve_subtask_by_position(subtasks, position)
     if not subtask:
         return redirect(url_for('student_klasse', slug=slug))
+    subtask['materials'] = models.get_materials_for_subtask(task['task_id'], subtask['id'])
     return render_template('student/print_tasks.html', task=task, subtasks=[subtask], single=True)
 
 

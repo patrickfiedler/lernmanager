@@ -57,6 +57,15 @@
         .task-content p { margin: 0.4rem 0; }
         .task-content ul, .task-content ol { margin: 0.4rem 0; padding-left: 1.25rem; }
         .task-content code { background: #f3f4f6; padding: 0.1rem 0.3rem; border-radius: 3px; font-size: 0.85em; }
+        .task-materials {
+            margin-left: 1.75rem;
+            margin-top: 0.5rem;
+            font-size: 0.875rem;
+            color: #374151;
+        }
+        .task-materials ul { margin: 0.25rem 0 0 0; padding-left: 1.25rem; }
+        .task-materials li { margin: 0.15rem 0; }
+        .task-materials a { color: #1d4ed8; }
         .print-btn {
             display: inline-block;
             margin-bottom: 1.5rem;
@@ -69,6 +78,7 @@
         @media print {
             .print-btn { display: none; }
             body { padding: 0; }
+            .task-materials a::after { content: " (" attr(href) ")"; font-size: 0.8em; color: #6b7280; }
         }
     </style>
 </head>
@@ -88,6 +98,23 @@
         <div class="task-content">
             {{ sub.beschreibung | markdown }}
         </div>
+        {% if sub.get('materials') %}
+        <div class="task-materials">
+            <strong>📎 Materialien:</strong>
+            <ul>
+            {% for m in sub.materials %}
+            {% set label = m.beschreibung or m.pfad.split('/')[-1] %}
+            <li>
+                {% if m.typ == 'link' %}
+                <a href="{{ m.pfad }}">{{ label }}</a>
+                {% else %}
+                📄 {{ label }}
+                {% endif %}
+            </li>
+            {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
     </div>
     {% endfor %}
 </body>
