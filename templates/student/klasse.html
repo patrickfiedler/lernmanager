@@ -1015,6 +1015,13 @@ function adjustZoom(delta) {
                 } else {
                     let html = `<p class="gate-fail-msg">${data.message}</p>`;
                     html += renderGateChecklist(data.matches, data.details, data.warnings);
+                    {% if artifact_gate_required %}
+                    html += `<div class="task-complete" style="margin-top:0.75rem;font-size:0.9rem;"
+                                  onclick="if(!this.dataset.used){this.dataset.used='1';this.querySelector('input').checked=true;this.style.opacity='0.5';this.style.pointerEvents='none';toggleSubtask({{ current_index + 1 }}, true);}">
+                        <input type="checkbox" onclick="event.stopPropagation()">
+                        <label style="cursor:pointer;">Trotzdem mit der nächsten Aufgabe weitermachen</label>
+                    </div>`;
+                    {% endif %}
                     resultDiv.innerHTML = html;
                     resultDiv.style.display = 'block';
                     submitBtn.disabled = false;
