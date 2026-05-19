@@ -482,6 +482,8 @@
 {% endblock %}
 
 {% block scripts %}
+{% set _active = current_subtask or (subtasks|rejectattr('erledigt')|list|first) if (current_subtask or subtasks) %}
+{% set current_index = subtasks.index(_active) if _active and _active in subtasks else 0 %}
 const topicSlug = '{{ task|topic_slug }}';
 const subtaskCount = {{ subtasks|length }};
 const gatePosition = {{ capstone_gate_position or 'null' }};
