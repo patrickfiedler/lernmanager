@@ -135,7 +135,8 @@
             <!-- Inline gate card (non-capstone subtask gate) -->
             {% if inline_gate and not task.abgeschlossen %}
             {% set inline_gate_formats = inline_gate.get('format', []) %}
-            <div id="inline-gate-card" class="gate-card gate-inline mt-2 {% if inline_gate_passed %}gate-passed{% else %}gate-ready{% endif %}">
+            {% set gate_chained = inline_gate_passed and artifact_gate_required and active_subtask and active_subtask.fertig_wenn %}
+            <div id="inline-gate-card" class="gate-card gate-inline mt-2 {% if inline_gate_passed %}gate-passed{% if gate_chained %} gate-inline--chained{% endif %}{% else %}gate-ready{% endif %}">
                 {% if inline_gate_passed %}
                 <div class="gate-header">📎 Abgabe geprüft ✓</div>
                 <p class="gate-success-msg">Deine Datei wurde erfolgreich geprüft.</p>
@@ -942,7 +943,12 @@ function adjustZoom(delta) {
                         resultDiv.style.display = 'block';
                         submitBtn.style.display = 'none';
                     } else {
-                        location.reload();
+                        let html = `<p class="gate-success-msg" style="margin-bottom:0.5rem;">✓ Abgabe geprüft!</p>`;
+                        html += renderGateChecklist(data.matches, data.details);
+                        html += `<button class="btn btn-primary mt-1" onclick="location.reload()">Weiter →</button>`;
+                        resultDiv.innerHTML = html;
+                        resultDiv.style.display = 'block';
+                        submitBtn.style.display = 'none';
                     }
                 } else {
                     let html = `<p class="gate-fail-msg">${data.message}</p>`;
@@ -999,7 +1005,12 @@ function adjustZoom(delta) {
                     return;
                 }
                 if (data.passed) {
-                    location.reload();
+                    let html = `<p class="gate-success-msg">✓ Abgabe erfolgreich geprüft!</p>`;
+                    html += renderGateChecklist(data.matches, data.details);
+                    html += `<button class="btn btn-primary mt-1" onclick="location.reload()">Weiter →</button>`;
+                    resultDiv.innerHTML = html;
+                    resultDiv.style.display = 'block';
+                    submitBtn.style.display = 'none';
                 } else {
                     let html = `<p class="gate-fail-msg">${data.message}</p>`;
                     html += renderGateChecklist(data.matches, data.details);

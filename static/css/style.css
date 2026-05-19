@@ -1712,6 +1712,13 @@ tr.unsaved-row td {
     border-color: #86efac;
 }
 .gate-card.gate-ready { border-color: #f59e0b; }
+.gate-card.gate-inline--chained {
+    margin-top: 0;
+    border-top: none;
+    border-bottom: none;
+    border-radius: 0;
+    border-color: #10b981;
+}
 .gate-header {
     font-weight: 600;
     font-size: 1rem;
