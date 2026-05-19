@@ -127,7 +127,7 @@
             {% endif %}
 
             {% if active_subtask and active_subtask.fertig_wenn %}
-            <div class="fertig-wenn-callout {% if inline_gate and not inline_gate_passed %}fertig-wenn-callout--standalone{% endif %}">
+            <div class="fertig-wenn-callout {% if inline_gate and (not inline_gate_passed or not artifact_gate_required) %}fertig-wenn-callout--standalone{% endif %}">
                 {{ active_subtask.fertig_wenn | markdown }}
             </div>
             {% endif %}
@@ -160,7 +160,7 @@
             {% endif %}
 
             <!-- Completion zone: checkbox (left) + optional KI-Check (right) -->
-            {% if active_subtask and not task.abgeschlossen and (not inline_gate or inline_gate_passed) %}
+            {% if active_subtask and not task.abgeschlossen and (not inline_gate or inline_gate_passed or not artifact_gate_required) %}
             {% if graded_artifact %}
             <div class="task-complete {% if active_subtask.fertig_wenn %}has-fertig-wenn{% endif %} has-artifact">
                 <!-- Left: completion checkbox -->

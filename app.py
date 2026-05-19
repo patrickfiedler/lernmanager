@@ -350,6 +350,17 @@ def admin_klasse_transparency_mode(klasse_id):
     return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id))
 
 
+@app.route('/admin/klasse/<int:klasse_id>/artifact-gate-required', methods=['POST'])
+@admin_required
+def admin_klasse_artifact_gate_required(klasse_id):
+    """Toggle whether the deterministic artifact gate blocks task completion."""
+    required = request.form.get('required') == '1'
+    models.set_klasse_artifact_gate_required(klasse_id, required)
+    state = 'erforderlich' if required else 'optional (informativ)'
+    flash(f'Datei-Überprüfung jetzt {state}.', 'success')
+    return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id))
+
+
 @app.route('/admin/klasse/<int:klasse_id>/loeschen', methods=['POST'])
 @admin_required
 def admin_klasse_loeschen(klasse_id):
@@ -2031,6 +2042,7 @@ def student_klasse(slug):
                            inline_gate=inline_gate,
                            inline_gate_passed=inline_gate_passed,
                            inline_gate_position=inline_gate_position,
+                           artifact_gate_required=bool(klasse.get('artifact_gate_required', 1)),
                            student_path=student.get('lernpfad') if student else None)
 
 

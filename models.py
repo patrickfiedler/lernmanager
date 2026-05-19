@@ -3502,6 +3502,15 @@ def set_klasse_llm_feedback(klasse_id, enabled: bool):
         )
 
 
+def set_klasse_artifact_gate_required(klasse_id, required: bool):
+    """Set whether artifact gate blocks task completion (True) or is informational (False)."""
+    with db_session() as conn:
+        conn.execute(
+            "UPDATE klasse SET artifact_gate_required = ? WHERE id = ?",
+            (1 if required else 0, klasse_id)
+        )
+
+
 def record_llm_usage(student_id, question_type, tokens_used=0):
     """Record an LLM API call for rate limiting and monitoring."""
     with db_session() as conn:

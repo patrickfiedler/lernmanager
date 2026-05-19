@@ -123,6 +123,28 @@
     </div>
 </div>
 
+<!-- Artifact Gate Mode -->
+<div class="card mb-2">
+    <div class="card-header">📎 Datei-Überprüfung</div>
+    <div style="padding: 0.75rem;">
+        <p style="margin-bottom: 0.75rem; font-size: 0.9rem; color: #4b5563;">
+            Legt fest, ob Schüler eine Datei hochladen und prüfen lassen <em>müssen</em>, bevor sie eine Aufgabe abschließen können.
+            Deaktivieren, um wieder zur manuellen Selbsteinschätzung zurückzukehren.
+        </p>
+        <form method="POST" action="{{ url_for('admin_klasse_artifact_gate_required', klasse_id=klasse.id) }}" class="flex gap-1 flex-center">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="required" value="{{ '0' if klasse.artifact_gate_required else '1' }}">
+            {% if klasse.artifact_gate_required %}
+            <button type="submit" class="btn btn-secondary">Auf optional stellen</button>
+            <span style="color: #10b981; font-weight: 500;">✅ Erforderlich (Datei muss geprüft werden)</span>
+            {% else %}
+            <button type="submit" class="btn btn-secondary">Auf erforderlich stellen</button>
+            <span style="color: #6b7280;">⬜ Optional (Schüler entscheiden selbst)</span>
+            {% endif %}
+        </form>
+    </div>
+</div>
+
 <!-- Students List -->
 <div class="card">
     <div class="card-header">👥 Schüler ({{ students|length }})</div>
