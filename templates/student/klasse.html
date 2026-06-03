@@ -152,7 +152,6 @@
                     <label for="inline-gate-file-input" class="btn btn-secondary artifact-upload-btn">Datei auswählen</label>
                     <span id="inline-gate-filename" class="artifact-filename"></span>
                 </div>
-                <div id="inline-gate-keyword-warning" class="artifact-keyword-warning" style="display:none;"></div>
                 <button id="inline-gate-submit-btn" class="btn btn-primary mt-1" disabled
                         data-url="{{ url_for('student_artifact_gate_check', slug=task|topic_slug, position=inline_gate_position) }}">
                     Datei prüfen
@@ -395,7 +394,6 @@
             <label for="gate-file-input" class="btn btn-secondary artifact-upload-btn">Datei auswählen</label>
             <span id="gate-filename" class="artifact-filename"></span>
         </div>
-        <div id="gate-keyword-warning" class="artifact-keyword-warning" style="display:none;"></div>
         <button id="gate-submit-btn" class="btn btn-primary mt-1" disabled
                 data-url="{{ url_for('student_artifact_gate_check', slug=task|topic_slug, position=capstone_gate_position) }}">
             Datei prüfen
@@ -776,13 +774,15 @@ function escapeHtml(str) {
     return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-function renderGateChecklist(matches, details, warnings) {
+function renderGateChecklist(matches, details, warnings, filenameItem) {
     const toItem = (text, type) => {
         const icon = type === 'pass' ? '✅' : type === 'warn' ? '⚠️' : '❌';
         const color = type === 'pass' ? '#10b981' : type === 'warn' ? '#f59e0b' : '#ef4444';
         return `<div class="checklist-item" style="border-left:3px solid ${color};padding:0.5rem 0.75rem;margin:0.4rem 0;background:#f9fafb;"><div style="font-weight:500;">${icon} ${escapeHtml(text)}</div></div>`;
     };
-    return (matches || []).map(m => toItem(m, 'pass')).join('') +
+    const filenameHtml = filenameItem ? toItem(filenameItem.text, filenameItem.type) : '';
+    return filenameHtml +
+           (matches || []).map(m => toItem(m, 'pass')).join('') +
            (warnings || []).map(w => toItem(w, 'warn')).join('') +
            (details || []).map(d => toItem(d, 'fail')).join('');
 }
@@ -919,19 +919,16 @@ function adjustZoom(delta) {
         const name = fileInput.files[0] ? fileInput.files[0].name : '';
         filenameSpan.textContent = name;
         submitBtn.disabled = !name;
-        const kwWarning = document.getElementById('gate-keyword-warning');
-        if (kwWarning) {
-            if (capstoneGateKeyword && name && !name.toLowerCase().includes(capstoneGateKeyword.toLowerCase())) {
-                kwWarning.textContent = `⚠️ Dateiname sollte „${capstoneGateKeyword}" enthalten.`;
-                kwWarning.style.display = '';
-            } else {
-                kwWarning.style.display = 'none';
-            }
-        }
     });
 
     submitBtn.addEventListener('click', function() {
         if (!fileInput.files[0]) return;
+        const filename = fileInput.files[0].name;
+        const filenameItem = capstoneGateKeyword
+            ? (filename.toLowerCase().includes(capstoneGateKeyword.toLowerCase())
+                ? { text: `Dateiname enthält „${capstoneGateKeyword}"`, type: 'pass' }
+                : { text: `Dateiname sollte „${capstoneGateKeyword}" enthalten.`, type: 'warn' })
+            : null;
         submitBtn.disabled = true;
         submitBtn.textContent = 'Wird geprüft…';
         resultDiv.style.display = 'none';
@@ -971,7 +968,7 @@ function adjustZoom(delta) {
                         submitBtn.style.display = 'none';
                     } else {
                         let html = `<p class="gate-success-msg" style="margin-bottom:0.5rem;">✓ Abgabe geprüft!</p>`;
-                        html += renderGateChecklist(data.matches, data.details, data.warnings);
+                        html += renderGateChecklist(data.matches, data.details, data.warnings, filenameItem);
                         html += `<button class="btn btn-primary mt-1" onclick="location.reload()">Weiter →</button>`;
                         resultDiv.innerHTML = html;
                         resultDiv.style.display = 'block';
@@ -979,7 +976,7 @@ function adjustZoom(delta) {
                     }
                 } else {
                     let html = `<p class="gate-fail-msg">${data.message}</p>`;
-                    html += renderGateChecklist(data.matches, data.details, data.warnings);
+                    html += renderGateChecklist(data.matches, data.details, data.warnings, filenameItem);
                     resultDiv.innerHTML = html;
                     resultDiv.style.display = 'block';
                     submitBtn.disabled = false;
@@ -1009,19 +1006,16 @@ function adjustZoom(delta) {
         const name = fileInput.files[0] ? fileInput.files[0].name : '';
         filenameSpan.textContent = name;
         submitBtn.disabled = !name;
-        const kwWarning = document.getElementById('inline-gate-keyword-warning');
-        if (kwWarning) {
-            if (inlineGateKeyword && name && !name.toLowerCase().includes(inlineGateKeyword.toLowerCase())) {
-                kwWarning.textContent = `⚠️ Dateiname sollte „${inlineGateKeyword}" enthalten.`;
-                kwWarning.style.display = '';
-            } else {
-                kwWarning.style.display = 'none';
-            }
-        }
     });
 
     submitBtn.addEventListener('click', function() {
         if (!fileInput.files[0]) return;
+        const filename = fileInput.files[0].name;
+        const filenameItem = inlineGateKeyword
+            ? (filename.toLowerCase().includes(inlineGateKeyword.toLowerCase())
+                ? { text: `Dateiname enthält „${inlineGateKeyword}"`, type: 'pass' }
+                : { text: `Dateiname sollte „${inlineGateKeyword}" enthalten.`, type: 'warn' })
+            : null;
         submitBtn.disabled = true;
         submitBtn.textContent = 'Wird geprüft…';
         resultDiv.style.display = 'none';
@@ -1042,14 +1036,14 @@ function adjustZoom(delta) {
                 }
                 if (data.passed) {
                     let html = `<p class="gate-success-msg">✓ Abgabe erfolgreich geprüft!</p>`;
-                    html += renderGateChecklist(data.matches, data.details, data.warnings);
+                    html += renderGateChecklist(data.matches, data.details, data.warnings, filenameItem);
                     html += `<button class="btn btn-primary mt-1" onclick="location.reload()">Weiter →</button>`;
                     resultDiv.innerHTML = html;
                     resultDiv.style.display = 'block';
                     submitBtn.style.display = 'none';
                 } else {
                     let html = `<p class="gate-fail-msg">${data.message}</p>`;
-                    html += renderGateChecklist(data.matches, data.details, data.warnings);
+                    html += renderGateChecklist(data.matches, data.details, data.warnings, filenameItem);
                     {% if artifact_gate_required %}
                     html += `<div class="task-complete" style="margin-top:0.75rem;font-size:0.9rem;"
                                   onclick="if(!this.dataset.used){this.dataset.used='1';this.querySelector('input').checked=true;this.style.opacity='0.5';this.style.pointerEvents='none';toggleSubtask({{ current_index + 1 }}, true);}">
