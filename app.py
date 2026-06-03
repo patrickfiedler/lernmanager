@@ -1987,6 +1987,7 @@ def student_klasse(slug):
     capstone_gate_passed = False
     capstone_gate_position = None
     capstone_gate_llm_feedback = None
+    capstone_gate_keyword = None
     if subtasks and subtasks[-1].get('artifact_gate_json'):
         last = subtasks[-1]
         try:
@@ -1997,6 +1998,9 @@ def student_klasse(slug):
             if capstone_gate_passed and last.get('graded_artifact_json'):
                 fb = models.get_artifact_feedback(student_id, last['id'])
                 capstone_gate_llm_feedback = fb['feedback'] if fb else None
+            if last.get('graded_artifact_json'):
+                ga = json.loads(last['graded_artifact_json'])
+                capstone_gate_keyword = ga.get('keyword')
         except (json.JSONDecodeError, TypeError):
             pass
 
@@ -2004,11 +2008,15 @@ def student_klasse(slug):
     inline_gate = None
     inline_gate_passed = False
     inline_gate_position = None
+    inline_gate_keyword = None
     if current_subtask and current_subtask.get('artifact_gate_json') and subtasks and current_subtask is not subtasks[-1]:
         try:
             inline_gate = json.loads(current_subtask['artifact_gate_json'])
             inline_gate_passed = bool(current_subtask.get('artifact_gate_passed'))
             inline_gate_position = subtasks.index(current_subtask) + 1
+            if current_subtask.get('graded_artifact_json'):
+                ga = json.loads(current_subtask['graded_artifact_json'])
+                inline_gate_keyword = ga.get('keyword')
         except (json.JSONDecodeError, TypeError, ValueError):
             pass
 
@@ -2044,6 +2052,8 @@ def student_klasse(slug):
                            inline_gate=inline_gate,
                            inline_gate_passed=inline_gate_passed,
                            inline_gate_position=inline_gate_position,
+                           inline_gate_keyword=inline_gate_keyword,
+                           capstone_gate_keyword=capstone_gate_keyword,
                            artifact_gate_required=bool(klasse.get('artifact_gate_required', 1)),
                            student_path=student.get('lernpfad') if student else None)
 

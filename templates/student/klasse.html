@@ -152,6 +152,7 @@
                     <label for="inline-gate-file-input" class="btn btn-secondary artifact-upload-btn">Datei auswählen</label>
                     <span id="inline-gate-filename" class="artifact-filename"></span>
                 </div>
+                <div id="inline-gate-keyword-warning" class="artifact-keyword-warning" style="display:none;"></div>
                 <button id="inline-gate-submit-btn" class="btn btn-primary mt-1" disabled
                         data-url="{{ url_for('student_artifact_gate_check', slug=task|topic_slug, position=inline_gate_position) }}">
                     Datei prüfen
@@ -190,6 +191,7 @@
                         <label for="artifact-file-input" class="btn btn-secondary artifact-upload-btn">Datei auswählen</label>
                         <span id="artifact-filename" class="artifact-filename"></span>
                     </div>
+                    <div id="artifact-keyword-warning" class="artifact-keyword-warning" style="display:none;"></div>
                     <details id="artifact-preview-details" style="display:none;" class="artifact-preview-details">
                         <summary>Das sieht die KI: <span id="artifact-preview-filename"></span></summary>
                         <div class="artifact-preview-notice">Dein Name und persönliche Daten wurden ersetzt.</div>
@@ -393,6 +395,7 @@
             <label for="gate-file-input" class="btn btn-secondary artifact-upload-btn">Datei auswählen</label>
             <span id="gate-filename" class="artifact-filename"></span>
         </div>
+        <div id="gate-keyword-warning" class="artifact-keyword-warning" style="display:none;"></div>
         <button id="gate-submit-btn" class="btn btn-primary mt-1" disabled
                 data-url="{{ url_for('student_artifact_gate_check', slug=task|topic_slug, position=capstone_gate_position) }}">
             Datei prüfen
@@ -488,6 +491,9 @@ const topicSlug = '{{ task|topic_slug }}';
 const subtaskCount = {{ subtasks|length }};
 const gatePosition = {{ capstone_gate_position or 'null' }};
 const gatePassed = {{ 'true' if capstone_gate_passed else 'false' }};
+const artifactKeyword = {{ (graded_artifact.keyword if graded_artifact and graded_artifact.keyword else None) | tojson }};
+const inlineGateKeyword = {{ inline_gate_keyword | tojson }};
+const capstoneGateKeyword = {{ capstone_gate_keyword | tojson }};
 
 function toggleSubtask(position, checked) {
     const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
@@ -652,6 +658,15 @@ function handleArtifactUpload(position) {
     if (!file) return;
 
     document.getElementById('artifact-filename').textContent = file.name;
+    const kwWarning = document.getElementById('artifact-keyword-warning');
+    if (kwWarning) {
+        if (artifactKeyword && !file.name.toLowerCase().includes(artifactKeyword.toLowerCase())) {
+            kwWarning.textContent = `⚠️ Dateiname sollte „${artifactKeyword}" enthalten.`;
+            kwWarning.style.display = '';
+        } else {
+            kwWarning.style.display = 'none';
+        }
+    }
     document.getElementById('artifact-status').textContent = 'Wird gelesen …';
     const feedbackBtn = document.getElementById('artifact-feedback-btn');
     feedbackBtn.style.display = 'none';
@@ -904,6 +919,15 @@ function adjustZoom(delta) {
         const name = fileInput.files[0] ? fileInput.files[0].name : '';
         filenameSpan.textContent = name;
         submitBtn.disabled = !name;
+        const kwWarning = document.getElementById('gate-keyword-warning');
+        if (kwWarning) {
+            if (capstoneGateKeyword && name && !name.toLowerCase().includes(capstoneGateKeyword.toLowerCase())) {
+                kwWarning.textContent = `⚠️ Dateiname sollte „${capstoneGateKeyword}" enthalten.`;
+                kwWarning.style.display = '';
+            } else {
+                kwWarning.style.display = 'none';
+            }
+        }
     });
 
     submitBtn.addEventListener('click', function() {
@@ -985,6 +1009,15 @@ function adjustZoom(delta) {
         const name = fileInput.files[0] ? fileInput.files[0].name : '';
         filenameSpan.textContent = name;
         submitBtn.disabled = !name;
+        const kwWarning = document.getElementById('inline-gate-keyword-warning');
+        if (kwWarning) {
+            if (inlineGateKeyword && name && !name.toLowerCase().includes(inlineGateKeyword.toLowerCase())) {
+                kwWarning.textContent = `⚠️ Dateiname sollte „${inlineGateKeyword}" enthalten.`;
+                kwWarning.style.display = '';
+            } else {
+                kwWarning.style.display = 'none';
+            }
+        }
     });
 
     submitBtn.addEventListener('click', function() {
