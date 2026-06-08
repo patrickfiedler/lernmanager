@@ -1745,22 +1745,28 @@ def assign_task_to_student(student_id, klasse_id, task_id, rolle='primary'):
         
 
 def get_practice_unlocked_task_ids(klasse_id):
-    """Return set of task_ids that are practice_unlocked for any student in this class."""
+    """Return set of task_ids unlocked for practice in this class."""
     with db_session() as conn:
         rows = conn.execute(
-            "SELECT DISTINCT task_id FROM student_task WHERE klasse_id = ? AND practice_unlocked = 1",
+            "SELECT task_id FROM class_practice_unlock WHERE klasse_id = ?",
             (klasse_id,)
         ).fetchall()
     return {r['task_id'] for r in rows}
 
 
 def set_practice_unlock_for_class(klasse_id, task_id, unlocked):
-    """Set practice_unlocked for all student_task rows matching this class+topic."""
+    """Insert or delete a class_practice_unlock row for this class+topic."""
     with db_session() as conn:
-        conn.execute(
-            "UPDATE student_task SET practice_unlocked = ? WHERE klasse_id = ? AND task_id = ?",
-            (1 if unlocked else 0, klasse_id, task_id)
-        )
+        if unlocked:
+            conn.execute(
+                "INSERT OR IGNORE INTO class_practice_unlock (klasse_id, task_id) VALUES (?, ?)",
+                (klasse_id, task_id)
+            )
+        else:
+            conn.execute(
+                "DELETE FROM class_practice_unlock WHERE klasse_id = ? AND task_id = ?",
+                (klasse_id, task_id)
+            )
 
 
 def assign_task_to_klasse(klasse_id, task_id, rolle='primary'):
@@ -3608,6 +3614,69 @@ def get_warmup_question_pool(student_id):
                     'question': q,
                     'topic_name': sub['topic_name'],
                     'completed_at': sub['completed_at']
+                })
+
+        # 3. Class-unlocked topics → questions for students in that class,
+        #    regardless of whether the topic was ever assigned to the student.
+        seen_task_ids = {(e['task_id'], e['subtask_id']) for e in pool}
+
+        unlocked_topics = conn.execute('''
+            SELECT DISTINCT t.id as task_id, t.name, t.quiz_json
+            FROM student_klasse sk
+            JOIN class_practice_unlock cpu ON cpu.klasse_id = sk.klasse_id
+            JOIN task t ON t.id = cpu.task_id
+            WHERE sk.student_id = ?
+              AND t.quiz_json IS NOT NULL AND t.quiz_json != ''
+        ''', (student_id,)).fetchall()
+
+        for topic in unlocked_topics:
+            if (topic['task_id'], None) in seen_task_ids:
+                continue
+            try:
+                quiz = json.loads(topic['quiz_json'])
+            except (json.JSONDecodeError, TypeError):
+                continue
+            for i, q in enumerate(quiz.get('questions', [])):
+                if q.get('type') in ('short_answer', 'long_answer'):
+                    continue
+                pool.append({
+                    'task_id': topic['task_id'],
+                    'subtask_id': None,
+                    'question_index': i,
+                    'question': q,
+                    'topic_name': topic['name']
+                })
+
+        unlocked_subtasks = conn.execute('''
+            SELECT DISTINCT sub.id as subtask_id, sub.task_id, sub.quiz_json, t.name as topic_name
+            FROM student_klasse sk
+            JOIN class_practice_unlock cpu ON cpu.klasse_id = sk.klasse_id
+            JOIN task t ON t.id = cpu.task_id
+            JOIN subtask sub ON sub.task_id = t.id
+            WHERE sk.student_id = ?
+              AND sub.quiz_json IS NOT NULL AND sub.quiz_json != ''
+              AND sub.reihenfolge > (
+                  SELECT MIN(s2.reihenfolge) FROM subtask s2
+                  WHERE s2.task_id = sub.task_id
+              )
+        ''', (student_id,)).fetchall()
+
+        for sub in unlocked_subtasks:
+            if (sub['task_id'], sub['subtask_id']) in seen_task_ids:
+                continue
+            try:
+                quiz = json.loads(sub['quiz_json'])
+            except (json.JSONDecodeError, TypeError):
+                continue
+            for i, q in enumerate(quiz.get('questions', [])):
+                if q.get('type') in ('short_answer', 'long_answer'):
+                    continue
+                pool.append({
+                    'task_id': sub['task_id'],
+                    'subtask_id': sub['subtask_id'],
+                    'question_index': i,
+                    'question': q,
+                    'topic_name': sub['topic_name']
                 })
 
     return pool
