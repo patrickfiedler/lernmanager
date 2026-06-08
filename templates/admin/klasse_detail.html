@@ -66,6 +66,24 @@
     </form>
 </div>
 
+<!-- Unlock practice questions for class -->
+<div class="card mb-2">
+    <div class="card-header">🔓 Üben-Modus: Fragen freischalten</div>
+    <form method="POST" action="{{ url_for('admin_klasse_ueben_freischalten', klasse_id=klasse.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="flex gap-1">
+            <select name="task_id" class="form-control" style="flex: 1;" required>
+                <option value="">-- Thema wählen --</option>
+                {% for task in tasks %}
+                <option value="{{ task.id }}">{{ task.fach }} ({{ task.stufe }}): {{ task.name }}</option>
+                {% endfor %}
+            </select>
+            <button type="submit" class="btn btn-secondary">Freischalten</button>
+        </div>
+    </form>
+    <small class="text-muted">Alle Quizfragen dieses Themas erscheinen im Üben-Modus der Schüler, ohne ihren Lernfortschritt zu ändern.</small>
+</div>
+
 <!-- Set Lernpfad for whole class -->
 <div class="card mb-2">
     <div class="card-header">🛤️ Lernpfad für alle setzen</div>

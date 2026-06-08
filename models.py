@@ -1744,6 +1744,15 @@ def assign_task_to_student(student_id, klasse_id, task_id, rolle='primary'):
         )
         
 
+def unlock_practice_for_class(klasse_id, task_id):
+    """Set practice_unlocked=1 for all student_task rows matching this class+topic."""
+    with db_session() as conn:
+        conn.execute(
+            "UPDATE student_task SET practice_unlocked = 1 WHERE klasse_id = ? AND task_id = ?",
+            (klasse_id, task_id)
+        )
+
+
 def assign_task_to_klasse(klasse_id, task_id, rolle='primary'):
     """Assign a topic to all students in a class.
 
@@ -3535,7 +3544,7 @@ def get_warmup_question_pool(student_id):
             SELECT DISTINCT t.id as task_id, t.name, t.quiz_json
             FROM student_task st
             JOIN task t ON st.task_id = t.id
-            WHERE st.student_id = ? AND st.abgeschlossen = 1
+            WHERE st.student_id = ? AND (st.abgeschlossen = 1 OR st.practice_unlocked = 1)
               AND t.quiz_json IS NOT NULL AND t.quiz_json != ''
         ''', (student_id,)).fetchall()
 
@@ -3566,7 +3575,7 @@ def get_warmup_question_pool(student_id):
             JOIN task t ON st.task_id = t.id
             JOIN subtask sub ON sub.task_id = t.id
             LEFT JOIN student_subtask ss ON ss.student_task_id = st.id AND ss.subtask_id = sub.id
-            WHERE st.student_id = ? AND (st.abgeschlossen = 1 OR ss.erledigt = 1)
+            WHERE st.student_id = ? AND (st.abgeschlossen = 1 OR st.practice_unlocked = 1 OR ss.erledigt = 1)
               AND sub.quiz_json IS NOT NULL AND sub.quiz_json != ''
               AND sub.reihenfolge > (
                   SELECT MIN(s2.reihenfolge) FROM subtask s2

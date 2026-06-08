@@ -505,6 +505,16 @@ def admin_klasse_sidequest_zuweisen(klasse_id):
     return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id))
 
 
+@app.route('/admin/klasse/<int:klasse_id>/ueben-freischalten', methods=['POST'])
+@admin_required
+def admin_klasse_ueben_freischalten(klasse_id):
+    task_id = request.form.get('task_id')
+    if task_id:
+        models.unlock_practice_for_class(klasse_id, int(task_id))
+        flash('Fragen für Üben-Modus freigeschaltet. ✅', 'success')
+    return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id))
+
+
 @app.route('/admin/klasse/<int:klasse_id>/lernpfad-setzen', methods=['POST'])
 @admin_required
 def admin_klasse_lernpfad(klasse_id):
