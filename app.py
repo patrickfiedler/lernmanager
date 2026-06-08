@@ -322,9 +322,11 @@ def admin_klasse_detail(klasse_id):
             s['queue_pos'], s['queue_total'] = queue_lookup[s['task_id']]
 
     sidequests = models.get_sidequests_for_klasse(klasse_id)
+    practice_unlocked_ids = models.get_practice_unlocked_task_ids(klasse_id)
     return render_template('admin/klasse_detail.html', klasse=klasse, students=students,
                            tasks=tasks, unterricht=unterricht, schedule=schedule,
-                           has_queue=bool(queue), sidequests=sidequests)
+                           has_queue=bool(queue), sidequests=sidequests,
+                           practice_unlocked_ids=practice_unlocked_ids)
 
 
 @app.route('/admin/klasse/<int:klasse_id>/llm-feedback', methods=['POST'])
@@ -509,9 +511,12 @@ def admin_klasse_sidequest_zuweisen(klasse_id):
 @admin_required
 def admin_klasse_ueben_freischalten(klasse_id):
     task_id = request.form.get('task_id')
+    action = request.form.get('action', 'unlock')
     if task_id:
-        models.unlock_practice_for_class(klasse_id, int(task_id))
-        flash('Fragen für Üben-Modus freigeschaltet. ✅', 'success')
+        unlocked = action == 'unlock'
+        models.set_practice_unlock_for_class(klasse_id, int(task_id), unlocked)
+        msg = 'Fragen freigeschaltet. ✅' if unlocked else 'Freischaltung aufgehoben.'
+        flash(msg, 'success')
     return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id))
 
 

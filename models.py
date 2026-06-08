@@ -1744,12 +1744,22 @@ def assign_task_to_student(student_id, klasse_id, task_id, rolle='primary'):
         )
         
 
-def unlock_practice_for_class(klasse_id, task_id):
-    """Set practice_unlocked=1 for all student_task rows matching this class+topic."""
+def get_practice_unlocked_task_ids(klasse_id):
+    """Return set of task_ids that are practice_unlocked for any student in this class."""
+    with db_session() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT task_id FROM student_task WHERE klasse_id = ? AND practice_unlocked = 1",
+            (klasse_id,)
+        ).fetchall()
+    return {r['task_id'] for r in rows}
+
+
+def set_practice_unlock_for_class(klasse_id, task_id, unlocked):
+    """Set practice_unlocked for all student_task rows matching this class+topic."""
     with db_session() as conn:
         conn.execute(
-            "UPDATE student_task SET practice_unlocked = 1 WHERE klasse_id = ? AND task_id = ?",
-            (klasse_id, task_id)
+            "UPDATE student_task SET practice_unlocked = ? WHERE klasse_id = ? AND task_id = ?",
+            (1 if unlocked else 0, klasse_id, task_id)
         )
 
 
