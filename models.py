@@ -221,9 +221,17 @@ def init_db():
                 abgeschlossen INTEGER NOT NULL DEFAULT 0,
                 manuell_abgeschlossen INTEGER NOT NULL DEFAULT 0,
                 rolle TEXT NOT NULL DEFAULT 'primary',  -- primary/sidequest
+                practice_unlocked INTEGER DEFAULT 0,
                 FOREIGN KEY (student_id) REFERENCES student(id) ON DELETE CASCADE,
                 FOREIGN KEY (klasse_id) REFERENCES klasse(id) ON DELETE CASCADE,
                 FOREIGN KEY (task_id) REFERENCES task(id) ON DELETE CASCADE
+            );
+
+            -- Practice questions unlocked for a whole class (per topic)
+            CREATE TABLE IF NOT EXISTS class_practice_unlock (
+                klasse_id INTEGER NOT NULL,
+                task_id INTEGER NOT NULL,
+                PRIMARY KEY (klasse_id, task_id)
             );
 
             -- Student sub-task completion
