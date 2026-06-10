@@ -35,6 +35,15 @@
             {% endfor %}
         </select>
     </form>
+    {% if selected_topic %}
+    <p class="text-muted mb-0" style="margin-top: 0.5rem;">
+        {% if shown_count < pool_size %}
+        {{ shown_count }} von {{ pool_size }} Fragen werden angezeigt — weitere Fragen kommen in der nächsten Runde.
+        {% else %}
+        Alle {{ pool_size }} Fragen dieses Themas werden angezeigt.
+        {% endif %}
+    </p>
+    {% endif %}
 </div>
 {% endif %}
 

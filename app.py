@@ -2937,11 +2937,13 @@ def student_practice():
     if mode == 'thema' and topic_slug:
         pool = [q for q in pool if slugify(q['topic_name']) == topic_slug]
 
-    # Select questions based on mode
+    # Select questions based on mode. Thema mode is deliberate focused review,
+    # so it gets longer sessions than the quick-dip random/schwaechen modes.
     if mode == 'schwaechen':
         questions = models.select_warmup_questions(student_id, pool, difficulty='hard', count=5, respect_intervals=False)
     else:
-        questions = models.select_warmup_questions(student_id, pool, difficulty='mixed', count=5, respect_intervals=False)
+        count = 10 if mode == 'thema' and topic_slug else 5
+        questions = models.select_warmup_questions(student_id, pool, difficulty='mixed', count=count, respect_intervals=False)
 
     if not questions:
         flash('Keine passenden Fragen gefunden.', 'info')
@@ -2952,6 +2954,7 @@ def student_practice():
     return render_template('student/practice.html', student=student,
                            questions_json=questions_json, mode=mode,
                            topic_names=topic_names, selected_topic=topic_slug,
+                           pool_size=len(pool), shown_count=len(questions),
                            practice_sessions_today=practice_sessions_today)
 
 
