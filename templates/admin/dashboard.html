@@ -59,6 +59,19 @@
                 <span class="toggle-slider"></span>
             </label>
         </div>
+        <div class="flex flex-between flex-center" style="margin-top: 0.75rem;">
+            <div>
+                <strong>Klarnamen in der Schüleransicht</strong>
+                <p class="text-muted" style="margin: 0.25rem 0 0 0; font-size: 0.875rem;">
+                    Wenn aktiviert, sehen Schüler ihren Vornamen (z.B. "Hallo, Emma!").
+                    Wenn deaktiviert, sehen sie ihr Pseudonym (z.B. "happypanda").
+                </p>
+            </div>
+            <label class="toggle-switch">
+                <input type="checkbox" name="student_clear_names" {% if student_clear_names %}checked{% endif %} onchange="this.form.submit()">
+                <span class="toggle-slider"></span>
+            </label>
+        </div>
     </form>
 </div>
 {% endblock %}

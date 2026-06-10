@@ -39,7 +39,7 @@
                     </details>
                 {% elif session.student_id %}
                     <a href="{{ url_for('student_settings') }}">⚙️ Einstellungen</a>
-                    <span>👤 {{ session.student_name }}</span>
+                    <span>👤 {{ student_display_name }}</span>
                 {% endif %}
                 <a href="{{ url_for('logout') }}">Abmelden</a>
             </div>

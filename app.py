@@ -77,6 +77,27 @@ def b64encode_filter(text):
 
 # ============ Helpers ============
 
+def _student_display_name():
+    """Name a logged-in student sees for themselves (nav, greeting, flash).
+
+    App-wide setting STUDENT_CLEAR_NAMES decides: clear name (vorname) or
+    pseudonym (username). Both are stored in the session at login; sessions
+    created before student_username existed lack that key and fall back
+    to the clear name until the next login.
+    """
+    if app.config.get('STUDENT_CLEAR_NAMES', True):
+        return session.get('student_name', '')
+    return session.get('student_username') or session.get('student_name', '')
+
+
+@app.context_processor
+def inject_student_display_name():
+    """Make student_display_name available in all templates."""
+    if 'student_id' in session:
+        return {'student_display_name': _student_display_name()}
+    return {}
+
+
 def validate_quiz_json(raw):
     """Validate and return quiz JSON string, or None if empty. Raises ValueError on invalid JSON."""
     if not raw or not raw.strip():
@@ -223,6 +244,7 @@ def login():
         if student:
             session['student_id'] = student['id']
             session['student_name'] = student['vorname']
+            session['student_username'] = student['username']
             # Log login event
             models.log_analytics_event(
                 event_type='login',
@@ -230,7 +252,7 @@ def login():
                 user_type='student',
                 metadata={'username': student['username']}
             )
-            flash(f'Willkommen, {student["username"]}! 👋', 'success')
+            flash(f'Willkommen, {_student_display_name()}! 👋', 'success')
             return redirect(url_for('student_warmup'))
 
         flash('Benutzername oder Passwort stimmt nicht.', 'danger')
@@ -261,11 +283,13 @@ def admin_dashboard():
         if schedule and schedule['weekday'] == today_weekday:
             klassen_heute.append(klasse)
 
-    # Get page view logging setting
+    # Get app-wide settings for the settings card
     log_page_views = models.get_bool_setting('log_page_views', default=True)
+    student_clear_names = models.get_bool_setting('student_clear_names', default=True)
 
     return render_template('admin/dashboard.html', klassen=klassen, tasks=tasks,
-                          klassen_heute=klassen_heute, log_page_views=log_page_views)
+                          klassen_heute=klassen_heute, log_page_views=log_page_views,
+                          student_clear_names=student_clear_names)
 
 
 @app.route('/admin/settings', methods=['POST'])
@@ -275,11 +299,14 @@ def admin_update_settings():
     log_page_views = 'log_page_views' in request.form
     models.set_bool_setting('log_page_views', log_page_views)
 
-    # Update cached value
-    app.config['LOG_PAGE_VIEWS'] = log_page_views
+    student_clear_names = 'student_clear_names' in request.form
+    models.set_bool_setting('student_clear_names', student_clear_names)
 
-    flash(f"Einstellung gespeichert: Seitenaufrufe protokollieren {'aktiviert' if log_page_views else 'deaktiviert'}",
-          'success')
+    # Update cached values
+    app.config['LOG_PAGE_VIEWS'] = log_page_views
+    app.config['STUDENT_CLEAR_NAMES'] = student_clear_names
+
+    flash('Einstellungen gespeichert. ✅', 'success')
     return redirect(url_for('admin_dashboard'))
 
 
@@ -3150,6 +3177,7 @@ def init_app():
 
     # Load app settings into config (cached for performance)
     app.config['LOG_PAGE_VIEWS'] = models.get_bool_setting('log_page_views', default=True)
+    app.config['STUDENT_CLEAR_NAMES'] = models.get_bool_setting('student_clear_names', default=True)
     print(f"Page view logging: {'enabled' if app.config['LOG_PAGE_VIEWS'] else 'disabled'}")
 
     # Create default admin if not exists
