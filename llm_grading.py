@@ -31,6 +31,11 @@ FALLBACK_RESULT = {
     "source": "fallback"
 }
 
+# NOTE: Use a NON-reasoning model here (e.g. Mistral-Nemo-Instruct-2407). Reasoning
+# models like Qwen3.6 spend the whole token budget on internal reasoning (~700 tokens,
+# 8-10s) and blow the 5s quiz timeout. OVH offers no working way to disable thinking
+# (both extra_body chat_template_kwargs and the /no_think soft switch are ignored).
+
 
 def _get_client():
     """Create OpenAI-compatible client."""
@@ -38,6 +43,23 @@ def _get_client():
     if not config.LLM_BASE_URL:
         raise ValueError("LLM_BASE_URL must be set")
     return OpenAI(base_url=config.LLM_BASE_URL, api_key=config.LLM_API_KEY)
+
+
+def _message_text(response):
+    """Safely extract stripped text content from a chat completion response.
+
+    Reasoning models (e.g. Qwen3.6) can return message.content = None when the
+    token budget is spent on internal reasoning before any answer is emitted.
+    Must never raise — return "" whenever choices / message / content is missing.
+    """
+    if not response.choices:
+        return ""
+    choice = response.choices[0]
+    content = choice.message.content
+    if not content:
+        print(f"LLM: empty content (finish_reason={choice.finish_reason})", file=sys.stderr)
+        return ""
+    return content.strip()
 
 
 def _call_llm(question_text, expected_or_rubric, student_answer):
@@ -63,7 +85,7 @@ def _call_llm(question_text, expected_or_rubric, student_answer):
         ],
         timeout=config.LLM_TIMEOUT,
     )
-    text = response.choices[0].message.content.strip() if response.choices else ""
+    text = _message_text(response)
     if not text:
         print("LLM grading: empty response", file=sys.stderr)
         return None
@@ -113,7 +135,7 @@ def filter_noise_answers(question_text: str, answers: list) -> list:
             ],
             timeout=config.LLM_TIMEOUT,
         )
-        text = response.choices[0].message.content.strip() if response.choices else ""
+        text = _message_text(response)
         if not text:
             return []
         parsed = json.loads(text)
@@ -170,7 +192,7 @@ def grade_artifact_checklist(extracted_text: str, criteria: list) -> list:
             ],
             timeout=config.LLM_ARTIFACT_TIMEOUT,
         )
-        text = response.choices[0].message.content.strip() if response.choices else ""
+        text = _message_text(response)
 
         if not text:
             print("LLM artifact checklist: empty response", file=sys.stderr)
