@@ -2298,6 +2298,7 @@ def student_artifact_feedback(slug, position):
 
     body = request.get_json(silent=True) or {}
     anonymized_text = body.get('text', '').strip()
+    filename = body.get('filename', '')
     if not anonymized_text:
         return jsonify({'error': 'Kein Text empfangen'}), 400
 
@@ -2309,10 +2310,21 @@ def student_artifact_feedback(slug, position):
     if checks_remaining <= 0:
         return jsonify({'rate_limited': True}), 429
 
-    feedback = llm_grading.grade_artifact_checklist(anonymized_text, criteria)
+    # Filename is checked deterministically, never sent to the LLM (see conventions.md).
+    feedback = []
+    expected_filename = graded.get('expected_filename')
+    if expected_filename and filename:
+        full_name = f"{student['vorname']} {student['nachname']}" if student else ''
+        feedback.append(artifact_checker.check_filename(
+            filename, expected_filename, (student or {}).get('vorname', ''), full_name
+        ))
+
+    llm_feedback = llm_grading.grade_artifact_checklist(anonymized_text, criteria)
+    feedback.extend(llm_feedback)
+    if llm_feedback:
+        models.record_llm_usage(student_id, 'artifact_feedback', 0)
     if feedback:
         models.save_artifact_feedback(student_id, subtask['id'], feedback)
-        models.record_llm_usage(student_id, 'artifact_feedback', 0)
 
     checks_remaining = models.get_artifact_checks_remaining(student_id)
     response = {'feedback': feedback, 'checks_remaining': checks_remaining}
@@ -2399,11 +2411,21 @@ def student_artifact_gate_check(slug, position):
                     anonymized = artifact_processor.anonymize(f"[Dateiname: {filename}]\n\n{extracted}", full_name, klasse['name'])
                     student_path = (student or {}).get('lernpfad') or 'wanderweg'
                     criteria = _get_criteria_for_path(graded, student_path)
-                    if criteria:
-                        feedback = llm_grading.grade_artifact_checklist(anonymized, criteria)
-                        if feedback:
-                            models.save_artifact_feedback(student_id, subtask['id'], feedback)
-                            models.record_llm_usage(student_id, 'artifact_feedback', 0)
+
+                    # Filename is checked deterministically, never sent to the LLM (see conventions.md).
+                    feedback = []
+                    expected_filename = graded.get('expected_filename')
+                    if expected_filename:
+                        feedback.append(artifact_checker.check_filename(
+                            filename, expected_filename, (student or {}).get('vorname', ''), full_name
+                        ))
+
+                    llm_feedback = llm_grading.grade_artifact_checklist(anonymized, criteria) if criteria else []
+                    feedback.extend(llm_feedback)
+                    if llm_feedback:
+                        models.record_llm_usage(student_id, 'artifact_feedback', 0)
+                    if feedback:
+                        models.save_artifact_feedback(student_id, subtask['id'], feedback)
                         checks_remaining = models.get_artifact_checks_remaining(student_id)
                         result['llm_feedback'] = feedback
                         result['checks_remaining'] = checks_remaining

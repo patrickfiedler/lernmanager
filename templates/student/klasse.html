@@ -376,7 +376,7 @@
             {% for item in capstone_gate_llm_feedback %}
             <div class="checklist-item" style="border-left:3px solid {% if item.passed %}#10b981{% else %}#ef4444{% endif %}; padding:0.5rem 0.75rem; margin:0.4rem 0; background:#f9fafb;">
                 <div style="font-weight:500;">{% if item.passed %}✅{% else %}❌{% endif %} {{ item.criterion }}</div>
-                {% if item.note %}<div style="font-size:0.875rem;color:#4b5563;margin-top:0.2rem;">💬 {{ item.note }} <span style="font-size:0.75rem;color:#6b7280;margin-left:0.4rem;">✨ KI</span></div>{% endif %}
+                {% if item.note %}<div style="font-size:0.875rem;color:#4b5563;margin-top:0.2rem;">💬 {{ item.note }}{% if item.source != 'deterministic' %} <span style="font-size:0.75rem;color:#6b7280;margin-left:0.4rem;">✨ KI</span>{% endif %}</div>{% endif %}
             </div>
             {% endfor %}
             <p style="font-size:0.8rem;color:#6b7280;margin-top:0.5rem;">Note wird von der Lehrkraft gesetzt.</p>
@@ -649,6 +649,7 @@ function handleDotKeydown(event) {
 // --- Artifact upload flow ---
 
 let artifactPreviewText = '';
+let artifactPreviewFilename = '';
 
 function handleArtifactUpload(position) {
     const fileInput = document.getElementById('artifact-file-input');
@@ -689,6 +690,7 @@ function handleArtifactUpload(position) {
             return;
         }
         artifactPreviewText = data.preview_text;
+        artifactPreviewFilename = data.filename;
         document.getElementById('artifact-preview-text').textContent = data.preview_text;
         document.getElementById('artifact-preview-filename').textContent = data.filename;
         document.getElementById('artifact-preview-details').style.display = '';
@@ -712,7 +714,7 @@ function requestArtifactFeedback(position) {
     fetch(`/schueler/thema/${topicSlug}/aufgabe-${position}/artefakt/feedback`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
-        body: JSON.stringify({text: artifactPreviewText}),
+        body: JSON.stringify({text: artifactPreviewText, filename: artifactPreviewFilename}),
     })
     .then(r => r.json())
     .then(data => {
@@ -757,7 +759,7 @@ function renderArtifactChecklist(feedback, extractedText) {
         const borderColor = item.passed ? '#10b981' : '#ef4444';
         return `<div class="checklist-item" style="border-left: 3px solid ${borderColor}; padding: 0.5rem 0.75rem; margin: 0.4rem 0; background: #f9fafb;">
             <div style="font-weight:500;">${icon} ${escapeHtml(item.criterion)}</div>
-            ${item.note ? `<div style="font-size:0.875rem; color:#4b5563; margin-top:0.2rem;">💬 ${escapeHtml(item.note)} <span style="font-size:0.75rem; color:#6b7280; margin-left:0.4rem;">✨ KI</span></div>` : ''}
+            ${item.note ? `<div style="font-size:0.875rem; color:#4b5563; margin-top:0.2rem;">💬 ${escapeHtml(item.note)}${item.source !== 'deterministic' ? ' <span style="font-size:0.75rem; color:#6b7280; margin-left:0.4rem;">✨ KI</span>' : ''}</div>` : ''}
         </div>`;
     }).join('');
     const transparencyBlock = extractedText ? `
@@ -955,7 +957,7 @@ function adjustZoom(delta) {
                             const color = item.passed ? '#10b981' : '#ef4444';
                             return `<div class="checklist-item" style="border-left:3px solid ${color};padding:0.5rem 0.75rem;margin:0.4rem 0;background:#f9fafb;">
                                 <div style="font-weight:500;">${icon} ${escapeHtml(item.criterion)}</div>
-                                ${item.note ? `<div style="font-size:0.875rem;color:#4b5563;margin-top:0.2rem;">💬 ${escapeHtml(item.note)} <span style="font-size:0.75rem;color:#6b7280;margin-left:0.4rem;">✨ KI</span></div>` : ''}
+                                ${item.note ? `<div style="font-size:0.875rem;color:#4b5563;margin-top:0.2rem;">💬 ${escapeHtml(item.note)}${item.source !== 'deterministic' ? ' <span style="font-size:0.75rem;color:#6b7280;margin-left:0.4rem;">✨ KI</span>' : ''}</div>` : ''}
                             </div>`;
                         }).join('');
                         const rateNote = (data.checks_remaining !== undefined && data.checks_remaining <= 3 && data.checks_remaining > 0)
@@ -1042,7 +1044,7 @@ function adjustZoom(delta) {
                             const color = item.passed ? '#10b981' : '#ef4444';
                             return `<div class="checklist-item" style="border-left:3px solid ${color};padding:0.5rem 0.75rem;margin:0.4rem 0;background:#f9fafb;">
                                 <div style="font-weight:500;">${icon} ${escapeHtml(item.criterion)}</div>
-                                ${item.note ? `<div style="font-size:0.875rem;color:#4b5563;margin-top:0.2rem;">💬 ${escapeHtml(item.note)} <span style="font-size:0.75rem;color:#6b7280;margin-left:0.4rem;">✨ KI</span></div>` : ''}
+                                ${item.note ? `<div style="font-size:0.875rem;color:#4b5563;margin-top:0.2rem;">💬 ${escapeHtml(item.note)}${item.source !== 'deterministic' ? ' <span style="font-size:0.75rem;color:#6b7280;margin-left:0.4rem;">✨ KI</span>' : ''}</div>` : ''}
                             </div>`;
                         }).join('');
                         const rateNote = (data.checks_remaining !== undefined && data.checks_remaining <= 3 && data.checks_remaining > 0)

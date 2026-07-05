@@ -27,6 +27,25 @@ def _fuzzy_match(a: str, b: str) -> float:
     return SequenceMatcher(None, a.lower().strip(), b.lower().strip()).ratio()
 
 
+def check_filename(filename: str, expected_filename: str, student_vorname: str = '', student_name: str = '') -> dict:
+    """Deterministic filename check — never sent to the LLM (see conventions.md).
+
+    Compares the uploaded filename's stem against expected_filename with
+    [Vorname]/[Name] placeholders substituted for the student's real name.
+    Shaped like an LLM checklist item so it can be spliced into the same
+    feedback list; the caller marks it non-LLM (e.g. source='deterministic').
+    """
+    stem = filename.rsplit('.', 1)[0] if '.' in filename else filename
+    expected = expected_filename.replace('[Vorname]', student_vorname).replace('[Name]', student_name)
+    passed = stem.strip().lower() == expected.strip().lower()
+    note = (
+        "Der Dateiname ist korrekt."
+        if passed
+        else f'Der Dateiname sollte „{expected}" sein (ohne Dateiendung), gefunden: „{stem}".'
+    )
+    return {'criterion': f'Dateiname ist „{expected}"', 'passed': passed, 'note': note, 'source': 'deterministic'}
+
+
 def _result(issues: list, matches: list = None, warnings: list = None) -> dict:
     passed = not issues
     message = "Abgabe sieht vollständig aus ✓" if passed else "Abgabe noch nicht vollständig"
