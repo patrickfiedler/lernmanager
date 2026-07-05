@@ -31,10 +31,14 @@ FALLBACK_RESULT = {
     "source": "fallback"
 }
 
-# NOTE: Use a NON-reasoning model here (e.g. Mistral-Nemo-Instruct-2407). Reasoning
-# models like Qwen3.6 spend the whole token budget on internal reasoning (~700 tokens,
-# 8-10s) and blow the 5s quiz timeout. OVH offers no working way to disable thinking
-# (both extra_body chat_template_kwargs and the /no_think soft switch are ignored).
+# NOTE: Qwen3.6 is a reasoning model — pass reasoning_effort="none" on every call or it
+# spends the whole token budget on internal reasoning and returns content=None on both
+# the 5s quiz timeout and the 60s artifact timeout. (Model-level switches don't work:
+# extra_body chat_template_kwargs and the /no_think prompt hint are both ignored.)
+# reasoning_effort is OpenAI's own param (officially a Responses API concept), not a
+# formal part of the OpenAI-compatible spec — OVH's serving stack happens to honor it
+# on Chat Completions too. If this breaks after an OVH backend change or on another
+# provider, that's why.
 
 
 def _get_client():
@@ -84,6 +88,7 @@ def _call_llm(question_text, expected_or_rubric, student_answer):
             {"role": "user", "content": user_prompt},
         ],
         timeout=config.LLM_TIMEOUT,
+        reasoning_effort="none",
     )
     text = _message_text(response)
     if not text:
@@ -134,6 +139,7 @@ def filter_noise_answers(question_text: str, answers: list) -> list:
                 {"role": "user", "content": user_prompt},
             ],
             timeout=config.LLM_TIMEOUT,
+            reasoning_effort="none",
         )
         text = _message_text(response)
         if not text:
@@ -191,6 +197,7 @@ def grade_artifact_checklist(extracted_text: str, criteria: list) -> list:
                 {"role": "user", "content": user_prompt},
             ],
             timeout=config.LLM_ARTIFACT_TIMEOUT,
+            reasoning_effort="none",
         )
         text = _message_text(response)
 
