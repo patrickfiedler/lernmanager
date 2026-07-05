@@ -1035,12 +1035,32 @@ function adjustZoom(delta) {
                     return;
                 }
                 if (data.passed) {
-                    let html = `<p class="gate-success-msg">✓ Abgabe erfolgreich geprüft!</p>`;
-                    html += renderGateChecklist(data.matches, data.details, data.warnings, filenameItem);
-                    html += `<button class="btn btn-primary mt-1" onclick="location.reload()">Weiter →</button>`;
-                    resultDiv.innerHTML = html;
-                    resultDiv.style.display = 'block';
-                    submitBtn.style.display = 'none';
+                    if (data.llm_feedback && data.llm_feedback.length) {
+                        // Show LLM checklist before continuing
+                        const items = data.llm_feedback.map(item => {
+                            const icon = item.passed ? '✅' : '❌';
+                            const color = item.passed ? '#10b981' : '#ef4444';
+                            return `<div class="checklist-item" style="border-left:3px solid ${color};padding:0.5rem 0.75rem;margin:0.4rem 0;background:#f9fafb;">
+                                <div style="font-weight:500;">${icon} ${escapeHtml(item.criterion)}</div>
+                                ${item.note ? `<div style="font-size:0.875rem;color:#4b5563;margin-top:0.2rem;">💬 ${escapeHtml(item.note)} <span style="font-size:0.75rem;color:#6b7280;margin-left:0.4rem;">✨ KI</span></div>` : ''}
+                            </div>`;
+                        }).join('');
+                        const rateNote = (data.checks_remaining !== undefined && data.checks_remaining <= 3 && data.checks_remaining > 0)
+                            ? `<p style="font-size:0.8rem;color:#6b7280;">Noch ${data.checks_remaining} KI-Check${data.checks_remaining === 1 ? '' : 's'} übrig.</p>` : '';
+                        resultDiv.innerHTML = `<p class="gate-success-msg" style="margin-bottom:0.5rem;">✓ Abgabe geprüft!</p>
+                            <div class="checklist-header">KI-Feedback:</div>${items}
+                            <p style="font-size:0.8rem;color:#6b7280;margin-top:0.5rem;">Note wird von der Lehrkraft gesetzt.</p>${rateNote}
+                            <button class="btn btn-primary mt-1" onclick="location.reload()">Weiter →</button>`;
+                        resultDiv.style.display = 'block';
+                        submitBtn.style.display = 'none';
+                    } else {
+                        let html = `<p class="gate-success-msg">✓ Abgabe erfolgreich geprüft!</p>`;
+                        html += renderGateChecklist(data.matches, data.details, data.warnings, filenameItem);
+                        html += `<button class="btn btn-primary mt-1" onclick="location.reload()">Weiter →</button>`;
+                        resultDiv.innerHTML = html;
+                        resultDiv.style.display = 'block';
+                        submitBtn.style.display = 'none';
+                    }
                 } else {
                     let html = `<p class="gate-fail-msg">${data.message}</p>`;
                     html += renderGateChecklist(data.matches, data.details, data.warnings, filenameItem);
