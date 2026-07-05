@@ -6,6 +6,7 @@ Only question text, rubric, and student answer are sent to the API — never any
 
 import json
 import sys
+import time
 import config
 import models
 
@@ -251,3 +252,85 @@ def grade_answer(question_text, expected_or_rubric, student_answer, student_id=N
     except Exception as e:
         print(f"LLM grading error: {type(e).__name__}: {e}", file=sys.stderr)
         return FALLBACK_RESULT
+
+
+def diagnostic_call(kind, **fields):
+    """Run a raw diagnostic LLM call for the admin LLM-check page.
+
+    Unlike grade_answer/filter_noise_answers/grade_artifact_checklist, this never
+    swallows errors into a fallback — it returns full diagnostics so an admin can
+    confirm the configured model+params actually work in production.
+
+    Args:
+        kind: "quiz" | "noise" | "artifact"
+        fields: kind-specific input fields (see TODO(human) below for the mapping)
+
+    Returns: dict with keys: elapsed, model, finish_reason, completion_tokens,
+        content, parsed (dict or None), error (str or None)
+    """
+    client = _get_client()
+
+    if kind == "quiz":
+        system_prompt = SYSTEM_PROMPT
+        user_prompt = (
+            f"Frage: {fields['question_text']}\n"
+            f"Erwartete Antwort / Bewertungskriterien: {fields['expected_or_rubric']}\n"
+            f"Schülerantwort: {fields['student_answer']}"
+        )
+        max_tokens, timeout = 150, config.LLM_TIMEOUT
+    elif kind == "noise":
+        system_prompt = NOISE_SYSTEM_PROMPT
+        answers = fields["answers"]
+        numbered = "\n".join(f"{i}. {a['text']!r} ({a['count']}×)" for i, a in enumerate(answers))
+        user_prompt = f"Frage: {fields['question_text']}\n\nAntworten:\n{numbered}"
+        max_tokens, timeout = 200, config.LLM_TIMEOUT
+    elif kind == "artifact":
+        system_prompt = ARTIFACT_CHECKLIST_SYSTEM_PROMPT
+        numbered = "\n".join(f"{i+1}. {c}" for i, c in enumerate(fields["criteria"]))
+        user_prompt = f"Kriterien:\n{numbered}\n\nDokument:\n{fields['extracted_text']}"
+        max_tokens, timeout = 1200, config.LLM_ARTIFACT_TIMEOUT
+    else:
+        raise ValueError(f"Unknown diagnostic kind: {kind!r}")
+
+    start = time.time()
+    try:
+        response = client.chat.completions.create(
+            model=config.LLM_MODEL,
+            max_tokens=max_tokens,
+            temperature=0,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            timeout=timeout,
+            reasoning_effort="none",
+        )
+        elapsed = time.time() - start
+        choice = response.choices[0]
+        content = choice.message.content
+        parsed = None
+        if content:
+            try:
+                parsed = json.loads(content)
+            except json.JSONDecodeError:
+                pass
+        return {
+            "elapsed": round(elapsed, 2),
+            "model": config.LLM_MODEL,
+            "finish_reason": choice.finish_reason,
+            "completion_tokens": response.usage.completion_tokens if response.usage else None,
+            "content": content,
+            "parsed": parsed,
+            "error": None,
+        }
+    except Exception as e:
+        return {
+            "elapsed": round(time.time() - start, 2),
+            "model": config.LLM_MODEL,
+            "finish_reason": None,
+            "completion_tokens": None,
+            "content": None,
+            "parsed": None,
+            "error": f"{type(e).__name__}: {e}",
+        }

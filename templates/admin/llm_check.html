@@ -1,0 +1,81 @@
+{% extends 'base.html' %}
+
+{% block title %}LLM-Check - Lernmanager{% endblock %}
+
+{% block content %}
+<h1 class="mb-2">🔧 LLM-Check</h1>
+
+<div class="card mb-2">
+    <div class="card-header">⚙️ Aktuelle Konfiguration</div>
+    <table style="padding: 1rem; width: 100%;">
+        <tr><td class="text-muted">Aktiviert</td><td>{{ '✅ Ja' if llm_enabled else '❌ Nein' }}</td></tr>
+        <tr><td class="text-muted">Modell</td><td><code>{{ llm_model }}</code></td></tr>
+        <tr><td class="text-muted">Provider</td><td>{{ llm_provider }}</td></tr>
+        <tr><td class="text-muted">Endpoint</td><td><code>{{ llm_base_url or '(nicht gesetzt)' }}</code></td></tr>
+        <tr><td class="text-muted">Timeout Quiz/Rauschfilter</td><td>{{ llm_timeout }}s</td></tr>
+        <tr><td class="text-muted">Timeout Artefakt-Checkliste</td><td>{{ llm_artifact_timeout }}s</td></tr>
+    </table>
+</div>
+
+<div class="card mb-2">
+    <div class="card-header">🧪 Testanfrage</div>
+    <form method="POST" style="padding: 1rem;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+        <label class="mb-1" style="display: block;">
+            Testtyp
+            <select name="kind" onchange="this.form.submit()" class="form-control">
+                <option value="quiz" {% if kind == 'quiz' %}selected{% endif %}>Quiz-Bewertung (kurze Antwort)</option>
+                <option value="noise" {% if kind == 'noise' %}selected{% endif %}>Rauschfilter (Antwortverteilung)</option>
+                <option value="artifact" {% if kind == 'artifact' %}selected{% endif %}>Artefakt-Checkliste</option>
+            </select>
+        </label>
+
+        {% if kind == 'quiz' %}
+        <label class="mb-1" style="display: block;">Frage
+            <input type="text" name="question_text" value="{{ form.question_text }}" class="form-control">
+        </label>
+        <label class="mb-1" style="display: block;">Erwartete Antwort / Bewertungskriterien
+            <input type="text" name="expected_or_rubric" value="{{ form.expected_or_rubric }}" class="form-control">
+        </label>
+        <label class="mb-1" style="display: block;">Schülerantwort
+            <input type="text" name="student_answer" value="{{ form.student_answer }}" class="form-control">
+        </label>
+        {% elif kind == 'noise' %}
+        <label class="mb-1" style="display: block;">Frage
+            <input type="text" name="question_text" value="{{ form.question_text }}" class="form-control">
+        </label>
+        <label class="mb-1" style="display: block;">Antworten (eine pro Zeile, Format "Text: Anzahl")
+            <textarea name="answers_text" rows="4" class="form-control">{{ form.answers_text }}</textarea>
+        </label>
+        {% elif kind == 'artifact' %}
+        <label class="mb-1" style="display: block;">Kriterien (eine pro Zeile)
+            <textarea name="criteria_text" rows="4" class="form-control">{{ form.criteria_text }}</textarea>
+        </label>
+        <label class="mb-1" style="display: block;">Dokumenttext
+            <textarea name="extracted_text" rows="6" class="form-control">{{ form.extracted_text }}</textarea>
+        </label>
+        {% endif %}
+
+        <button type="submit" class="btn btn-primary mt-1">Testen</button>
+    </form>
+</div>
+
+{% if result %}
+<div class="card">
+    <div class="card-header">📋 Ergebnis</div>
+    <table style="padding: 1rem; width: 100%;">
+        <tr><td class="text-muted">Dauer</td><td>{{ result.elapsed }}s</td></tr>
+        <tr><td class="text-muted">Modell</td><td><code>{{ result.model }}</code></td></tr>
+        <tr><td class="text-muted">finish_reason</td>
+            <td>{{ result.finish_reason or '–' }}{% if result.finish_reason == 'length' %} ⚠️ Antwort abgeschnitten (Token-Limit erreicht){% endif %}</td></tr>
+        <tr><td class="text-muted">completion_tokens</td><td>{{ result.completion_tokens if result.completion_tokens is not none else '–' }}</td></tr>
+        <tr><td class="text-muted">Fehler</td><td>{{ result.error or '–' }}</td></tr>
+    </table>
+    <div style="padding: 0 1rem 1rem 1rem;">
+        <strong>Rohantwort</strong>
+        <pre style="background: var(--color-bg-secondary, #f5f5f5); padding: 0.75rem; border-radius: 4px; white-space: pre-wrap;">{{ result.content or '(leer)' }}</pre>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

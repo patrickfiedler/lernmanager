@@ -1652,6 +1652,62 @@ def admin_errors_clear():
     return redirect(url_for('admin_errors'))
 
 
+# ============ Admin: LLM Check ============
+
+LLM_CHECK_DEFAULTS = {
+    'quiz': {
+        'question_text': 'Was ist ein Computervirus?',
+        'expected_or_rubric': 'Schadprogramm, verbreitet sich selbst',
+        'student_answer': 'Ein Vieres ist ein schädliches Programm.',
+    },
+    'noise': {
+        'question_text': 'Was ist ein Cookie?',
+        'answers_text': 'speichert Website-Infos: 5\nasdf: 3\nkeine Ahnung: 2',
+    },
+    'artifact': {
+        'criteria_text': 'Nennt mindestens 3 Beispiele für persönliche Daten\nErklärt was ein sicheres Passwort ausmacht',
+        'extracted_text': 'Persönliche Daten sind zum Beispiel Name, Adresse und Geburtsdatum. Ein gutes Passwort ist lang und enthält Zahlen, Buchstaben und Sonderzeichen.',
+    },
+}
+
+
+@app.route('/admin/llm-check', methods=['GET', 'POST'])
+@admin_required
+def admin_llm_check():
+    """Diagnostic page: show LLM config and run live test requests."""
+    kind = request.form.get('kind', 'quiz')
+    form = {**LLM_CHECK_DEFAULTS.get(kind, {}), **{k: v for k, v in request.form.items() if k != 'kind'}}
+    result = None
+
+    if request.method == 'POST':
+        if kind == 'noise':
+            answers = []
+            for line in form.get('answers_text', '').splitlines():
+                if ':' in line:
+                    text, count = line.rsplit(':', 1)
+                    answers.append({'text': text.strip(), 'count': int(count.strip() or 0)})
+            result = llm_grading.diagnostic_call('noise', question_text=form['question_text'], answers=answers)
+        elif kind == 'artifact':
+            criteria = [c.strip() for c in form.get('criteria_text', '').splitlines() if c.strip()]
+            result = llm_grading.diagnostic_call('artifact', extracted_text=form['extracted_text'], criteria=criteria)
+        else:
+            result = llm_grading.diagnostic_call(
+                'quiz',
+                question_text=form['question_text'],
+                expected_or_rubric=form['expected_or_rubric'],
+                student_answer=form['student_answer'],
+            )
+
+    return render_template('admin/llm_check.html',
+                          llm_enabled=config.LLM_ENABLED,
+                          llm_model=config.LLM_MODEL,
+                          llm_provider=config.LLM_PROVIDER,
+                          llm_base_url=config.LLM_BASE_URL,
+                          llm_timeout=config.LLM_TIMEOUT,
+                          llm_artifact_timeout=config.LLM_ARTIFACT_TIMEOUT,
+                          kind=kind, form=form, result=result)
+
+
 # ============ Admin: Analytics ============
 
 @app.route('/admin/analytics')
