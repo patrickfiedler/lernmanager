@@ -1,6 +1,7 @@
 import os
 import io
 import re
+import sys
 import json
 import uuid
 import zipfile
@@ -2408,8 +2409,9 @@ def student_artifact_gate_check(slug, position):
                         result['checks_remaining'] = checks_remaining
                         if models.get_effective_transparency_mode(student_id, klasse['id']):
                             result['extracted_text'] = anonymized
-                except Exception:
-                    pass  # LLM failure is non-blocking; gate result stands
+                except Exception as e:
+                    print(f"Inline gate LLM feedback error: {type(e).__name__}: {e}", file=sys.stderr)
+                    # LLM failure is non-blocking; gate result stands
 
     return jsonify(result)
 

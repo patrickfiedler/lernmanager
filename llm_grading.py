@@ -155,7 +155,9 @@ def filter_noise_answers(question_text: str, answers: list) -> list:
 
 ARTIFACT_CHECKLIST_SYSTEM_PROMPT = (
     "Du prüfst ein Schülerdokument anhand einer nummerierten Kriterienliste. "
-    "Antworte NUR mit JSON: {\"results\": [{\"criterion\": \"...\", \"passed\": true/false, \"note\": \"...\"}]} "
+    "Antworte NUR mit JSON: {\"results\": [{\"passed\": true/false, \"note\": \"...\"}]} — "
+    "genau ein Eintrag pro Kriterium, in der gleichen Reihenfolge wie die nummerierte Liste. "
+    "Wiederhole den Kriterientext NICHT im note-Feld — schreibe nur dein eigenes kurzes Feedback. "
     "Schreibe jede note in einfacher Sprache für Schüler (10-12 Jahre): "
     "Bei passed=true: Ein kurzer Satz, der bestätigt was gefunden wurde. "
     "Bei passed=false: Ein kurzer Satz, der erklärt was fehlt und was der Schüler konkret tun soll. "
@@ -208,14 +210,20 @@ def grade_artifact_checklist(extracted_text: str, criteria: list) -> list:
 
         parsed = json.loads(text)
         results = parsed.get("results", parsed) if isinstance(parsed, dict) else parsed
+        results = [r for r in results if isinstance(r, dict)]
+
+        if len(results) != len(criteria):
+            print(f"LLM artifact checklist: expected {len(criteria)} results, got {len(results)}", file=sys.stderr)
+
+        # Match positionally — the original criterion text (not the model's echo of it) is
+        # always used, so criteria containing quotes/special chars can't break JSON escaping.
         return [
             {
-                "criterion": str(r.get("criterion", "")),
+                "criterion": criterion,
                 "passed": bool(r.get("passed", False)),
                 "note": str(r.get("note", "")),
             }
-            for r in results
-            if isinstance(r, dict)
+            for criterion, r in zip(criteria, results)
         ]
     except Exception as e:
         print(f"LLM artifact checklist error: {type(e).__name__}: {e}", file=sys.stderr)
