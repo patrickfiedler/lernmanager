@@ -161,6 +161,9 @@
                 <span class="material-icon">📄</span>
                 <a class="mat-label" href="{{ url_for('download_material', material_id=mat.id) }}" target="_blank">{{ mat.beschreibung or mat.pfad }}</a>
                 {% endif %}
+                {% if mat.attribution %}
+                <small class="text-muted">© {{ mat.attribution }}</small>
+                {% endif %}
                 <input class="mat-input form-control" type="text" value="{{ mat.beschreibung or mat.pfad }}" style="display:none; width: 220px;" data-mat-id="{{ mat.id }}">
                 <button class="btn btn-sm mat-save" style="display:none;" onclick="saveMaterialName({{ mat.id }})">✓</button>
                 <button class="btn btn-sm mat-cancel" style="display:none;" onclick="cancelMaterialEdit({{ mat.id }})">✗</button>
@@ -235,6 +238,9 @@
                 <div class="form-group">
                     <input type="text" name="beschreibung" class="form-control" placeholder="Beschreibung (optional)">
                 </div>
+                <div class="form-group">
+                    <input type="text" name="attribution" class="form-control" placeholder="Quelle/Urheber (optional)">
+                </div>
                 <button type="submit" class="btn btn-secondary">Link hinzufügen</button>
             </form>
         </div>
@@ -247,6 +253,9 @@
                 </div>
                 <div class="form-group">
                     <input type="text" name="beschreibung" class="form-control" placeholder="Beschreibung (optional)">
+                </div>
+                <div class="form-group">
+                    <input type="text" name="attribution" class="form-control" placeholder="Quelle/Urheber (optional)">
                 </div>
                 <button type="submit" class="btn btn-secondary">Hochladen</button>
             </form>

@@ -355,7 +355,8 @@ def _create_materials(task_id, materials_data, subtask_id_by_position):
             task_id,
             mat['typ'],
             mat['pfad'],
-            mat.get('beschreibung', '')
+            mat.get('beschreibung', ''),
+            mat.get('attribution')
         )
         if mat.get('subtask_indices'):
             assigned_ids = [

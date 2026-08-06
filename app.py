@@ -1195,8 +1195,9 @@ def admin_thema_aufgaben(task_id):
 def admin_thema_material_link(task_id):
     url = request.form['url'].strip()
     beschreibung = request.form.get('beschreibung', '').strip()
+    attribution = request.form.get('attribution', '').strip() or None
     if url:
-        models.create_material(task_id, 'link', url, beschreibung)
+        models.create_material(task_id, 'link', url, beschreibung, attribution)
         flash('Link hinzugefügt. ✅', 'success')
     return redirect(url_for('admin_thema_detail', task_id=task_id))
 
@@ -1239,7 +1240,8 @@ def admin_thema_material_upload(task_id):
 
         # Add to database
         beschreibung = request.form.get('beschreibung', '').strip()
-        models.create_material(task_id, 'datei', filename, beschreibung)
+        attribution = request.form.get('attribution', '').strip() or None
+        models.create_material(task_id, 'datei', filename, beschreibung, attribution)
 
         flash('Datei hochgeladen. ✅', 'success')
 

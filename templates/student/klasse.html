@@ -356,6 +356,9 @@
                     {# Non-viewable files: download/new tab only #}
                     <a href="{{ url_for('download_material', material_id=mat.id) }}" target="_blank">{{ label }}</a>
                     {% endif %}
+                    {% if mat.attribution %}
+                    <span class="material-attribution text-muted">© {{ mat.attribution }}</span>
+                    {% endif %}
                 </li>
                 {% endfor %}
             </ul>

@@ -197,6 +197,7 @@ def init_db():
                 typ TEXT NOT NULL,  -- 'link' or 'datei'
                 pfad TEXT NOT NULL,  -- URL or file path
                 beschreibung TEXT,
+                attribution TEXT,  -- photographer/source credit
                 FOREIGN KEY (task_id) REFERENCES task(id) ON DELETE CASCADE
             );
 
@@ -1266,7 +1267,8 @@ def export_task_to_dict(task_id):
             mat_data = {
                 'typ': material['typ'],
                 'pfad': material['pfad'],
-                'beschreibung': material['beschreibung']
+                'beschreibung': material['beschreibung'],
+                'attribution': material.get('attribution')
             }
             # Include subtask_indices if material has specific assignments
             assigned_subtask_ids = material_assignments.get(material['id'])
@@ -1637,14 +1639,23 @@ def get_material(material_id):
         return dict(row) if row else None
 
 
-def create_material(task_id, typ, pfad, beschreibung=''):
+def create_material(task_id, typ, pfad, beschreibung='', attribution=None):
     """Create a material."""
     with db_session() as conn:
         cursor = conn.execute(
-            "INSERT INTO material (task_id, typ, pfad, beschreibung) VALUES (?, ?, ?, ?)",
-            (task_id, typ, pfad, beschreibung)
+            "INSERT INTO material (task_id, typ, pfad, beschreibung, attribution) VALUES (?, ?, ?, ?, ?)",
+            (task_id, typ, pfad, beschreibung, attribution)
         )
         return cursor.lastrowid
+
+
+def update_material_attribution(material_id, attribution):
+    """Update a material's attribution credit."""
+    with db_session() as conn:
+        conn.execute(
+            "UPDATE material SET attribution = ? WHERE id = ?",
+            (attribution, material_id)
+        )
 
 
 def delete_material(material_id):
