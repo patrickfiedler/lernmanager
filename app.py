@@ -2478,6 +2478,20 @@ def _handle_quiz(student_id, student, task, slug, quiz_json_str, subtask_id=None
     student_task_id = task['id']
     quiz = _filter_quiz_for_path(json.loads(quiz_json_str), student)
 
+    # Filter out short_answer (LLM-required) if rate limit exceeded. Must run
+    # before the POST/GET split so grading indices always match what was
+    # displayed - fill_blank is kept, it grades via exact match with LLM only
+    # as fallback.
+    llm_available = models.check_llm_rate_limit(student_id)
+    if not llm_available:
+        quiz['questions'] = [q for q in quiz['questions'] if q.get('type', 'multiple_choice') != 'short_answer']
+
+    # Guard against a quiz left with no questions for this student (all
+    # path-restricted away, or all short_answer while rate-limited).
+    if not quiz['questions']:
+        flash('Für dich sind aktuell keine Fragen in diesem Quiz verfügbar. Versuche es später erneut.', 'warning')
+        return redirect(url_for('student_klasse', slug=slug))
+
     if request.method == 'POST':
         # Grade the quiz using the mapping from hidden fields
         punkte = 0
@@ -2567,21 +2581,6 @@ def _handle_quiz(student_id, student, task, slug, quiz_json_str, subtask_id=None
         if subtask_id and position:
             return redirect(url_for('student_quiz_result_subtask', slug=slug, position=position))
         return redirect(url_for('student_quiz_result', slug=slug))
-
-    # GET: guard against a quiz whose questions are all path-restricted away
-    # from this student (misconfiguration - should not normally happen).
-    if not quiz['questions']:
-        flash('Für dich sind in diesem Quiz aktuell keine Fragen verfügbar.', 'warning')
-        return redirect(url_for('student_klasse', slug=slug))
-
-    # GET: Filter out short_answer (LLM-required) if rate limit exceeded.
-    # fill_blank is kept — it grades via exact match, LLM is only a fallback.
-    llm_available = models.check_llm_rate_limit(student_id)
-    if not llm_available:
-        quiz['questions'] = [q for q in quiz['questions'] if q.get('type', 'multiple_choice') != 'short_answer']
-        if not quiz['questions']:
-            flash('Du hast dein Quiz-Limit erreicht. Versuche es später erneut.', 'warning')
-            return redirect(url_for('student_klasse', slug=slug))
 
     # Shuffle questions and answers for display
     import random as quiz_random
