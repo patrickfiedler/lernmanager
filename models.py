@@ -1420,6 +1420,25 @@ def is_subtask_required_for_path(subtask, student_path):
     return PATH_ORDER[subtask_path] <= PATH_ORDER[student_path]
 
 
+def is_question_visible_for_path(question, student_path):
+    """Whether a quiz question should be shown to a student on student_path.
+
+    Cumulative like is_subtask_required_for_path, but no path_model dimension
+    (a question is either shown or not). No 'path' key -> visible to everyone,
+    so existing quizzes without per-question path tags are unaffected.
+    """
+    question_path = question.get('path')
+    if not question_path or question_path not in VALID_PATHS:
+        return True
+    if not student_path or student_path not in VALID_PATHS:
+        return True
+    if student_path == 'seilbahn':
+        return question_path == 'seilbahn'
+    if question_path == 'seilbahn':
+        return False
+    return PATH_ORDER[question_path] <= PATH_ORDER[student_path]
+
+
 # ============ Subtask functions ============
 
 def get_subtasks(task_id):

@@ -136,6 +136,21 @@ def _resolve_subtask_by_position(subtasks, position):
     return None
 
 
+def _filter_quiz_for_path(quiz, student):
+    """Drop quiz questions tagged with a path the student's path doesn't cover.
+
+    Must run identically on every load of a given quiz definition (initial
+    display, grading POST, and result review) so that question indices stay
+    aligned across requests - see is_question_visible_for_path.
+    """
+    student_path = (student or {}).get('lernpfad') or 'wanderweg'
+    quiz['questions'] = [
+        q for q in quiz['questions']
+        if models.is_question_visible_for_path(q, student_path)
+    ]
+    return quiz
+
+
 def _build_display_quiz(quiz):
     """Transform quiz JSON (text/options) to template format (question/answers)."""
     return {
@@ -2461,7 +2476,7 @@ def _get_criteria_for_path(graded_artifact, student_path):
 def _handle_quiz(student_id, student, task, slug, quiz_json_str, subtask_id=None, position=None):
     """Shared quiz logic for topic and subtask quizzes."""
     student_task_id = task['id']
-    quiz = json.loads(quiz_json_str)
+    quiz = _filter_quiz_for_path(json.loads(quiz_json_str), student)
 
     if request.method == 'POST':
         # Grade the quiz using the mapping from hidden fields
@@ -2552,6 +2567,12 @@ def _handle_quiz(student_id, student, task, slug, quiz_json_str, subtask_id=None
         if subtask_id and position:
             return redirect(url_for('student_quiz_result_subtask', slug=slug, position=position))
         return redirect(url_for('student_quiz_result', slug=slug))
+
+    # GET: guard against a quiz whose questions are all path-restricted away
+    # from this student (misconfiguration - should not normally happen).
+    if not quiz['questions']:
+        flash('Für dich sind in diesem Quiz aktuell keine Fragen verfügbar.', 'warning')
+        return redirect(url_for('student_klasse', slug=slug))
 
     # GET: Filter out short_answer (LLM-required) if rate limit exceeded.
     # fill_blank is kept — it grades via exact match, LLM is only a fallback.
@@ -2683,7 +2704,7 @@ def student_quiz_result(slug):
 
     latest = attempts[0]
     ever_passed = any(a['bestanden'] for a in attempts)
-    quiz = json.loads(task['quiz_json'])
+    quiz = _filter_quiz_for_path(json.loads(task['quiz_json']), student)
     antworten = json.loads(latest['antworten_json']) if latest['antworten_json'] else {}
 
     next_topic = None
@@ -2739,7 +2760,7 @@ def student_quiz_result_subtask(slug, position):
     with models.db_session() as conn:
         subtask_row = conn.execute("SELECT quiz_json FROM subtask WHERE id = ?", (subtask['id'],)).fetchone()
 
-    quiz = json.loads(subtask_row['quiz_json'])
+    quiz = _filter_quiz_for_path(json.loads(subtask_row['quiz_json']), student)
     antworten = json.loads(latest['antworten_json']) if latest['antworten_json'] else {}
 
     next_position = position + 1 if position < len(subtasks) else None
