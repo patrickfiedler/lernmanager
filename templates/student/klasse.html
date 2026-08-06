@@ -146,6 +146,7 @@
                 <p class="gate-desc">Lade deine aktuelle Datei hoch, um deinen Fortschritt zu überprüfen.</p>
                 {% endif %}
                 {% if inline_gate_formats %}<p class="gate-formats">Akzeptiert: {% for f in inline_gate_formats %}<code>{{ f }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</p>{% endif %}
+                {% if current_subtask_file %}<p class="artifact-file-link">📄 Deine Datei: <a href="{{ url_for('download_student_artifact', student_id=student.id, subtask_id=current_subtask.id) }}">{{ current_subtask_file.original_filename }}</a></p>{% endif %}
                 <div class="gate-upload-row">
                     <input type="file" id="inline-gate-file-input" class="artifact-file-input"
                            {% if inline_gate_formats %}accept="{{ inline_gate_formats|join(',') }}"{% endif %}>
@@ -181,6 +182,7 @@
                     <div class="artifact-accepted-formats">Akzeptiert:
                         {% for fmt in graded_artifact.get('format', []) %}<code>{{ fmt }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
                     </div>
+                    <p id="artifact-file-link" class="artifact-file-link" {% if not current_subtask_file %}style="display:none;"{% endif %}>📄 Deine Datei: <a id="artifact-file-link-a" href="{{ url_for('download_student_artifact', student_id=student.id, subtask_id=active_subtask.id) }}">{{ current_subtask_file.original_filename if current_subtask_file else '' }}</a></p>
                     <div class="artifact-file-row">
                         <input type="file"
                                id="artifact-file-input"
@@ -391,6 +393,7 @@
         <p class="gate-desc">Lade deine Datei hoch – sie muss geprüft sein, bevor du das Thema abschließen kannst.</p>
         {% endif %}
         {% if gate_formats %}<p class="gate-formats">Akzeptiert: {% for f in gate_formats %}<code>{{ f }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</p>{% endif %}
+        {% if capstone_gate_file %}<p class="artifact-file-link">📄 Deine Datei: <a href="{{ url_for('download_student_artifact', student_id=student.id, subtask_id=capstone_gate.id) }}">{{ capstone_gate_file.original_filename }}</a></p>{% endif %}
         <div class="gate-upload-row">
             <input type="file" id="gate-file-input" class="artifact-file-input"
                    {% if gate_formats %}accept="{{ gate_formats|join(',') }}"{% endif %}>
@@ -700,6 +703,12 @@ function handleArtifactUpload(position) {
         document.getElementById('artifact-preview-details').open = true;
         document.getElementById('artifact-feedback-btn').style.display = '';
         document.getElementById('artifact-status').textContent = '';
+        if (data.file_url) {
+            const linkEl = document.getElementById('artifact-file-link');
+            document.getElementById('artifact-file-link-a').href = data.file_url;
+            document.getElementById('artifact-file-link-a').textContent = data.filename;
+            linkEl.style.display = '';
+        }
     })
     .catch(() => {
         document.getElementById('artifact-status').textContent = '⚠️ Fehler beim Lesen der Datei.';

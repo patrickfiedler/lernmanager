@@ -184,5 +184,21 @@
     {% endfor %}
 </div>
 {% endif %}
+
+<!-- Uploaded Artifact Files (latest per Aufgabe) -->
+{% if artifact_files %}
+<div class="card mt-2">
+    <div class="card-header">📄 Hochgeladene Dateien ({{ artifact_files|length }})</div>
+    {% for entry in artifact_files %}
+    <div style="padding: 0.6rem 0.75rem; border-bottom: 1px solid #e5e7eb; display: flex; justify-content: space-between; align-items: center;">
+        <div style="font-size: 0.9rem;">
+            <span style="color:#6b7280;">{{ entry.uploaded_at[:16] }}</span> —
+            {{ entry.task_name }}, Aufgabe {{ entry.subtask_pos }}
+        </div>
+        <a href="{{ url_for('download_student_artifact', student_id=student.id, subtask_id=entry.subtask_id) }}" class="btn btn-secondary" style="font-size:0.85rem; padding:0.3rem 0.6rem;">{{ entry.original_filename }} ↓</a>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
 {% endblock %}
 

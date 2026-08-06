@@ -4,6 +4,7 @@ import re
 import sys
 import json
 import uuid
+import glob
 import zipfile
 import traceback
 from functools import wraps
@@ -427,7 +428,7 @@ def admin_klasse_alle_schueler_loeschen(klasse_id):
     if confirmation != klasse['name']:
         flash('Bestätigung fehlgeschlagen — Klassenname stimmt nicht überein.', 'danger')
         return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id))
-    models.delete_all_students_in_klasse(klasse_id)
+    _unlink_artifact_files(models.delete_all_students_in_klasse(klasse_id))
     flash(f'Alle Schülerdaten der Klasse „{klasse["name"]}" wurden gelöscht (DSGVO).', 'success')
     return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id))
 
@@ -619,6 +620,7 @@ def admin_schueler_detail(student_id):
         student_tasks[klasse['id']] = models.get_student_task(student_id, klasse['id'])
 
     artifact_feedback = models.get_all_artifact_feedback_for_student(student_id)
+    artifact_files = models.get_all_student_artifact_files_for_student(student_id)
     data_summary = models.get_student_data_summary(student_id)
 
     return render_template('admin/schueler_detail.html',
@@ -628,13 +630,14 @@ def admin_schueler_detail(student_id):
                            tasks=tasks,
                            student_tasks=student_tasks,
                            artifact_feedback=artifact_feedback,
+                           artifact_files=artifact_files,
                            data_summary=data_summary)
 
 
 @app.route('/admin/schueler/<int:student_id>/loeschen', methods=['POST'])
 @admin_required
 def admin_schueler_loeschen(student_id):
-    models.delete_student(student_id)
+    _unlink_artifact_files(models.delete_student(student_id))
     flash('Schüler gelöscht.', 'success')
     return redirect(request.referrer or url_for('admin_klassen'))
 
@@ -2147,6 +2150,16 @@ def student_klasse(slug):
         except (json.JSONDecodeError, TypeError):
             pass
 
+    # Latest uploaded artifact file, if any -- shown as a download link next to the upload widget
+    current_subtask_file = None
+    if current_subtask:
+        current_subtask_file = models.get_student_artifact_file(student_id, current_subtask['id'])
+    capstone_gate_file = None
+    if capstone_gate and (not current_subtask or current_subtask is not subtasks[-1]):
+        capstone_gate_file = models.get_student_artifact_file(student_id, subtasks[-1]['id'])
+    elif capstone_gate:
+        capstone_gate_file = current_subtask_file
+
     return render_template('student/klasse.html',
                            student=student,
                            klasse=klasse,
@@ -2171,7 +2184,9 @@ def student_klasse(slug):
                            inline_gate_keyword=inline_gate_keyword,
                            capstone_gate_keyword=capstone_gate_keyword,
                            artifact_gate_required=bool(klasse.get('artifact_gate_required', 1)),
-                           student_path=student.get('lernpfad') if student else None)
+                           student_path=student.get('lernpfad') if student else None,
+                           current_subtask_file=current_subtask_file,
+                           capstone_gate_file=capstone_gate_file)
 
 
 @app.route('/schueler/thema/<slug>/aufgabe/<int:position>', methods=['POST'])
@@ -2232,6 +2247,33 @@ def student_toggle_subtask(slug, position):
     return jsonify({'status': 'ok', 'task_complete': False})
 
 
+def _artifact_upload_dir():
+    """Computed fresh each call (not a frozen constant) so tests can override config.UPLOAD_FOLDER."""
+    return os.path.join(config.UPLOAD_FOLDER, 'artefakte')
+
+
+def _save_artifact_file(student_id, subtask_id, file_bytes, original_filename):
+    """Persist the latest artifact upload for a student+subtask, overwriting any previous file."""
+    ext = ('.' + original_filename.rsplit('.', 1)[-1].lower()) if '.' in original_filename else ''
+    upload_dir = _artifact_upload_dir()
+    os.makedirs(upload_dir, exist_ok=True)
+    for old in glob.glob(os.path.join(upload_dir, f'{student_id}_{subtask_id}.*')):
+        os.remove(old)
+    disk_filename = f'{student_id}_{subtask_id}{ext}'
+    with open(os.path.join(upload_dir, disk_filename), 'wb') as out:
+        out.write(file_bytes)
+    models.save_student_artifact_file(student_id, subtask_id, original_filename, disk_filename)
+
+
+def _unlink_artifact_files(disk_filenames):
+    """Remove stored artifact files from disk (call after models.delete_student/delete_all_students_in_klasse)."""
+    upload_dir = _artifact_upload_dir()
+    for disk_filename in disk_filenames:
+        filepath = os.path.join(upload_dir, disk_filename)
+        if os.path.exists(filepath):
+            os.remove(filepath)
+
+
 @app.route('/schueler/thema/<slug>/aufgabe-<int:position>/artefakt/vorschau', methods=['POST'])
 @student_required
 def student_artifact_preview(slug, position):
@@ -2266,14 +2308,15 @@ def student_artifact_preview(slug, position):
     if allowed_formats and ext not in allowed_formats:
         return jsonify({'error': f'Erwartet: {", ".join(allowed_formats)}'}), 400
 
-    file_bytes = f.read()
-    if ext == '.pptx':
-        file_bytes = artifact_processor.strip_pptx_metadata(file_bytes)
+    raw_bytes = f.read()
+    extract_bytes = artifact_processor.strip_pptx_metadata(raw_bytes) if ext == '.pptx' else raw_bytes
 
     try:
-        extracted = artifact_processor.extract_artifact(file_bytes, filename)
+        extracted = artifact_processor.extract_artifact(extract_bytes, filename)
     except Exception as e:
         return jsonify({'error': f'Datei konnte nicht gelesen werden: {e}'}), 400
+
+    _save_artifact_file(student_id, subtask['id'], raw_bytes, filename)
 
     student = models.get_student(student_id)
     full_name = f"{student['vorname']} {student['nachname']}" if student else ''
@@ -2284,6 +2327,8 @@ def student_artifact_preview(slug, position):
         'preview_text': anonymized,
         'filename': filename,
         'subtask_id': subtask['id'],
+        'file_saved': True,
+        'file_url': url_for('download_student_artifact', student_id=student_id, subtask_id=subtask['id']),
     })
 
 
@@ -2388,6 +2433,11 @@ def student_artifact_gate_check(slug, position):
     except Exception as e:
         return jsonify({'error': f'Datei konnte nicht gelesen werden: {e}'}), 400
 
+    # Saved regardless of pass/fail -- "latest submission", not "latest passing submission"
+    _save_artifact_file(student_id, subtask['id'], file_bytes, filename)
+    result['file_saved'] = True
+    result['file_url'] = url_for('download_student_artifact', student_id=student_id, subtask_id=subtask['id'])
+
     already_passed = bool(subtask.get('artifact_gate_passed'))
     if not already_passed or result['passed']:
         models.save_artifact_gate_result(task['id'], subtask['id'], result['passed'])
@@ -2453,6 +2503,24 @@ def student_artifact_gate_check(slug, position):
                     # LLM failure is non-blocking; gate result stands
 
     return jsonify(result)
+
+
+@app.route('/artefakt-datei/<int:student_id>/<int:subtask_id>/download')
+def download_student_artifact(student_id, subtask_id):
+    """Download the latest artifact upload for a student+subtask. Owner (student) or admin only."""
+    if session.get('student_id') != student_id and 'admin_id' not in session:
+        abort(403)
+    record = models.get_student_artifact_file(student_id, subtask_id)
+    if not record:
+        abort(404)
+    upload_dir = _artifact_upload_dir()
+    filepath = os.path.join(upload_dir, record['disk_filename'])
+    if not os.path.exists(filepath):
+        abort(404)
+    return send_from_directory(
+        upload_dir, record['disk_filename'],
+        as_attachment=True, download_name=record['original_filename']
+    )
 
 
 def _get_criteria_for_path(graded_artifact, student_path):

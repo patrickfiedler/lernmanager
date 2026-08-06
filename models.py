@@ -521,6 +521,22 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_gate_attempt_student_subtask
             ON artifact_gate_attempt(student_id, subtask_id);
 
+            -- Latest uploaded artifact file per (student, subtask) -- overwritten on re-upload
+            CREATE TABLE IF NOT EXISTS student_artifact_file (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_id INTEGER NOT NULL,
+                subtask_id INTEGER NOT NULL,
+                original_filename TEXT NOT NULL,
+                disk_filename TEXT NOT NULL,
+                uploaded_at TEXT NOT NULL,
+                UNIQUE(student_id, subtask_id),
+                FOREIGN KEY (student_id) REFERENCES student(id),
+                FOREIGN KEY (subtask_id) REFERENCES subtask(id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_student_artifact_file_student_subtask
+            ON student_artifact_file(student_id, subtask_id);
+
             -- ============ Warmup / Spaced Repetition ============
 
             -- Per-student per-question stats for spaced repetition
@@ -819,8 +835,11 @@ def move_student_to_klasse(student_id, from_klasse_id, to_klasse_id):
 
 
 def delete_student(student_id):
-    """Delete a student and all associated data."""
+    """Delete a student and all associated data. Returns disk filenames of removed artifact uploads (caller must unlink)."""
     with db_session() as conn:
+        disk_filenames = [r[0] for r in conn.execute(
+            "SELECT disk_filename FROM student_artifact_file WHERE student_id = ?", (student_id,)
+        ).fetchall()]
         # Tables without ON DELETE CASCADE must be cleaned up explicitly
         conn.execute(
             "DELETE FROM analytics_events WHERE user_id = ? AND user_type = 'student'",
@@ -828,17 +847,21 @@ def delete_student(student_id):
         )
         conn.execute("DELETE FROM unterricht_student WHERE student_id = ?", (student_id,))
         conn.execute("DELETE FROM artifact_feedback WHERE student_id = ?", (student_id,))
+        conn.execute("DELETE FROM student_artifact_file WHERE student_id = ?", (student_id,))
         conn.execute("DELETE FROM student WHERE id = ?", (student_id,))
+    return disk_filenames
 
 
 def delete_all_students_in_klasse(klasse_id):
-    """Delete all students in a class (DSGVO year-end cleanup)."""
+    """Delete all students in a class (DSGVO year-end cleanup). Returns disk filenames of removed artifact uploads."""
     with db_session() as conn:
         rows = conn.execute(
             "SELECT student_id FROM student_klasse WHERE klasse_id = ?", (klasse_id,)
         ).fetchall()
+    disk_filenames = []
     for row in rows:
-        delete_student(row['student_id'])
+        disk_filenames.extend(delete_student(row['student_id']))
+    return disk_filenames
 
 
 def get_student_data_summary(student_id):
@@ -3549,6 +3572,64 @@ def get_artifact_gate_attempts_for_student(student_id):
             'timestamp_local': r['timestamp_local'],
             'passed': bool(r['passed']),
             'details': json.loads(r['details_json']),
+            'task_name': r['task_name'],
+            'subtask_pos': r['subtask_pos'],
+        }
+        for r in rows
+    ]
+
+
+# --- Student artifact file (latest upload, overwritten on re-upload) ---
+
+def save_student_artifact_file(student_id, subtask_id, original_filename, disk_filename, timezone='Europe/Berlin'):
+    """Store/replace the latest uploaded file record for a student+subtask."""
+    uploaded_at = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
+    with db_session() as conn:
+        conn.execute(
+            "INSERT INTO student_artifact_file (student_id, subtask_id, original_filename, disk_filename, uploaded_at) "
+            "VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT(student_id, subtask_id) DO UPDATE SET "
+            "original_filename = excluded.original_filename, "
+            "disk_filename = excluded.disk_filename, "
+            "uploaded_at = excluded.uploaded_at",
+            (student_id, subtask_id, original_filename, disk_filename, uploaded_at)
+        )
+
+
+def get_student_artifact_file(student_id, subtask_id):
+    """Return the stored file record for a student+subtask, or None."""
+    with db_session() as conn:
+        row = conn.execute(
+            "SELECT original_filename, disk_filename, uploaded_at FROM student_artifact_file "
+            "WHERE student_id = ? AND subtask_id = ?",
+            (student_id, subtask_id)
+        ).fetchone()
+    if not row:
+        return None
+    return {
+        'original_filename': row['original_filename'],
+        'disk_filename': row['disk_filename'],
+        'uploaded_at': row['uploaded_at'],
+    }
+
+
+def get_all_student_artifact_files_for_student(student_id):
+    """Return all stored artifact files for a student, newest first, with task/subtask context."""
+    with db_session() as conn:
+        rows = conn.execute(
+            "SELECT saf.subtask_id, saf.original_filename, saf.uploaded_at, "
+            "       t.name as task_name, s.reihenfolge as subtask_pos "
+            "FROM student_artifact_file saf "
+            "JOIN subtask s ON s.id = saf.subtask_id "
+            "JOIN task t ON t.id = s.task_id "
+            "WHERE saf.student_id = ? ORDER BY saf.uploaded_at DESC",
+            (student_id,)
+        ).fetchall()
+    return [
+        {
+            'subtask_id': r['subtask_id'],
+            'original_filename': r['original_filename'],
+            'uploaded_at': r['uploaded_at'],
             'task_name': r['task_name'],
             'subtask_pos': r['subtask_pos'],
         }

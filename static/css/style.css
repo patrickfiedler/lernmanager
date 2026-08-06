@@ -1736,6 +1736,8 @@ tr.unsaved-row td {
 }
 .gate-success-msg { color: #16a34a; margin: 0; }
 .gate-desc, .gate-formats { font-size: 0.875rem; color: #4b5563; margin-bottom: 0.4rem; }
+
+.artifact-file-link { font-size: 0.875rem; color: #4b5563; margin-bottom: 0.5rem; }
 .gate-upload-row { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
 .gate-result { margin-top: 0.75rem; }
 .gate-fail-msg { font-weight: 600; color: #b45309; margin-bottom: 0.25rem; }
