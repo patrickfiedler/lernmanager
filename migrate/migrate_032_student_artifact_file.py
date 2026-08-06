@@ -3,7 +3,11 @@
 Database Migration 032: Student artifact file storage
 
 Adds:
-  - student_artifact_file: latest uploaded artifact file per (student, subtask)
+  - student_artifact_file: latest uploaded artifact file per (student, task/unit)
+
+Keyed by task (unit), not subtask: units use the "gradual artifact building"
+pattern (docs/shared/mbi/content-design.md) -- one growing document uploaded
+at each checkpoint, not a separate file per checkpoint.
 """
 
 import os
@@ -39,18 +43,20 @@ def migrate():
         CREATE TABLE IF NOT EXISTS student_artifact_file (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             student_id INTEGER NOT NULL,
-            subtask_id INTEGER NOT NULL,
+            task_id INTEGER NOT NULL,
+            last_subtask_id INTEGER NOT NULL,
             original_filename TEXT NOT NULL,
             disk_filename TEXT NOT NULL,
             uploaded_at TEXT NOT NULL,
-            UNIQUE(student_id, subtask_id),
+            UNIQUE(student_id, task_id),
             FOREIGN KEY (student_id) REFERENCES student(id),
-            FOREIGN KEY (subtask_id) REFERENCES subtask(id)
+            FOREIGN KEY (task_id) REFERENCES task(id),
+            FOREIGN KEY (last_subtask_id) REFERENCES subtask(id)
         )
     """)
     cursor.execute("""
-        CREATE INDEX IF NOT EXISTS idx_student_artifact_file_student_subtask
-        ON student_artifact_file(student_id, subtask_id)
+        CREATE INDEX IF NOT EXISTS idx_student_artifact_file_student_task
+        ON student_artifact_file(student_id, task_id)
     """)
     conn.commit()
     print("✓ Table and index created")

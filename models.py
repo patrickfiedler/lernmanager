@@ -521,21 +521,26 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_gate_attempt_student_subtask
             ON artifact_gate_attempt(student_id, subtask_id);
 
-            -- Latest uploaded artifact file per (student, subtask) -- overwritten on re-upload
+            -- Latest uploaded artifact file per (student, task/unit) -- overwritten on re-upload.
+            -- Keyed by task, not subtask: units use the "gradual artifact building" pattern
+            -- (docs/shared/mbi/content-design.md) -- one growing document per unit, uploaded
+            -- fresh at each checkpoint, not a separate file per checkpoint.
             CREATE TABLE IF NOT EXISTS student_artifact_file (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 student_id INTEGER NOT NULL,
-                subtask_id INTEGER NOT NULL,
+                task_id INTEGER NOT NULL,
+                last_subtask_id INTEGER NOT NULL,
                 original_filename TEXT NOT NULL,
                 disk_filename TEXT NOT NULL,
                 uploaded_at TEXT NOT NULL,
-                UNIQUE(student_id, subtask_id),
+                UNIQUE(student_id, task_id),
                 FOREIGN KEY (student_id) REFERENCES student(id),
-                FOREIGN KEY (subtask_id) REFERENCES subtask(id)
+                FOREIGN KEY (task_id) REFERENCES task(id),
+                FOREIGN KEY (last_subtask_id) REFERENCES subtask(id)
             );
 
-            CREATE INDEX IF NOT EXISTS idx_student_artifact_file_student_subtask
-            ON student_artifact_file(student_id, subtask_id);
+            CREATE INDEX IF NOT EXISTS idx_student_artifact_file_student_task
+            ON student_artifact_file(student_id, task_id);
 
             -- ============ Warmup / Spaced Repetition ============
 
@@ -3579,30 +3584,33 @@ def get_artifact_gate_attempts_for_student(student_id):
     ]
 
 
-# --- Student artifact file (latest upload, overwritten on re-upload) ---
+# --- Student artifact file (latest upload per unit, overwritten on re-upload) ---
+# Keyed by task (unit), not subtask -- see "gradual artifact building" pattern,
+# docs/shared/mbi/content-design.md. One growing document per unit.
 
-def save_student_artifact_file(student_id, subtask_id, original_filename, disk_filename, timezone='Europe/Berlin'):
-    """Store/replace the latest uploaded file record for a student+subtask."""
+def save_student_artifact_file(student_id, task_id, subtask_id, original_filename, disk_filename, timezone='Europe/Berlin'):
+    """Store/replace the latest uploaded file record for a student+task. subtask_id records which checkpoint triggered this upload."""
     uploaded_at = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
     with db_session() as conn:
         conn.execute(
-            "INSERT INTO student_artifact_file (student_id, subtask_id, original_filename, disk_filename, uploaded_at) "
-            "VALUES (?, ?, ?, ?, ?) "
-            "ON CONFLICT(student_id, subtask_id) DO UPDATE SET "
+            "INSERT INTO student_artifact_file (student_id, task_id, last_subtask_id, original_filename, disk_filename, uploaded_at) "
+            "VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(student_id, task_id) DO UPDATE SET "
+            "last_subtask_id = excluded.last_subtask_id, "
             "original_filename = excluded.original_filename, "
             "disk_filename = excluded.disk_filename, "
             "uploaded_at = excluded.uploaded_at",
-            (student_id, subtask_id, original_filename, disk_filename, uploaded_at)
+            (student_id, task_id, subtask_id, original_filename, disk_filename, uploaded_at)
         )
 
 
-def get_student_artifact_file(student_id, subtask_id):
-    """Return the stored file record for a student+subtask, or None."""
+def get_student_artifact_file(student_id, task_id):
+    """Return the stored file record for a student+task (unit), or None."""
     with db_session() as conn:
         row = conn.execute(
             "SELECT original_filename, disk_filename, uploaded_at FROM student_artifact_file "
-            "WHERE student_id = ? AND subtask_id = ?",
-            (student_id, subtask_id)
+            "WHERE student_id = ? AND task_id = ?",
+            (student_id, task_id)
         ).fetchone()
     if not row:
         return None
@@ -3614,20 +3622,20 @@ def get_student_artifact_file(student_id, subtask_id):
 
 
 def get_all_student_artifact_files_for_student(student_id):
-    """Return all stored artifact files for a student, newest first, with task/subtask context."""
+    """Return all stored artifact files for a student, newest first, with task/checkpoint context."""
     with db_session() as conn:
         rows = conn.execute(
-            "SELECT saf.subtask_id, saf.original_filename, saf.uploaded_at, "
+            "SELECT saf.task_id, saf.original_filename, saf.uploaded_at, "
             "       t.name as task_name, s.reihenfolge as subtask_pos "
             "FROM student_artifact_file saf "
-            "JOIN subtask s ON s.id = saf.subtask_id "
-            "JOIN task t ON t.id = s.task_id "
+            "JOIN task t ON t.id = saf.task_id "
+            "JOIN subtask s ON s.id = saf.last_subtask_id "
             "WHERE saf.student_id = ? ORDER BY saf.uploaded_at DESC",
             (student_id,)
         ).fetchall()
     return [
         {
-            'subtask_id': r['subtask_id'],
+            'task_id': r['task_id'],
             'original_filename': r['original_filename'],
             'uploaded_at': r['uploaded_at'],
             'task_name': r['task_name'],

@@ -2150,15 +2150,10 @@ def student_klasse(slug):
         except (json.JSONDecodeError, TypeError):
             pass
 
-    # Latest uploaded artifact file, if any -- shown as a download link next to the upload widget
-    current_subtask_file = None
-    if current_subtask:
-        current_subtask_file = models.get_student_artifact_file(student_id, current_subtask['id'])
-    capstone_gate_file = None
-    if capstone_gate and (not current_subtask or current_subtask is not subtasks[-1]):
-        capstone_gate_file = models.get_student_artifact_file(student_id, subtasks[-1]['id'])
-    elif capstone_gate:
-        capstone_gate_file = current_subtask_file
+    # Latest uploaded artifact file for this unit, if any -- shown as a download link next to
+    # the upload widget. One file per (student, task): units use the "gradual artifact building"
+    # pattern, so every checkpoint in the unit shares the same growing document.
+    unit_artifact_file = models.get_student_artifact_file(student_id, task['task_id']) if task else None
 
     return render_template('student/klasse.html',
                            student=student,
@@ -2185,8 +2180,7 @@ def student_klasse(slug):
                            capstone_gate_keyword=capstone_gate_keyword,
                            artifact_gate_required=bool(klasse.get('artifact_gate_required', 1)),
                            student_path=student.get('lernpfad') if student else None,
-                           current_subtask_file=current_subtask_file,
-                           capstone_gate_file=capstone_gate_file)
+                           unit_artifact_file=unit_artifact_file)
 
 
 @app.route('/schueler/thema/<slug>/aufgabe/<int:position>', methods=['POST'])
@@ -2252,17 +2246,22 @@ def _artifact_upload_dir():
     return os.path.join(config.UPLOAD_FOLDER, 'artefakte')
 
 
-def _save_artifact_file(student_id, subtask_id, file_bytes, original_filename):
-    """Persist the latest artifact upload for a student+subtask, overwriting any previous file."""
+def _save_artifact_file(student_id, task_id, subtask_id, file_bytes, original_filename):
+    """Persist the latest artifact upload for a student+task (unit), overwriting any previous file.
+
+    Keyed by task_id, not subtask_id: units use the "gradual artifact building" pattern
+    (docs/shared/mbi/content-design.md) -- one growing document uploaded at each checkpoint.
+    subtask_id is recorded for context only (which checkpoint triggered this upload).
+    """
     ext = ('.' + original_filename.rsplit('.', 1)[-1].lower()) if '.' in original_filename else ''
     upload_dir = _artifact_upload_dir()
     os.makedirs(upload_dir, exist_ok=True)
-    for old in glob.glob(os.path.join(upload_dir, f'{student_id}_{subtask_id}.*')):
+    for old in glob.glob(os.path.join(upload_dir, f'{student_id}_{task_id}.*')):
         os.remove(old)
-    disk_filename = f'{student_id}_{subtask_id}{ext}'
+    disk_filename = f'{student_id}_{task_id}{ext}'
     with open(os.path.join(upload_dir, disk_filename), 'wb') as out:
         out.write(file_bytes)
-    models.save_student_artifact_file(student_id, subtask_id, original_filename, disk_filename)
+    models.save_student_artifact_file(student_id, task_id, subtask_id, original_filename, disk_filename)
 
 
 def _unlink_artifact_files(disk_filenames):
@@ -2316,7 +2315,7 @@ def student_artifact_preview(slug, position):
     except Exception as e:
         return jsonify({'error': f'Datei konnte nicht gelesen werden: {e}'}), 400
 
-    _save_artifact_file(student_id, subtask['id'], raw_bytes, filename)
+    _save_artifact_file(student_id, task['task_id'], subtask['id'], raw_bytes, filename)
 
     student = models.get_student(student_id)
     full_name = f"{student['vorname']} {student['nachname']}" if student else ''
@@ -2328,7 +2327,7 @@ def student_artifact_preview(slug, position):
         'filename': filename,
         'subtask_id': subtask['id'],
         'file_saved': True,
-        'file_url': url_for('download_student_artifact', student_id=student_id, subtask_id=subtask['id']),
+        'file_url': url_for('download_student_artifact', student_id=student_id, task_id=task['task_id']),
     })
 
 
@@ -2434,9 +2433,9 @@ def student_artifact_gate_check(slug, position):
         return jsonify({'error': f'Datei konnte nicht gelesen werden: {e}'}), 400
 
     # Saved regardless of pass/fail -- "latest submission", not "latest passing submission"
-    _save_artifact_file(student_id, subtask['id'], file_bytes, filename)
+    _save_artifact_file(student_id, task['task_id'], subtask['id'], file_bytes, filename)
     result['file_saved'] = True
-    result['file_url'] = url_for('download_student_artifact', student_id=student_id, subtask_id=subtask['id'])
+    result['file_url'] = url_for('download_student_artifact', student_id=student_id, task_id=task['task_id'])
 
     already_passed = bool(subtask.get('artifact_gate_passed'))
     if not already_passed or result['passed']:
@@ -2505,12 +2504,12 @@ def student_artifact_gate_check(slug, position):
     return jsonify(result)
 
 
-@app.route('/artefakt-datei/<int:student_id>/<int:subtask_id>/download')
-def download_student_artifact(student_id, subtask_id):
-    """Download the latest artifact upload for a student+subtask. Owner (student) or admin only."""
+@app.route('/artefakt-datei/<int:student_id>/<int:task_id>/download')
+def download_student_artifact(student_id, task_id):
+    """Download the latest artifact upload for a student+task (unit). Owner (student) or admin only."""
     if session.get('student_id') != student_id and 'admin_id' not in session:
         abort(403)
-    record = models.get_student_artifact_file(student_id, subtask_id)
+    record = models.get_student_artifact_file(student_id, task_id)
     if not record:
         abort(404)
     upload_dir = _artifact_upload_dir()
