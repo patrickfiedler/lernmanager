@@ -2154,6 +2154,7 @@ def student_klasse(slug):
     # the upload widget. One file per (student, task): units use the "gradual artifact building"
     # pattern, so every checkpoint in the unit shares the same growing document.
     unit_artifact_file = models.get_student_artifact_file(student_id, task['task_id']) if task else None
+    artifact_checkpoint_status, artifact_criteria = _artifact_file_details(unit_artifact_file, subtasks, student)
 
     return render_template('student/klasse.html',
                            student=student,
@@ -2180,7 +2181,9 @@ def student_klasse(slug):
                            capstone_gate_keyword=capstone_gate_keyword,
                            artifact_gate_required=bool(klasse.get('artifact_gate_required', 1)),
                            student_path=student.get('lernpfad') if student else None,
-                           unit_artifact_file=unit_artifact_file)
+                           unit_artifact_file=unit_artifact_file,
+                           artifact_checkpoint_status=artifact_checkpoint_status,
+                           artifact_criteria=artifact_criteria)
 
 
 @app.route('/schueler/thema/<slug>/aufgabe/<int:position>', methods=['POST'])
@@ -2538,6 +2541,56 @@ def _get_criteria_for_path(graded_artifact, student_path):
         if graded_artifact.get(key):
             return graded_artifact[key]
     return []
+
+
+def _artifact_file_details(unit_artifact_file, subtasks, student):
+    """Re-check the stored artifact against each checkpoint's structural gate up to and
+    including the one it was last uploaded for, plus the criteria list for that checkpoint.
+
+    Deterministic only (no LLM) -- shows what's structurally required per checkpoint, not
+    the LLM-graded criteria wording/rubric (that's a separate, still-undecided design question).
+    Returns (checkpoint_status: list[{position, passed}], criteria: list[str] | None).
+    """
+    if not unit_artifact_file:
+        return [], None
+
+    upload_dir = _artifact_upload_dir()
+    filepath = os.path.join(upload_dir, unit_artifact_file['disk_filename'])
+    if not os.path.exists(filepath):
+        return [], None
+
+    last_position = next(
+        (i + 1 for i, st in enumerate(subtasks) if st['id'] == unit_artifact_file['last_subtask_id']), None
+    )
+    if not last_position:
+        return [], None
+
+    with open(filepath, 'rb') as f:
+        stored_bytes = f.read()
+
+    checkpoint_status = []
+    for i, st in enumerate(subtasks[:last_position]):
+        gate_raw = st.get('artifact_gate_json')
+        if not gate_raw:
+            continue
+        try:
+            gate_config = json.loads(gate_raw)
+            check = artifact_checker.check_gate(stored_bytes, unit_artifact_file['original_filename'], gate_config)
+            checkpoint_status.append({'position': i + 1, 'passed': check['passed']})
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    criteria = None
+    last_subtask = subtasks[last_position - 1]
+    if last_subtask.get('graded_artifact_json'):
+        try:
+            ga = json.loads(last_subtask['graded_artifact_json'])
+            student_path = (student or {}).get('lernpfad') or 'wanderweg'
+            criteria = _get_criteria_for_path(ga, student_path) or None
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    return checkpoint_status, criteria
 
 
 def _handle_quiz(student_id, student, task, slug, quiz_json_str, subtask_id=None, position=None):

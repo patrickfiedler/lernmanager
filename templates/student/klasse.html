@@ -146,7 +146,7 @@
                 <p class="gate-desc">Lade deine aktuelle Datei hoch, um deinen Fortschritt zu überprüfen.</p>
                 {% endif %}
                 {% if inline_gate_formats %}<p class="gate-formats">Akzeptiert: {% for f in inline_gate_formats %}<code>{{ f }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</p>{% endif %}
-                {% if unit_artifact_file %}<p class="artifact-file-link">📄 Deine Datei: <a href="{{ url_for('download_student_artifact', student_id=student.id, task_id=task.task_id) }}">{{ unit_artifact_file.original_filename }}</a></p>{% endif %}
+                {% if unit_artifact_file %}{% include 'student/_artifact_file_details.html' %}{% endif %}
                 <div class="gate-upload-row">
                     <input type="file" id="inline-gate-file-input" class="artifact-file-input"
                            {% if inline_gate_formats %}accept="{{ inline_gate_formats|join(',') }}"{% endif %}>
@@ -393,7 +393,7 @@
         <p class="gate-desc">Lade deine Datei hoch – sie muss geprüft sein, bevor du das Thema abschließen kannst.</p>
         {% endif %}
         {% if gate_formats %}<p class="gate-formats">Akzeptiert: {% for f in gate_formats %}<code>{{ f }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</p>{% endif %}
-        {% if unit_artifact_file %}<p class="artifact-file-link">📄 Deine Datei: <a href="{{ url_for('download_student_artifact', student_id=student.id, task_id=task.task_id) }}">{{ unit_artifact_file.original_filename }}</a></p>{% endif %}
+        {% if unit_artifact_file %}{% include 'student/_artifact_file_details.html' %}{% endif %}
         <div class="gate-upload-row">
             <input type="file" id="gate-file-input" class="artifact-file-input"
                    {% if gate_formats %}accept="{{ gate_formats|join(',') }}"{% endif %}>

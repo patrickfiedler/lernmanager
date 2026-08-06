@@ -3608,7 +3608,7 @@ def get_student_artifact_file(student_id, task_id):
     """Return the stored file record for a student+task (unit), or None."""
     with db_session() as conn:
         row = conn.execute(
-            "SELECT original_filename, disk_filename, uploaded_at FROM student_artifact_file "
+            "SELECT original_filename, disk_filename, uploaded_at, last_subtask_id FROM student_artifact_file "
             "WHERE student_id = ? AND task_id = ?",
             (student_id, task_id)
         ).fetchone()
@@ -3618,6 +3618,7 @@ def get_student_artifact_file(student_id, task_id):
         'original_filename': row['original_filename'],
         'disk_filename': row['disk_filename'],
         'uploaded_at': row['uploaded_at'],
+        'last_subtask_id': row['last_subtask_id'],
     }
 
 

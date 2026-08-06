@@ -1994,7 +1994,8 @@ body.split-pane-active .container {
 .materials-toggle summary,
 .topic-description-toggle summary,
 .tipps-toggle summary,
-.why-learn-toggle summary {
+.why-learn-toggle summary,
+.artifact-file-toggle summary {
     cursor: pointer;
     color: #374151;
     font-size: 0.9375rem;
@@ -2011,7 +2012,8 @@ body.split-pane-active .container {
 .materials-toggle summary:hover,
 .topic-description-toggle summary:hover,
 .tipps-toggle summary:hover,
-.why-learn-toggle summary:hover {
+.why-learn-toggle summary:hover,
+.artifact-file-toggle summary:hover {
     background: #f3f4f6;
     border-color: #d1d5db;
 }
@@ -2019,7 +2021,8 @@ body.split-pane-active .container {
 .materials-toggle summary::before,
 .topic-description-toggle summary::before,
 .tipps-toggle summary::before,
-.why-learn-toggle summary::before {
+.why-learn-toggle summary::before,
+.artifact-file-toggle summary::before {
     content: '▸ ';
     margin-right: 0.5rem;
     transition: transform 0.2s;
@@ -2029,14 +2032,16 @@ body.split-pane-active .container {
 .materials-toggle[open] summary::before,
 .topic-description-toggle[open] summary::before,
 .tipps-toggle[open] summary::before,
-.why-learn-toggle[open] summary::before {
+.why-learn-toggle[open] summary::before,
+.artifact-file-toggle[open] summary::before {
     transform: rotate(90deg);
 }
 
 .materials-toggle[open] summary,
 .topic-description-toggle[open] summary,
 .tipps-toggle[open] summary,
-.why-learn-toggle[open] summary {
+.why-learn-toggle[open] summary,
+.artifact-file-toggle[open] summary {
     border-bottom: none;
     border-radius: 0.5rem 0.5rem 0 0;
 }
@@ -2044,12 +2049,28 @@ body.split-pane-active .container {
 .materials-content,
 .topic-description-content,
 .tipps-content,
-.why-learn-content {
+.why-learn-content,
+.artifact-file-content {
     padding: 1.25rem;
     background: var(--gray-50);
     border-radius: 0 0 0.5rem 0.5rem;
     border: 1px solid var(--gray-200);
     border-top: none;
+}
+
+.artifact-file-content ul {
+    margin: 0.4rem 0 0.8rem 1.25rem;
+    padding: 0;
+}
+
+.artifact-file-content li {
+    font-size: 0.875rem;
+    margin-bottom: 0.25rem;
+}
+
+.artifact-file-content p {
+    font-size: 0.875rem;
+    margin: 0 0 0.4rem;
 }
 
 /* Quiz Card */

@@ -51,7 +51,8 @@ def _student_with_two_checkpoints(app, tmp_path):
     )
     subtask2_id = models.create_subtask(
         task_id, "Checkpoint 2", reihenfolge=2,
-        artifact_gate_json=json.dumps(GATE_CONFIG)
+        artifact_gate_json=json.dumps(GATE_CONFIG),
+        graded_artifact_json=json.dumps({"criteria": ["Titelfolie vorhanden", "Mindestens 3 Folien"]})
     )
     models.assign_task_to_student(student_id, klasse_id, task_id)
     return student_id, task_id, subtask1_id, subtask2_id
@@ -189,6 +190,16 @@ def test_second_checkpoint_overwrites_first_checkpoints_file(app, client, tmp_pa
     page = client.get("/schueler/thema/testthema?aufgabe=1")
     assert page.status_code == 200
     assert f"/artefakt-datei/{student_id}/{task_id}/download".encode() in page.data
+
+    # Fold-out shows structural pass/fail for both checkpoints the file was uploaded
+    # for (unknown extension short-circuits check_gate to always pass -- verifies the
+    # per-checkpoint loop and rendering wire up correctly, not real content validation)
+    body = page.get_data(as_text=True)
+    assert "Aufgabe 1" in body
+    assert "Aufgabe 2" in body
+    # Criteria from the last checkpoint (checkpoint 2) are shown, plain text, no grading
+    assert "Titelfolie vorhanden" in body
+    assert "Mindestens 3 Folien" in body
 
 
 def test_download_ownership_check(app, client, tmp_path):

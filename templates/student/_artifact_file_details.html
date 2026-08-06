@@ -1,0 +1,22 @@
+<details class="artifact-file-toggle">
+    <summary>📄 Deine Datei: {{ unit_artifact_file.original_filename }}</summary>
+    <div class="artifact-file-content">
+        <p><a href="{{ url_for('download_student_artifact', student_id=student.id, task_id=task.task_id) }}">Datei herunterladen</a> · hochgeladen am {{ unit_artifact_file.uploaded_at[:16].replace('T', ' ') }} Uhr</p>
+        {% if artifact_checkpoint_status %}
+        <p>Dein Fortschritt:</p>
+        <ul>
+            {% for cp in artifact_checkpoint_status %}
+            <li>{{ '✅' if cp.passed else '❌' }} Aufgabe {{ cp.position }}</li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+        {% if artifact_criteria %}
+        <p>Das wird geprüft:</p>
+        <ul>
+            {% for c in artifact_criteria %}
+            <li>{{ c }}</li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+    </div>
+</details>
