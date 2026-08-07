@@ -10,7 +10,17 @@
             {% endfor %}
         </ul>
         {% endif %}
-        {% if artifact_criteria %}
+        {% if artifact_llm_feedback %}
+        <div class="artifact-checklist" style="margin-top:0.75rem;">
+            <div class="checklist-header">KI-Feedback:</div>
+            {% for item in artifact_llm_feedback %}
+            <div class="checklist-item" style="border-left:3px solid {% if item.passed %}#10b981{% else %}#ef4444{% endif %}; padding:0.5rem 0.75rem; margin:0.4rem 0; background:#f9fafb;">
+                <div style="font-weight:500;">{% if item.passed %}✅{% else %}❌{% endif %} {{ item.criterion }}</div>
+                {% if item.note %}<div style="font-size:0.875rem;color:#4b5563;margin-top:0.2rem;">💬 {{ item.note }}{% if item.source != 'deterministic' %} <span style="font-size:0.75rem;color:#6b7280;margin-left:0.4rem;">✨ KI</span>{% endif %}</div>{% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        {% elif artifact_criteria %}
         <p>Das wird geprüft:</p>
         <ul>
             {% for c in artifact_criteria %}

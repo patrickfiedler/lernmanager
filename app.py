@@ -2154,7 +2154,9 @@ def student_klasse(slug):
     # the upload widget. One file per (student, task): units use the "gradual artifact building"
     # pattern, so every checkpoint in the unit shares the same growing document.
     unit_artifact_file = models.get_student_artifact_file(student_id, task['task_id']) if task else None
-    artifact_checkpoint_status, artifact_criteria = _artifact_file_details(unit_artifact_file, subtasks, student)
+    artifact_checkpoint_status, artifact_criteria, artifact_llm_feedback = _artifact_file_details(
+        unit_artifact_file, subtasks, student, klasse
+    )
 
     return render_template('student/klasse.html',
                            student=student,
@@ -2183,7 +2185,8 @@ def student_klasse(slug):
                            student_path=student.get('lernpfad') if student else None,
                            unit_artifact_file=unit_artifact_file,
                            artifact_checkpoint_status=artifact_checkpoint_status,
-                           artifact_criteria=artifact_criteria)
+                           artifact_criteria=artifact_criteria,
+                           artifact_llm_feedback=artifact_llm_feedback)
 
 
 @app.route('/schueler/thema/<slug>/aufgabe/<int:position>', methods=['POST'])
@@ -2543,27 +2546,29 @@ def _get_criteria_for_path(graded_artifact, student_path):
     return []
 
 
-def _artifact_file_details(unit_artifact_file, subtasks, student):
+def _artifact_file_details(unit_artifact_file, subtasks, student, klasse):
     """Re-check the stored artifact against each checkpoint's structural gate up to and
     including the one it was last uploaded for, plus the criteria list for that checkpoint.
 
-    Deterministic only (no LLM) -- shows what's structurally required per checkpoint, not
-    the LLM-graded criteria wording/rubric (that's a separate, still-undecided design question).
-    Returns (checkpoint_status: list[{position, passed}], criteria: list[str] | None).
+    Checkpoint status is always deterministic (no LLM). The criteria/feedback view depends
+    on the klasse's LLM-feedback toggle: when on and a persisted result exists for the last
+    checkpoint, show that graded checklist; otherwise fall back to the plain criteria list.
+    Returns (checkpoint_status: list[{position, passed}], criteria: list[str] | None,
+    llm_feedback: list[dict] | None).
     """
     if not unit_artifact_file:
-        return [], None
+        return [], None, None
 
     upload_dir = _artifact_upload_dir()
     filepath = os.path.join(upload_dir, unit_artifact_file['disk_filename'])
     if not os.path.exists(filepath):
-        return [], None
+        return [], None, None
 
     last_position = next(
         (i + 1 for i, st in enumerate(subtasks) if st['id'] == unit_artifact_file['last_subtask_id']), None
     )
     if not last_position:
-        return [], None
+        return [], None, None
 
     with open(filepath, 'rb') as f:
         stored_bytes = f.read()
@@ -2590,7 +2595,12 @@ def _artifact_file_details(unit_artifact_file, subtasks, student):
         except (json.JSONDecodeError, TypeError):
             pass
 
-    return checkpoint_status, criteria
+    llm_feedback = None
+    if klasse.get('llm_artifact_feedback_enabled'):
+        fb = models.get_artifact_feedback((student or {}).get('id'), last_subtask['id'])
+        llm_feedback = fb['feedback'] if fb else None
+
+    return checkpoint_status, criteria, llm_feedback
 
 
 def _handle_quiz(student_id, student, task, slug, quiz_json_str, subtask_id=None, position=None):
