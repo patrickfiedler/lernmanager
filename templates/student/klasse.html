@@ -23,7 +23,7 @@
                 {% for sub in subtasks %}
                 {% set has_quiz = sub.quiz_json %}
                 {% set quiz_passed = subtask_quiz_status.get(sub.id, false) %}
-                {% set disp = 'E' if loop.index == 1 else (loop.index - 1)|string %}
+                {% set disp = loop.index | aufgabe_label %}
                 <div class="dot dot-subtask {% if sub.erledigt %}completed {% endif %}{% if current_subtask and sub.id == current_subtask.id %}current{% endif %}{% if not sub.get('required', true) %} optional{% endif %}"
                      role="button"
                      tabindex="0"
@@ -102,7 +102,7 @@
         <div class="current-task">
             {% if active_subtask %}
             <div class="task-badge-group">
-                {% set badge_num = 'E' if current_index == 0 else current_index %}
+                {% set badge_num = (current_index + 1) | aufgabe_label %}
                 <div class="task-badge">Aufgabe {{ badge_num }} von {{ subtasks|length - 1 }}</div>
                 {% if active_subtask.estimated_minutes %}
                 <div class="task-badge time-estimate">⏱️ ~{{ active_subtask.estimated_minutes }} Min</div>

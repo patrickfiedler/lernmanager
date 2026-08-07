@@ -70,6 +70,13 @@ def topic_slug(task):
     return slugify(name)
 
 
+@app.template_filter('aufgabe_label')
+def aufgabe_label_filter(position):
+    """Translate 1-based internal subtask position to the student-facing label.
+    Position 1 is always the Einführung ('E'); Aufgabe N = position - 1."""
+    return 'E' if position == 1 else str(position - 1)
+
+
 @app.template_filter('b64encode')
 def b64encode_filter(text):
     """Base64-encode a string for client-side email obfuscation."""
@@ -2154,7 +2161,7 @@ def student_klasse(slug):
     # the upload widget. One file per (student, task): units use the "gradual artifact building"
     # pattern, so every checkpoint in the unit shares the same growing document.
     unit_artifact_file = models.get_student_artifact_file(student_id, task['task_id']) if task else None
-    artifact_checkpoint_status, artifact_criteria, artifact_llm_feedback = _artifact_file_details(
+    artifact_checkpoint_status, artifact_criteria, artifact_llm_feedback, artifact_last_position = _artifact_file_details(
         unit_artifact_file, subtasks, student, klasse
     )
 
@@ -2186,7 +2193,8 @@ def student_klasse(slug):
                            unit_artifact_file=unit_artifact_file,
                            artifact_checkpoint_status=artifact_checkpoint_status,
                            artifact_criteria=artifact_criteria,
-                           artifact_llm_feedback=artifact_llm_feedback)
+                           artifact_llm_feedback=artifact_llm_feedback,
+                           artifact_last_position=artifact_last_position)
 
 
 @app.route('/schueler/thema/<slug>/aufgabe/<int:position>', methods=['POST'])
@@ -2547,34 +2555,39 @@ def _get_criteria_for_path(graded_artifact, student_path):
 
 
 def _artifact_file_details(unit_artifact_file, subtasks, student, klasse):
-    """Re-check the stored artifact against each checkpoint's structural gate up to and
-    including the one it was last uploaded for, plus the criteria list for that checkpoint.
+    """Re-check the stored artifact against each *earlier* checkpoint's structural gate
+    (regression check on the growing document), plus criteria/feedback for the checkpoint
+    it was actually last uploaded for.
+
+    The checkpoint it was last uploaded for is reported separately (last_position) and
+    excluded from checkpoint_status -- its real state is the criteria/llm_feedback below,
+    not a pass/fail dot that would duplicate and contradict that.
 
     Checkpoint status is always deterministic (no LLM). The criteria/feedback view depends
     on the klasse's LLM-feedback toggle: when on and a persisted result exists for the last
     checkpoint, show that graded checklist; otherwise fall back to the plain criteria list.
     Returns (checkpoint_status: list[{position, passed}], criteria: list[str] | None,
-    llm_feedback: list[dict] | None).
+    llm_feedback: list[dict] | None, last_position: int | None).
     """
     if not unit_artifact_file:
-        return [], None, None
+        return [], None, None, None
 
     upload_dir = _artifact_upload_dir()
     filepath = os.path.join(upload_dir, unit_artifact_file['disk_filename'])
     if not os.path.exists(filepath):
-        return [], None, None
+        return [], None, None, None
 
     last_position = next(
         (i + 1 for i, st in enumerate(subtasks) if st['id'] == unit_artifact_file['last_subtask_id']), None
     )
     if not last_position:
-        return [], None, None
+        return [], None, None, None
 
     with open(filepath, 'rb') as f:
         stored_bytes = f.read()
 
     checkpoint_status = []
-    for i, st in enumerate(subtasks[:last_position]):
+    for i, st in enumerate(subtasks[:last_position - 1]):
         gate_raw = st.get('artifact_gate_json')
         if not gate_raw:
             continue
@@ -2600,7 +2613,7 @@ def _artifact_file_details(unit_artifact_file, subtasks, student, klasse):
         fb = models.get_artifact_feedback((student or {}).get('id'), last_subtask['id'])
         llm_feedback = fb['feedback'] if fb else None
 
-    return checkpoint_status, criteria, llm_feedback
+    return checkpoint_status, criteria, llm_feedback, last_position
 
 
 def _handle_quiz(student_id, student, task, slug, quiz_json_str, subtask_id=None, position=None):

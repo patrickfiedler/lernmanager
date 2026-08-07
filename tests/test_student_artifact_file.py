@@ -36,8 +36,9 @@ def _student_with_gated_subtask(app, tmp_path):
 
 
 def _student_with_two_checkpoints(app, tmp_path):
-    """Two checkpoints in the same unit, mirroring the real "mein-blog"/"bild-steckbrief"
-    units: both accept the same growing document, not two independent files."""
+    """Intro (position 1, always displayed as 'E', never gated) plus two checkpoints in the
+    same unit, mirroring the real "mein-blog"/"bild-steckbrief" units: both accept the same
+    growing document, not two independent files."""
     app.config["WTF_CSRF_ENABLED"] = False
     config.UPLOAD_FOLDER = str(tmp_path / "uploads")
 
@@ -45,12 +46,13 @@ def _student_with_two_checkpoints(app, tmp_path):
     klasse_id = models.create_klasse("Testklasse")
     models.add_student_to_klasse(student_id, klasse_id)
     task_id = models.create_task("Testthema", "", "", "MBI", "5/6", "pflicht")
+    models.create_subtask(task_id, "Einfuehrung", reihenfolge=1)
     subtask1_id = models.create_subtask(
-        task_id, "Checkpoint 1", reihenfolge=1,
+        task_id, "Checkpoint 1", reihenfolge=2,
         artifact_gate_json=json.dumps(GATE_CONFIG)
     )
     subtask2_id = models.create_subtask(
-        task_id, "Checkpoint 2", reihenfolge=2,
+        task_id, "Checkpoint 2", reihenfolge=3,
         artifact_gate_json=json.dumps(GATE_CONFIG),
         graded_artifact_json=json.dumps({"criteria": ["Titelfolie vorhanden", "Mindestens 3 Folien"]})
     )
@@ -159,7 +161,7 @@ def test_second_checkpoint_overwrites_first_checkpoints_file(app, client, tmp_pa
         sess["student_id"] = student_id
 
     client.post(
-        "/schueler/thema/testthema/aufgabe-1/abgabe-pruefen",
+        "/schueler/thema/testthema/aufgabe-2/abgabe-pruefen",
         data={"file": (io.BytesIO(b"nach checkpoint 1"), "wachsende-datei.txt")},
         content_type="multipart/form-data",
     )
@@ -168,7 +170,7 @@ def test_second_checkpoint_overwrites_first_checkpoints_file(app, client, tmp_pa
     assert first_path.read_bytes() == b"nach checkpoint 1"
 
     client.post(
-        "/schueler/thema/testthema/aufgabe-2/abgabe-pruefen",
+        "/schueler/thema/testthema/aufgabe-3/abgabe-pruefen",
         data={"file": (io.BytesIO(b"nach checkpoint 2, laenger"), "wachsende-datei.txt")},
         content_type="multipart/form-data",
     )
@@ -187,13 +189,14 @@ def test_second_checkpoint_overwrites_first_checkpoints_file(app, client, tmp_pa
     assert stored_path.read_bytes() == b"nach checkpoint 2, laenger"
 
     # Viewing the unit at checkpoint 1's position shows the up-to-date (checkpoint 2) file
-    page = client.get("/schueler/thema/testthema?aufgabe=1")
+    page = client.get("/schueler/thema/testthema?aufgabe=2")
     assert page.status_code == 200
     assert f"/artefakt-datei/{student_id}/{task_id}/download".encode() in page.data
 
-    # Fold-out shows structural pass/fail for both checkpoints the file was uploaded
-    # for (unknown extension short-circuits check_gate to always pass -- verifies the
-    # per-checkpoint loop and rendering wire up correctly, not real content validation)
+    # Fold-out states which checkpoint the file was last checked for (checkpoint 2 = "Aufgabe 2"),
+    # and lists earlier checkpoints still structurally satisfied by the current file (checkpoint 1
+    # = "Aufgabe 1") -- but not checkpoint 2 itself again, since its own criteria are shown right
+    # below instead of a redundant/contradictory pass checkmark.
     body = page.get_data(as_text=True)
     assert "Aufgabe 1" in body
     assert "Aufgabe 2" in body
