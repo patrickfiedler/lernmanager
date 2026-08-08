@@ -1,6 +1,11 @@
 [Unit]
 Description=Lernmanager Flask Application
 After=network.target
+# /opt/lernmanager is itself a LUKS container mount (manual unlock, no
+# auto-unlock keyfile - see docs/2026-08-08_luks_container_setup.md). This
+# holds the service inactive-and-waiting at boot instead of crash-looping
+# every RestartSec until someone manually unlocks + mounts it.
+RequiresMountsFor=/opt/lernmanager
 
 [Service]
 Type=simple
