@@ -5,6 +5,7 @@ import sys
 import json
 import uuid
 import glob
+import shutil
 import zipfile
 import traceback
 from functools import wraps
@@ -21,7 +22,7 @@ import models
 import llm_grading
 import artifact_processor
 import artifact_checker
-from utils import generate_username, generate_password, allowed_file, generate_credentials_pdf, generate_student_self_report_pdf, generate_class_report_pdf, generate_student_report_pdf, slugify
+from utils import generate_username, generate_password, allowed_file, generate_credentials_pdf, generate_student_self_report_pdf, generate_class_report_pdf, generate_student_report_pdf, slugify, format_bytes
 from import_task import validate_task_structure, check_duplicate, import_task as do_import_task, overwrite_task_from_import, ValidationError
 
 app = Flask(__name__)
@@ -293,11 +294,26 @@ def logout():
 
 # ============ Admin Dashboard ============
 
+def get_disk_status(percent_used):
+    """Map disk usage percent to a (label, css_class) status for the dashboard widget."""
+    if percent_used >= 85:
+        return ("Kritisch", "critical")
+    elif percent_used >= 70:
+        return ("Wird langsam knapp", "warn")
+    else:
+        return ("OK", "ok")
+
+
 @app.route('/admin')
 @admin_required
 def admin_dashboard():
     klassen = models.get_all_klassen()
     tasks = models.get_all_tasks()
+
+    disk_total, _, disk_free = shutil.disk_usage(config.BASE_DIR)
+    disk_used = disk_total - disk_free
+    disk_percent = round(disk_used / disk_total * 100, 1)
+    disk_status_label, disk_status_class = get_disk_status(disk_percent)
 
     # Filter classes for "Unterricht heute" based on schedule
     today_weekday = datetime.today().weekday()  # 0=Monday, 6=Sunday
@@ -313,7 +329,10 @@ def admin_dashboard():
 
     return render_template('admin/dashboard.html', klassen=klassen, tasks=tasks,
                           klassen_heute=klassen_heute, log_page_views=log_page_views,
-                          student_clear_names=student_clear_names)
+                          student_clear_names=student_clear_names,
+                          disk_total=format_bytes(disk_total), disk_used=format_bytes(disk_used),
+                          disk_free=format_bytes(disk_free), disk_percent=disk_percent,
+                          disk_status_label=disk_status_label, disk_status_class=disk_status_class)
 
 
 @app.route('/admin/settings', methods=['POST'])

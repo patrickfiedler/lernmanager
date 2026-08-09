@@ -483,6 +483,14 @@ select.form-control {
     background: var(--success);
 }
 
+.disk-bar-ok { background: var(--success); }
+.disk-bar-warn { background: var(--warning); }
+.disk-bar-critical { background: var(--danger); }
+
+.disk-status-ok { color: var(--success); }
+.disk-status-warn { color: var(--warning); }
+.disk-status-critical { color: var(--danger); }
+
 /* Task Cards */
 .task-card {
     border-left: 4px solid var(--primary);

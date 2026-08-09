@@ -3,6 +3,16 @@ import random
 import unicodedata
 
 
+def format_bytes(num_bytes):
+    """Human-readable size, e.g. 4200000000 -> '3.9 GB'."""
+    size = float(num_bytes)
+    for unit in ('B', 'KB', 'MB', 'GB', 'TB'):
+        if size < 1024:
+            return f"{size:.0f} {unit}" if unit == 'B' else f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} PB"
+
+
 def slugify(text):
     """Convert text to URL-friendly slug. Handles German umlauts."""
     text = text.replace('ä', 'ae').replace('ö', 'oe').replace('ü', 'ue').replace('ß', 'ss')

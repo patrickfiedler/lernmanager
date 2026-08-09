@@ -43,6 +43,19 @@
 </div>
 
 <div class="card mt-2">
+    <div class="card-header">💾 Speicherplatz</div>
+    <div style="padding: 1rem;">
+        <div class="flex flex-between mb-1">
+            <span>{{ disk_used }} von {{ disk_total }} belegt ({{ disk_free }} frei)</span>
+            <strong class="disk-status-{{ disk_status_class }}">{{ disk_status_label }}</strong>
+        </div>
+        <div class="progress-container">
+            <div class="progress-bar disk-bar-{{ disk_status_class }}" style="width: {{ disk_percent }}%;"></div>
+        </div>
+    </div>
+</div>
+
+<div class="card mt-2">
     <div class="card-header">⚙️ Systemeinstellungen</div>
     <form method="POST" action="{{ url_for('admin_update_settings') }}" style="padding: 1rem;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
