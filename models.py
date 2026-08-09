@@ -198,6 +198,7 @@ def init_db():
                 pfad TEXT NOT NULL,  -- URL or file path
                 beschreibung TEXT,
                 attribution TEXT,  -- photographer/source credit
+                school_only INTEGER NOT NULL DEFAULT 0,  -- 1=only downloadable from school network (network gate)
                 FOREIGN KEY (task_id) REFERENCES task(id) ON DELETE CASCADE
             );
 
@@ -1686,12 +1687,12 @@ def get_material(material_id):
         return dict(row) if row else None
 
 
-def create_material(task_id, typ, pfad, beschreibung='', attribution=None):
+def create_material(task_id, typ, pfad, beschreibung='', attribution=None, school_only=False):
     """Create a material."""
     with db_session() as conn:
         cursor = conn.execute(
-            "INSERT INTO material (task_id, typ, pfad, beschreibung, attribution) VALUES (?, ?, ?, ?, ?)",
-            (task_id, typ, pfad, beschreibung, attribution)
+            "INSERT INTO material (task_id, typ, pfad, beschreibung, attribution, school_only) VALUES (?, ?, ?, ?, ?, ?)",
+            (task_id, typ, pfad, beschreibung, attribution, 1 if school_only else 0)
         )
         return cursor.lastrowid
 
@@ -1702,6 +1703,15 @@ def update_material_attribution(material_id, attribution):
         conn.execute(
             "UPDATE material SET attribution = ? WHERE id = ?",
             (attribution, material_id)
+        )
+
+
+def update_material_school_only(material_id, school_only):
+    """Update whether a material is restricted to the school network (network gate)."""
+    with db_session() as conn:
+        conn.execute(
+            "UPDATE material SET school_only = ? WHERE id = ?",
+            (1 if school_only else 0, material_id)
         )
 
 

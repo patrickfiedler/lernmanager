@@ -1,6 +1,41 @@
 import re
 import random
+import ipaddress
 import unicodedata
+from datetime import datetime
+
+
+def is_ip_allowed(ip_str, ranges_str):
+    """Check if ip_str is in any CIDR/IP in ranges_str (comma/newline separated). Empty ranges = allow all."""
+    if not ranges_str or not ranges_str.strip():
+        return True
+    try:
+        ip = ipaddress.ip_address(ip_str)
+    except (ValueError, TypeError):
+        return False
+    for entry in re.split(r'[,\n]', ranges_str):
+        entry = entry.strip()
+        if not entry:
+            continue
+        try:
+            if ip in ipaddress.ip_network(entry, strict=False):
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+def is_within_time_window(start_str, end_str, now=None):
+    """Check if now falls within HH:MM-HH:MM (wraps past midnight). Empty start/end = allow all times."""
+    if not start_str or not end_str:
+        return True
+    now = now or datetime.now()
+    start = datetime.strptime(start_str, '%H:%M').time()
+    end = datetime.strptime(end_str, '%H:%M').time()
+    current = now.time()
+    if start <= end:
+        return start <= current <= end
+    return current >= start or current <= end
 
 
 def format_bytes(num_bytes):

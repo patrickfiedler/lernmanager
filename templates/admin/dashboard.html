@@ -87,4 +87,28 @@
         </div>
     </form>
 </div>
+
+<div class="card mt-2">
+    <div class="card-header">🔒 Netzwerk-Zugriff</div>
+    <form method="POST" action="{{ url_for('admin_update_network_gate') }}" style="padding: 1rem;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <p class="text-muted mb-1" style="font-size: 0.875rem;">
+            Beschränkt als "Nur Schulnetzwerk" markierte Materialien (z.B. Lehrbuch-Scans) auf die hier
+            eingetragenen IP-Bereiche. Leer lassen = keine Beschränkung.
+        </p>
+        <div class="form-group">
+            <label>Erlaubte IP-Bereiche (ein CIDR/IP pro Zeile)</label>
+            <textarea name="network_gate_ip_ranges" class="form-control" rows="3" placeholder="10.0.0.0/24&#10;192.168.1.50">{{ network_gate_ip_ranges }}</textarea>
+        </div>
+        <div class="form-group">
+            <label>Zeitfenster (optional, für zukünftige Nutzung z.B. Chemie-Checkpoints)</label>
+            <div class="flex flex-center gap-1">
+                <input type="time" name="network_gate_start_time" class="form-control" value="{{ network_gate_start_time }}" style="max-width: 140px;">
+                <span>bis</span>
+                <input type="time" name="network_gate_end_time" class="form-control" value="{{ network_gate_end_time }}" style="max-width: 140px;">
+            </div>
+        </div>
+        <button type="submit" class="btn btn-primary">Speichern</button>
+    </form>
+</div>
 {% endblock %}

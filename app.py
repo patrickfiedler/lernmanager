@@ -7,6 +7,7 @@ import uuid
 import glob
 import shutil
 import zipfile
+import ipaddress
 import traceback
 from functools import wraps
 from datetime import date, datetime
@@ -22,7 +23,7 @@ import models
 import llm_grading
 import artifact_processor
 import artifact_checker
-from utils import generate_username, generate_password, allowed_file, generate_credentials_pdf, generate_student_self_report_pdf, generate_class_report_pdf, generate_student_report_pdf, slugify, format_bytes
+from utils import generate_username, generate_password, allowed_file, generate_credentials_pdf, generate_student_self_report_pdf, generate_class_report_pdf, generate_student_report_pdf, slugify, format_bytes, is_ip_allowed, is_within_time_window
 from import_task import validate_task_structure, check_duplicate, import_task as do_import_task, overwrite_task_from_import, ValidationError
 
 app = Flask(__name__)
@@ -292,6 +293,16 @@ def logout():
     return redirect(url_for('login'))
 
 
+# ============ Network Access Gate ============
+# Shared IP-range + time-window gate, used to restrict routes to the school
+# network and/or a scheduled lesson block. Both dimensions are optional and
+# admin-configurable (app_settings); a route opts into whichever it needs.
+
+def _get_client_ip():
+    """Real client IP behind nginx (X-Real-IP), falling back to remote_addr for local/dev."""
+    return request.headers.get('X-Real-IP') or request.remote_addr
+
+
 # ============ Admin Dashboard ============
 
 def get_disk_status(percent_used):
@@ -327,9 +338,17 @@ def admin_dashboard():
     log_page_views = models.get_bool_setting('log_page_views', default=True)
     student_clear_names = models.get_bool_setting('student_clear_names', default=True)
 
+    # Network access gate settings (IP ranges + time window)
+    network_gate_ip_ranges = models.get_setting('network_gate_ip_ranges', '')
+    network_gate_start_time = models.get_setting('network_gate_start_time', '')
+    network_gate_end_time = models.get_setting('network_gate_end_time', '')
+
     return render_template('admin/dashboard.html', klassen=klassen, tasks=tasks,
                           klassen_heute=klassen_heute, log_page_views=log_page_views,
                           student_clear_names=student_clear_names,
+                          network_gate_ip_ranges=network_gate_ip_ranges,
+                          network_gate_start_time=network_gate_start_time,
+                          network_gate_end_time=network_gate_end_time,
                           disk_total=format_bytes(disk_total), disk_used=format_bytes(disk_used),
                           disk_free=format_bytes(disk_free), disk_percent=disk_percent,
                           disk_status_label=disk_status_label, disk_status_class=disk_status_class)
@@ -350,6 +369,43 @@ def admin_update_settings():
     app.config['STUDENT_CLEAR_NAMES'] = student_clear_names
 
     flash('Einstellungen gespeichert. ✅', 'success')
+    return redirect(url_for('admin_dashboard'))
+
+
+@app.route('/admin/settings/netzwerk-gate', methods=['POST'])
+@admin_required
+def admin_update_network_gate():
+    """Update IP-range and time-window settings for the shared network access gate."""
+    ip_ranges = request.form.get('network_gate_ip_ranges', '').strip()
+    start_time = request.form.get('network_gate_start_time', '').strip()
+    end_time = request.form.get('network_gate_end_time', '').strip()
+
+    for entry in re.split(r'[,\n]', ip_ranges):
+        entry = entry.strip()
+        if not entry:
+            continue
+        try:
+            ipaddress.ip_network(entry, strict=False)
+        except ValueError:
+            flash(f'Ungültiger IP-Bereich: "{entry}". Nichts gespeichert.', 'danger')
+            return redirect(url_for('admin_dashboard'))
+
+    if bool(start_time) != bool(end_time):
+        flash('Start- und Endzeit müssen beide gesetzt sein (oder beide leer). Nichts gespeichert.', 'danger')
+        return redirect(url_for('admin_dashboard'))
+    for t in (start_time, end_time):
+        if t:
+            try:
+                datetime.strptime(t, '%H:%M')
+            except ValueError:
+                flash(f'Ungültige Uhrzeit: "{t}". Format HH:MM. Nichts gespeichert.', 'danger')
+                return redirect(url_for('admin_dashboard'))
+
+    models.set_setting('network_gate_ip_ranges', ip_ranges)
+    models.set_setting('network_gate_start_time', start_time)
+    models.set_setting('network_gate_end_time', end_time)
+
+    flash('Netzwerk-Einstellungen gespeichert. ✅', 'success')
     return redirect(url_for('admin_dashboard'))
 
 
@@ -1285,7 +1341,8 @@ def admin_thema_material_upload(task_id):
         # Add to database
         beschreibung = request.form.get('beschreibung', '').strip()
         attribution = request.form.get('attribution', '').strip() or None
-        models.create_material(task_id, 'datei', filename, beschreibung, attribution)
+        school_only = 'school_only' in request.form
+        models.create_material(task_id, 'datei', filename, beschreibung, attribution, school_only)
 
         flash('Datei hochgeladen. ✅', 'success')
 
@@ -1390,6 +1447,12 @@ def download_material(material_id):
     # Only serve files, not links
     if material['typ'] != 'datei':
         abort(404)
+
+    # School-network-only materials (e.g. Lehrbuch scans): gate by IP range
+    if material['school_only']:
+        ip_ranges = models.get_setting('network_gate_ip_ranges', '')
+        if not is_ip_allowed(_get_client_ip(), ip_ranges):
+            abort(403)
 
     # Verify file exists before serving
     filepath = os.path.join(config.UPLOAD_FOLDER, material['pfad'])

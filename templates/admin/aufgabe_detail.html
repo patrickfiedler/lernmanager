@@ -164,6 +164,9 @@
                 {% if mat.attribution %}
                 <small class="text-muted">© {{ mat.attribution }}</small>
                 {% endif %}
+                {% if mat.school_only %}
+                <span title="Nur im Schulnetzwerk abrufbar">🔒</span>
+                {% endif %}
                 <input class="mat-input form-control" type="text" value="{{ mat.beschreibung or mat.pfad }}" style="display:none; width: 220px;" data-mat-id="{{ mat.id }}">
                 <button class="btn btn-sm mat-save" style="display:none;" onclick="saveMaterialName({{ mat.id }})">✓</button>
                 <button class="btn btn-sm mat-cancel" style="display:none;" onclick="cancelMaterialEdit({{ mat.id }})">✗</button>
@@ -256,6 +259,12 @@
                 </div>
                 <div class="form-group">
                     <input type="text" name="attribution" class="form-control" placeholder="Quelle/Urheber (optional)">
+                </div>
+                <div class="form-group">
+                    <label class="flex flex-center gap-1">
+                        <input type="checkbox" name="school_only">
+                        🔒 Nur im Schulnetzwerk abrufbar (z.B. Lehrbuch-Scans, Urheberrecht)
+                    </label>
                 </div>
                 <button type="submit" class="btn btn-secondary">Hochladen</button>
             </form>
