@@ -161,9 +161,15 @@ def validate_task_structure(data, warnings=None):
     if 'kategorie' in task and task['kategorie'] not in ['pflicht', 'bonus']:
         errors.append("Invalid kategorie. Must be 'pflicht' or 'bonus'")
 
+    # Validate module_tier if provided (Chemie Checkpoint-Punktekonto)
+    if 'module_tier' in task and task['module_tier'] not in ('kern_standard', 'hero'):
+        errors.append("Invalid module_tier. Must be 'kern_standard' or 'hero'")
+
     # Validate subtasks
     VALID_PATHS = ('wanderweg', 'bergweg', 'gipfeltour', 'seilbahn')
     VALID_PATH_MODELS = ('skip', 'depth')
+    VALID_CHECKPOINT_TYPES = ('quiz', 'abnahme', 'artefakt')
+    VALID_KERN_STANDARD_TAGS = ('kern', 'standard')
     if 'subtasks' in task:
         if not isinstance(task['subtasks'], list):
             errors.append("subtasks must be a list")
@@ -180,6 +186,13 @@ def validate_task_structure(data, warnings=None):
                 # path_model is optional, defaults to 'skip'
                 if 'path_model' in sub and sub['path_model'] not in VALID_PATH_MODELS:
                     errors.append(f"Subtask {i+1} invalid 'path_model'. Must be one of: {', '.join(VALID_PATH_MODELS)}")
+                # checkpoint_type/kern_standard_tag are optional, but required together (Chemie checkpoints)
+                if 'checkpoint_type' in sub and sub['checkpoint_type'] not in VALID_CHECKPOINT_TYPES:
+                    errors.append(f"Subtask {i+1} invalid 'checkpoint_type'. Must be one of: {', '.join(VALID_CHECKPOINT_TYPES)}")
+                if sub.get('checkpoint_type') and sub.get('kern_standard_tag') not in VALID_KERN_STANDARD_TAGS:
+                    errors.append(f"Subtask {i+1} has checkpoint_type but missing/invalid 'kern_standard_tag'. Must be one of: {', '.join(VALID_KERN_STANDARD_TAGS)}")
+                if sub.get('kern_standard_tag') and not sub.get('checkpoint_type'):
+                    errors.append(f"Subtask {i+1} has 'kern_standard_tag' but no 'checkpoint_type'")
                 # graded_artifact is optional
                 if 'graded_artifact' in sub and sub['graded_artifact']:
                     ga = sub['graded_artifact']
@@ -299,7 +312,8 @@ def import_task(task_data, dry_run=False, warnings=None):
         quiz_json=quiz_json,
         number=task.get('number', 0),
         why_learn_this=task.get('why_learn_this'),
-        lernziel_schueler=task.get('lernziel_schueler')
+        lernziel_schueler=task.get('lernziel_schueler'),
+        module_tier=task.get('module_tier', 'kern_standard')
     )
 
     # Set subtask_quiz_required if specified (default is 1/true in DB)
@@ -309,7 +323,8 @@ def import_task(task_data, dry_run=False, warnings=None):
                           task.get('kategorie', 'pflicht'), quiz_json,
                           task.get('number', 0), task.get('why_learn_this'),
                           subtask_quiz_required=1 if task['subtask_quiz_required'] else 0,
-                          lernziel_schueler=task.get('lernziel_schueler'))
+                          lernziel_schueler=task.get('lernziel_schueler'),
+                          module_tier=task.get('module_tier', 'kern_standard'))
 
     # Create subtasks and track position -> ID mapping
     subtasks = task.get('subtasks', [])
@@ -331,9 +346,12 @@ def import_task(task_data, dry_run=False, warnings=None):
             artifact_gate_json = None
         fertig_wenn = sub.get('fertig_wenn') or None
         tipps = sub.get('tipps') or None
+        checkpoint_type = sub.get('checkpoint_type') or None
+        kern_standard_tag = sub.get('kern_standard_tag') or None
         sub_id = models.create_subtask(task_id, sub['beschreibung'], reihenfolge, estimated_minutes, sub_quiz_json,
                                        path=path, path_model=path_model, graded_artifact_json=graded_artifact_json,
-                                       fertig_wenn=fertig_wenn, tipps=tipps, artifact_gate_json=artifact_gate_json)
+                                       fertig_wenn=fertig_wenn, tipps=tipps, artifact_gate_json=artifact_gate_json,
+                                       checkpoint_type=checkpoint_type, kern_standard_tag=kern_standard_tag)
         subtask_id_by_position[reihenfolge] = sub_id
 
     # Create materials and restore subtask assignments
@@ -405,7 +423,8 @@ def overwrite_task_from_import(existing_task_id, task_data, reset_progress=False
         number=task.get('number', 0),
         why_learn_this=task.get('why_learn_this'),
         subtask_quiz_required=1 if task.get('subtask_quiz_required', True) else 0,
-        lernziel_schueler=task.get('lernziel_schueler')
+        lernziel_schueler=task.get('lernziel_schueler'),
+        module_tier=task.get('module_tier', 'kern_standard')
     )
 
     # Validate artifact_gate on each subtask; strip invalid gates before storing

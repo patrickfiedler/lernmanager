@@ -1202,7 +1202,8 @@ def admin_thema_neu():
             kategorie=request.form['kategorie'],
             number=int(request.form.get('number', 0)),
             why_learn_this=request.form.get('why_learn_this') or None,
-            lernziel_schueler=request.form.get('lernziel_schueler') or None
+            lernziel_schueler=request.form.get('lernziel_schueler') or None,
+            module_tier=request.form.get('module_tier', 'kern_standard')
         )
         flash('Thema erstellt. ✅', 'success')
         return redirect(url_for('admin_thema_detail', task_id=task_id))
@@ -1244,7 +1245,8 @@ def admin_thema_bearbeiten(task_id):
         number=int(request.form.get('number', 0)),
         why_learn_this=request.form.get('why_learn_this') or None,
         subtask_quiz_required=1 if request.form.get('subtask_quiz_required') else 0,
-        lernziel_schueler=request.form.get('lernziel_schueler') or None
+        lernziel_schueler=request.form.get('lernziel_schueler') or None,
+        module_tier=request.form.get('module_tier', 'kern_standard')
     )
     flash('Thema aktualisiert. ✅', 'success')
     return redirect(url_for('admin_thema_detail', task_id=task_id))
@@ -1274,6 +1276,8 @@ def admin_thema_aufgaben(task_id):
         path_model_list = request.form.getlist('path_model[]')
         fertig_wenn_list = request.form.getlist('fertig_wenn[]')
         tipps_list = request.form.getlist('tipps[]')
+        checkpoint_type_list = request.form.getlist('checkpoint_type[]')
+        kern_standard_tag_list = request.form.getlist('kern_standard_tag[]')
 
         # Validate all subtask quiz JSONs before saving
         for i, qj in enumerate(quiz_json_list):
@@ -1285,7 +1289,9 @@ def admin_thema_aufgaben(task_id):
 
         models.update_subtasks(task_id, subtasks_list, estimated_minutes_list, quiz_json_list,
                                path_list=path_list, path_model_list=path_model_list,
-                               fertig_wenn_list=fertig_wenn_list, tipps_list=tipps_list)
+                               fertig_wenn_list=fertig_wenn_list, tipps_list=tipps_list,
+                               checkpoint_type_list=checkpoint_type_list,
+                               kern_standard_tag_list=kern_standard_tag_list)
         flash('Aufgaben aktualisiert.', 'success')
         return redirect(url_for('admin_thema_detail', task_id=task_id))
 

@@ -44,6 +44,14 @@
                     <option value="bonus" {% if task and task.kategorie == 'bonus' %}selected{% endif %}>⭐ Bonus</option>
                 </select>
             </div>
+
+            <div class="form-group">
+                <label for="module_tier">Modul-Stufe <small class="text-muted">(Chemie Checkpoint-Punktekonto)</small></label>
+                <select id="module_tier" name="module_tier" class="form-control" required>
+                    <option value="kern_standard" {% if not task or task.module_tier != 'hero' %}selected{% endif %}>Kern/Standard</option>
+                    <option value="hero" {% if task and task.module_tier == 'hero' %}selected{% endif %}>⭐ Hero (Zusatzmodul)</option>
+                </select>
+            </div>
         </div>
 
         <div class="form-group">

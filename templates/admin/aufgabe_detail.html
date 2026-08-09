@@ -53,6 +53,13 @@
                     {% for l in levels %}<option value="{{ l }}" {% if task.stufe == l %}selected{% endif %}>{{ l }}</option>{% endfor %}
                 </select>
             </div>
+            <div class="form-group">
+                <label>Modul-Stufe <small class="text-muted">(Chemie Checkpoint-Punktekonto)</small></label>
+                <select name="module_tier" class="form-control" required>
+                    <option value="kern_standard" {% if task.module_tier != 'hero' %}selected{% endif %}>Kern/Standard</option>
+                    <option value="hero" {% if task.module_tier == 'hero' %}selected{% endif %}>⭐ Hero (Zusatzmodul)</option>
+                </select>
+            </div>
         </div>
         <div class="form-group">
             <label>Lernziel (Lehrkraft) <small class="text-muted">(Markdown) — „Die SuS können…"</small></label>
@@ -113,6 +120,17 @@
                         <select name="path_model[]" class="form-control" style="width: 100px;" title="Pfadmodell">
                             <option value="skip" {% if st.path_model != 'depth' %}selected{% endif %}>Skip</option>
                             <option value="depth" {% if st.path_model == 'depth' %}selected{% endif %}>Depth</option>
+                        </select>
+                        <select name="checkpoint_type[]" class="form-control" style="width: 130px;" title="Checkpoint-Typ (Chemie)">
+                            <option value="" {% if not st.checkpoint_type %}selected{% endif %}>– kein Checkpoint –</option>
+                            <option value="quiz" {% if st.checkpoint_type == 'quiz' %}selected{% endif %}>🧠 Quiz</option>
+                            <option value="abnahme" {% if st.checkpoint_type == 'abnahme' %}selected{% endif %}>🗣️ Abnahme</option>
+                            <option value="artefakt" {% if st.checkpoint_type == 'artefakt' %}selected{% endif %}>📎 Artefakt</option>
+                        </select>
+                        <select name="kern_standard_tag[]" class="form-control" style="width: 110px;" title="Kern/Standard">
+                            <option value="" {% if not st.kern_standard_tag %}selected{% endif %}>– –</option>
+                            <option value="kern" {% if st.kern_standard_tag == 'kern' %}selected{% endif %}>Kern</option>
+                            <option value="standard" {% if st.kern_standard_tag == 'standard' %}selected{% endif %}>Standard</option>
                         </select>
                         <input type="number" name="estimated_minutes[]" class="form-control" style="width: 80px;" min="5" max="180" placeholder="Min" value="{{ st.estimated_minutes or '' }}" title="Geschätzte Dauer in Minuten">
                         <button type="button" class="btn btn-danger btn-sm" onclick="removeSubtask(this)">✕ Entfernen</button>
@@ -501,6 +519,17 @@ function addSubtask() {
                 <select name="path_model[]" class="form-control" style="width: 100px;" title="Pfadmodell">
                     <option value="skip" selected>Skip</option>
                     <option value="depth">Depth</option>
+                </select>
+                <select name="checkpoint_type[]" class="form-control" style="width: 130px;" title="Checkpoint-Typ (Chemie)">
+                    <option value="" selected>– kein Checkpoint –</option>
+                    <option value="quiz">🧠 Quiz</option>
+                    <option value="abnahme">🗣️ Abnahme</option>
+                    <option value="artefakt">📎 Artefakt</option>
+                </select>
+                <select name="kern_standard_tag[]" class="form-control" style="width: 110px;" title="Kern/Standard">
+                    <option value="" selected>– –</option>
+                    <option value="kern">Kern</option>
+                    <option value="standard">Standard</option>
                 </select>
                 <input type="number" name="estimated_minutes[]" class="form-control" style="width: 80px;" min="5" max="180" placeholder="Min" title="Geschätzte Dauer in Minuten">
                 <button type="button" class="btn btn-danger btn-sm" onclick="removeSubtask(this)">✕ Entfernen</button>
