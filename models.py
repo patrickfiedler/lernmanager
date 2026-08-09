@@ -87,7 +87,8 @@ def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
                 llm_artifact_feedback_enabled INTEGER NOT NULL DEFAULT 0,
-                llm_transparency_mode INTEGER DEFAULT NULL
+                llm_transparency_mode INTEGER DEFAULT NULL,
+                artifact_gate_required INTEGER NOT NULL DEFAULT 1
             );
 
             -- Students (Schüler)
@@ -362,72 +363,6 @@ def init_db():
                 FOREIGN KEY (unterricht_id) REFERENCES unterricht(id) ON DELETE CASCADE,
                 FOREIGN KEY (student_id) REFERENCES student(id) ON DELETE CASCADE
             );
-
-            -- ============ Game Mode Tables ============
-
-            -- Game character state for each student
-            CREATE TABLE IF NOT EXISTS game_character (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                student_id INTEGER UNIQUE NOT NULL,
-                fach TEXT NOT NULL,
-                hp INTEGER NOT NULL DEFAULT 100,
-                max_hp INTEGER NOT NULL DEFAULT 100,
-                xp INTEGER NOT NULL DEFAULT 0,
-                level INTEGER NOT NULL DEFAULT 1,
-                current_area TEXT DEFAULT 'village',
-                position_x INTEGER DEFAULT 0,
-                position_y INTEGER DEFAULT 0,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (student_id) REFERENCES student(id) ON DELETE CASCADE
-            );
-
-            -- Question pool extracted from tasks for game encounters
-            CREATE TABLE IF NOT EXISTS game_question_pool (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                task_id INTEGER NOT NULL,
-                question_index INTEGER NOT NULL,
-                question_text TEXT NOT NULL,
-                answers_json TEXT NOT NULL,
-                correct_indices_json TEXT NOT NULL,
-                difficulty INTEGER DEFAULT 1,
-                fach TEXT NOT NULL,
-                UNIQUE(task_id, question_index),
-                FOREIGN KEY (task_id) REFERENCES task(id) ON DELETE CASCADE
-            );
-
-            -- Track which questions student has answered (for spaced repetition)
-            CREATE TABLE IF NOT EXISTS game_question_history (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                student_id INTEGER NOT NULL,
-                question_pool_id INTEGER NOT NULL,
-                times_answered INTEGER DEFAULT 0,
-                times_correct INTEGER DEFAULT 0,
-                last_answered DATETIME,
-                next_review DATETIME,
-                UNIQUE(student_id, question_pool_id),
-                FOREIGN KEY (student_id) REFERENCES student(id) ON DELETE CASCADE,
-                FOREIGN KEY (question_pool_id) REFERENCES game_question_pool(id) ON DELETE CASCADE
-            );
-
-            -- Track game answers that count toward real task completion
-            CREATE TABLE IF NOT EXISTS game_task_progress (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                student_id INTEGER NOT NULL,
-                student_task_id INTEGER NOT NULL,
-                question_index INTEGER NOT NULL,
-                answered_correctly INTEGER NOT NULL DEFAULT 0,
-                answered_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(student_id, student_task_id, question_index),
-                FOREIGN KEY (student_id) REFERENCES student(id) ON DELETE CASCADE,
-                FOREIGN KEY (student_task_id) REFERENCES student_task(id) ON DELETE CASCADE
-            );
-
-            -- Index for efficient question selection
-            CREATE INDEX IF NOT EXISTS idx_question_pool_fach_difficulty
-            ON game_question_pool(fach, difficulty);
-
-            CREATE INDEX IF NOT EXISTS idx_question_history_review
-            ON game_question_history(student_id, next_review);
 
             -- ============ Error Logging ============
 
@@ -2328,19 +2263,7 @@ def check_task_completion(student_task_id):
             ''', (student_task_id,)).fetchone()
 
             if not topic_quiz_passed:
-                # Check if quiz passed via game mode
-                import json
-                quiz = json.loads(task_info['quiz_json'])
-                total_questions = len(quiz.get('questions', []))
-
-                if total_questions > 0:
-                    game_correct = conn.execute('''
-                        SELECT COUNT(*) as count FROM game_task_progress
-                        WHERE student_task_id = ? AND answered_correctly = 1
-                    ''', (student_task_id,)).fetchone()
-
-                    if game_correct['count'] < total_questions:
-                        return False
+                return False
 
         return True
 
