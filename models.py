@@ -571,18 +571,21 @@ def init_db():
 
             -- ============ Warmup / Spaced Repetition ============
 
-            -- Per-student per-question stats for spaced repetition
+            -- Per-student per-question stats for spaced repetition.
+            -- Keyed by question_hash (content hash, see _question_hash()) rather
+            -- than position - an edited quiz that inserts/reorders a question
+            -- must not silently attach history to the wrong one.
             CREATE TABLE IF NOT EXISTS warmup_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 student_id INTEGER NOT NULL,
                 task_id INTEGER,
                 subtask_id INTEGER,
-                question_index INTEGER NOT NULL,
+                question_hash TEXT NOT NULL,
                 times_shown INTEGER NOT NULL DEFAULT 0,
                 times_correct INTEGER NOT NULL DEFAULT 0,
                 last_shown DATE,
                 streak INTEGER NOT NULL DEFAULT 0,
-                UNIQUE(student_id, task_id, subtask_id, question_index),
+                UNIQUE(student_id, task_id, subtask_id, question_hash),
                 FOREIGN KEY (student_id) REFERENCES student(id) ON DELETE CASCADE
             );
 
@@ -3826,6 +3829,7 @@ def get_warmup_question_pool(student_id):
                     'task_id': topic['task_id'],
                     'subtask_id': None,
                     'question_index': i,
+                    'question_hash': _question_hash(q),
                     'question': q,
                     'topic_name': topic['name']
                 })
@@ -3861,6 +3865,7 @@ def get_warmup_question_pool(student_id):
                     'task_id': sub['task_id'],
                     'subtask_id': sub['subtask_id'],
                     'question_index': i,
+                    'question_hash': _question_hash(q),
                     'question': q,
                     'topic_name': sub['topic_name'],
                     'completed_at': sub['completed_at']
@@ -3893,6 +3898,7 @@ def get_warmup_question_pool(student_id):
                     'task_id': topic['task_id'],
                     'subtask_id': None,
                     'question_index': i,
+                    'question_hash': _question_hash(q),
                     'question': q,
                     'topic_name': topic['name']
                 })
@@ -3925,6 +3931,7 @@ def get_warmup_question_pool(student_id):
                     'task_id': sub['task_id'],
                     'subtask_id': sub['subtask_id'],
                     'question_index': i,
+                    'question_hash': _question_hash(q),
                     'question': q,
                     'topic_name': sub['topic_name']
                 })
@@ -3952,21 +3959,21 @@ def select_warmup_questions(student_id, pool, difficulty='easy', count=2, respec
 
     with db_session() as conn:
         history_rows = conn.execute(
-            'SELECT task_id, subtask_id, question_index, times_shown, times_correct, last_shown, streak '
+            'SELECT task_id, subtask_id, question_hash, times_shown, times_correct, last_shown, streak '
             'FROM warmup_history WHERE student_id = ?',
             (student_id,)
         ).fetchall()
 
     history = {}
     for h in history_rows:
-        key = (h['task_id'], h['subtask_id'], h['question_index'])
+        key = (h['task_id'], h['subtask_id'], h['question_hash'])
         history[key] = dict(h)
 
     today = datetime.now().date()
 
     bucket = []
     for q in pool:
-        key = (q['task_id'], q['subtask_id'], q['question_index'])
+        key = (q['task_id'], q['subtask_id'], q['question_hash'])
         h = history.get(key)
 
         # Leitner interval gate: skip questions not yet due
@@ -4015,7 +4022,7 @@ def _prioritize_questions(bucket, history, today, count):
     tier3 = []  # everything else
 
     for q in bucket:
-        key = (q['task_id'], q['subtask_id'], q['question_index'])
+        key = (q['task_id'], q['subtask_id'], q['question_hash'])
         h = history.get(key)
         completed_at = q.get('completed_at')
 
@@ -4042,13 +4049,13 @@ def _prioritize_questions(bucket, history, today, count):
     return selected
 
 
-def record_warmup_answer(student_id, task_id, subtask_id, question_index, correct):
+def record_warmup_answer(student_id, task_id, subtask_id, question_hash, correct):
     """Upsert warmup_history: update streak, times_shown/correct, last_shown."""
     with db_session() as conn:
         existing = conn.execute(
             'SELECT id, streak FROM warmup_history '
-            'WHERE student_id = ? AND task_id IS ? AND subtask_id IS ? AND question_index = ?',
-            (student_id, task_id, subtask_id, question_index)
+            'WHERE student_id = ? AND task_id IS ? AND subtask_id IS ? AND question_hash = ?',
+            (student_id, task_id, subtask_id, question_hash)
         ).fetchone()
 
         today = datetime.now().strftime('%Y-%m-%d')
@@ -4064,9 +4071,9 @@ def record_warmup_answer(student_id, task_id, subtask_id, question_index, correc
         else:
             conn.execute(
                 'INSERT INTO warmup_history '
-                '(student_id, task_id, subtask_id, question_index, times_shown, times_correct, last_shown, streak) '
+                '(student_id, task_id, subtask_id, question_hash, times_shown, times_correct, last_shown, streak) '
                 'VALUES (?, ?, ?, ?, 1, ?, ?, ?)',
-                (student_id, task_id, subtask_id, question_index,
+                (student_id, task_id, subtask_id, question_hash,
                  1 if correct else 0, today, 1 if correct else 0)
             )
 

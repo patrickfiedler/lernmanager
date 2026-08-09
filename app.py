@@ -3486,19 +3486,20 @@ def student_warmup_answer():
 
     # Rebuild the question from source to prevent client-side tampering
     pool = models.get_warmup_question_pool(student_id)
-    question = None
+    matched = None
     for item in pool:
         if (item['task_id'] == task_id and
                 item['subtask_id'] == subtask_id and
                 item['question_index'] == question_index):
-            question = item['question']
+            matched = item
             break
 
-    if question is None:
+    if matched is None:
         return jsonify({'error': 'Question not found'}), 404
+    question = matched['question']
 
     correct, feedback, source = _grade_warmup_answer(question, answer)
-    models.record_warmup_answer(student_id, task_id, subtask_id, question_index, correct)
+    models.record_warmup_answer(student_id, task_id, subtask_id, matched['question_hash'], correct)
 
     # Build correct_answer for feedback display
     # MC: always send correct indices (needed for ✅/❌ highlighting on all options)
