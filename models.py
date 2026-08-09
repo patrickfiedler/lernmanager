@@ -190,6 +190,7 @@ def init_db():
                 tipps TEXT,
                 checkpoint_type TEXT,  -- quiz/abnahme/artefakt (Chemie Checkpoint-Punktekonto; NULL = not a checkpoint)
                 kern_standard_tag TEXT,  -- kern/standard (NULL = not a checkpoint)
+                checkpoint_hints_json TEXT,  -- JSON array of escalating Tipp-button hints (quiz checkpoints)
                 FOREIGN KEY (task_id) REFERENCES task(id) ON DELETE CASCADE
             );
 
@@ -1309,6 +1310,7 @@ def export_task_to_dict(task_id):
                 'tipps': subtask.get('tipps') or None,
                 'checkpoint_type': subtask.get('checkpoint_type') or None,
                 'kern_standard_tag': subtask.get('kern_standard_tag') or None,
+                'checkpoint_hints': json.loads(subtask['checkpoint_hints_json']) if subtask.get('checkpoint_hints_json') else None,
             }
             if subtask.get('quiz_json'):
                 st_data['quiz'] = json.loads(subtask['quiz_json'])
@@ -1510,12 +1512,13 @@ def get_subtasks(task_id):
 
 def create_subtask(task_id, beschreibung, reihenfolge=0, estimated_minutes=None, quiz_json=None,
                    path=None, path_model='skip', graded_artifact_json=None, fertig_wenn=None, tipps=None,
-                   artifact_gate_json=None, checkpoint_type=None, kern_standard_tag=None):
+                   artifact_gate_json=None, checkpoint_type=None, kern_standard_tag=None,
+                   checkpoint_hints_json=None):
     """Create a subtask."""
     with db_session() as conn:
         cursor = conn.execute(
-            "INSERT INTO subtask (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json, artifact_gate_json, fertig_wenn, tipps, checkpoint_type, kern_standard_tag) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json, artifact_gate_json, fertig_wenn, tipps, checkpoint_type, kern_standard_tag)
+            "INSERT INTO subtask (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json, artifact_gate_json, fertig_wenn, tipps, checkpoint_type, kern_standard_tag, checkpoint_hints_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json, artifact_gate_json, fertig_wenn, tipps, checkpoint_type, kern_standard_tag, checkpoint_hints_json)
         )
         return cursor.lastrowid
 
@@ -1529,7 +1532,7 @@ def delete_subtask(subtask_id):
 def update_subtasks(task_id, subtasks_list, estimated_minutes_list=None, quiz_json_list=None,
                     path_list=None, path_model_list=None, graded_artifact_json_list=None,
                     fertig_wenn_list=None, tipps_list=None, checkpoint_type_list=None,
-                    kern_standard_tag_list=None):
+                    kern_standard_tag_list=None, checkpoint_hints_list=None):
     """Update subtasks for a task in-place by position.
 
     UPDATEs existing subtasks at matching positions (preserves their IDs and thus
@@ -1599,24 +1602,30 @@ def update_subtasks(task_id, subtasks_list, estimated_minutes_list=None, quiz_js
                 kst = kern_standard_tag_list[i].strip() if kern_standard_tag_list[i] else ''
                 kern_standard_tag = kst if kst in ('kern', 'standard') else None
 
+            checkpoint_hints = None
+            if checkpoint_hints_list and i < len(checkpoint_hints_list):
+                lines = [l.strip() for l in (checkpoint_hints_list[i] or '').splitlines() if l.strip()]
+                checkpoint_hints = json.dumps(lines, ensure_ascii=False) if lines else None
+
             if i in old_by_pos:
                 # UPDATE in-place — preserves subtask ID and student_subtask records
                 conn.execute("""
                     UPDATE subtask SET beschreibung=?, estimated_minutes=?,
                     quiz_json=?, path=?, path_model=?, graded_artifact_json=?,
-                    fertig_wenn=?, tipps=?, checkpoint_type=?, kern_standard_tag=?
+                    fertig_wenn=?, tipps=?, checkpoint_type=?, kern_standard_tag=?,
+                    checkpoint_hints_json=?
                     WHERE id=?
                 """, (beschreibung.strip(), estimated_minutes, subtask_quiz,
                       path, path_model, graded_artifact, fertig_wenn, tipps,
-                      checkpoint_type, kern_standard_tag,
+                      checkpoint_type, kern_standard_tag, checkpoint_hints,
                       old_by_pos[i]['id']))
             else:
                 # INSERT new subtask at this position
                 conn.execute(
-                    "INSERT INTO subtask (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json, fertig_wenn, tipps, checkpoint_type, kern_standard_tag) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO subtask (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json, fertig_wenn, tipps, checkpoint_type, kern_standard_tag, checkpoint_hints_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (task_id, beschreibung.strip(), i, estimated_minutes, subtask_quiz,
                      path, path_model, graded_artifact, fertig_wenn, tipps,
-                     checkpoint_type, kern_standard_tag)
+                     checkpoint_type, kern_standard_tag, checkpoint_hints)
                 )
 
         # DELETE subtasks at positions no longer present
@@ -1670,6 +1679,7 @@ def update_subtasks_from_import(task_id, subtasks_data):
             tipps = sub.get('tipps') or None
             checkpoint_type = sub.get('checkpoint_type') or None
             kern_standard_tag = sub.get('kern_standard_tag') or None
+            checkpoint_hints = json.dumps(sub['checkpoint_hints'], ensure_ascii=False) if sub.get('checkpoint_hints') else None
 
             if pos in old_by_pos:
                 # UPDATE existing subtask — keeps the ID, preserves student_subtask
@@ -1677,18 +1687,19 @@ def update_subtasks_from_import(task_id, subtasks_data):
                 conn.execute("""
                     UPDATE subtask SET beschreibung=?, estimated_minutes=?,
                     quiz_json=?, path=?, path_model=?, graded_artifact_json=?, artifact_gate_json=?,
-                    fertig_wenn=?, tipps=?, checkpoint_type=?, kern_standard_tag=?
+                    fertig_wenn=?, tipps=?, checkpoint_type=?, kern_standard_tag=?,
+                    checkpoint_hints_json=?
                     WHERE id=?
                 """, (sub['beschreibung'], estimated_minutes, quiz_json,
                       path, path_model, ga_json, gate_json, fertig_wenn, tipps,
-                      checkpoint_type, kern_standard_tag, sub_id))
+                      checkpoint_type, kern_standard_tag, checkpoint_hints, sub_id))
                 subtask_id_by_position[pos] = sub_id
             else:
                 # INSERT new subtask at this position
                 cursor = conn.execute(
-                    "INSERT INTO subtask (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json, artifact_gate_json, fertig_wenn, tipps, checkpoint_type, kern_standard_tag) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO subtask (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json, artifact_gate_json, fertig_wenn, tipps, checkpoint_type, kern_standard_tag, checkpoint_hints_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (task_id, sub['beschreibung'], pos, estimated_minutes, quiz_json, path, path_model, ga_json, gate_json, fertig_wenn, tipps,
-                     checkpoint_type, kern_standard_tag)
+                     checkpoint_type, kern_standard_tag, checkpoint_hints)
                 )
                 subtask_id_by_position[pos] = cursor.lastrowid
 
@@ -2103,12 +2114,16 @@ def toggle_student_subtask(student_task_id, subtask_id, erledigt):
             quiz_required = task_row and task_row['subtask_quiz_required']
 
             if has_subtask_quiz and quiz_required:
-                # Check if quiz already passed
+                # Check if quiz already passed (or, for Chemie Quiz-checkpoints,
+                # a completed checkpoint session — any score, see has_passed_subtask_quiz)
                 quiz_passed = conn.execute('''
                     SELECT 1 FROM quiz_attempt
                     WHERE student_task_id = ? AND subtask_id = ? AND bestanden = 1
+                    UNION
+                    SELECT 1 FROM checkpoint_attempt
+                    WHERE checkpoint_id = ? AND student_id = (SELECT student_id FROM student_task WHERE id = ?)
                     LIMIT 1
-                ''', (student_task_id, subtask_id)).fetchone()
+                ''', (student_task_id, subtask_id, subtask_id, student_task_id)).fetchone()
 
                 if not quiz_passed:
                     result['quiz_pending'] = True
@@ -2167,8 +2182,11 @@ def _advance_to_next_subtask_internal(conn, student_task_id, current_subtask_id)
             quiz_passed = conn.execute('''
                 SELECT 1 FROM quiz_attempt
                 WHERE student_task_id = ? AND subtask_id = ? AND bestanden = 1
+                UNION
+                SELECT 1 FROM checkpoint_attempt
+                WHERE checkpoint_id = ? AND student_id = (SELECT student_id FROM student_task WHERE id = ?)
                 LIMIT 1
-            ''', (student_task_id, subtask_id)).fetchone()
+            ''', (student_task_id, subtask_id, subtask_id, student_task_id)).fetchone()
             if not quiz_passed:
                 return  # Quiz still pending
 
@@ -2289,8 +2307,11 @@ def check_task_completion(student_task_id):
                     quiz_passed = conn.execute('''
                         SELECT 1 FROM quiz_attempt
                         WHERE student_task_id = ? AND subtask_id = ? AND bestanden = 1
+                        UNION
+                        SELECT 1 FROM checkpoint_attempt
+                        WHERE checkpoint_id = ? AND student_id = (SELECT student_id FROM student_task WHERE id = ?)
                         LIMIT 1
-                    ''', (student_task_id, sub['id'])).fetchone()
+                    ''', (student_task_id, sub['id'], sub['id'], student_task_id)).fetchone()
                     if not quiz_passed:
                         return False
 
@@ -2354,13 +2375,24 @@ def get_quiz_attempts(student_task_id, subtask_id=None):
 
 
 def has_passed_subtask_quiz(student_task_id, subtask_id):
-    """Returns True if any quiz_attempt for this student_task + subtask has bestanden=1."""
+    """Returns True if this subtask's quiz gate is cleared: a passed quiz_attempt,
+    or — for Chemie Quiz-checkpoints, which log to checkpoint_attempt instead —
+    any completed checkpoint session (any score; the 0/2/3 Kern-gate is a separate
+    Chemie-side grading query, not a Lernmanager progression gate)."""
     with db_session() as conn:
         row = conn.execute('''
             SELECT 1 FROM quiz_attempt
             WHERE student_task_id = ? AND subtask_id = ? AND bestanden = 1
             LIMIT 1
         ''', (student_task_id, subtask_id)).fetchone()
+        if row is not None:
+            return True
+        row = conn.execute('''
+            SELECT 1 FROM checkpoint_attempt
+            WHERE checkpoint_id = ?
+            AND student_id = (SELECT student_id FROM student_task WHERE id = ?)
+            LIMIT 1
+        ''', (subtask_id, student_task_id)).fetchone()
         return row is not None
 
 

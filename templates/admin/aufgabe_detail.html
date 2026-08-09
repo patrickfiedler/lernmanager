@@ -149,6 +149,11 @@
                     <textarea name="tipps[]" class="form-control" rows="2" placeholder="z.B. Nutze den Zoom-Regler um Details besser zu sehen.">{{ st.tipps or '' }}</textarea>
                 </div>
                 <details class="subtask-quiz-toggle">
+                    <summary>🪜 Checkpoint-Tipps (eskalierend) {% if st.checkpoint_hints_json %}<span class="badge badge-primary">vorhanden</span>{% endif %}</summary>
+                    <textarea name="checkpoint_hints[]" class="form-control mt-1" rows="3" placeholder="Ein Tipp pro Zeile, aufsteigend eskalierend:&#10;Leitfrage...&#10;Ansatz...&#10;Teil-Lösung...">{{ st.checkpoint_hints_json|json_lines }}</textarea>
+                    <small class="text-muted">Nur für Quiz-Checkpoints (Chemie). Ein Tipp pro Zeile, 2-3 Zeilen empfohlen. Erscheinen nacheinander über den Tipp-Button, erst nach dem ersten Versuch.</small>
+                </details>
+                <details class="subtask-quiz-toggle">
                     <summary>❓ Aufgaben-Quiz {% if st.quiz_json %}<span class="badge badge-primary">Quiz vorhanden</span>{% endif %}</summary>
                     <textarea name="quiz_json[]" class="form-control mt-1" rows="4" placeholder='{"questions": [{"text": "Frage?", "options": ["A", "B", "C", "D"], "correct": [0]}]}'>{{ st.quiz_json or '' }}</textarea>
                     <small class="text-muted">JSON-Format wie beim Themen-Quiz. Leer lassen = kein Quiz für diese Aufgabe.</small>
@@ -547,6 +552,11 @@ function addSubtask() {
             <label style="font-size: 0.875rem; color: #374151;">💡 Tipps: <small class="text-muted">(optional — ausklappbar unter der Aufgabe)</small></label>
             <textarea name="tipps[]" class="form-control" rows="2" placeholder="z.B. Nutze den Zoom-Regler um Details besser zu sehen."></textarea>
         </div>
+        <details class="subtask-quiz-toggle">
+            <summary>🪜 Checkpoint-Tipps (eskalierend)</summary>
+            <textarea name="checkpoint_hints[]" class="form-control mt-1" rows="3" placeholder="Ein Tipp pro Zeile, aufsteigend eskalierend:&#10;Leitfrage...&#10;Ansatz...&#10;Teil-Lösung..."></textarea>
+            <small class="text-muted">Nur für Quiz-Checkpoints (Chemie). Ein Tipp pro Zeile, 2-3 Zeilen empfohlen. Erscheinen nacheinander über den Tipp-Button, erst nach dem ersten Versuch.</small>
+        </details>
         <details class="subtask-quiz-toggle">
             <summary>❓ Aufgaben-Quiz</summary>
             <textarea name="quiz_json[]" class="form-control mt-1" rows="4" placeholder='{"questions": [{"text": "Frage?", "options": ["A", "B", "C", "D"], "correct": [0]}]}'></textarea>

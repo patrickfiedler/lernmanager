@@ -79,6 +79,17 @@ def aufgabe_label_filter(position):
     return 'E' if position == 1 else str(position - 1)
 
 
+@app.template_filter('json_lines')
+def json_lines_filter(json_str):
+    """Render a JSON array of strings as newline-joined text for a textarea."""
+    if not json_str:
+        return ''
+    try:
+        return '\n'.join(json.loads(json_str))
+    except (ValueError, TypeError):
+        return ''
+
+
 @app.template_filter('b64encode')
 def b64encode_filter(text):
     """Base64-encode a string for client-side email obfuscation."""
@@ -1278,20 +1289,30 @@ def admin_thema_aufgaben(task_id):
         tipps_list = request.form.getlist('tipps[]')
         checkpoint_type_list = request.form.getlist('checkpoint_type[]')
         kern_standard_tag_list = request.form.getlist('kern_standard_tag[]')
+        checkpoint_hints_list = request.form.getlist('checkpoint_hints[]')
 
         # Validate all subtask quiz JSONs before saving
         for i, qj in enumerate(quiz_json_list):
             try:
-                validate_quiz_json(qj)
+                validated = validate_quiz_json(qj)
             except ValueError as e:
                 flash(f'Aufgabe {i+1} Quiz-JSON: {e}', 'danger')
                 return redirect(url_for('admin_thema_detail', task_id=task_id))
+            # Quiz-checkpoints render as radio-button retry sessions (single-select
+            # only) - a multi-correct MC question there could never be answered right.
+            is_checkpoint_quiz = i < len(checkpoint_type_list) and checkpoint_type_list[i] == 'quiz'
+            if validated and is_checkpoint_quiz:
+                for qi, question in enumerate(json.loads(validated).get('questions', [])):
+                    if question.get('type', 'multiple_choice') == 'multiple_choice' and len(question.get('correct', [])) != 1:
+                        flash(f'Aufgabe {i+1}, Frage {qi+1}: Quiz-Checkpoints brauchen genau eine richtige Antwort.', 'danger')
+                        return redirect(url_for('admin_thema_detail', task_id=task_id))
 
         models.update_subtasks(task_id, subtasks_list, estimated_minutes_list, quiz_json_list,
                                path_list=path_list, path_model_list=path_model_list,
                                fertig_wenn_list=fertig_wenn_list, tipps_list=tipps_list,
                                checkpoint_type_list=checkpoint_type_list,
-                               kern_standard_tag_list=kern_standard_tag_list)
+                               kern_standard_tag_list=kern_standard_tag_list,
+                               checkpoint_hints_list=checkpoint_hints_list)
         flash('Aufgaben aktualisiert.', 'success')
         return redirect(url_for('admin_thema_detail', task_id=task_id))
 
@@ -2911,8 +2932,252 @@ def student_quiz_subtask(slug, position):
         flash('Diese Aufgabe hat kein Quiz.', 'warning')
         return redirect(url_for('student_klasse', slug=slug))
 
+    if subtask.get('checkpoint_type') == 'quiz':
+        return _handle_checkpoint_quiz(student, task, slug, subtask, position)
+
     return _handle_quiz(student_id, student, task, slug, subtask_row['quiz_json'],
                         subtask_id=subtask['id'], position=position)
+
+
+# ============ Chemie Quiz-Checkpoint (Checkpoint-Punktekonto) ============
+# One Quiz-checkpoint = one immediate-retry session (like warmup), not the
+# single-submit pass/fail@70% flow _handle_quiz uses. Scoring is 0/2/3, logged
+# to checkpoint_attempt instead of quiz_attempt. See
+# docs/shared/lernmanager/chemie-data-contract.md §3-4.
+
+def _serialize_checkpoint_question(q):
+    """Question payload for the client. Same visibility rule as warmup
+    (_serialize_question_for_js): MC options go to the client, fill_blank
+    answers don't. Never include 'correct' - unlike warmup this is a
+    retry-until-correct session, so leaking the answer up front (or on a
+    wrong attempt) would break the 3-vs-2 scoring signal."""
+    qtype = q.get('type', 'multiple_choice')
+    result = {'type': qtype, 'text': q['text']}
+    if qtype != 'fill_blank':
+        result['options'] = q.get('options', [])
+    if q.get('image'):
+        result['image'] = q['image']
+    return result
+
+
+def _resolve_checkpoint_subtask(student_id, slug, subtask_id):
+    """Resolve + authorize a Quiz-checkpoint subtask for the current student.
+    Returns (task, subtask_dict) or (None, None). `task` is the student_task row."""
+    task, klasse = _resolve_student_topic(student_id, slug)
+    if not task:
+        return None, None
+    with models.db_session() as conn:
+        row = conn.execute(
+            "SELECT * FROM subtask WHERE id = ? AND task_id = ? AND checkpoint_type = 'quiz'",
+            (subtask_id, task['task_id'])
+        ).fetchone()
+    return (task, dict(row)) if row else (None, None)
+
+
+def _checkpoint_progress(subtask_id):
+    """Server-side attempt/hint/solved counters for one in-progress checkpoint
+    session. Kept server-side, never trusted from the client, since these
+    numbers feed the 0/2/3 score directly."""
+    all_progress = session.get('checkpoint_progress', {})
+    return all_progress.get(str(subtask_id), {'attempts': {}, 'hints_used': {}, 'solved': {}, 'gave_up': {}})
+
+
+def _save_checkpoint_progress(subtask_id, progress):
+    all_progress = session.get('checkpoint_progress', {})
+    all_progress[str(subtask_id)] = progress
+    session['checkpoint_progress'] = all_progress
+
+
+def _score_checkpoint_session(question_results):
+    """0/2/3 score for one completed Quiz-checkpoint session, per
+    docs/shared/lernmanager/chemie-data-contract.md §3a: per-question score
+    (3 = first try, no hint; 2 = correct via hint and/or retry; 0 = never
+    solved) consolidated across the checkpoint via min(), not an average -
+    score stays a strict three-value category, matching the Kern-Sperre gate's
+    `score >= 2` ("every required question was eventually solved").
+
+    question_results: list of dicts, one per question in this checkpoint's
+    quiz: {'solved': bool, 'gave_up': bool, 'attempts': int, 'hints_used': int}
+    """
+    def question_score(result):
+        if not result['solved']:
+            return 0
+        if result['attempts'] > 1 or result['hints_used'] > 0:
+            return 2
+        return 3
+
+    return min(question_score(result) for result in question_results)
+
+
+def _handle_checkpoint_quiz(student, task, slug, subtask, position):
+    """GET: render a Chemie Quiz-checkpoint as an immediate-retry session."""
+    quiz = json.loads(subtask['quiz_json'])
+    llm_available = models.check_llm_rate_limit(student['id'])
+    questions = [q for q in quiz.get('questions', [])
+                 if llm_available or q.get('type', 'multiple_choice') != 'short_answer']
+    if not questions:
+        flash('Für diesen Checkpoint sind aktuell keine Fragen verfügbar. Versuche es später erneut.', 'warning')
+        return redirect(url_for('student_klasse', slug=slug))
+
+    hints = json.loads(subtask['checkpoint_hints_json']) if subtask.get('checkpoint_hints_json') else []
+    questions_json = json.dumps([_serialize_checkpoint_question(q) for q in questions])
+
+    return render_template('student/checkpoint_quiz.html',
+                           student=student, task=task, slug=slug, position=position,
+                           subtask_id=subtask['id'], questions_json=questions_json,
+                           has_hints=bool(hints))
+
+
+@app.route('/schueler/checkpoint/antwort', methods=['POST'])
+@student_required
+def student_checkpoint_answer():
+    """AJAX: grade one attempt within a checkpoint session. Returns correct/
+    incorrect only, never the answer itself - the student can retry, and
+    revealing it would break the retry-until-correct mechanic."""
+    student_id = session['student_id']
+    data = request.get_json() or {}
+    task, subtask = _resolve_checkpoint_subtask(student_id, data.get('slug'), data.get('subtask_id'))
+    if not subtask:
+        return jsonify({'error': 'Not found'}), 404
+
+    questions = json.loads(subtask['quiz_json']).get('questions', [])
+    question_index = data.get('question_index')
+    if question_index is None or not (0 <= question_index < len(questions)):
+        return jsonify({'error': 'Invalid question'}), 400
+
+    correct, _feedback, _source = _grade_warmup_answer(questions[question_index], data.get('answer'))
+
+    subtask_id = subtask['id']
+    progress = _checkpoint_progress(subtask_id)
+    qidx = str(question_index)
+    progress['attempts'][qidx] = progress['attempts'].get(qidx, 0) + 1
+    if correct:
+        progress['solved'][qidx] = True
+    _save_checkpoint_progress(subtask_id, progress)
+
+    return jsonify({'correct': correct, 'attempts': progress['attempts'][qidx]})
+
+
+@app.route('/schueler/checkpoint/hinweis', methods=['POST'])
+@student_required
+def student_checkpoint_hint():
+    """AJAX: reveal the next escalating hint. Gated to after the first attempt
+    (data contract §4) so the button can't be clicked reflexively and corrupt
+    the 3-vs-2 scoring signal."""
+    student_id = session['student_id']
+    data = request.get_json() or {}
+    task, subtask = _resolve_checkpoint_subtask(student_id, data.get('slug'), data.get('subtask_id'))
+    if not subtask:
+        return jsonify({'error': 'Not found'}), 404
+
+    subtask_id = subtask['id']
+    qidx = str(data.get('question_index'))
+    progress = _checkpoint_progress(subtask_id)
+    if progress['attempts'].get(qidx, 0) < 1:
+        return jsonify({'error': 'Erst nach dem ersten Versuch verfügbar.'}), 403
+
+    hints = json.loads(subtask['checkpoint_hints_json']) if subtask.get('checkpoint_hints_json') else []
+    hint_index = progress['hints_used'].get(qidx, 0)
+    if hint_index >= len(hints):
+        return jsonify({'hint': None})
+
+    progress['hints_used'][qidx] = hint_index + 1
+    _save_checkpoint_progress(subtask_id, progress)
+    return jsonify({'hint': hints[hint_index], 'hints_remaining': len(hints) - hint_index - 1})
+
+
+@app.route('/schueler/checkpoint/aufgeben', methods=['POST'])
+@student_required
+def student_checkpoint_give_up():
+    """AJAX: reveal the correct answer and end retries for one question."""
+    student_id = session['student_id']
+    data = request.get_json() or {}
+    task, subtask = _resolve_checkpoint_subtask(student_id, data.get('slug'), data.get('subtask_id'))
+    if not subtask:
+        return jsonify({'error': 'Not found'}), 404
+
+    questions = json.loads(subtask['quiz_json']).get('questions', [])
+    question_index = data.get('question_index')
+    if question_index is None or not (0 <= question_index < len(questions)):
+        return jsonify({'error': 'Invalid question'}), 400
+    question = questions[question_index]
+
+    if question.get('type', 'multiple_choice') == 'fill_blank':
+        correct_answer = question['answers'][0] if question.get('answers') else ''
+    else:
+        options = question.get('options', [])
+        correct_set = set(question.get('correct', []))
+        texts = [opt['text'] if isinstance(opt, dict) else str(opt)
+                 for idx, opt in enumerate(options) if idx in correct_set]
+        correct_answer = ', '.join(texts)
+
+    subtask_id = subtask['id']
+    qidx = str(question_index)
+    progress = _checkpoint_progress(subtask_id)
+    progress['gave_up'][qidx] = True
+    _save_checkpoint_progress(subtask_id, progress)
+
+    return jsonify({'correct_answer': correct_answer})
+
+
+@app.route('/schueler/checkpoint/fertig', methods=['POST'])
+@student_required
+def student_checkpoint_finish():
+    """AJAX: end the checkpoint session, score it, log to checkpoint_attempt,
+    then advance progression exactly like a passed subtask quiz."""
+    student_id = session['student_id']
+    data = request.get_json() or {}
+    slug = data.get('slug')
+    task, subtask = _resolve_checkpoint_subtask(student_id, slug, data.get('subtask_id'))
+    if not subtask:
+        return jsonify({'error': 'Not found'}), 404
+
+    subtask_id = subtask['id']
+    questions = json.loads(subtask['quiz_json']).get('questions', [])
+    progress = _checkpoint_progress(subtask_id)
+
+    question_results = []
+    for i in range(len(questions)):
+        qidx = str(i)
+        solved = progress['solved'].get(qidx, False)
+        gave_up = progress['gave_up'].get(qidx, False)
+        if not solved and not gave_up:
+            return jsonify({'error': 'Checkpoint noch nicht abgeschlossen.'}), 400
+        question_results.append({
+            'solved': solved,
+            'gave_up': gave_up,
+            'attempts': progress['attempts'].get(qidx, 0),
+            'hints_used': progress['hints_used'].get(qidx, 0),
+        })
+
+    score = _score_checkpoint_session(question_results)
+    total_attempts = sum(r['attempts'] for r in question_results) or 1
+    total_hints = sum(r['hints_used'] for r in question_results)
+
+    student_task_id = task['id']
+    models.create_checkpoint_attempt(
+        student_id, checkpoint_id=subtask_id, module_id=task['task_id'],
+        checkpoint_type='quiz', kern_standard_tag=subtask['kern_standard_tag'],
+        score=score, attempt_count=total_attempts, hint_count=total_hints
+    )
+    models.log_analytics_event(
+        event_type='checkpoint_attempt', user_id=student_id, user_type='student',
+        metadata={'student_task_id': student_task_id, 'subtask_id': subtask_id, 'score': score}
+    )
+
+    toggle_result = models.toggle_student_subtask(student_task_id, subtask_id, True)
+    if not toggle_result.get('quiz_pending') and models.check_task_completion(student_task_id):
+        models.mark_task_complete(student_task_id)
+        models.log_analytics_event(
+            event_type='task_complete', user_id=student_id, user_type='student',
+            metadata={'student_task_id': student_task_id}
+        )
+
+    all_progress = session.get('checkpoint_progress', {})
+    all_progress.pop(str(subtask_id), None)
+    session['checkpoint_progress'] = all_progress
+
+    return jsonify({'score': score, 'redirect_url': url_for('student_klasse', slug=slug)})
 
 
 @app.route('/schueler/thema/<slug>/quiz-ergebnis')

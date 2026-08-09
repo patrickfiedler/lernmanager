@@ -1,0 +1,267 @@
+{% extends 'base.html' %}
+
+{% block title %}Checkpoint - {{ task.name }} - Lernmanager{% endblock %}
+
+{% block content %}
+<div class="flex flex-between flex-center mb-2">
+    <h1>🧠 Checkpoint</h1>
+    <a href="{{ url_for('student_klasse', slug=slug) }}" class="btn btn-secondary">← Zurück</a>
+</div>
+
+<p class="text-muted mb-2">Du hast so viele Versuche wie du brauchst — nimm dir Zeit.</p>
+
+<div id="checkpoint-container">
+    <div class="mb-1 text-muted" id="progress-text"></div>
+
+    <div class="card mb-2" id="question-card">
+        <h4 id="question-text"></h4>
+        <div id="question-image-container"></div>
+        <div id="answer-area"></div>
+        <div id="feedback-area" style="display: none;"></div>
+        <div id="hint-area" style="display: none;"></div>
+        <div class="mt-2 flex gap-1">
+            <button class="btn btn-primary" id="check-btn" onclick="checkAnswer()">Prüfen</button>
+            <button class="btn btn-primary" id="next-btn" onclick="nextQuestion()" style="display: none;">Weiter →</button>
+            {% if has_hints %}
+            <button class="btn btn-secondary" id="hint-btn" onclick="requestHint()" style="display: none;">💡 Tipp</button>
+            {% endif %}
+            <button class="btn btn-secondary" id="giveup-btn" onclick="giveUp()">Ich weiß es nicht</button>
+        </div>
+    </div>
+
+    <div class="card checkpoint-summary" id="summary-card" style="display: none;">
+        <h2 class="text-center" id="summary-title"></h2>
+        <div class="text-center mt-2">
+            <a href="{{ url_for('student_klasse', slug=slug) }}" class="btn btn-primary btn-lg">Weiter →</a>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+(function() {
+    const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+    const slug = {{ slug|tojson }};
+    const subtaskId = {{ subtask_id }};
+    let questions = {{ questions_json|safe }};
+    let currentIdx = 0;
+    let answered = false;   // true once the current question is solved or given up
+
+    function shuffleIndices(length) {
+        var indices = [];
+        for (var i = 0; i < length; i++) indices.push(i);
+        for (var i = indices.length - 1; i > 0; i--) {
+            var j = Math.floor(Math.random() * (i + 1));
+            var tmp = indices[i]; indices[i] = indices[j]; indices[j] = tmp;
+        }
+        return indices;
+    }
+
+    function post(url, body) {
+        return fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+            body: JSON.stringify(body)
+        }).then(r => r.json());
+    }
+
+    function renderQuestion() {
+        const q = questions[currentIdx];
+        answered = false;
+
+        document.getElementById('progress-text').textContent =
+            'Frage ' + (currentIdx + 1) + ' von ' + questions.length;
+        document.getElementById('question-text').textContent = q.text;
+
+        const imgContainer = document.getElementById('question-image-container');
+        imgContainer.innerHTML = '';
+        if (q.image) {
+            const img = document.createElement('img');
+            img.src = q.image;
+            img.className = 'quiz-question-image';
+            img.alt = 'Bild zur Frage';
+            imgContainer.appendChild(img);
+        }
+
+        const area = document.getElementById('answer-area');
+        area.innerHTML = '';
+
+        if (q.type === 'fill_blank') {
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'form-control';
+            input.id = 'fill-input';
+            input.placeholder = 'Antwort eingeben...';
+            input.autocomplete = 'off';
+            input.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter' && !answered) {
+                    e.preventDefault();
+                    checkAnswer();
+                }
+            });
+            area.appendChild(input);
+            setTimeout(() => input.focus(), 50);
+        } else {
+            const order = shuffleIndices(q.options.length);
+            order.forEach(function(origIdx) {
+                const opt = q.options[origIdx];
+                const label = document.createElement('label');
+                label.className = 'quiz-option';
+                label.dataset.index = origIdx;
+                const cb = document.createElement('input');
+                cb.type = 'radio';
+                cb.name = 'mc-answer';
+                cb.value = origIdx;
+                const span = document.createElement('span');
+                span.textContent = (typeof opt === 'object') ? opt.text : opt;
+                label.appendChild(cb);
+                label.appendChild(span);
+                if (typeof opt === 'object' && opt.image) {
+                    const img = document.createElement('img');
+                    img.src = opt.image;
+                    img.className = 'quiz-option-image';
+                    label.appendChild(img);
+                }
+                area.appendChild(label);
+            });
+        }
+
+        document.getElementById('feedback-area').style.display = 'none';
+        document.getElementById('feedback-area').innerHTML = '';
+        document.getElementById('hint-area').style.display = 'none';
+        document.getElementById('hint-area').innerHTML = '';
+        document.getElementById('check-btn').style.display = '';
+        document.getElementById('next-btn').style.display = 'none';
+        document.getElementById('giveup-btn').style.display = '';
+        var hintBtn = document.getElementById('hint-btn');
+        if (hintBtn) hintBtn.style.display = 'none';
+        document.querySelectorAll('#answer-area input').forEach(function(el) { el.disabled = false; });
+    }
+
+    function getAnswer() {
+        const q = questions[currentIdx];
+        if (q.type === 'fill_blank') {
+            return document.getElementById('fill-input').value;
+        }
+        const checked = document.querySelector('input[name="mc-answer"]:checked');
+        return checked ? [parseInt(checked.value)] : [];
+    }
+
+    function showFeedback(correct) {
+        var fb = document.getElementById('feedback-area');
+        fb.innerHTML = '';
+        var line = document.createElement('div');
+        line.className = 'quiz-option';
+        if (correct) {
+            line.style.cssText = 'border-left: 4px solid var(--success-color, #28a745); padding-left: 1rem; background: #e8f5e9;';
+            line.textContent = '✅ Richtig!';
+        } else {
+            line.style.cssText = 'border-left: 4px solid var(--danger-color, #dc3545); padding-left: 1rem; background: #fde8e8;';
+            line.textContent = '❌ Noch nicht richtig — versuch es nochmal.';
+        }
+        fb.appendChild(line);
+        fb.style.display = 'block';
+    }
+
+    function lockQuestion(resolutionText) {
+        document.querySelectorAll('#answer-area input').forEach(function(el) { el.disabled = true; });
+        document.getElementById('check-btn').style.display = 'none';
+        document.getElementById('giveup-btn').style.display = 'none';
+        var hintBtn = document.getElementById('hint-btn');
+        if (hintBtn) hintBtn.style.display = 'none';
+        document.getElementById('next-btn').style.display = '';
+        if (resolutionText) {
+            var fb = document.getElementById('feedback-area');
+            var line = document.createElement('div');
+            line.className = 'quiz-option';
+            line.style.cssText = 'border-left: 4px solid var(--info-color, #17a2b8); padding-left: 1rem; background: #e8f4fd; margin-top: 0.5rem;';
+            line.textContent = resolutionText;
+            fb.appendChild(line);
+            fb.style.display = 'block';
+        }
+    }
+
+    window.checkAnswer = function() {
+        if (answered) return;
+        const answer = getAnswer();
+
+        post('{{ url_for("student_checkpoint_answer") }}', {
+            slug: slug, subtask_id: subtaskId, question_index: currentIdx, answer: answer
+        }).then(data => {
+            if (data.error) return;
+            showFeedback(data.correct);
+            var hintBtn = document.getElementById('hint-btn');
+            if (hintBtn) hintBtn.style.display = '';
+            if (data.correct) {
+                answered = true;
+                lockQuestion(null);
+            }
+        });
+    };
+
+    window.requestHint = function() {
+        post('{{ url_for("student_checkpoint_hint") }}', {
+            slug: slug, subtask_id: subtaskId, question_index: currentIdx
+        }).then(data => {
+            if (data.error) return;
+            var hintArea = document.getElementById('hint-area');
+            if (data.hint === null) {
+                document.getElementById('hint-btn').style.display = 'none';
+                return;
+            }
+            var p = document.createElement('p');
+            p.className = 'text-muted';
+            p.textContent = '💡 ' + data.hint;
+            hintArea.appendChild(p);
+            hintArea.style.display = 'block';
+            if (data.hints_remaining <= 0) {
+                document.getElementById('hint-btn').style.display = 'none';
+            }
+        });
+    };
+
+    window.giveUp = function() {
+        if (answered) return;
+        post('{{ url_for("student_checkpoint_give_up") }}', {
+            slug: slug, subtask_id: subtaskId, question_index: currentIdx
+        }).then(data => {
+            if (data.error) return;
+            answered = true;
+            lockQuestion('Richtige Antwort: ' + data.correct_answer);
+        });
+    };
+
+    window.nextQuestion = function() {
+        currentIdx++;
+        if (currentIdx < questions.length) {
+            renderQuestion();
+        } else {
+            finishCheckpoint();
+        }
+    };
+
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' && document.getElementById('next-btn').style.display !== 'none') {
+            e.preventDefault();
+            nextQuestion();
+        }
+    });
+
+    function finishCheckpoint() {
+        post('{{ url_for("student_checkpoint_finish") }}', { slug: slug, subtask_id: subtaskId })
+        .then(data => {
+            if (data.error) return;
+            document.getElementById('question-card').style.display = 'none';
+            document.getElementById('progress-text').style.display = 'none';
+            var summary = document.getElementById('summary-card');
+            summary.style.display = '';
+            document.getElementById('summary-title').textContent = '✅ Checkpoint abgeschlossen';
+            if (data.redirect_url) {
+                setTimeout(function() { window.location.href = data.redirect_url; }, 1200);
+            }
+        });
+    }
+
+    renderQuestion();
+})();
+{% endblock %}
