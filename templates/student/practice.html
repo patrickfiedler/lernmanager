@@ -134,10 +134,9 @@
             input.placeholder = 'Antwort eingeben...';
             input.autocomplete = 'off';
             input.addEventListener('keydown', function(e) {
-                if (e.key === 'Enter') {
+                if (e.key === 'Enter' && !answered) {
                     e.preventDefault();
-                    if (!answered) checkAnswer();
-                    else nextQuestion();
+                    checkAnswer();
                 }
             });
             area.appendChild(input);
@@ -326,7 +325,18 @@
         }
     };
 
+    // Enter advances to the next question once feedback is showing (any question type).
+    // Keyed off next-btn's visibility, not `answered` — that flag flips true as soon as
+    // checkAnswer() fires, before the fetch resolves and feedback actually renders.
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' && document.getElementById('next-btn').style.display !== 'none') {
+            e.preventDefault();
+            nextQuestion();
+        }
+    });
+
     function showSummary() {
+        document.getElementById('next-btn').style.display = 'none'; // stop a stray Enter on the summary screen from re-triggering nextQuestion()
         // Save practice session
         fetch('{{ url_for("student_warmup_finish") }}', {
             method: 'POST',
