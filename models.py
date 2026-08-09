@@ -3800,6 +3800,32 @@ def record_llm_usage(student_id, question_type, tokens_used=0):
 
 # ============ Warmup / Spaced Repetition ============
 
+def _quiz_json_to_pool_entries(task_id, subtask_id, quiz_json, topic_name, completed_at=None):
+    """Parse one quiz_json blob into warmup pool entries, filtering out
+    question types too slow for a quick warm-up (short_answer, long_answer)."""
+    try:
+        quiz = json.loads(quiz_json)
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+    entries = []
+    for i, q in enumerate(quiz.get('questions', [])):
+        if q.get('type') in ('short_answer', 'long_answer'):
+            continue
+        entry = {
+            'task_id': task_id,
+            'subtask_id': subtask_id,
+            'question_index': i,
+            'question_hash': _question_hash(q),
+            'question': q,
+            'topic_name': topic_name,
+        }
+        if completed_at is not None:
+            entry['completed_at'] = completed_at
+        entries.append(entry)
+    return entries
+
+
 def get_warmup_question_pool(student_id):
     """Build question pool from completed topics and completed tasks of active topics.
 
@@ -3818,21 +3844,8 @@ def get_warmup_question_pool(student_id):
         ''', (student_id,)).fetchall()
 
         for topic in completed_topics:
-            try:
-                quiz = json.loads(topic['quiz_json'])
-            except (json.JSONDecodeError, TypeError):
-                continue
-            for i, q in enumerate(quiz.get('questions', [])):
-                if q.get('type') in ('short_answer', 'long_answer'):
-                    continue
-                pool.append({
-                    'task_id': topic['task_id'],
-                    'subtask_id': None,
-                    'question_index': i,
-                    'question_hash': _question_hash(q),
-                    'question': q,
-                    'topic_name': topic['name']
-                })
+            pool.extend(_quiz_json_to_pool_entries(
+                topic['task_id'], None, topic['quiz_json'], topic['name']))
 
         # 2. Completed subtasks → per-task quiz questions
         # Also includes all subtasks from manually-completed topics (no student_subtask rows).
@@ -3854,22 +3867,9 @@ def get_warmup_question_pool(student_id):
         ''', (student_id,)).fetchall()
 
         for sub in completed_subtasks:
-            try:
-                quiz = json.loads(sub['quiz_json'])
-            except (json.JSONDecodeError, TypeError):
-                continue
-            for i, q in enumerate(quiz.get('questions', [])):
-                if q.get('type') in ('short_answer', 'long_answer'):
-                    continue
-                pool.append({
-                    'task_id': sub['task_id'],
-                    'subtask_id': sub['subtask_id'],
-                    'question_index': i,
-                    'question_hash': _question_hash(q),
-                    'question': q,
-                    'topic_name': sub['topic_name'],
-                    'completed_at': sub['completed_at']
-                })
+            pool.extend(_quiz_json_to_pool_entries(
+                sub['task_id'], sub['subtask_id'], sub['quiz_json'], sub['topic_name'],
+                completed_at=sub['completed_at']))
 
         # 3. Class-unlocked topics → questions for students in that class,
         #    regardless of whether the topic was ever assigned to the student.
@@ -3887,21 +3887,8 @@ def get_warmup_question_pool(student_id):
         for topic in unlocked_topics:
             if (topic['task_id'], None) in seen_task_ids:
                 continue
-            try:
-                quiz = json.loads(topic['quiz_json'])
-            except (json.JSONDecodeError, TypeError):
-                continue
-            for i, q in enumerate(quiz.get('questions', [])):
-                if q.get('type') in ('short_answer', 'long_answer'):
-                    continue
-                pool.append({
-                    'task_id': topic['task_id'],
-                    'subtask_id': None,
-                    'question_index': i,
-                    'question_hash': _question_hash(q),
-                    'question': q,
-                    'topic_name': topic['name']
-                })
+            pool.extend(_quiz_json_to_pool_entries(
+                topic['task_id'], None, topic['quiz_json'], topic['name']))
 
         unlocked_subtasks = conn.execute('''
             SELECT DISTINCT sub.id as subtask_id, sub.task_id, sub.quiz_json, t.name as topic_name
@@ -3920,21 +3907,8 @@ def get_warmup_question_pool(student_id):
         for sub in unlocked_subtasks:
             if (sub['task_id'], sub['subtask_id']) in seen_task_ids:
                 continue
-            try:
-                quiz = json.loads(sub['quiz_json'])
-            except (json.JSONDecodeError, TypeError):
-                continue
-            for i, q in enumerate(quiz.get('questions', [])):
-                if q.get('type') in ('short_answer', 'long_answer'):
-                    continue
-                pool.append({
-                    'task_id': sub['task_id'],
-                    'subtask_id': sub['subtask_id'],
-                    'question_index': i,
-                    'question_hash': _question_hash(q),
-                    'question': q,
-                    'topic_name': sub['topic_name']
-                })
+            pool.extend(_quiz_json_to_pool_entries(
+                sub['task_id'], sub['subtask_id'], sub['quiz_json'], sub['topic_name']))
 
     return pool
 
