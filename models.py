@@ -638,6 +638,12 @@ def delete_klasse(klasse_id):
         conn.execute("DELETE FROM klasse WHERE id = ?", (klasse_id,))
 
 
+def update_klasse_name(klasse_id, name):
+    """Rename a class in-place (same ID, so student progress/history stays attached)."""
+    with db_session() as conn:
+        conn.execute("UPDATE klasse SET name = ? WHERE id = ?", (name, klasse_id))
+
+
 def get_klasse(klasse_id):
     """Get a class by ID."""
     with db_session() as conn:

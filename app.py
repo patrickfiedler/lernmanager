@@ -471,10 +471,12 @@ def admin_klasse_detail(klasse_id):
 
     sidequests = models.get_sidequests_for_klasse(klasse_id)
     practice_unlocked_ids = models.get_practice_unlocked_task_ids(klasse_id)
+    andere_klassen = [k for k in models.get_all_klassen() if k['id'] != klasse_id]
     return render_template('admin/klasse_detail.html', klasse=klasse, students=students,
                            tasks=tasks, unterricht=unterricht, schedule=schedule,
                            has_queue=bool(queue), sidequests=sidequests,
-                           practice_unlocked_ids=practice_unlocked_ids)
+                           practice_unlocked_ids=practice_unlocked_ids,
+                           andere_klassen=andere_klassen)
 
 
 @app.route('/admin/klasse/<int:klasse_id>/llm-feedback', methods=['POST'])
@@ -519,6 +521,36 @@ def admin_klasse_loeschen(klasse_id):
         models.delete_klasse(klasse_id)
         flash(f'Klasse "{klasse["name"]}" gelöscht.', 'success')
     return redirect(url_for('admin_klassen'))
+
+
+@app.route('/admin/klasse/<int:klasse_id>/umbenennen', methods=['POST'])
+@admin_required
+def admin_klasse_umbenennen(klasse_id):
+    name = request.form.get('name', '').strip()
+    if not name:
+        flash('Klassenname darf nicht leer sein.', 'danger')
+    else:
+        models.update_klasse_name(klasse_id, name)
+        flash(f'Klasse umbenannt zu „{name}". ✅', 'success')
+    return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id))
+
+
+@app.route('/admin/klasse/<int:klasse_id>/schueler-verschieben-batch', methods=['POST'])
+@admin_required
+def admin_klasse_schueler_verschieben_batch(klasse_id):
+    """Move multiple selected students from this class to another in one go
+    (prep for school-year transitions: reshuffling/splitting/merging classes)."""
+    to_klasse_id = request.form.get('to_klasse', type=int)
+    student_ids = request.form.getlist('student_ids', type=int)
+    to_klasse = models.get_klasse(to_klasse_id) if to_klasse_id else None
+    if not to_klasse or not student_ids:
+        flash('Bitte Zielklasse und mindestens einen Schüler auswählen.', 'danger')
+        return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id))
+
+    for student_id in student_ids:
+        models.move_student_to_klasse(student_id, klasse_id, to_klasse_id)
+    flash(f'{len(student_ids)} Schüler nach „{to_klasse["name"]}" verschoben. ✅', 'success')
+    return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id))
 
 
 @app.route('/admin/klasse/<int:klasse_id>/alle-schueler-loeschen', methods=['POST'])
