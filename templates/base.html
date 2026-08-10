@@ -27,23 +27,33 @@
                     <a href="{{ url_for('admin_klassen') }}">Klassen</a>
                     <a href="{{ url_for('admin_themen') }}">Themen</a>
                     <details class="nav-dropdown">
-                        <summary>Mehr ▾</summary>
+                        <summary>Auswertung ▾</summary>
                         <div class="nav-dropdown-menu">
-                            <a href="{{ url_for('admin_wahlpflicht') }}">Wahlpflicht</a>
                             <a href="{{ url_for('admin_analytics') }}">Aktivität</a>
                             <a href="{{ url_for('admin_quiz_antworten') }}">Quiz-Prüfung</a>
                             <a href="{{ url_for('admin_quiz_statistik') }}">Quiz-Statistik</a>
+                        </div>
+                    </details>
+                    <details class="nav-dropdown">
+                        <summary>System ▾</summary>
+                        <div class="nav-dropdown-menu">
                             <a href="{{ url_for('admin_netzwerk_whitelist') }}">Domain-Whitelist</a>
                             <a href="{{ url_for('admin_errors') }}">Fehlerprotokolle</a>
                             <a href="{{ url_for('admin_llm_check') }}">LLM-Check</a>
-                            <a href="{{ url_for('admin_passwort') }}">{{ session.admin_username }}</a>
+                        </div>
+                    </details>
+                    <details class="nav-dropdown">
+                        <summary>👤 {{ session.admin_username }} ▾</summary>
+                        <div class="nav-dropdown-menu">
+                            <a href="{{ url_for('admin_passwort') }}">Passwort ändern</a>
+                            <a href="{{ url_for('logout') }}">Abmelden</a>
                         </div>
                     </details>
                 {% elif session.student_id %}
                     <a href="{{ url_for('student_settings') }}">⚙️ Einstellungen</a>
                     <span>👤 {{ student_display_name }}</span>
+                    <a href="{{ url_for('logout') }}">Abmelden</a>
                 {% endif %}
-                <a href="{{ url_for('logout') }}">Abmelden</a>
             </div>
         </div>
     </nav>
