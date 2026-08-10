@@ -103,8 +103,12 @@
         <div class="current-task">
             {% if active_subtask %}
             <div class="task-badge-group">
+                {% if current_index == 0 %}
+                <div class="task-badge">Einführung</div>
+                {% else %}
                 {% set badge_num = (current_index + 1) | aufgabe_label %}
                 <div class="task-badge">Aufgabe {{ badge_num }} von {{ subtasks|length - 1 }}</div>
+                {% endif %}
                 {% if active_subtask.estimated_minutes %}
                 <div class="task-badge time-estimate">⏱️ ~{{ active_subtask.estimated_minutes }} Min</div>
                 {% endif %}
