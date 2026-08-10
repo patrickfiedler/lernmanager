@@ -4,6 +4,7 @@ import sys
 from hashlib import sha256
 from contextlib import contextmanager
 from datetime import datetime, timedelta
+from urllib.parse import urlparse
 from werkzeug.security import generate_password_hash, check_password_hash
 import config
 
@@ -1674,6 +1675,38 @@ def get_materials(task_id):
             (task_id,)
         ).fetchall()
         return [dict(r) for r in rows]
+
+
+def get_external_link_domains():
+    """Distinct domains referenced by material links, with usage count and the
+    topic names that use them — for building a school-firewall whitelist."""
+    with db_session() as conn:
+        rows = conn.execute('''
+            SELECT m.pfad, t.name AS task_name
+            FROM material m
+            JOIN task t ON m.task_id = t.id
+            WHERE m.typ = 'link' AND m.pfad != ''
+        ''').fetchall()
+
+    domains = {}
+    for row in rows:
+        domain = urlparse(row['pfad']).netloc
+        if not domain:
+            continue
+        # UCS@school's Internetregeln docs recommend the bare domain
+        # (e.g. "wikipedia.org") over the "www." form, since it matches subdomains too.
+        if domain.startswith('www.'):
+            domain = domain[4:]
+        entry = domains.setdefault(domain, {'count': 0, 'themen': set()})
+        entry['count'] += 1
+        entry['themen'].add(row['task_name'])
+
+    result = [
+        {'domain': domain, 'count': data['count'], 'themen': sorted(data['themen'])}
+        for domain, data in domains.items()
+    ]
+    result.sort(key=lambda d: d['domain'])
+    return result
 
 
 def get_material(material_id):

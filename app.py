@@ -1756,6 +1756,17 @@ def admin_filter_noise():
     return jsonify({'noise': noise})
 
 
+# ============ Admin: Network Whitelist ============
+
+@app.route('/admin/netzwerk-whitelist')
+@admin_required
+def admin_netzwerk_whitelist():
+    """Live-computed list of external domains referenced by material links,
+    for pasting into a school-firewall whitelist (e.g. UCS@school Internetregeln)."""
+    domains = models.get_external_link_domains()
+    return render_template('admin/netzwerk_whitelist.html', domains=domains)
+
+
 # ============ Admin: Error Logs ============
 
 @app.route('/admin/errors')

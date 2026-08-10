@@ -1,0 +1,128 @@
+{% extends 'base.html' %}
+
+{% block title %}Domain-Whitelist - Lernmanager{% endblock %}
+
+{% block content %}
+<h1>🌐 Domain-Whitelist</h1>
+<p class="text-muted mb-2">
+    Alle externen Domains, die als Material-Links in Themen verwendet werden. Für eine
+    schul-Firewall-Whitelist (z.B. UCS@school Internetregeln), damit Schüler nur diese Seiten
+    statt des ganzen Internets öffnen können. Wird live aus den aktuellen Materialien berechnet —
+    bei neuen Links hier einfach neu laden. Domains ohne "www." eingetragen (UCS@school empfiehlt das so,
+    deckt Subdomains automatisch mit ab).
+</p>
+
+<div class="card mb-2">
+    <div class="card-header">Zum Kopieren (eine Domain pro Zeile)</div>
+    <div style="padding: 1rem;">
+        <textarea id="whitelist-output" class="form-control" rows="8" readonly onclick="this.select()"></textarea>
+    </div>
+</div>
+
+<div class="card mb-2">
+    <div class="card-header">➕ Häufige Webseiten hinzufügen</div>
+    <div style="padding: 1rem;">
+        <p class="text-muted mb-1" style="font-size: 0.875rem;">
+            Nicht in Materialien verlinkt, aber oft für Recherche gebraucht. Bewusst nicht vorausgewählt —
+            jede zusätzliche Seite vergrößert wieder die Angriffsfläche für Ablenkung, die die Whitelist
+            eigentlich einschränken soll.
+        </p>
+        <div class="flex gap-2" style="flex-wrap: wrap;">
+            <fieldset style="border: 1px solid #e5e7eb; border-radius: 6px; padding: 0.5rem 0.75rem;">
+                <legend style="font-size: 0.875rem; padding: 0 0.25rem;">Suchmaschinen</legend>
+                <label class="flex flex-center gap-1"><input type="checkbox" class="extra-domain" value="google.com"> Google</label>
+                <label class="flex flex-center gap-1"><input type="checkbox" class="extra-domain" value="bing.com"> Bing</label>
+                <label class="flex flex-center gap-1"><input type="checkbox" class="extra-domain" value="duckduckgo.com"> DuckDuckGo</label>
+                <label class="flex flex-center gap-1"><input type="checkbox" class="extra-domain" value="ecosia.org"> Ecosia</label>
+            </fieldset>
+            <fieldset style="border: 1px solid #e5e7eb; border-radius: 6px; padding: 0.5rem 0.75rem;">
+                <legend style="font-size: 0.875rem; padding: 0 0.25rem;">Nachschlagewerke</legend>
+                <label class="flex flex-center gap-1"><input type="checkbox" class="extra-domain" value="wikipedia.org"> Wikipedia</label>
+                <label class="flex flex-center gap-1"><input type="checkbox" class="extra-domain" value="wiktionary.org"> Wiktionary</label>
+                <label class="flex flex-center gap-1"><input type="checkbox" class="extra-domain" value="duden.de"> Duden</label>
+            </fieldset>
+        </div>
+        <p class="text-muted mt-1" style="font-size: 0.875rem;">
+            ⚠️ Google und Bing zeigen KI-Antworten direkt auf derselben Domain wie die normale Suche
+            (<code>google.com</code>, <code>bing.com</code>) — eine Domain-Whitelist kann die beiden nicht
+            trennen. Der URL-Parameter <code>&amp;udm=14</code> schaltet Googles KI-Übersicht pro Suche ab
+            (Stand Juli 2026 weiterhin zuverlässig), aber das ist eine freiwillige Browser-Gewohnheit, kein
+            technischer Filter — Schüler können den Parameter jederzeit selbst wieder aus der URL entfernen.
+        </p>
+    </div>
+</div>
+
+<div class="card mb-2">
+    <div class="card-header">🚫 KI-Chatbot-Blacklist</div>
+    <div style="padding: 1rem;">
+        <p class="text-muted mb-1" style="font-size: 0.875rem;">
+            Für eine <strong>eigene, schulweite Sperrliste</strong> in UCS@school (unabhängig von der
+            Klassen-Whitelist oben) — kommt allen Lehrern zugute, nicht nur dieser Klasse. Google und Bing
+            bewusst nicht enthalten: dort läuft der KI-Chat auf derselben Domain wie die normale Suche, eine
+            Sperre würde auch die Suche selbst blockieren.
+        </p>
+        <div class="flex gap-1" style="flex-wrap: wrap;">
+            <label class="flex flex-center gap-1"><input type="checkbox" class="blacklist-domain" value="chatgpt.com" checked> ChatGPT</label>
+            <label class="flex flex-center gap-1"><input type="checkbox" class="blacklist-domain" value="chat.openai.com" checked> ChatGPT (alt)</label>
+            <label class="flex flex-center gap-1"><input type="checkbox" class="blacklist-domain" value="claude.ai" checked> Claude</label>
+            <label class="flex flex-center gap-1"><input type="checkbox" class="blacklist-domain" value="gemini.google.com" checked> Gemini</label>
+            <label class="flex flex-center gap-1"><input type="checkbox" class="blacklist-domain" value="copilot.microsoft.com" checked> Copilot</label>
+            <label class="flex flex-center gap-1"><input type="checkbox" class="blacklist-domain" value="character.ai" checked> Character.AI</label>
+            <label class="flex flex-center gap-1"><input type="checkbox" class="blacklist-domain" value="perplexity.ai" checked> Perplexity</label>
+            <label class="flex flex-center gap-1"><input type="checkbox" class="blacklist-domain" value="poe.com" checked> Poe</label>
+            <label class="flex flex-center gap-1"><input type="checkbox" class="blacklist-domain" value="duck.ai" checked> DuckDuckGo AI</label>
+            <label class="flex flex-center gap-1"><input type="checkbox" class="blacklist-domain" value="meta.ai" checked> Meta AI</label>
+            <label class="flex flex-center gap-1"><input type="checkbox" class="blacklist-domain" value="deepseek.com" checked> DeepSeek</label>
+            <label class="flex flex-center gap-1"><input type="checkbox" class="blacklist-domain" value="grok.com" checked> Grok</label>
+        </div>
+        <textarea id="blacklist-output" class="form-control mt-1" rows="4" readonly onclick="this.select()"></textarea>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">Details ({{ domains|length }} Domains aus Materialien)</div>
+    <div style="overflow-x: auto;">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Domain</th>
+                    <th>Verwendungen</th>
+                    <th>Themen</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for d in domains %}
+                <tr>
+                    <td><code>{{ d.domain }}</code></td>
+                    <td>{{ d.count }}</td>
+                    <td>{{ d.themen|join(', ') }}</td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="3" class="text-muted">Keine externen Material-Links vorhanden.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+const baseDomains = {{ domains|map(attribute='domain')|list|tojson }};
+
+function updateWhitelist() {
+    const extras = Array.from(document.querySelectorAll('.extra-domain:checked')).map(cb => cb.value);
+    document.getElementById('whitelist-output').value = baseDomains.concat(extras).join('\n');
+}
+
+function updateBlacklist() {
+    const domains = Array.from(document.querySelectorAll('.blacklist-domain:checked')).map(cb => cb.value);
+    document.getElementById('blacklist-output').value = domains.join('\n');
+}
+
+document.querySelectorAll('.extra-domain').forEach(cb => cb.addEventListener('change', updateWhitelist));
+document.querySelectorAll('.blacklist-domain').forEach(cb => cb.addEventListener('change', updateBlacklist));
+updateWhitelist();
+updateBlacklist();
+{% endblock %}
