@@ -903,7 +903,7 @@ def admin_schueler_bericht(student_id):
 @admin_required
 def admin_themen():
     tasks = models.get_all_tasks()
-    return render_template('admin/aufgaben.html', tasks=tasks, subjects=config.SUBJECTS, levels=config.LEVELS)
+    return render_template('admin/themen.html', tasks=tasks, subjects=config.SUBJECTS, levels=config.LEVELS)
 
 
 @app.route('/admin/themen/export')
@@ -1262,7 +1262,7 @@ def admin_thema_neu():
         flash('Thema erstellt. ✅', 'success')
         return redirect(url_for('admin_thema_detail', task_id=task_id))
 
-    return render_template('admin/aufgabe_form.html', task=None, subjects=config.SUBJECTS, levels=config.LEVELS)
+    return render_template('admin/thema_form.html', task=None, subjects=config.SUBJECTS, levels=config.LEVELS)
 
 
 @app.route('/admin/thema/<int:task_id>')
@@ -1275,7 +1275,7 @@ def admin_thema_detail(task_id):
     subtasks = models.get_subtasks(task_id)
     materials = models.get_materials(task_id)
     material_assignments = models.get_material_subtask_assignments(task_id)
-    return render_template('admin/aufgabe_detail.html', task=task, subtasks=subtasks, materials=materials, subjects=config.SUBJECTS, levels=config.LEVELS, material_assignments=material_assignments)
+    return render_template('admin/thema_detail.html', task=task, subtasks=subtasks, materials=materials, subjects=config.SUBJECTS, levels=config.LEVELS, material_assignments=material_assignments)
 
 
 @app.route('/admin/thema/<int:task_id>/bearbeiten', methods=['POST'])
