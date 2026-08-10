@@ -2959,7 +2959,7 @@ def _serialize_checkpoint_question(q):
     wrong attempt) would break the 3-vs-2 scoring signal."""
     qtype = q.get('type', 'multiple_choice')
     result = {'type': qtype, 'text': q['text']}
-    if qtype != 'fill_blank':
+    if qtype not in ('fill_blank', 'short_answer'):
         result['options'] = q.get('options', [])
     if q.get('image'):
         result['image'] = q['image']
@@ -3113,8 +3113,11 @@ def student_checkpoint_give_up():
         return jsonify({'error': 'Invalid question'}), 400
     question = questions[question_index]
 
-    if question.get('type', 'multiple_choice') == 'fill_blank':
+    qtype = question.get('type', 'multiple_choice')
+    if qtype == 'fill_blank':
         correct_answer = question['answers'][0] if question.get('answers') else ''
+    elif qtype == 'short_answer':
+        correct_answer = question.get('rubric', '')
     else:
         options = question.get('options', [])
         correct_set = set(question.get('correct', []))
@@ -3397,6 +3400,7 @@ def _grade_warmup_answer(question, answer):
 
     MC: compare selected indices to correct set.
     fill_blank: case-insensitive exact match, then LLM fallback.
+    short_answer: rubric-graded via LLM (no exact match, free text).
     source: 'match' | 'llm' | 'fallback' | 'empty' | 'mc'
     """
     qtype = question.get('type', 'multiple_choice')
@@ -3411,6 +3415,15 @@ def _grade_warmup_answer(question, answer):
         # LLM fallback
         result = llm_grading.grade_answer(
             question['text'], ', '.join(question['answers']),
+            student_text, session.get('student_id')
+        )
+        return result['correct'], result.get('feedback', ''), result.get('source', 'llm')
+    elif qtype == 'short_answer':
+        student_text = (answer or '').strip()
+        if not student_text:
+            return False, 'Keine Antwort.', 'empty'
+        result = llm_grading.grade_answer(
+            question['text'], question['rubric'],
             student_text, session.get('student_id')
         )
         return result['correct'], result.get('feedback', ''), result.get('source', 'llm')

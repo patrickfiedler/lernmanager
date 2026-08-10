@@ -23,6 +23,7 @@
                 {% for sub in subtasks %}
                 {% set has_quiz = sub.quiz_json %}
                 {% set quiz_passed = subtask_quiz_status.get(sub.id, false) %}
+                {% set quiz_available = true if sub.checkpoint_type == 'quiz' else sub.erledigt %}
                 {% set disp = loop.index | aufgabe_label %}
                 <div class="dot dot-subtask {% if sub.erledigt %}completed {% endif %}{% if current_subtask and sub.id == current_subtask.id %}current{% endif %}{% if not sub.get('required', true) %} optional{% endif %}"
                      role="button"
@@ -35,16 +36,16 @@
                      onkeydown="handleDotKeydown(event)"
                      title="Aufgabe {{ disp }}{% if not sub.get('required', true) %} (Zusatz){% endif %}"><span class="dot-num">{% if not sub.get('required', true) %}★&nbsp;{% endif %}{{ disp }}</span></div>
                 {% if has_quiz %}
-                <div class="dot dot-subtask-quiz {% if quiz_passed %}completed{% elif sub.erledigt %}available{% endif %}"
+                <div class="dot dot-subtask-quiz {% if quiz_passed %}completed{% elif quiz_available %}available{% endif %}"
                      role="button"
                      tabindex="0"
-                     aria-label="Quiz zu Aufgabe {{ disp }}{% if quiz_passed %} - Bestanden{% elif sub.erledigt %} - Verfügbar{% else %} - Gesperrt{% endif %}"
+                     aria-label="Quiz zu Aufgabe {{ disp }}{% if quiz_passed %} - Bestanden{% elif quiz_available %} - Verfügbar{% else %} - Gesperrt{% endif %}"
                      data-quiz-position="{{ loop.index }}"
                      data-quiz-passed="{{ 'true' if quiz_passed else 'false' }}"
-                     data-quiz-available="{{ 'true' if sub.erledigt else 'false' }}"
-                     onclick="navigateToSubtaskQuiz({{ loop.index }}, {{ 'true' if quiz_passed else 'false' }}, {{ 'true' if sub.erledigt else 'false' }})"
+                     data-quiz-available="{{ 'true' if quiz_available else 'false' }}"
+                     onclick="navigateToSubtaskQuiz({{ loop.index }}, {{ 'true' if quiz_passed else 'false' }}, {{ 'true' if quiz_available else 'false' }})"
                      onkeydown="handleDotKeydown(event)"
-                     title="Quiz zu Aufgabe {{ disp }}{% if quiz_passed %} (bestanden){% elif sub.erledigt %} (verfügbar){% endif %}">?</div>
+                     title="Quiz zu Aufgabe {{ disp }}{% if quiz_passed %} (bestanden){% elif quiz_available %} (verfügbar){% endif %}">?</div>
                 {% endif %}
                 {% endfor %}
                 {% if capstone_gate %}

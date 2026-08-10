@@ -101,6 +101,14 @@
             });
             area.appendChild(input);
             setTimeout(() => input.focus(), 50);
+        } else if (q.type === 'short_answer') {
+            const textarea = document.createElement('textarea');
+            textarea.className = 'form-control';
+            textarea.id = 'short-answer-input';
+            textarea.rows = 4;
+            textarea.placeholder = 'Antwort eingeben...';
+            area.appendChild(textarea);
+            setTimeout(() => textarea.focus(), 50);
         } else {
             const order = shuffleIndices(q.options.length);
             order.forEach(function(origIdx) {
@@ -135,13 +143,16 @@
         document.getElementById('giveup-btn').style.display = '';
         var hintBtn = document.getElementById('hint-btn');
         if (hintBtn) hintBtn.style.display = 'none';
-        document.querySelectorAll('#answer-area input').forEach(function(el) { el.disabled = false; });
+        document.querySelectorAll('#answer-area input, #answer-area textarea').forEach(function(el) { el.disabled = false; });
     }
 
     function getAnswer() {
         const q = questions[currentIdx];
         if (q.type === 'fill_blank') {
             return document.getElementById('fill-input').value;
+        }
+        if (q.type === 'short_answer') {
+            return document.getElementById('short-answer-input').value;
         }
         const checked = document.querySelector('input[name="mc-answer"]:checked');
         return checked ? [parseInt(checked.value)] : [];
@@ -164,7 +175,7 @@
     }
 
     function lockQuestion(resolutionText) {
-        document.querySelectorAll('#answer-area input').forEach(function(el) { el.disabled = true; });
+        document.querySelectorAll('#answer-area input, #answer-area textarea').forEach(function(el) { el.disabled = true; });
         document.getElementById('check-btn').style.display = 'none';
         document.getElementById('giveup-btn').style.display = 'none';
         var hintBtn = document.getElementById('hint-btn');
