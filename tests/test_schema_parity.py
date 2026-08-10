@@ -129,9 +129,6 @@ BASELINE_EXEMPT = {
     ('task_folge', 'folge_task_id'), ('task_folge', 'task_id'),
     ('task_voraussetzung', 'task_id'), ('task_voraussetzung', 'voraussetzung_task_id'),
     ('unterricht', 'datum'), ('unterricht', 'id'), ('unterricht', 'klasse_id'),
-    ('wahlpflicht_gruppe', 'beschreibung'), ('wahlpflicht_gruppe', 'fach'),
-    ('wahlpflicht_gruppe', 'id'), ('wahlpflicht_gruppe', 'name'), ('wahlpflicht_gruppe', 'stufe'),
-    ('wahlpflicht_task', 'gruppe_id'), ('wahlpflicht_task', 'task_id'),
 }
 
 

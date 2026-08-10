@@ -1574,59 +1574,6 @@ def download_material(material_id):
         abort(500)
 
 
-# ============ Admin: Wahlpflicht (Elective Groups) ============
-
-@app.route('/admin/wahlpflicht')
-@admin_required
-def admin_wahlpflicht():
-    gruppen = models.get_all_wahlpflicht_gruppen()
-    tasks = models.get_all_tasks()
-    # Get tasks for each group
-    gruppen_tasks = {}
-    for gruppe in gruppen:
-        gruppen_tasks[gruppe['id']] = models.get_wahlpflicht_tasks(gruppe['id'])
-    return render_template('admin/wahlpflicht.html', gruppen=gruppen, gruppen_tasks=gruppen_tasks, tasks=tasks, subjects=config.SUBJECTS, levels=config.LEVELS)
-
-
-@app.route('/admin/wahlpflicht/neu', methods=['POST'])
-@admin_required
-def admin_wahlpflicht_neu():
-    gruppe_id = models.create_wahlpflicht_gruppe(
-        name=request.form['name'],
-        beschreibung=request.form.get('beschreibung', ''),
-        fach=request.form['fach'],
-        stufe=request.form['stufe']
-    )
-    flash('Wahlpflichtgruppe erstellt. ✅', 'success')
-    return redirect(url_for('admin_wahlpflicht'))
-
-
-@app.route('/admin/wahlpflicht/<int:gruppe_id>/thema-hinzufuegen', methods=['POST'])
-@admin_required
-def admin_wahlpflicht_thema_hinzufuegen(gruppe_id):
-    task_id = request.form.get('task_id')
-    if task_id:
-        models.add_task_to_wahlpflicht(gruppe_id, int(task_id))
-        flash('Thema zur Gruppe hinzugefügt. ✅', 'success')
-    return redirect(url_for('admin_wahlpflicht'))
-
-
-@app.route('/admin/wahlpflicht/<int:gruppe_id>/thema/<int:task_id>/entfernen', methods=['POST'])
-@admin_required
-def admin_wahlpflicht_thema_entfernen(gruppe_id, task_id):
-    models.remove_task_from_wahlpflicht(gruppe_id, task_id)
-    flash('Thema aus Gruppe entfernt.', 'success')
-    return redirect(url_for('admin_wahlpflicht'))
-
-
-@app.route('/admin/wahlpflicht/<int:gruppe_id>/loeschen', methods=['POST'])
-@admin_required
-def admin_wahlpflicht_loeschen(gruppe_id):
-    models.delete_wahlpflicht_gruppe(gruppe_id)
-    flash('Wahlpflichtgruppe gelöscht.', 'success')
-    return redirect(url_for('admin_wahlpflicht'))
-
-
 # ============ Admin: Password Change ============
 
 @app.route('/admin/passwort', methods=['GET', 'POST'])

@@ -156,25 +156,6 @@ def init_db():
                 FOREIGN KEY (folge_task_id) REFERENCES task(id) ON DELETE CASCADE
             );
 
-            -- Elective task groups (Wahlpflicht)
-            -- Students must complete ONE task from the group
-            CREATE TABLE IF NOT EXISTS wahlpflicht_gruppe (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                beschreibung TEXT,
-                fach TEXT NOT NULL,
-                stufe TEXT NOT NULL
-            );
-
-            -- Tasks belonging to an elective group
-            CREATE TABLE IF NOT EXISTS wahlpflicht_task (
-                gruppe_id INTEGER NOT NULL,
-                task_id INTEGER NOT NULL,
-                PRIMARY KEY (gruppe_id, task_id),
-                FOREIGN KEY (gruppe_id) REFERENCES wahlpflicht_gruppe(id) ON DELETE CASCADE,
-                FOREIGN KEY (task_id) REFERENCES task(id) ON DELETE CASCADE
-            );
-
             -- Sub-tasks (Teilaufgaben)
             CREATE TABLE IF NOT EXISTS subtask (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1313,84 +1294,6 @@ def export_all_tasks():
     """Export all tasks. Wraps each task with export_task_to_dict()."""
     tasks = get_all_tasks()
     return [export_task_to_dict(t['id']) for t in tasks]
-
-
-# ============ Wahlpflicht (Elective Groups) ============
-
-def create_wahlpflicht_gruppe(name, beschreibung, fach, stufe):
-    """Create an elective task group."""
-    with db_session() as conn:
-        cursor = conn.execute(
-            "INSERT INTO wahlpflicht_gruppe (name, beschreibung, fach, stufe) VALUES (?, ?, ?, ?)",
-            (name, beschreibung, fach, stufe)
-        )
-        return cursor.lastrowid
-
-
-def get_wahlpflicht_gruppe(gruppe_id):
-    """Get an elective group by ID."""
-    with db_session() as conn:
-        row = conn.execute(
-            "SELECT * FROM wahlpflicht_gruppe WHERE id = ?", (gruppe_id,)
-        ).fetchone()
-        return dict(row) if row else None
-
-
-def get_all_wahlpflicht_gruppen():
-    """Get all elective groups."""
-    with db_session() as conn:
-        rows = conn.execute(
-            "SELECT * FROM wahlpflicht_gruppe ORDER BY fach, stufe, name"
-        ).fetchall()
-        return [dict(r) for r in rows]
-
-
-def delete_wahlpflicht_gruppe(gruppe_id):
-    """Delete an elective group."""
-    with db_session() as conn:
-        conn.execute("DELETE FROM wahlpflicht_gruppe WHERE id = ?", (gruppe_id,))
-
-
-def add_task_to_wahlpflicht(gruppe_id, task_id):
-    """Add a task to an elective group."""
-    with db_session() as conn:
-        conn.execute(
-            "INSERT OR IGNORE INTO wahlpflicht_task (gruppe_id, task_id) VALUES (?, ?)",
-            (gruppe_id, task_id)
-        )
-
-
-def remove_task_from_wahlpflicht(gruppe_id, task_id):
-    """Remove a task from an elective group."""
-    with db_session() as conn:
-        conn.execute(
-            "DELETE FROM wahlpflicht_task WHERE gruppe_id = ? AND task_id = ?",
-            (gruppe_id, task_id)
-        )
-
-
-def get_wahlpflicht_tasks(gruppe_id):
-    """Get all tasks in an elective group."""
-    with db_session() as conn:
-        rows = conn.execute('''
-            SELECT t.* FROM task t
-            JOIN wahlpflicht_task wt ON t.id = wt.task_id
-            WHERE wt.gruppe_id = ?
-            ORDER BY t.name
-        ''', (gruppe_id,)).fetchall()
-        return [dict(r) for r in rows]
-
-
-def check_wahlpflicht_erfuellt(student_id, klasse_id, gruppe_id):
-    """Check if student has completed any task from an elective group."""
-    with db_session() as conn:
-        completed = conn.execute('''
-            SELECT st.id FROM student_task st
-            JOIN wahlpflicht_task wt ON st.task_id = wt.task_id
-            WHERE st.student_id = ? AND st.klasse_id = ? AND wt.gruppe_id = ? AND st.abgeschlossen = 1
-            LIMIT 1
-        ''', (student_id, klasse_id, gruppe_id)).fetchone()
-        return completed is not None
 
 
 # ============ Learning Paths ============
