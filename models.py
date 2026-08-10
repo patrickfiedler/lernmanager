@@ -192,6 +192,7 @@ def init_db():
                 checkpoint_type TEXT,  -- quiz/abnahme/artefakt (Chemie Checkpoint-Punktekonto; NULL = not a checkpoint)
                 kern_standard_tag TEXT,  -- kern/standard (NULL = not a checkpoint)
                 checkpoint_hints_json TEXT,  -- JSON array of escalating Tipp-button hints (quiz checkpoints)
+                school_only INTEGER NOT NULL DEFAULT 0,  -- 1=Quiz-Checkpoint only accessible from school network
                 FOREIGN KEY (task_id) REFERENCES task(id) ON DELETE CASCADE
             );
 
@@ -1470,7 +1471,7 @@ def delete_subtask(subtask_id):
 def update_subtasks(task_id, subtasks_list, estimated_minutes_list=None, quiz_json_list=None,
                     path_list=None, path_model_list=None, graded_artifact_json_list=None,
                     fertig_wenn_list=None, tipps_list=None, checkpoint_type_list=None,
-                    kern_standard_tag_list=None, checkpoint_hints_list=None):
+                    kern_standard_tag_list=None, checkpoint_hints_list=None, school_only_list=None):
     """Update subtasks for a task in-place by position.
 
     UPDATEs existing subtasks at matching positions (preserves their IDs and thus
@@ -1545,25 +1546,29 @@ def update_subtasks(task_id, subtasks_list, estimated_minutes_list=None, quiz_js
                 lines = [l.strip() for l in (checkpoint_hints_list[i] or '').splitlines() if l.strip()]
                 checkpoint_hints = json.dumps(lines, ensure_ascii=False) if lines else None
 
+            school_only = 0
+            if school_only_list and i < len(school_only_list):
+                school_only = 1 if school_only_list[i] == '1' else 0
+
             if i in old_by_pos:
                 # UPDATE in-place — preserves subtask ID and student_subtask records
                 conn.execute("""
                     UPDATE subtask SET beschreibung=?, estimated_minutes=?,
                     quiz_json=?, path=?, path_model=?, graded_artifact_json=?,
                     fertig_wenn=?, tipps=?, checkpoint_type=?, kern_standard_tag=?,
-                    checkpoint_hints_json=?
+                    checkpoint_hints_json=?, school_only=?
                     WHERE id=?
                 """, (beschreibung.strip(), estimated_minutes, subtask_quiz,
                       path, path_model, graded_artifact, fertig_wenn, tipps,
-                      checkpoint_type, kern_standard_tag, checkpoint_hints,
+                      checkpoint_type, kern_standard_tag, checkpoint_hints, school_only,
                       old_by_pos[i]['id']))
             else:
                 # INSERT new subtask at this position
                 conn.execute(
-                    "INSERT INTO subtask (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json, fertig_wenn, tipps, checkpoint_type, kern_standard_tag, checkpoint_hints_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO subtask (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json, fertig_wenn, tipps, checkpoint_type, kern_standard_tag, checkpoint_hints_json, school_only) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (task_id, beschreibung.strip(), i, estimated_minutes, subtask_quiz,
                      path, path_model, graded_artifact, fertig_wenn, tipps,
-                     checkpoint_type, kern_standard_tag, checkpoint_hints)
+                     checkpoint_type, kern_standard_tag, checkpoint_hints, school_only)
                 )
 
         # DELETE subtasks at positions no longer present

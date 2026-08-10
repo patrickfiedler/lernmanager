@@ -132,6 +132,10 @@
                             <option value="kern" {% if st.kern_standard_tag == 'kern' %}selected{% endif %}>Kern</option>
                             <option value="standard" {% if st.kern_standard_tag == 'standard' %}selected{% endif %}>Standard</option>
                         </select>
+                        <select name="school_only[]" class="form-control" style="width: 130px;" title="Nur im Schulnetzwerk (Quiz-Checkpoints)">
+                            <option value="0" {% if not st.school_only %}selected{% endif %}>Überall verfügbar</option>
+                            <option value="1" {% if st.school_only %}selected{% endif %}>🔒 Nur Schulnetzwerk</option>
+                        </select>
                         <input type="number" name="estimated_minutes[]" class="form-control" style="width: 80px;" min="5" max="180" placeholder="Min" value="{{ st.estimated_minutes or '' }}" title="Geschätzte Dauer in Minuten">
                         <button type="button" class="btn btn-danger btn-sm" onclick="removeSubtask(this)">✕ Entfernen</button>
                     </div>
@@ -535,6 +539,10 @@ function addSubtask() {
                     <option value="" selected>– –</option>
                     <option value="kern">Kern</option>
                     <option value="standard">Standard</option>
+                </select>
+                <select name="school_only[]" class="form-control" style="width: 130px;" title="Nur im Schulnetzwerk (Quiz-Checkpoints)">
+                    <option value="0" selected>Überall verfügbar</option>
+                    <option value="1">🔒 Nur Schulnetzwerk</option>
                 </select>
                 <input type="number" name="estimated_minutes[]" class="form-control" style="width: 80px;" min="5" max="180" placeholder="Min" title="Geschätzte Dauer in Minuten">
                 <button type="button" class="btn btn-danger btn-sm" onclick="removeSubtask(this)">✕ Entfernen</button>

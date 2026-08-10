@@ -314,6 +314,17 @@ def _get_client_ip():
     return request.headers.get('X-Real-IP') or request.remote_addr
 
 
+def _checkpoint_school_gate_ok(subtask):
+    """Chemie Quiz-Checkpoints can be marked school_only (subtask.school_only).
+    Returns True if this subtask is either not restricted, or the current
+    request's client IP falls inside the shared network_gate_ip_ranges setting.
+    Reuses the same gate as download_material() (see admin dashboard 'Netzwerk-Gate')."""
+    if not subtask['school_only']:
+        return True
+    ip_ranges = models.get_setting('network_gate_ip_ranges', '')
+    return is_ip_allowed(_get_client_ip(), ip_ranges)
+
+
 # ============ Admin Dashboard ============
 
 def get_disk_status(percent_used):
@@ -1290,6 +1301,7 @@ def admin_thema_aufgaben(task_id):
         checkpoint_type_list = request.form.getlist('checkpoint_type[]')
         kern_standard_tag_list = request.form.getlist('kern_standard_tag[]')
         checkpoint_hints_list = request.form.getlist('checkpoint_hints[]')
+        school_only_list = request.form.getlist('school_only[]')
 
         # Validate all subtask quiz JSONs before saving
         for i, qj in enumerate(quiz_json_list):
@@ -1312,7 +1324,8 @@ def admin_thema_aufgaben(task_id):
                                fertig_wenn_list=fertig_wenn_list, tipps_list=tipps_list,
                                checkpoint_type_list=checkpoint_type_list,
                                kern_standard_tag_list=kern_standard_tag_list,
-                               checkpoint_hints_list=checkpoint_hints_list)
+                               checkpoint_hints_list=checkpoint_hints_list,
+                               school_only_list=school_only_list)
         flash('Aufgaben aktualisiert.', 'success')
         return redirect(url_for('admin_thema_detail', task_id=task_id))
 
@@ -2933,6 +2946,9 @@ def student_quiz_subtask(slug, position):
         return redirect(url_for('student_klasse', slug=slug))
 
     if subtask.get('checkpoint_type') == 'quiz':
+        if not _checkpoint_school_gate_ok(subtask):
+            flash('Dieser Checkpoint ist nur im Schulnetzwerk verfügbar.', 'warning')
+            return redirect(url_for('student_klasse', slug=slug))
         return _handle_checkpoint_quiz(student, task, slug, subtask, position)
 
     return _handle_quiz(student_id, student, task, slug, subtask_row['quiz_json'],
@@ -2971,7 +2987,12 @@ def _resolve_checkpoint_subtask(student_id, slug, subtask_id):
             "SELECT * FROM subtask WHERE id = ? AND task_id = ? AND checkpoint_type = 'quiz'",
             (subtask_id, task['task_id'])
         ).fetchone()
-    return (task, dict(row)) if row else (None, None)
+    if not row:
+        return None, None
+    subtask = dict(row)
+    if not _checkpoint_school_gate_ok(subtask):
+        return None, None
+    return task, subtask
 
 
 def _checkpoint_progress(subtask_id):
