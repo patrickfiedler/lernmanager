@@ -409,7 +409,16 @@ def admin_dashboard():
         if schedule and schedule['weekday'] == today_weekday:
             klassen_heute.append(klasse)
 
-    # Get app-wide settings for the settings card
+    return render_template('admin/dashboard.html', klassen=klassen, tasks=tasks,
+                          klassen_heute=klassen_heute,
+                          disk_total=format_bytes(disk_total), disk_used=format_bytes(disk_used),
+                          disk_free=format_bytes(disk_free), disk_percent=disk_percent,
+                          disk_status_label=disk_status_label, disk_status_class=disk_status_class)
+
+
+@app.route('/admin/einstellungen')
+@admin_required
+def admin_einstellungen():
     log_page_views = models.get_bool_setting('log_page_views', default=True)
     student_clear_names = models.get_bool_setting('student_clear_names', default=True)
 
@@ -418,15 +427,11 @@ def admin_dashboard():
     network_gate_start_time = models.get_setting('network_gate_start_time', '')
     network_gate_end_time = models.get_setting('network_gate_end_time', '')
 
-    return render_template('admin/dashboard.html', klassen=klassen, tasks=tasks,
-                          klassen_heute=klassen_heute, log_page_views=log_page_views,
+    return render_template('admin/einstellungen.html', log_page_views=log_page_views,
                           student_clear_names=student_clear_names,
                           network_gate_ip_ranges=network_gate_ip_ranges,
                           network_gate_start_time=network_gate_start_time,
-                          network_gate_end_time=network_gate_end_time,
-                          disk_total=format_bytes(disk_total), disk_used=format_bytes(disk_used),
-                          disk_free=format_bytes(disk_free), disk_percent=disk_percent,
-                          disk_status_label=disk_status_label, disk_status_class=disk_status_class)
+                          network_gate_end_time=network_gate_end_time)
 
 
 @app.route('/admin/settings', methods=['POST'])
@@ -444,7 +449,7 @@ def admin_update_settings():
     app.config['STUDENT_CLEAR_NAMES'] = student_clear_names
 
     flash('Einstellungen gespeichert. ✅', 'success')
-    return redirect(url_for('admin_dashboard'))
+    return redirect(url_for('admin_einstellungen'))
 
 
 @app.route('/admin/settings/netzwerk-gate', methods=['POST'])
@@ -463,25 +468,25 @@ def admin_update_network_gate():
             ipaddress.ip_network(entry, strict=False)
         except ValueError:
             flash(f'Ungültiger IP-Bereich: "{entry}". Nichts gespeichert.', 'danger')
-            return redirect(url_for('admin_dashboard'))
+            return redirect(url_for('admin_einstellungen'))
 
     if bool(start_time) != bool(end_time):
         flash('Start- und Endzeit müssen beide gesetzt sein (oder beide leer). Nichts gespeichert.', 'danger')
-        return redirect(url_for('admin_dashboard'))
+        return redirect(url_for('admin_einstellungen'))
     for t in (start_time, end_time):
         if t:
             try:
                 datetime.strptime(t, '%H:%M')
             except ValueError:
                 flash(f'Ungültige Uhrzeit: "{t}". Format HH:MM. Nichts gespeichert.', 'danger')
-                return redirect(url_for('admin_dashboard'))
+                return redirect(url_for('admin_einstellungen'))
 
     models.set_setting('network_gate_ip_ranges', ip_ranges)
     models.set_setting('network_gate_start_time', start_time)
     models.set_setting('network_gate_end_time', end_time)
 
     flash('Netzwerk-Einstellungen gespeichert. ✅', 'success')
-    return redirect(url_for('admin_dashboard'))
+    return redirect(url_for('admin_einstellungen'))
 
 
 # ============ Admin: Klassen ============

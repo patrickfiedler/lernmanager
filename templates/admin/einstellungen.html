@@ -1,0 +1,71 @@
+{% extends 'base.html' %}
+
+{% block title %}Einstellungen - Lernmanager{% endblock %}
+
+{% block content %}
+<h1 class="mb-2">⚙️ Einstellungen</h1>
+
+<div class="card mt-2">
+    <div class="card-header">⚙️ Systemeinstellungen</div>
+    <form method="POST" action="{{ url_for('admin_update_settings') }}" style="padding: 1rem;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="flex flex-between flex-center">
+            <div>
+                <strong>Seitenaufrufe protokollieren</strong>
+                <p class="text-muted" style="margin: 0.25rem 0 0 0; font-size: 0.875rem;">
+                    Wenn deaktiviert, werden nur wichtige Aktivitäten protokolliert (Themen, Quiz, Downloads).
+                    Dies kann die Leistung leicht verbessern.
+                </p>
+            </div>
+            <label class="toggle-switch">
+                <input type="checkbox" name="log_page_views" {% if log_page_views %}checked{% endif %} onchange="this.form.submit()">
+                <span class="toggle-slider"></span>
+            </label>
+        </div>
+        <div class="flex flex-between flex-center" style="margin-top: 0.75rem;">
+            <div>
+                <strong>Klarnamen in der Schüleransicht</strong>
+                <p class="text-muted" style="margin: 0.25rem 0 0 0; font-size: 0.875rem;">
+                    Wenn aktiviert, sehen Schüler ihren Vornamen (z.B. "Hallo, Emma!").
+                    Wenn deaktiviert, sehen sie ihr Pseudonym (z.B. "happypanda").
+                </p>
+            </div>
+            <label class="toggle-switch">
+                <input type="checkbox" name="student_clear_names" {% if student_clear_names %}checked{% endif %} onchange="this.form.submit()">
+                <span class="toggle-slider"></span>
+            </label>
+        </div>
+    </form>
+</div>
+
+<div class="card mt-2">
+    <div class="card-header">🔒 Netzwerk-Zugriff</div>
+    <form method="POST" action="{{ url_for('admin_update_network_gate') }}" style="padding: 1rem;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <p class="text-muted mb-1" style="font-size: 0.875rem;">
+            Beschränkt als "Nur Schulnetzwerk" markierte Materialien (z.B. Lehrbuch-Scans) und
+            Chemie-Quiz-Checkpoints auf die hier eingetragenen IP-Bereiche. Leer lassen = keine Beschränkung.
+        </p>
+        <div class="form-group">
+            <label>Erlaubte IP-Bereiche (ein CIDR/IP pro Zeile)</label>
+            <textarea name="network_gate_ip_ranges" class="form-control" rows="3" placeholder="10.0.0.0/24&#10;192.168.1.50">{{ network_gate_ip_ranges }}</textarea>
+            <small class="text-muted" style="display: block; margin-top: 0.25rem;">
+                Die Zahl nach dem <code>/</code> (CIDR) gibt die Größe des Bereichs an: <code>/32</code> = eine
+                einzelne IP, <code>/27</code> = 32 IPs, <code>/24</code> = 256 IPs. Beispiel: <code>94.135.230.160/27</code>
+                deckt <code>.160</code>–<code>.191</code> ab. Nicht raten — die genaue Größe per WHOIS-Abfrage der
+                eigenen öffentlichen IP nachschlagen (z.B. auf <code>stat.ripe.net</code>), sonst wird der Bereich
+                leicht falsch (zu groß oder falsch verschoben).
+            </small>
+        </div>
+        <div class="form-group">
+            <label>Zeitfenster (optional, für zukünftige Nutzung z.B. Chemie-Checkpoints)</label>
+            <div class="flex flex-center gap-1">
+                <input type="time" name="network_gate_start_time" class="form-control" value="{{ network_gate_start_time }}" style="max-width: 140px;">
+                <span>bis</span>
+                <input type="time" name="network_gate_end_time" class="form-control" value="{{ network_gate_end_time }}" style="max-width: 140px;">
+            </div>
+        </div>
+        <button type="submit" class="btn btn-primary">Speichern</button>
+    </form>
+</div>
+{% endblock %}
