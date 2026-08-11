@@ -135,6 +135,59 @@ def validate_quiz_json(raw):
     return raw.strip()
 
 
+def _connections_to_admin_fields(connections_json):
+    """Parse connections_json into admin-editable textarea text.
+
+    building_on lines: "label | unit_slug | strength" (unit/strength optional,
+    omitted entirely for external/free-text-only prerequisites).
+    arriving_at lines: one bullet per line.
+    """
+    building_on_text = ''
+    arriving_at_text = ''
+    if connections_json:
+        try:
+            connections = json.loads(connections_json)
+        except (json.JSONDecodeError, TypeError):
+            connections = {}
+        arriving_at_text = '\n'.join(connections.get('arriving_at', []))
+        lines = []
+        for entry in connections.get('building_on', []):
+            parts = [entry.get('label', '')]
+            if entry.get('unit'):
+                parts.append(entry['unit'])
+                parts.append(entry.get('strength', 'hard'))
+            lines.append(' | '.join(parts))
+        building_on_text = '\n'.join(lines)
+    return building_on_text, arriving_at_text
+
+
+def _parse_connections_form(building_on_text, arriving_at_text):
+    """Parse admin building_on/arriving_at textareas into a connections dict, or None if both empty."""
+    building_on = []
+    for line in (building_on_text or '').splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = [p.strip() for p in line.split('|')]
+        entry = {'label': parts[0]}
+        if len(parts) > 1 and parts[1]:
+            entry['unit'] = parts[1]
+        if len(parts) > 2 and parts[2] in ('hard', 'soft'):
+            entry['strength'] = parts[2]
+        building_on.append(entry)
+
+    arriving_at = [line.strip() for line in (arriving_at_text or '').splitlines() if line.strip()]
+
+    if not building_on and not arriving_at:
+        return None
+    connections = {}
+    if building_on:
+        connections['building_on'] = building_on
+    if arriving_at:
+        connections['arriving_at'] = arriving_at
+    return connections
+
+
 def _resolve_student_topic(student_id, slug):
     """Find student_task matching topic slug. Returns (task, klasse) or (None, None).
 
@@ -1257,7 +1310,8 @@ def admin_thema_neu():
             number=int(request.form.get('number', 0)),
             why_learn_this=request.form.get('why_learn_this') or None,
             lernziel_schueler=request.form.get('lernziel_schueler') or None,
-            module_tier=request.form.get('module_tier', 'kern_standard')
+            module_tier=request.form.get('module_tier', 'kern_standard'),
+            unit_slug=request.form.get('unit_slug') or None
         )
         flash('Thema erstellt. ✅', 'success')
         return redirect(url_for('admin_thema_detail', task_id=task_id))
@@ -1275,7 +1329,8 @@ def admin_thema_detail(task_id):
     subtasks = models.get_subtasks(task_id)
     materials = models.get_materials(task_id)
     material_assignments = models.get_material_subtask_assignments(task_id)
-    return render_template('admin/thema_detail.html', task=task, subtasks=subtasks, materials=materials, subjects=config.SUBJECTS, levels=config.LEVELS, material_assignments=material_assignments)
+    building_on_text, arriving_at_text = _connections_to_admin_fields(task.get('connections_json'))
+    return render_template('admin/thema_detail.html', task=task, subtasks=subtasks, materials=materials, subjects=config.SUBJECTS, levels=config.LEVELS, material_assignments=material_assignments, building_on_text=building_on_text, arriving_at_text=arriving_at_text)
 
 
 @app.route('/admin/thema/<int:task_id>/bearbeiten', methods=['POST'])
@@ -1286,6 +1341,19 @@ def admin_thema_bearbeiten(task_id):
     except ValueError as e:
         flash(str(e), 'danger')
         return redirect(url_for('admin_thema_detail', task_id=task_id))
+
+    unit_slug = request.form.get('unit_slug') or None
+    if unit_slug and not re.match(r'^[a-z0-9_]+$', unit_slug):
+        flash("Unit-Slug ungültig. Nur Kleinbuchstaben, Ziffern und Unterstriche.", 'danger')
+        return redirect(url_for('admin_thema_detail', task_id=task_id))
+    if unit_slug:
+        slug_owner = models.get_task_by_unit_slug(unit_slug)
+        if slug_owner and slug_owner['id'] != task_id:
+            flash(f"Unit-Slug '{unit_slug}' wird bereits von Thema '{slug_owner['name']}' verwendet.", 'danger')
+            return redirect(url_for('admin_thema_detail', task_id=task_id))
+
+    connections = _parse_connections_form(request.form.get('building_on'), request.form.get('arriving_at'))
+    connections_json = json.dumps(connections, ensure_ascii=False) if connections else None
 
     models.update_task(
         task_id=task_id,
@@ -1300,7 +1368,9 @@ def admin_thema_bearbeiten(task_id):
         why_learn_this=request.form.get('why_learn_this') or None,
         subtask_quiz_required=1 if request.form.get('subtask_quiz_required') else 0,
         lernziel_schueler=request.form.get('lernziel_schueler') or None,
-        module_tier=request.form.get('module_tier', 'kern_standard')
+        module_tier=request.form.get('module_tier', 'kern_standard'),
+        unit_slug=unit_slug,
+        connections_json=connections_json
     )
     flash('Thema aktualisiert. ✅', 'success')
     return redirect(url_for('admin_thema_detail', task_id=task_id))
@@ -2277,7 +2347,20 @@ def student_klasse(slug):
         unit_artifact_file, subtasks, student, klasse
     )
 
+    # Clayden-style unit connections (Baut auf / Du erreichst / Führt zu) — plain-text v1
+    connections = None
+    looking_forward_to = []
+    if task and task.get('connections_json'):
+        try:
+            connections = json.loads(task['connections_json'])
+        except (json.JSONDecodeError, TypeError):
+            connections = None
+    if task and task.get('unit_slug'):
+        looking_forward_to = models.get_looking_forward_to(task['unit_slug'])
+
     return render_template('student/klasse.html',
+                           connections=connections,
+                           looking_forward_to=looking_forward_to,
                            student=student,
                            klasse=klasse,
                            task=task,

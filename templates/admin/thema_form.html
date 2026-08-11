@@ -52,6 +52,11 @@
                     <option value="hero" {% if task and task.module_tier == 'hero' %}selected{% endif %}>⭐ Hero (Zusatzmodul)</option>
                 </select>
             </div>
+
+            <div class="form-group">
+                <label for="unit_slug">Unit-Slug <small class="text-muted">(optional, für Verbindungen)</small></label>
+                <input type="text" id="unit_slug" name="unit_slug" class="form-control" pattern="[a-z0-9_]+" value="{{ task.unit_slug if task else '' }}" placeholder="z.B. modul_01">
+            </div>
         </div>
 
         <div class="form-group">

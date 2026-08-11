@@ -135,8 +135,12 @@ def init_db():
                 quiz_json TEXT,  -- JSON format for quiz questions (topic-level)
                 why_learn_this TEXT,
                 subtask_quiz_required INTEGER DEFAULT 1,  -- 1=must pass subtask quizzes, 0=optional
-                module_tier TEXT NOT NULL DEFAULT 'kern_standard'  -- kern_standard/hero (Chemie swap-rule tier)
+                module_tier TEXT NOT NULL DEFAULT 'kern_standard',  -- kern_standard/hero (Chemie swap-rule tier)
+                unit_slug TEXT,  -- stable author-chosen ID (e.g. "modul_01"), referenced by other units' connections.building_on
+                connections_json TEXT  -- JSON: {building_on: [...], arriving_at: [...]} (Clayden-style unit connections)
             );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_task_unit_slug ON task(unit_slug) WHERE unit_slug IS NOT NULL;
 
             -- Task prerequisites (many-to-many)
             CREATE TABLE IF NOT EXISTS task_voraussetzung (
@@ -1027,28 +1031,68 @@ def get_task(task_id):
         return dict(row) if row else None
 
 
-def create_task(name, beschreibung, lernziel, fach, stufe, kategorie, quiz_json=None, number=0, why_learn_this=None, lernziel_schueler=None, module_tier='kern_standard'):
+def get_task_by_unit_slug(unit_slug):
+    """Get a task by its unit_slug (Clayden-style connections). Returns None if not found."""
+    if not unit_slug:
+        return None
+    with db_session() as conn:
+        row = conn.execute("SELECT * FROM task WHERE unit_slug = ?", (unit_slug,)).fetchone()
+        return dict(row) if row else None
+
+
+def create_task(name, beschreibung, lernziel, fach, stufe, kategorie, quiz_json=None, number=0, why_learn_this=None, lernziel_schueler=None, module_tier='kern_standard', unit_slug=None, connections_json=None):
     """Create a new task."""
     with db_session() as conn:
         cursor = conn.execute(
-            "INSERT INTO task (name, number, beschreibung, lernziel, lernziel_schueler, fach, stufe, kategorie, quiz_json, why_learn_this, module_tier) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (name, number, beschreibung, lernziel, lernziel_schueler, fach, stufe, kategorie, quiz_json, why_learn_this, module_tier)
+            "INSERT INTO task (name, number, beschreibung, lernziel, lernziel_schueler, fach, stufe, kategorie, quiz_json, why_learn_this, module_tier, unit_slug, connections_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (name, number, beschreibung, lernziel, lernziel_schueler, fach, stufe, kategorie, quiz_json, why_learn_this, module_tier, unit_slug, connections_json)
         )
         return cursor.lastrowid
 
 
-def update_task(task_id, name, beschreibung, lernziel, fach, stufe, kategorie, quiz_json=None, number=0, why_learn_this=None, subtask_quiz_required=None, lernziel_schueler=None, module_tier='kern_standard'):
+def update_task(task_id, name, beschreibung, lernziel, fach, stufe, kategorie, quiz_json=None, number=0, why_learn_this=None, subtask_quiz_required=None, lernziel_schueler=None, module_tier='kern_standard', unit_slug=None, connections_json=None):
     """Update a task."""
     with db_session() as conn:
         conn.execute('''
             UPDATE task SET name=?, number=?, beschreibung=?, lernziel=?, lernziel_schueler=?, fach=?, stufe=?,
-            kategorie=?, quiz_json=?, why_learn_this=?, module_tier=? WHERE id=?
-        ''', (name, number, beschreibung, lernziel, lernziel_schueler, fach, stufe, kategorie, quiz_json, why_learn_this, module_tier, task_id))
+            kategorie=?, quiz_json=?, why_learn_this=?, module_tier=?, unit_slug=?, connections_json=? WHERE id=?
+        ''', (name, number, beschreibung, lernziel, lernziel_schueler, fach, stufe, kategorie, quiz_json, why_learn_this, module_tier, unit_slug, connections_json, task_id))
         if subtask_quiz_required is not None:
             conn.execute(
                 "UPDATE task SET subtask_quiz_required = ? WHERE id = ?",
                 (subtask_quiz_required, task_id)
             )
+
+
+def get_looking_forward_to(unit_slug):
+    """Inverse of connections.building_on, computed at render time (not stored).
+
+    Unit A "looks forward to" every unit B where A appears in B's building_on
+    (docs/shared/chemie/technical.md § Clayden-style prerequisites). Computing
+    this fresh avoids two files (or one author, twice) drifting out of sync as
+    building_on entries change.
+    """
+    if not unit_slug:
+        return []
+    with db_session() as conn:
+        rows = conn.execute(
+            "SELECT name, unit_slug, connections_json FROM task WHERE connections_json IS NOT NULL"
+        ).fetchall()
+
+    result = []
+    for row in rows:
+        try:
+            connections = json.loads(row['connections_json'])
+        except (json.JSONDecodeError, TypeError):
+            continue
+        for entry in connections.get('building_on', []):
+            if entry.get('unit') == unit_slug:
+                result.append({
+                    'unit': row['unit_slug'],
+                    'label': row['name'],
+                    'strength': entry.get('strength', 'hard'),
+                })
+    return result
 
 
 def delete_task(task_id):
@@ -1885,6 +1929,7 @@ def get_student_task(student_id, klasse_id):
     with db_session() as conn:
         row = conn.execute(f'''
             SELECT st.*, t.name, t.beschreibung, t.lernziel, t.fach, t.stufe, t.kategorie, t.quiz_json, t.why_learn_this, t.subtask_quiz_required,
+                t.unit_slug, t.connections_json,
                 {_IS_SEILBAHN_SQL}
             FROM student_task st
             JOIN task t ON st.task_id = t.id
@@ -1904,6 +1949,7 @@ def get_all_student_tasks(student_id, klasse_id):
     with db_session() as conn:
         rows = conn.execute(f'''
             SELECT st.*, t.name, t.beschreibung, t.lernziel, t.fach, t.stufe, t.kategorie, t.quiz_json, t.why_learn_this, t.subtask_quiz_required,
+                t.unit_slug, t.connections_json,
                 {_IS_SEILBAHN_SQL}
             FROM student_task st
             JOIN task t ON st.task_id = t.id

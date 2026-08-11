@@ -60,6 +60,10 @@
                     <option value="hero" {% if task.module_tier == 'hero' %}selected{% endif %}>⭐ Hero (Zusatzmodul)</option>
                 </select>
             </div>
+            <div class="form-group">
+                <label>Unit-Slug <small class="text-muted">(optional, für Verbindungen)</small></label>
+                <input type="text" name="unit_slug" class="form-control" pattern="[a-z0-9_]+" value="{{ task.unit_slug or '' }}" placeholder="z.B. modul_01">
+            </div>
         </div>
         <div class="form-group">
             <label>Lernziel (Lehrkraft) <small class="text-muted">(Markdown) — „Die SuS können…"</small></label>
@@ -87,6 +91,14 @@
             <label>Wofür brauchen die Schüler das? 💡</label>
             <textarea name="why_learn_this" class="form-control" rows="2" placeholder="z.B. 'Du lernst, wie Computer funktionieren - das brauchst du, um digitale Geräte zu verstehen.'">{{ task.why_learn_this or '' }}</textarea>
             <small class="text-muted">Kurze Erklärung (1-2 Sätze), altersgerecht für Stufe {{ task.stufe }}. Wird den Schülern prominent angezeigt. {% if not task.why_learn_this %}<strong style="color: #ca8a04;">⚠️ Noch nicht ausgefüllt</strong>{% endif %}</small>
+        </div>
+        <div class="form-group">
+            <label>🔗 Baut auf <small class="text-muted">(ein Eintrag pro Zeile: Label | unit_slug | strength — unit_slug und strength optional, strength = hard/soft, Standard hard)</small></label>
+            <textarea name="building_on" class="form-control" rows="3" placeholder="Atombau (Sek I) | modul_00 | hard&#10;Reine Sek-I-Vorkenntnisse, kein Lernmanager-Modul">{{ building_on_text }}</textarea>
+        </div>
+        <div class="form-group">
+            <label>🔗 Du erreichst <small class="text-muted">(arriving_at — ein Satz pro Zeile, „Du kannst…")</small></label>
+            <textarea name="arriving_at" class="form-control" rows="3" placeholder="Du kannst erklären, warum Metalle Strom leiten.">{{ arriving_at_text }}</textarea>
         </div>
         <div class="form-group">
             <label>

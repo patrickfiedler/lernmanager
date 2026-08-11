@@ -13,6 +13,7 @@ Usage:
 
 import argparse
 import json
+import re
 import sys
 import zipfile
 from pathlib import Path
@@ -91,6 +92,44 @@ def _validate_artifact_gate(gate, label):
     return gate, None
 
 
+def _validate_connections(connections, warnings=None):
+    """Validate connections.building_on / arriving_at (Clayden-style unit connections).
+
+    Returns a list of hard errors. An unresolved building_on.unit is a soft
+    warning, not a hard error - batch imports may reference a unit_slug that
+    hasn't been imported yet, resolvable only once the whole batch lands.
+    """
+    errors = []
+    if not isinstance(connections, dict):
+        return ["connections must be an object"]
+
+    building_on = connections.get('building_on', [])
+    if building_on and not isinstance(building_on, list):
+        errors.append("connections.building_on must be a list")
+    elif building_on:
+        for i, entry in enumerate(building_on):
+            label = f"connections.building_on[{i}]"
+            if not isinstance(entry, dict):
+                errors.append(f"{label} must be an object")
+                continue
+            if not entry.get('label'):
+                errors.append(f"{label} missing 'label'")
+            if 'strength' in entry and entry['strength'] not in ('hard', 'soft'):
+                errors.append(f"{label} invalid 'strength'. Must be 'hard' or 'soft'")
+            if entry.get('unit') and not models.get_task_by_unit_slug(entry['unit']) and warnings is not None:
+                warnings.append(f"{label} references unresolved unit_slug '{entry['unit']}' (ok if it's part of the same batch import)")
+
+    arriving_at = connections.get('arriving_at', [])
+    if arriving_at and not isinstance(arriving_at, list):
+        errors.append("connections.arriving_at must be a list of strings")
+    elif arriving_at:
+        for i, bullet in enumerate(arriving_at):
+            if not isinstance(bullet, str) or not bullet.strip():
+                errors.append(f"connections.arriving_at[{i}] must be a non-empty string")
+
+    return errors
+
+
 def _validate_quiz(quiz, prefix="Quiz"):
     """Validate quiz JSON structure. Returns list of error strings."""
     errors = []
@@ -164,6 +203,12 @@ def validate_task_structure(data, warnings=None):
     # Validate module_tier if provided (Chemie Checkpoint-Punktekonto)
     if 'module_tier' in task and task['module_tier'] not in ('kern_standard', 'hero'):
         errors.append("Invalid module_tier. Must be 'kern_standard' or 'hero'")
+
+    # Validate unit_slug / connections (Clayden-style cross-project connections)
+    if task.get('unit_slug') and not re.match(r'^[a-z0-9_]+$', task['unit_slug']):
+        errors.append(f"Invalid unit_slug '{task['unit_slug']}'. Must match ^[a-z0-9_]+$")
+    if task.get('connections'):
+        errors.extend(_validate_connections(task['connections'], warnings=warnings))
 
     # Validate subtasks
     VALID_PATHS = ('wanderweg', 'bergweg', 'gipfeltour', 'seilbahn')
@@ -307,6 +352,14 @@ def import_task(task_data, dry_run=False, warnings=None):
     if task.get('quiz') and task['quiz'].get('questions'):
         quiz_json = json.dumps(task['quiz'], ensure_ascii=False)
 
+    # unit_slug must be globally unique (Clayden-style connections)
+    if task.get('unit_slug'):
+        slug_owner = models.get_task_by_unit_slug(task['unit_slug'])
+        if slug_owner:
+            raise ValidationError(f"unit_slug '{task['unit_slug']}' already used by task '{slug_owner['name']}' (ID: {slug_owner['id']})")
+
+    connections_json = json.dumps(task['connections'], ensure_ascii=False) if task.get('connections') else None
+
     # Create task
     task_id = models.create_task(
         name=task['name'],
@@ -319,7 +372,9 @@ def import_task(task_data, dry_run=False, warnings=None):
         number=task.get('number', 0),
         why_learn_this=task.get('why_learn_this'),
         lernziel_schueler=task.get('lernziel_schueler'),
-        module_tier=task.get('module_tier', 'kern_standard')
+        module_tier=task.get('module_tier', 'kern_standard'),
+        unit_slug=task.get('unit_slug'),
+        connections_json=connections_json
     )
 
     # Set subtask_quiz_required if specified (default is 1/true in DB)
@@ -330,7 +385,9 @@ def import_task(task_data, dry_run=False, warnings=None):
                           task.get('number', 0), task.get('why_learn_this'),
                           subtask_quiz_required=1 if task['subtask_quiz_required'] else 0,
                           lernziel_schueler=task.get('lernziel_schueler'),
-                          module_tier=task.get('module_tier', 'kern_standard'))
+                          module_tier=task.get('module_tier', 'kern_standard'),
+                          unit_slug=task.get('unit_slug'),
+                          connections_json=connections_json)
 
     # Create subtasks and track position -> ID mapping
     subtasks = task.get('subtasks', [])
@@ -419,6 +476,14 @@ def overwrite_task_from_import(existing_task_id, task_data, reset_progress=False
     if task.get('quiz') and task['quiz'].get('questions'):
         quiz_json = json.dumps(task['quiz'], ensure_ascii=False)
 
+    # unit_slug must be globally unique, except when it's this same task's existing slug
+    if task.get('unit_slug'):
+        slug_owner = models.get_task_by_unit_slug(task['unit_slug'])
+        if slug_owner and slug_owner['id'] != existing_task_id:
+            raise ValidationError(f"unit_slug '{task['unit_slug']}' already used by task '{slug_owner['name']}' (ID: {slug_owner['id']})")
+
+    connections_json = json.dumps(task['connections'], ensure_ascii=False) if task.get('connections') else None
+
     models.update_task(
         existing_task_id,
         name=task['name'],
@@ -432,7 +497,9 @@ def overwrite_task_from_import(existing_task_id, task_data, reset_progress=False
         why_learn_this=task.get('why_learn_this'),
         subtask_quiz_required=1 if task.get('subtask_quiz_required', True) else 0,
         lernziel_schueler=task.get('lernziel_schueler'),
-        module_tier=task.get('module_tier', 'kern_standard')
+        module_tier=task.get('module_tier', 'kern_standard'),
+        unit_slug=task.get('unit_slug'),
+        connections_json=connections_json
     )
 
     # Validate artifact_gate on each subtask; strip invalid gates before storing

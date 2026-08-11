@@ -464,6 +464,38 @@
     </details>
     {% endif %}
 
+    {% if connections or looking_forward_to %}
+    <details class="connections-toggle mt-2">
+        <summary>🔗 Verbindungen</summary>
+        <div class="connections-content">
+            {% if connections and connections.building_on %}
+            <p><strong>Baut auf:</strong></p>
+            <ul>
+                {% for entry in connections.building_on %}
+                <li>{{ entry.label }}</li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+            {% if connections and connections.arriving_at %}
+            <p><strong>Du erreichst:</strong></p>
+            <ul>
+                {% for bullet in connections.arriving_at %}
+                <li>{{ bullet }}</li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+            {% if looking_forward_to %}
+            <p><strong>Führt zu:</strong></p>
+            <ul>
+                {% for entry in looking_forward_to %}
+                <li>{{ entry.label }}</li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+        </div>
+    </details>
+    {% endif %}
+
 </div>
 
 <!-- Split Pane Sidebar -->

@@ -2003,6 +2003,7 @@ body.split-pane-active .container {
 .topic-description-toggle summary,
 .tipps-toggle summary,
 .why-learn-toggle summary,
+.connections-toggle summary,
 .artifact-file-toggle summary {
     cursor: pointer;
     color: #374151;
@@ -2021,6 +2022,7 @@ body.split-pane-active .container {
 .topic-description-toggle summary:hover,
 .tipps-toggle summary:hover,
 .why-learn-toggle summary:hover,
+.connections-toggle summary:hover,
 .artifact-file-toggle summary:hover {
     background: #f3f4f6;
     border-color: #d1d5db;
@@ -2030,6 +2032,7 @@ body.split-pane-active .container {
 .topic-description-toggle summary::before,
 .tipps-toggle summary::before,
 .why-learn-toggle summary::before,
+.connections-toggle summary::before,
 .artifact-file-toggle summary::before {
     content: '▸ ';
     margin-right: 0.5rem;
@@ -2041,6 +2044,7 @@ body.split-pane-active .container {
 .topic-description-toggle[open] summary::before,
 .tipps-toggle[open] summary::before,
 .why-learn-toggle[open] summary::before,
+.connections-toggle[open] summary::before,
 .artifact-file-toggle[open] summary::before {
     transform: rotate(90deg);
 }
@@ -2049,6 +2053,7 @@ body.split-pane-active .container {
 .topic-description-toggle[open] summary,
 .tipps-toggle[open] summary,
 .why-learn-toggle[open] summary,
+.connections-toggle[open] summary,
 .artifact-file-toggle[open] summary {
     border-bottom: none;
     border-radius: 0.5rem 0.5rem 0 0;
@@ -2058,6 +2063,7 @@ body.split-pane-active .container {
 .topic-description-content,
 .tipps-content,
 .why-learn-content,
+.connections-content,
 .artifact-file-content {
     padding: 1.25rem;
     background: var(--gray-50);
