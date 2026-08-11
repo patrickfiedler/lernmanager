@@ -203,8 +203,10 @@
                 {% if mat.attribution %}
                 <small class="text-muted">© {{ mat.attribution }}</small>
                 {% endif %}
-                {% if mat.school_only %}
-                <span title="Nur im Schulnetzwerk abrufbar">🔒</span>
+                {% if mat.typ == 'datei' %}
+                <button class="btn btn-sm mat-schulnetz" data-mat-id="{{ mat.id }}" data-school-only="{{ 1 if mat.school_only else 0 }}"
+                        onclick="toggleMaterialSchulnetz({{ mat.id }})"
+                        title="{{ 'Nur im Schulnetzwerk abrufbar (klicken zum Aufheben)' if mat.school_only else 'Überall verfügbar (klicken zum Beschränken auf Schulnetzwerk)' }}">{{ '🔒' if mat.school_only else '🔓' }}</button>
                 {% endif %}
                 <input class="mat-input form-control" type="text" value="{{ mat.beschreibung or mat.pfad }}" style="display:none; width: 220px;" data-mat-id="{{ mat.id }}">
                 <button class="btn btn-sm mat-save" style="display:none;" onclick="saveMaterialName({{ mat.id }})">✓</button>
@@ -497,6 +499,25 @@ function cancelMaterialEdit(matId) {
     li.querySelector('.mat-input').style.display = 'none';
     li.querySelector('.mat-save').style.display = 'none';
     li.querySelector('.mat-cancel').style.display = 'none';
+}
+
+async function toggleMaterialSchulnetz(matId) {
+    const btn = document.querySelector(`.mat-schulnetz[data-mat-id="${matId}"]`);
+    const newValue = btn.dataset.schoolOnly !== '1';
+    const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+    const res = await fetch(`/admin/material/${matId}/schulnetz`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+        body: JSON.stringify({ school_only: newValue })
+    });
+    if (res.ok) {
+        btn.dataset.schoolOnly = newValue ? '1' : '0';
+        btn.textContent = newValue ? '🔒' : '🔓';
+        btn.title = newValue ? 'Nur im Schulnetzwerk abrufbar (klicken zum Aufheben)' : 'Überall verfügbar (klicken zum Beschränken auf Schulnetzwerk)';
+    } else {
+        const data = await res.json();
+        alert(data.error || 'Fehler beim Speichern.');
+    }
 }
 
 async function saveMaterialName(matId) {

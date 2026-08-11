@@ -1549,6 +1549,17 @@ def admin_material_umbenennen(material_id):
     return jsonify({'ok': True})
 
 
+@app.route('/admin/material/<int:material_id>/schulnetz', methods=['POST'])
+@admin_required
+def admin_material_schulnetz(material_id):
+    material = models.get_material(material_id)
+    if not material or material['typ'] != 'datei':
+        return jsonify({'error': 'Nur Dateien können auf Schulnetzwerk beschränkt werden.'}), 400
+    data = request.get_json()
+    models.update_material_school_only(material_id, bool(data.get('school_only')))
+    return jsonify({'ok': True})
+
+
 @app.route('/admin/thema/<int:task_id>/material-zuordnung', methods=['POST'])
 @admin_required
 def admin_material_zuordnung(task_id):
