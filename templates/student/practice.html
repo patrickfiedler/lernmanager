@@ -175,7 +175,10 @@
 
         document.getElementById('feedback-area').style.display = 'none';
         document.getElementById('feedback-area').innerHTML = '';
-        document.getElementById('check-btn').style.display = '';
+        const checkBtn = document.getElementById('check-btn');
+        checkBtn.style.display = '';
+        checkBtn.disabled = false;
+        checkBtn.textContent = 'Prüfen';
         document.getElementById('next-btn').style.display = 'none';
     }
 
@@ -289,6 +292,10 @@
             answer = Array.from(checked).map(cb => parseInt(cb.value));
         }
 
+        const checkBtn = document.getElementById('check-btn');
+        checkBtn.disabled = true;
+        checkBtn.textContent = '⏳ Prüfe …';
+
         fetch('{{ url_for("student_warmup_answer") }}', {
             method: 'POST',
             headers: {
@@ -311,8 +318,13 @@
 
             showQuizFeedback(q, data);
 
-            document.getElementById('check-btn').style.display = 'none';
+            checkBtn.style.display = 'none';
             document.getElementById('next-btn').style.display = '';
+        })
+        .catch(function() {
+            answered = false;
+            checkBtn.disabled = false;
+            checkBtn.textContent = 'Prüfen';
         });
     };
 
