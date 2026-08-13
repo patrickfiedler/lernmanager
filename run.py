@@ -14,7 +14,7 @@ if __name__ == '__main__':
     print("=" * 50)
     print("📚 Lernmanager")
     print("=" * 50)
-    print("Server läuft auf: http://localhost:8080")
+    print("Server läuft auf: http://localhost:8081")
     print("Admin-Login: admin / admin")
     print("=" * 50)
     print("Zum Beenden: Strg+C")
@@ -24,7 +24,7 @@ if __name__ == '__main__':
     serve(
         app,
         host='0.0.0.0',
-        port=8080,
+        port=8081,
         threads=32,                   # Worker threads — doubled for concurrent LLM-graded quiz submissions
         connection_limit=500,         # Max open connections (default 100 — too low for full-class quiz bursts)
         channel_timeout=120,          # Timeout for connections (2 minutes)

@@ -224,7 +224,7 @@ EOF
 
     # Test HTTP endpoint
     log_info "Testing HTTP endpoint..."
-    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8080 || echo "000")
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8081 || echo "000")
 
     if [[ "$HTTP_CODE" == "200" || "$HTTP_CODE" == "302" ]]; then
         log_info "✓ Application is responding (HTTP $HTTP_CODE)"
@@ -244,7 +244,7 @@ EOF
     echo "  Location:        $APP_DIR"
     echo "  Git commit:      $CURRENT_COMMIT"
     echo "  Service status:  $(systemctl is-active lernmanager)"
-    echo "  Local URL:       http://127.0.0.1:8080"
+    echo "  Local URL:       http://127.0.0.1:8081"
     echo ""
     echo -e "${BLUE}Default Admin Credentials:${NC}"
     echo "  Username:        admin"

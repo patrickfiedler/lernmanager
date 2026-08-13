@@ -45,4 +45,4 @@ sleep 2
 systemctl status lernmanager --no-pager
 
 # 5. Verify it's actually responding
-curl -s -o /dev/null -w "HTTP %{http_code}\n" http://127.0.0.1:8080
+curl -s -o /dev/null -w "HTTP %{http_code}\n" http://127.0.0.1:8081
