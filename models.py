@@ -1096,8 +1096,22 @@ def get_looking_forward_to(unit_slug):
 
 
 def delete_task(task_id):
-    """Delete a task."""
+    """Delete a task and its dependent rows.
+
+    subtask/material/student_task cascade via FK ON DELETE CASCADE, but
+    artifact_feedback, artifact_gate_attempt and student_artifact_file were
+    added without cascade (SQLite can't ALTER a FK in place), so they're
+    cleared explicitly here to avoid an IntegrityError.
+    """
     with db_session() as conn:
+        subtask_ids = [r['id'] for r in conn.execute(
+            "SELECT id FROM subtask WHERE task_id = ?", (task_id,)
+        ).fetchall()]
+        if subtask_ids:
+            ph = ','.join('?' * len(subtask_ids))
+            conn.execute(f"DELETE FROM artifact_feedback WHERE subtask_id IN ({ph})", subtask_ids)
+            conn.execute(f"DELETE FROM artifact_gate_attempt WHERE subtask_id IN ({ph})", subtask_ids)
+        conn.execute("DELETE FROM student_artifact_file WHERE task_id = ?", (task_id,))
         conn.execute("DELETE FROM task WHERE id = ?", (task_id,))
 
 

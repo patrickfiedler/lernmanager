@@ -1384,8 +1384,12 @@ def admin_thema_bearbeiten(task_id):
 @app.route('/admin/thema/<int:task_id>/loeschen', methods=['POST'])
 @admin_required
 def admin_thema_loeschen(task_id):
-    models.delete_task(task_id)
-    flash('Thema gelöscht.', 'success')
+    import sqlite3
+    try:
+        models.delete_task(task_id)
+        flash('Thema gelöscht.', 'success')
+    except sqlite3.IntegrityError:
+        flash('Thema konnte nicht gelöscht werden: Es gibt noch verknüpfte Schülerdaten (z.B. hochgeladene Artefakte).', 'danger')
     return redirect(url_for('admin_themen'))
 
 
