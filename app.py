@@ -1386,7 +1386,9 @@ def admin_thema_bearbeiten(task_id):
 def admin_thema_loeschen(task_id):
     import sqlite3
     try:
-        models.delete_task(task_id)
+        artifact_disk_filenames, material_pfade = models.delete_task(task_id)
+        _unlink_artifact_files(artifact_disk_filenames)
+        _unlink_material_files(material_pfade)
         flash('Thema gelöscht.', 'success')
     except sqlite3.IntegrityError:
         flash('Thema konnte nicht gelöscht werden: Es gibt noch verknüpfte Schülerdaten (z.B. hochgeladene Artefakte).', 'danger')
@@ -2498,6 +2500,14 @@ def _unlink_artifact_files(disk_filenames):
     upload_dir = _artifact_upload_dir()
     for disk_filename in disk_filenames:
         filepath = os.path.join(upload_dir, disk_filename)
+        if os.path.exists(filepath):
+            os.remove(filepath)
+
+
+def _unlink_material_files(pfade):
+    """Remove stored material files from disk (call after models.delete_task, only for pfade it flagged as unreferenced)."""
+    for pfad in pfade:
+        filepath = os.path.join(config.UPLOAD_FOLDER, pfad)
         if os.path.exists(filepath):
             os.remove(filepath)
 

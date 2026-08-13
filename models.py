@@ -1102,6 +1102,12 @@ def delete_task(task_id):
     artifact_feedback, artifact_gate_attempt and student_artifact_file were
     added without cascade (SQLite can't ALTER a FK in place), so they're
     cleared explicitly here to avoid an IntegrityError.
+
+    Returns (student_artifact_disk_filenames, material_pfade_to_unlink) for
+    the caller to remove from disk. Material filenames aren't task-scoped
+    (ZIP-imported pfad values are plain content filenames, no task_id
+    prefix -- see docs/shared/lernmanager/conventions.md), so a pfad is only
+    safe to unlink once no other task's material row still references it.
     """
     with db_session() as conn:
         subtask_ids = [r['id'] for r in conn.execute(
@@ -1111,8 +1117,26 @@ def delete_task(task_id):
             ph = ','.join('?' * len(subtask_ids))
             conn.execute(f"DELETE FROM artifact_feedback WHERE subtask_id IN ({ph})", subtask_ids)
             conn.execute(f"DELETE FROM artifact_gate_attempt WHERE subtask_id IN ({ph})", subtask_ids)
+
+        student_artifact_disk_filenames = [r['disk_filename'] for r in conn.execute(
+            "SELECT disk_filename FROM student_artifact_file WHERE task_id = ?", (task_id,)
+        ).fetchall()]
         conn.execute("DELETE FROM student_artifact_file WHERE task_id = ?", (task_id,))
-        conn.execute("DELETE FROM task WHERE id = ?", (task_id,))
+
+        material_pfade = [r['pfad'] for r in conn.execute(
+            "SELECT pfad FROM material WHERE task_id = ? AND typ = 'datei'", (task_id,)
+        ).fetchall()]
+
+        conn.execute("DELETE FROM task WHERE id = ?", (task_id,))  # cascades subtask/material/student_task
+
+        material_pfade_to_unlink = [
+            pfad for pfad in material_pfade
+            if conn.execute(
+                "SELECT 1 FROM material WHERE pfad = ? AND typ = 'datei'", (pfad,)
+            ).fetchone() is None
+        ]
+
+    return student_artifact_disk_filenames, material_pfade_to_unlink
 
 
 def reset_student_progress_for_task(task_id):
