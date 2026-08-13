@@ -41,8 +41,6 @@ def clean_title(beschreibung):
 def main():
     dry_run = '--dry-run' in sys.argv
 
-    models.init_db()
-
     with models.db_session() as conn:
         rows = conn.execute(
             "SELECT id, beschreibung FROM subtask ORDER BY task_id, reihenfolge"
