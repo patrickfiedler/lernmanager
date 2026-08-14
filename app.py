@@ -676,6 +676,7 @@ def admin_klasse_bericht(klasse_id):
 def admin_klasse_schueler_hinzufuegen(klasse_id):
     batch_input = request.form['batch_input']
     existing_usernames = models.get_existing_usernames()
+    existing_netzwerk_ids = models.get_existing_netzwerk_ids()
 
     # Collect created students for PDF
     created_students = []
@@ -692,8 +693,10 @@ def admin_klasse_schueler_hinzufuegen(klasse_id):
             username = generate_username(existing_usernames, vorname, nachname)
             existing_usernames.add(username)
             password = generate_password()
+            netzwerk_id = models.generate_netzwerk_id(nachname, vorname, existing_netzwerk_ids)
+            existing_netzwerk_ids.add(netzwerk_id)
 
-            student_id = models.create_student(nachname, vorname, username, password)
+            student_id = models.create_student(nachname, vorname, username, password, netzwerk_id=netzwerk_id)
             models.add_student_to_klasse(student_id, klasse_id)
 
             # Store for PDF generation

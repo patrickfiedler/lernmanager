@@ -101,8 +101,10 @@ def init_db():
                 password_hash TEXT NOT NULL,
                 lernpfad TEXT DEFAULT 'bergweg',  -- wanderweg/bergweg/gipfeltour/seilbahn
                 easy_reading_mode INTEGER DEFAULT 0,
-                llm_transparency_mode INTEGER DEFAULT 0
+                llm_transparency_mode INTEGER DEFAULT 0,
+                netzwerk_id TEXT  -- surname.firstname school network ID, matches scan-folders' folder names (grading-service-deployment.md §Phase 2)
             );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_student_netzwerk_id ON student(netzwerk_id) WHERE netzwerk_id IS NOT NULL;
 
             -- Student-Class relationship (many-to-many)
             CREATE TABLE IF NOT EXISTS student_klasse (
@@ -749,12 +751,59 @@ def get_existing_usernames():
         return {r['username'] for r in rows}
 
 
-def create_student(nachname, vorname, username, password, lernpfad='bergweg'):
+def get_existing_netzwerk_ids():
+    """Get all existing (non-null) student netzwerk_ids."""
+    with db_session() as conn:
+        rows = conn.execute("SELECT netzwerk_id FROM student WHERE netzwerk_id IS NOT NULL").fetchall()
+        return {r['netzwerk_id'] for r in rows}
+
+
+def _normalize_umlauts(text):
+    """ä/ö/ü/ß -> ae/oe/ue/ss. Same mapping as grading-with-llm's
+    scripts/generate_student_ids.py (kept in sync by hand, not imported --
+    that project isn't a dependency of this one)."""
+    if not text:
+        return ""
+    replacements = {'ä': 'ae', 'Ä': 'ae', 'ö': 'oe', 'Ö': 'oe', 'ü': 'ue', 'Ü': 'ue', 'ß': 'ss'}
+    for umlaut, replacement in replacements.items():
+        text = text.replace(umlaut, replacement)
+    return text
+
+
+def generate_netzwerk_id(nachname, vorname, existing_ids):
+    """
+    Generate a school network ID: lastname.firstname, lowercase, umlauts
+    normalized, 12 chars total max (7 lastname + 1 dot + 4 firstname, or less
+    if lastname is shorter). Matches the format scan-folders produces for
+    submission folder names, so grading-service imports can match a folder to
+    an enrolled student without fuzzy nachname/vorname matching. Algorithm
+    ported from grading-with-llm/scripts/generate_student_ids.py.
+
+    existing_ids: set of already-assigned netzwerk_ids (this call's own
+    generated ones must be added by the caller between calls, same as
+    generate_username's existing_usernames convention) -- collisions get a
+    numeric suffix (musterm.mari, musterm.mari2, ...).
+    """
+    last = ''.join(c for c in _normalize_umlauts(nachname.strip()).lower() if c.isalnum())
+    first = ''.join(c for c in _normalize_umlauts(vorname.strip()).lower() if c.isalnum())
+    id_last = last[:7]
+    id_first = first[:12 - len(id_last) - 1]
+    base_id = f"{id_last}.{id_first}"
+
+    if base_id not in existing_ids:
+        return base_id
+    n = 2
+    while f"{base_id}{n}" in existing_ids:
+        n += 1
+    return f"{base_id}{n}"
+
+
+def create_student(nachname, vorname, username, password, lernpfad='bergweg', netzwerk_id=None):
     """Create a new student."""
     with db_session() as conn:
         cursor = conn.execute(
-            "INSERT INTO student (nachname, vorname, username, password_hash, lernpfad) VALUES (?, ?, ?, ?, ?)",
-            (nachname, vorname, username, hash_password(password), lernpfad)
+            "INSERT INTO student (nachname, vorname, username, password_hash, lernpfad, netzwerk_id) VALUES (?, ?, ?, ?, ?, ?)",
+            (nachname, vorname, username, hash_password(password), lernpfad, netzwerk_id)
         )
         return cursor.lastrowid
 
