@@ -54,7 +54,9 @@ def test_import_grading_callback_creates_results(db):
     assert r["nachname"] == "Mueller"
     assert r["status"] == "imported"
     assert r["criteria"][1]["review_required"] is True
-    assert r["media"] == [{"file": "media/mueller.anna/001.jpg", "kind": "image"}]
+    # media copy is skipped when GRADING_SERVICE_URL isn't configured (default
+    # in tests) -- see test_grading_media_copy.py for the download path itself.
+    assert r["media"] == []
 
 
 def test_import_grading_callback_unmatched_student_gets_null_student_id(db):

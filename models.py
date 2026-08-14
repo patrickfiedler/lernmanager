@@ -5,6 +5,8 @@ from hashlib import sha256
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from urllib.parse import urlparse
+import urllib.request
+import urllib.error
 from werkzeug.security import generate_password_hash, check_password_hash
 import config
 
@@ -4017,6 +4019,53 @@ def get_student_by_netzwerk_id(netzwerk_id):
     return row['id'] if row else None
 
 
+def _grading_upload_dir():
+    """Computed fresh each call (not a frozen constant) so tests can override
+    config.UPLOAD_FOLDER -- same convention as app.py's _artifact_upload_dir()."""
+    return os.path.join(config.UPLOAD_FOLDER, 'grading')
+
+
+def _copy_grading_media(run_id, job_id, netzwerk_id, media_list):
+    """
+    Download each graded image from the grading service's GET
+    /jobs/<job_id>/media/<student>/<file> (Bearer-authed, teacher-review-ui.md
+    §6) into instance/uploads/grading/<run_id>/<netzwerk_id>/ and rewrite
+    'file' to the local relative path. Must happen at import time, not
+    lazily: the source job (and its media) gets purged from the grading host
+    once reviewed (spec §7's retention rule) -- there is nothing to fetch
+    from later.
+
+    A single download failure (network hiccup, service already purged this
+    job) drops that one media entry rather than failing the whole import --
+    matches the fire-and-forget philosophy of the callback itself. The
+    review UI's media_skipped[] messaging already covers "no image was
+    found here"; a failed copy reads the same way to a teacher.
+    """
+    if not media_list or not config.GRADING_SERVICE_URL:
+        return []
+    dest_dir = os.path.join(_grading_upload_dir(), str(run_id), netzwerk_id)
+    os.makedirs(dest_dir, exist_ok=True)
+
+    copied = []
+    for m in media_list:
+        filename = os.path.basename(m['file'])
+        url = f"{config.GRADING_SERVICE_URL}/jobs/{job_id}/media/{netzwerk_id}/{filename}"
+        req = urllib.request.Request(url, headers={
+            'Authorization': f'Bearer {config.GRADING_SERVICE_TOKEN}',
+        })
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = resp.read()
+        except (urllib.error.URLError, OSError, TimeoutError):
+            continue
+        with open(os.path.join(dest_dir, filename), 'wb') as f:
+            f.write(data)
+        entry = dict(m)
+        entry['file'] = f"{run_id}/{netzwerk_id}/{filename}"
+        copied.append(entry)
+    return copied
+
+
 def import_grading_callback(job_id, provider, model, graded_at, students):
     """
     Import the grading service's POST /internal/grading/results payload
@@ -4056,12 +4105,13 @@ def import_grading_callback(job_id, provider, model, graded_at, students):
             flagged_count += 1
         if total_score == 0:
             zero_score_count += 1
+        media = _copy_grading_media(run['id'], job_id, netzwerk_id, s.get('media') or [])
         create_grading_result(
             grading_run_id=run['id'], task_id=run['task_id'], student_id=student_id,
             netzwerk_id=netzwerk_id, criteria=s.get('criteria', []),
             llm_total_score=total_score, llm_max_score=max_score, flagged=flagged,
             confidence=s.get('confidence'), error=s.get('error'),
-            document_file=s.get('document_file'), media=s.get('media'),
+            document_file=s.get('document_file'), media=media,
             media_skipped=s.get('media_skipped'),
         )
         imported += 1
@@ -4205,6 +4255,14 @@ def release_grading_result(result_id, admin_id):
         if row['student_id'] is None:
             raise ValueError("cannot release a result with no matched student_id")
 
+        criteria = json.loads(row['criteria_json'])
+        unconfirmed = [c['name'] for c in criteria if c.get('review_required') and not c.get('confirmed')]
+        if unconfirmed:
+            raise ValueError(
+                f"cannot release: always-review criteria not yet confirmed: {', '.join(unconfirmed)} "
+                f"(teacher-review-ui.md §4)"
+            )
+
         conflict = conn.execute(
             "SELECT id FROM grading_result WHERE student_id = ? AND task_id = ? "
             "AND status = 'active' AND id != ?",
@@ -4248,6 +4306,73 @@ def discard_grading_run(run_id):
             "WHERE grading_run_id = ? AND status NOT IN ('active', 'superseded')",
             (run_id,)
         )
+
+
+def is_non_submitter_result(result):
+    """True for the sync path's zero-score placeholder row for an empty
+    folder (processor.py's 'No document files found' case) -- these have no
+    media to review, so teacher-review-ui.md §4 routes them through a
+    one-click Page A confirm instead of the per-student Page B queue."""
+    return result.get('document_file') is None and bool(result.get('error'))
+
+
+def _review_queue_sort_key(result):
+    """Flagged-first ordering for Page B (teacher-review-ui.md §4): (1) error
+    rows on a real submission, (2) unconfirmed always-review criteria or any
+    zero-score criterion, (3) alphabetical. Recomputed per page load rather
+    than frozen at queue start (spec's stated ideal) -- see task_plan.md's
+    2g/2h known-gaps note for why that's an acceptable MVP simplification
+    here: the only input that changes mid-review is 'confirmed', and a
+    result leaving bucket 2 because a teacher just confirmed it is a mild
+    reshuffle, not the "queue points at a gone/superseded row" hazard the
+    freeze was really guarding against (R3)."""
+    is_real_error = bool(result.get('error')) and not is_non_submitter_result(result)
+    needs_attention = any(
+        (c.get('review_required') and not c.get('confirmed')) or c.get('llm_score') == 0
+        for c in result['criteria']
+    )
+    bucket = 0 if is_real_error else (1 if needs_attention else 2)
+    name = f"{result.get('nachname') or ''}, {result.get('vorname') or ''}"
+    return (bucket, name)
+
+
+def get_grading_run_review_queue(run_id):
+    """Ordered list of grading_results for Page B's queue -- excludes
+    non-submitters (handled on Page A) and anything already active/discarded/
+    superseded (nothing left to review)."""
+    reviewable = [
+        r for r in list_grading_results(run_id)
+        if not is_non_submitter_result(r) and r['status'] in ('imported', 'under_review', 'corrected')
+    ]
+    return sorted(reviewable, key=_review_queue_sort_key)
+
+
+def get_next_in_review_queue(run_id, current_result_id):
+    """The next result after current_result_id in the live queue order, or
+    None at the end (Page B redirects back to Page A there)."""
+    queue = get_grading_run_review_queue(run_id)
+    ids = [r['id'] for r in queue]
+    if current_result_id not in ids:
+        return queue[0] if queue else None
+    idx = ids.index(current_result_id)
+    return queue[idx + 1] if idx + 1 < len(queue) else None
+
+
+def get_grading_run_override_rate(run_id):
+    """Count of overridden:true criteria / total reviewed criteria across the
+    run (teacher-review-ui.md §5) -- the calibration signal the local-grading
+    trust gate (todo.md) is waiting on. None if nothing has been reviewed yet."""
+    total = 0
+    overridden = 0
+    for r in list_grading_results(run_id):
+        for c in r['criteria']:
+            if c.get('reviewed_at'):
+                total += 1
+                if c.get('overridden'):
+                    overridden += 1
+    if total == 0:
+        return None
+    return overridden / total
 
 
 # ============ Warmup / Spaced Repetition ============

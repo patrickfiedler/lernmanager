@@ -662,6 +662,187 @@ def admin_klasse_grading_upload_complete(klasse_id):
     return jsonify({'grading_run_id': run_id}), 201
 
 
+# --- Page A: grading_run_detail (teacher-review-ui.md §2 -- class-level view) ---
+
+@app.route('/admin/grading-run/<int:run_id>')
+@admin_required
+def admin_grading_run_detail(run_id):
+    run = models.get_grading_run(run_id)
+    if not run:
+        flash('Bewertungslauf nicht gefunden.', 'danger')
+        return redirect(url_for('admin_klassen'))
+
+    results = models.list_grading_results(run_id)
+    non_submitters = [r for r in results if models.is_non_submitter_result(r)]
+    reviewable = [r for r in results if not models.is_non_submitter_result(r)]
+
+    # Bulk-release partition (teacher-review-ui.md §4): results with an
+    # already-active sibling for the same (student, task) need a supersede
+    # decision first, everyone else can go in one click.
+    no_conflict = []
+    needs_decision = []
+    for r in reviewable:
+        if r['status'] not in ('imported', 'under_review', 'corrected'):
+            continue
+        active = models.get_active_grading_result(r['student_id'], run['task_id']) if r['student_id'] else None
+        if active and active['id'] != r['id']:
+            needs_decision.append(r)
+        else:
+            no_conflict.append(r)
+
+    return render_template(
+        'admin/grading_run_detail.html', run=run, results=results, reviewable=reviewable,
+        non_submitters=non_submitters, no_conflict=no_conflict, needs_decision=needs_decision,
+        override_rate=models.get_grading_run_override_rate(run_id),
+    )
+
+
+@app.route('/admin/grading-run/<int:run_id>/discard', methods=['POST'])
+@admin_required
+def admin_grading_run_discard(run_id):
+    models.discard_grading_run(run_id)
+    flash('Bewertungslauf verworfen (bereits freigegebene Ergebnisse bleiben sichtbar).', 'success')
+    return redirect(url_for('admin_grading_run_detail', run_id=run_id))
+
+
+@app.route('/admin/grading-run/<int:run_id>/release-bulk', methods=['POST'])
+@admin_required
+def admin_grading_run_release_bulk(run_id):
+    run = models.get_grading_run(run_id)
+    released = skipped = 0
+    for r in models.list_grading_results(run_id):
+        if r['status'] not in ('imported', 'under_review', 'corrected'):
+            continue
+        try:
+            models.release_grading_result(r['id'], session['admin_id'])
+            released += 1
+        except ValueError:
+            skipped += 1
+    flash(f'{released} Ergebnis(se) freigegeben. {skipped} übersprungen (Konflikt oder offene Prüfung).',
+          'success' if released else 'warning')
+    return redirect(url_for('admin_grading_run_detail', run_id=run_id))
+
+
+@app.route('/admin/grading-result/<int:result_id>/confirm', methods=['POST'])
+@admin_required
+def admin_grading_result_confirm(result_id):
+    """One-click release for non-submitters (teacher-review-ui.md §4) --
+    no media to review, routing them through Page B is pure friction."""
+    result = models.get_grading_result(result_id)
+    if not result:
+        flash('Ergebnis nicht gefunden.', 'danger')
+        return redirect(url_for('admin_klassen'))
+    try:
+        models.release_grading_result(result_id, session['admin_id'])
+        flash('Bestätigt.', 'success')
+    except ValueError as e:
+        flash(f'Konnte nicht bestätigt werden: {e}', 'danger')
+    return redirect(url_for('admin_grading_run_detail', run_id=result['grading_run_id']))
+
+
+@app.route('/admin/grading-result/<int:result_id>/discard', methods=['POST'])
+@admin_required
+def admin_grading_result_discard(result_id):
+    result = models.get_grading_result(result_id)
+    if not result:
+        flash('Ergebnis nicht gefunden.', 'danger')
+        return redirect(url_for('admin_klassen'))
+    models.discard_grading_result(result_id)
+    flash('Verworfen.', 'success')
+    return redirect(url_for('admin_grading_run_detail', run_id=result['grading_run_id']))
+
+
+# --- Page B: grading_review (teacher-review-ui.md §3-5 -- per-student review flow) ---
+
+@app.route('/admin/grading-result/<int:result_id>/review', methods=['GET', 'POST'])
+@admin_required
+def admin_grading_result_review(result_id):
+    result = models.get_grading_result(result_id)
+    if not result:
+        flash('Ergebnis nicht gefunden.', 'danger')
+        return redirect(url_for('admin_klassen'))
+    run = models.get_grading_run(result['grading_run_id'])
+
+    if request.method == 'POST':
+        action = request.form.get('action', 'save')
+
+        if action == 'skip':
+            # Advances without writing anything (teacher-review-ui.md §4) --
+            # distinct from Speichern & Weiter, which does persist edits first.
+            nxt = models.get_next_in_review_queue(run['id'], result_id)
+            if nxt:
+                return redirect(url_for('admin_grading_result_review', result_id=nxt['id']))
+            return redirect(url_for('admin_grading_run_detail', run_id=run['id']))
+
+        criteria = []
+        for i, c in enumerate(result['criteria']):
+            raw = request.form.get(f'teacher_score_{i}')
+            try:
+                teacher_score = float(raw) if raw not in (None, '') else c.get('llm_score')
+            except ValueError:
+                teacher_score = c.get('llm_score')
+            entry = dict(c)
+            entry['teacher_score'] = teacher_score
+            if c.get('review_required'):
+                entry['confirmed'] = request.form.get(f'confirmed_{i}') == 'on'
+            criteria.append(entry)
+        models.save_grading_result_review(result_id, criteria)
+
+        if action == 'save_next':
+            nxt = models.get_next_in_review_queue(run['id'], result_id)
+            if nxt:
+                return redirect(url_for('admin_grading_result_review', result_id=nxt['id']))
+            flash('Prüfung abgeschlossen -- zurück zur Übersicht.', 'success')
+            return redirect(url_for('admin_grading_run_detail', run_id=run['id']))
+
+        flash('Gespeichert.', 'success')
+        return redirect(url_for('admin_grading_result_review', result_id=result_id))
+
+    result = models.get_grading_result(result_id)  # re-fetch: GET always shows latest saved state
+    queue = models.get_grading_run_review_queue(run['id'])
+    queue_ids = [r['id'] for r in queue]
+    position = queue_ids.index(result_id) + 1 if result_id in queue_ids else None
+    remaining_flagged = sum(
+        1 for r in queue if r['id'] != result_id and any(
+            (c.get('review_required') and not c.get('confirmed')) or c.get('llm_score') == 0
+            for c in r['criteria']
+        )
+    )
+    prev_result = queue[queue_ids.index(result_id) - 1] if position and position > 1 else None
+
+    supersede_conflict = None
+    if result['student_id']:
+        active = models.get_active_grading_result(result['student_id'], run['task_id'])
+        if active and active['id'] != result_id:
+            supersede_conflict = active
+
+    return render_template(
+        'admin/grading_review.html', result=result, run=run, position=position,
+        queue_total=len(queue), remaining_flagged=remaining_flagged,
+        prev_result=prev_result, supersede_conflict=supersede_conflict,
+    )
+
+
+@app.route('/grading-medien/<path:relpath>')
+@admin_required
+def download_grading_media(relpath):
+    """Serve a graded image copied locally at import time (models._copy_grading_media,
+    teacher-review-ui.md §6) -- admin-gated, inline (not an attachment) so it
+    renders in Page B's gallery. relpath is '<run_id>/<netzwerk_id>/<filename>',
+    exactly the 'file' field stored on each grading_result media entry."""
+    upload_dir = os.path.abspath(models._grading_upload_dir())
+    directory, filename = os.path.split(relpath)
+    full_dir = os.path.abspath(os.path.join(upload_dir, directory))
+    # os.path.abspath collapses any '..' before this check runs -- reject
+    # anything that resolved outside upload_dir, same class of guard as
+    # send_from_directory's own, applied before we even build the path.
+    if os.path.commonpath([upload_dir, full_dir]) != upload_dir:
+        abort(404)
+    if not os.path.isfile(os.path.join(full_dir, filename)):
+        abort(404)
+    return send_from_directory(full_dir, filename, as_attachment=False)
+
+
 @app.route('/admin/klasse/<int:klasse_id>/llm-feedback', methods=['POST'])
 @admin_required
 def admin_klasse_llm_feedback_toggle(klasse_id):

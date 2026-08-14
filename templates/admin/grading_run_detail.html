@@ -1,0 +1,132 @@
+{% extends 'base.html' %}
+
+{% block title %}Bewertungslauf {{ run.task_name }} - Lernmanager{% endblock %}
+
+{% block content %}
+<div class="flex flex-between flex-center mb-2">
+    <h1>🎯 {{ run.task_name }} — {{ run.klasse_name }}</h1>
+    <a href="{{ url_for('admin_klasse_detail', klasse_id=run.klasse_id) }}" class="btn btn-secondary">← Zurück zur Klasse</a>
+</div>
+
+<div class="card mb-2">
+    <div class="card-header">📋 Import-Übersicht</div>
+    <div style="padding: 0.75rem 1rem;">
+        <table class="table" style="margin: 0;">
+            <tbody>
+                <tr><td>Rubric</td><td><code>{{ run.rubric }}</code></td></tr>
+                <tr><td>Anbieter / Modell</td><td>{{ run.provider }}{% if run.model %} / {{ run.model }}{% endif %}</td></tr>
+                <tr><td>Importiert</td><td>{{ run.imported_at }}</td></tr>
+                <tr><td>Bewertet</td><td>{{ run.graded_at or '—' }}</td></tr>
+                <tr><td>Schüler</td><td>{{ run.total_students }} ({{ run.flagged_count }} markiert, {{ run.zero_score_count }} mit 0 Punkten)</td></tr>
+                {% if override_rate is not none %}
+                <tr><td>Korrektur-Rate</td><td>{{ (override_rate * 100)|round(1) }}% der geprüften Kriterien wurden angepasst</td></tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% if no_conflict or needs_decision %}
+<div class="card mb-2">
+    <div class="card-header">✅ Freigeben</div>
+    <div style="padding: 0.75rem 1rem;">
+        {% if no_conflict %}
+        <form method="POST" action="{{ url_for('admin_grading_run_release_bulk', run_id=run.id) }}" style="display: inline;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-primary">{{ no_conflict|length }} ohne Konflikt freigeben</button>
+        </form>
+        {% endif %}
+        {% if needs_decision %}
+        <p style="margin-top: 0.5rem; color: #92400e;">
+            ⚠️ {{ needs_decision|length }} Schüler haben bereits eine andere freigegebene Bewertung für dieses Thema —
+            diese müssen einzeln über "Prüfen" entschieden werden.
+        </p>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+{% if non_submitters %}
+<div class="card mb-2">
+    <div class="card-header">📭 Keine Abgabe ({{ non_submitters|length }})</div>
+    <table class="table" style="margin: 0;">
+        <tbody>
+            {% for r in non_submitters %}
+            <tr>
+                <td>{{ r.nachname or '—' }}, {{ r.vorname or '' }}{% if not r.student_id %}<span class="badge badge-warning">nicht zugeordnet ({{ r.netzwerk_id }})</span>{% endif %}</td>
+                <td style="width: 1%; white-space: nowrap;">
+                    {% if r.status == 'active' %}
+                    <span class="badge badge-success">✅ freigegeben</span>
+                    {% elif r.student_id %}
+                    <form method="POST" action="{{ url_for('admin_grading_result_confirm', result_id=r.id) }}" style="display: inline;">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="btn btn-sm btn-secondary">Bestätigen</button>
+                    </form>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<div class="card">
+    <div class="card-header">👥 Schüler ({{ reviewable|length }})</div>
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Status</th>
+                <th>LLM</th>
+                <th>Lehrkraft</th>
+                <th>Aktionen</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in reviewable %}
+            <tr {% if r.flagged or r.error %}style="border-left: 3px solid #dc2626;"{% endif %}>
+                <td>
+                    {% if r.student_id %}
+                    <a href="{{ url_for('admin_schueler_detail', student_id=r.student_id) }}">{{ r.nachname }}, {{ r.vorname }}</a>
+                    {% else %}
+                    <span class="badge badge-warning">nicht zugeordnet</span> {{ r.netzwerk_id }}
+                    {% endif %}
+                    {% if r.error %}<br><small style="color: #dc2626;">{{ r.error }}</small>{% endif %}
+                </td>
+                <td>
+                    {% if r.status == 'active' %}<span class="badge badge-success">✅ freigegeben</span>
+                    {% elif r.status == 'superseded' %}<span class="badge">↪️ ersetzt</span>
+                    {% elif r.status == 'discarded' %}<span class="badge">🗑️ verworfen</span>
+                    {% elif r.status == 'under_review' or r.status == 'corrected' %}<span class="badge badge-primary">🔄 in Prüfung</span>
+                    {% else %}<span class="badge badge-warning">⏳ importiert</span>
+                    {% endif %}
+                </td>
+                <td>{{ r.llm_total_score }} / {{ r.llm_max_score }}</td>
+                <td>{{ r.teacher_total_score if r.teacher_total_score is not none else '—' }}</td>
+                <td>
+                    {% if r.status in ('imported', 'under_review', 'corrected') and r.student_id %}
+                    <a href="{{ url_for('admin_grading_result_review', result_id=r.id) }}" class="btn btn-sm btn-secondary">Prüfen</a>
+                    <form method="POST" action="{{ url_for('admin_grading_result_discard', result_id=r.id) }}" style="display: inline;">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="btn btn-sm btn-danger">Verwerfen</button>
+                    </form>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<details class="card mt-2" style="border: 1px solid #fca5a5;">
+    <summary class="card-header" style="cursor: pointer; background: #fff1f2; color: #991b1b;">⚠️ Gefahrenzone</summary>
+    <div style="padding: 1rem;">
+        <p>Verwirft alle noch nicht freigegebenen Ergebnisse dieses Laufs (bereits freigegebene Bewertungen bleiben sichtbar).</p>
+        <form method="POST" action="{{ url_for('admin_grading_run_discard', run_id=run.id) }}" onsubmit="return confirm('Bewertungslauf wirklich verwerfen?');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-danger">🗑️ Lauf verwerfen</button>
+        </form>
+    </div>
+</details>
+{% endblock %}

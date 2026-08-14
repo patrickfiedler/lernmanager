@@ -1,0 +1,123 @@
+{% extends 'base.html' %}
+
+{% block title %}Prüfen: {{ result.nachname }}, {{ result.vorname }} - Lernmanager{% endblock %}
+
+{% block content %}
+<div class="flex flex-between flex-center mb-2">
+    <h1>
+        {% if result.student_id %}{{ result.nachname }}, {{ result.vorname }}{% else %}{{ result.netzwerk_id }} (nicht zugeordnet){% endif %}
+        {% if position %}<span class="text-muted" style="font-size: 1rem;">{{ position }} / {{ queue_total }}</span>{% endif %}
+        {% if remaining_flagged %}<span class="badge badge-warning">{{ remaining_flagged }} markiert noch offen</span>{% endif %}
+    </h1>
+    <a href="{{ url_for('admin_grading_run_detail', run_id=run.id) }}" class="btn btn-secondary">← Zur Übersicht</a>
+</div>
+<p class="text-muted" style="margin-top: -0.5rem;">{{ run.klasse_name }} · {{ run.rubric }} · {{ result.document_file or '—' }}</p>
+
+{% if supersede_conflict %}
+<div class="card mb-2" style="border: 1px solid #f59e0b;">
+    <div style="padding: 0.75rem 1rem; background: #fffbeb; color: #92400e;">
+        ⚠️ Für diesen Schüler ist bereits eine andere Bewertung freigegeben
+        (Lauf vom {{ supersede_conflict.created_at }}). Freigabe dieser Bewertung ersetzt sie.
+    </div>
+</div>
+{% endif %}
+
+<div class="grid grid-2" style="align-items: start;">
+    <div class="card">
+        <div class="card-header">🖼️ Medien ({{ result.media|selectattr('graded')|list|length }} bewertet)</div>
+        <div style="padding: 0.75rem; display: flex; flex-wrap: wrap; gap: 0.5rem;">
+            {% for m in result.media %}
+            <a href="{{ url_for('download_grading_media', relpath=m.file) }}" target="_blank" style="display: block;">
+                <img src="{{ url_for('download_grading_media', relpath=m.file) }}" alt="{{ m.source }}"
+                     style="width: 100px; height: 100px; object-fit: cover; border-radius: 4px; border: 1px solid #d1d5db;">
+                <small class="text-muted" style="display: block; text-align: center;">{{ m.source }}</small>
+            </a>
+            {% else %}
+            <p class="text-muted">Keine Medien für dieses Kriterium gefunden.</p>
+            {% endfor %}
+        </div>
+        {% if result.media_skipped %}
+        <div style="padding: 0 0.75rem 0.75rem;">
+            <p style="color: #92400e; font-size: 0.85rem; margin-bottom: 0.25rem;">
+                ⚠️ {{ result.media_skipped|length }} Bild(er) übersprungen — nicht bewertet:
+            </p>
+            <ul style="margin: 0; padding-left: 1.25rem; font-size: 0.85rem; color: #92400e;">
+                {% for skip in result.media_skipped %}
+                <li>{{ skip.name }} ({{ skip.reason }})</li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+    </div>
+
+    <form method="POST" id="review-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="card">
+            <div class="card-header">📝 Kriterien</div>
+            <table class="table" style="margin: 0;">
+                <thead>
+                    <tr><th>Kriterium</th><th style="width: 4rem;">LLM</th><th style="width: 6rem;">Korrigiert</th></tr>
+                </thead>
+                <tbody>
+                    {% for c in result.criteria %}
+                    <tr {% if c.review_required and not c.confirmed %}style="border-left: 3px solid #dc2626;"{% elif c.llm_score == 0 %}style="border-left: 3px solid #f59e0b;"{% endif %}>
+                        <td>
+                            {{ c.name }}
+                            {% if c.review_required %}<span class="badge badge-warning" title="Kein Modell bewertet dieses Kriterium zuverlässig">⚠️ Prüfung nötig</span>{% endif %}
+                            {% if c.feedback %}<br><small class="text-muted">{{ c.feedback }}</small>{% endif %}
+                        </td>
+                        <td>{{ c.llm_score }} / {{ c.max_score }}</td>
+                        <td>
+                            <input type="number" step="0.5" min="0" max="{{ c.max_score }}"
+                                   name="teacher_score_{{ loop.index0 }}"
+                                   value="{{ c.teacher_score if c.teacher_score is not none else c.llm_score }}"
+                                   class="form-control criteria-score" data-max="{{ c.max_score }}" style="width: 5rem;">
+                            {% if c.review_required %}
+                            <label style="display: block; font-size: 0.8rem; margin-top: 0.25rem;">
+                                <input type="checkbox" name="confirmed_{{ loop.index0 }}" {% if c.confirmed %}checked{% endif %}>
+                                bestätigt
+                            </label>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+                <tfoot>
+                    <tr>
+                        <td><strong>Gesamt</strong></td>
+                        <td>{{ result.llm_total_score }}</td>
+                        <td><strong id="live-total">{{ result.teacher_total_score if result.teacher_total_score is not none else result.llm_total_score }}</strong></td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+
+        <div class="flex flex-between mt-2" style="position: sticky; bottom: 0; background: white; padding: 0.75rem 0; border-top: 1px solid #e5e7eb;">
+            <div class="flex gap-1">
+                {% if prev_result %}
+                <a href="{{ url_for('admin_grading_result_review', result_id=prev_result.id) }}" class="btn btn-secondary">← Zurück</a>
+                {% endif %}
+                <button type="submit" name="action" value="skip" class="btn btn-secondary" formnovalidate>Überspringen</button>
+            </div>
+            <div class="flex gap-1">
+                <button type="submit" name="action" value="save" class="btn btn-secondary">Speichern</button>
+                <button type="submit" name="action" value="save_next" class="btn btn-primary">Speichern & Weiter →</button>
+            </div>
+        </div>
+    </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+const llmTotal = {{ result.llm_total_score or 0 }};
+function recompute() {
+    let total = 0;
+    document.querySelectorAll('.criteria-score').forEach(input => {
+        total += parseFloat(input.value) || 0;
+    });
+    document.getElementById('live-total').textContent = total;
+}
+document.querySelectorAll('.criteria-score').forEach(input => {
+    input.addEventListener('input', recompute);
+});
+{% endblock %}
