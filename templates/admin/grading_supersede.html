@@ -1,0 +1,53 @@
+{% extends 'base.html' %}
+
+{% block title %}Konflikt entscheiden - Lernmanager{% endblock %}
+
+{% block content %}
+<div class="flex flex-between flex-center mb-2">
+    <h1>⚖️ Welche Bewertung soll gelten?</h1>
+    <a href="{{ url_for('admin_grading_run_detail', run_id=run.id) }}" class="btn btn-secondary">← Zur Übersicht</a>
+</div>
+<p class="text-muted" style="margin-top: -0.5rem;">
+    {% if challenger.student_id %}{{ challenger.nachname }}, {{ challenger.vorname }}{% else %}{{ challenger.netzwerk_id }}{% endif %}
+    · {{ run.task_name }}
+</p>
+
+<form method="POST">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="grid grid-2">
+        <div class="card">
+            <div class="card-header">✅ Aktuell freigegeben</div>
+            <div style="padding: 0.75rem 1rem;">
+                <p><strong>Gesamt:</strong> {{ active.teacher_total_score if active.teacher_total_score is not none else active.llm_total_score }}</p>
+                <table class="table" style="margin: 0;">
+                    <tbody>
+                        {% for c in active.criteria %}
+                        <tr><td>{{ c.name }}</td><td>{{ c.teacher_score if c.teacher_score is not none else c.llm_score }} / {{ c.max_score }}</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <label style="display: block; margin-top: 0.75rem;">
+                    <input type="radio" name="winner" value="active" checked> Diese Bewertung behalten
+                </label>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-header">🆕 Neuer Lauf (nicht freigegeben)</div>
+            <div style="padding: 0.75rem 1rem;">
+                <p><strong>Gesamt:</strong> {{ challenger.teacher_total_score if challenger.teacher_total_score is not none else challenger.llm_total_score }}</p>
+                <table class="table" style="margin: 0;">
+                    <tbody>
+                        {% for c in challenger.criteria %}
+                        <tr><td>{{ c.name }}</td><td>{{ c.teacher_score if c.teacher_score is not none else c.llm_score }} / {{ c.max_score }}</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <label style="display: block; margin-top: 0.75rem;">
+                    <input type="radio" name="winner" value="challenger"> Diese Bewertung stattdessen freigeben
+                </label>
+            </div>
+        </div>
+    </div>
+    <button type="submit" class="btn btn-primary mt-2">Entscheidung übernehmen</button>
+</form>
+{% endblock %}

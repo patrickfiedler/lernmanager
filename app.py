@@ -702,6 +702,7 @@ def admin_grading_run_detail(run_id):
 def admin_grading_run_discard(run_id):
     models.discard_grading_run(run_id)
     flash('Bewertungslauf verworfen (bereits freigegebene Ergebnisse bleiben sichtbar).', 'success')
+    models.maybe_auto_purge_grading_run(run_id)
     return redirect(url_for('admin_grading_run_detail', run_id=run_id))
 
 
@@ -720,6 +721,17 @@ def admin_grading_run_release_bulk(run_id):
             skipped += 1
     flash(f'{released} Ergebnis(se) freigegeben. {skipped} übersprungen (Konflikt oder offene Prüfung).',
           'success' if released else 'warning')
+    models.maybe_auto_purge_grading_run(run_id)
+    return redirect(url_for('admin_grading_run_detail', run_id=run_id))
+
+
+@app.route('/admin/grading-run/<int:run_id>/purge-media', methods=['POST'])
+@admin_required
+def admin_grading_run_purge_media(run_id):
+    """Manual early purge (spec §7's retention rule), independent of whether
+    the run is fully settled yet -- a teacher may want to force cleanup."""
+    models.purge_grading_run_media(run_id)
+    flash('Medien gelöscht.', 'success')
     return redirect(url_for('admin_grading_run_detail', run_id=run_id))
 
 
@@ -737,6 +749,7 @@ def admin_grading_result_confirm(result_id):
         flash('Bestätigt.', 'success')
     except ValueError as e:
         flash(f'Konnte nicht bestätigt werden: {e}', 'danger')
+    models.maybe_auto_purge_grading_run(result['grading_run_id'])
     return redirect(url_for('admin_grading_run_detail', run_id=result['grading_run_id']))
 
 
@@ -749,6 +762,7 @@ def admin_grading_result_discard(result_id):
         return redirect(url_for('admin_klassen'))
     models.discard_grading_result(result_id)
     flash('Verworfen.', 'success')
+    models.maybe_auto_purge_grading_run(result['grading_run_id'])
     return redirect(url_for('admin_grading_run_detail', run_id=result['grading_run_id']))
 
 
@@ -821,6 +835,43 @@ def admin_grading_result_review(result_id):
         queue_total=len(queue), remaining_flagged=remaining_flagged,
         prev_result=prev_result, supersede_conflict=supersede_conflict,
     )
+
+
+@app.route('/admin/grading-result/<int:result_id>/supersede', methods=['GET', 'POST'])
+@admin_required
+def admin_grading_result_supersede(result_id):
+    """
+    Resolve a supersede conflict (spec §7): two grading_results exist for the
+    same (student, artifact), one already 'active'. Side-by-side comparison,
+    one radio choice picks the winner -- never a silent bulk-overwrite of an
+    existing active run.
+    """
+    challenger = models.get_grading_result(result_id)
+    if not challenger:
+        flash('Ergebnis nicht gefunden.', 'danger')
+        return redirect(url_for('admin_klassen'))
+    run = models.get_grading_run(challenger['grading_run_id'])
+    active = models.get_active_grading_result(challenger['student_id'], run['task_id']) if challenger['student_id'] else None
+
+    if not active or active['id'] == result_id:
+        flash('Kein Konflikt (mehr) für dieses Ergebnis.', 'warning')
+        return redirect(url_for('admin_grading_run_detail', run_id=run['id']))
+
+    if request.method == 'POST':
+        winner = request.form.get('winner')
+        active_run_id = active['grading_run_id']
+        if winner == 'challenger':
+            models.supersede_grading_result(active['id'], result_id)
+            models.release_grading_result(result_id, session['admin_id'])
+            flash('Neue Bewertung übernommen.', 'success')
+        else:
+            models.discard_grading_result(result_id)
+            flash('Bestehende Bewertung behalten.', 'success')
+        models.maybe_auto_purge_grading_run(run['id'])
+        models.maybe_auto_purge_grading_run(active_run_id)
+        return redirect(url_for('admin_grading_run_detail', run_id=run['id']))
+
+    return render_template('admin/grading_supersede.html', challenger=challenger, active=active, run=run)
 
 
 @app.route('/grading-medien/<path:relpath>')

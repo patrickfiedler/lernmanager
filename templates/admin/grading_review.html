@@ -15,9 +15,10 @@
 
 {% if supersede_conflict %}
 <div class="card mb-2" style="border: 1px solid #f59e0b;">
-    <div style="padding: 0.75rem 1rem; background: #fffbeb; color: #92400e;">
-        ⚠️ Für diesen Schüler ist bereits eine andere Bewertung freigegeben
-        (Lauf vom {{ supersede_conflict.created_at }}). Freigabe dieser Bewertung ersetzt sie.
+    <div style="padding: 0.75rem 1rem; background: #fffbeb; color: #92400e;" class="flex flex-between flex-center">
+        <span>⚠️ Für diesen Schüler ist bereits eine andere Bewertung freigegeben
+        (Lauf vom {{ supersede_conflict.created_at }}).</span>
+        <a href="{{ url_for('admin_grading_result_supersede', result_id=result.id) }}" class="btn btn-sm btn-secondary">Vergleichen</a>
     </div>
 </div>
 {% endif %}

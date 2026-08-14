@@ -4001,6 +4001,64 @@ def mark_grading_run_media_purged(run_id):
         conn.execute("UPDATE grading_run SET media_purged_at = ? WHERE id = ?", (purged_at, run_id))
 
 
+def is_grading_run_settled(run_id):
+    """True once every result in the run has left the review pipeline
+    (active/discarded/superseded) -- nothing left that still needs the
+    source media to review. Drives the auto-purge trigger below."""
+    with db_session() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) as cnt FROM grading_result "
+            "WHERE grading_run_id = ? AND status IN ('imported', 'under_review', 'corrected')",
+            (run_id,)
+        ).fetchone()
+    return row['cnt'] == 0
+
+
+def purge_grading_run_media(run_id):
+    """
+    Retention sweep for one run (spec §7: "once a run is imported and
+    released, the grading service should purge the extracted files and
+    results" -- plus Lernmanager's own local copy). Best-effort on both
+    legs: a failed DELETE against an already-purged/offline grading service
+    must not block deleting the local copy, and vice versa -- whichever
+    succeeds, succeeds; mark_grading_run_media_purged() records that the
+    sweep ran regardless, so it isn't retried forever against a service
+    that's simply offline.
+    """
+    import shutil
+    run = get_grading_run(run_id)
+    if run is None:
+        return
+
+    local_dir = os.path.join(_grading_upload_dir(), str(run_id))
+    if os.path.isdir(local_dir):
+        shutil.rmtree(local_dir, ignore_errors=True)
+
+    if config.GRADING_SERVICE_URL and run.get('job_id'):
+        req = urllib.request.Request(
+            f"{config.GRADING_SERVICE_URL}/jobs/{run['job_id']}",
+            method='DELETE',
+            headers={'Authorization': f"Bearer {config.GRADING_SERVICE_TOKEN}"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=15):
+                pass
+        except (urllib.error.URLError, OSError, TimeoutError):
+            pass  # already gone, or service unreachable -- not fatal, see docstring
+
+    mark_grading_run_media_purged(run_id)
+
+
+def maybe_auto_purge_grading_run(run_id):
+    """Call after any action that can settle a run (release/discard) --
+    purges media immediately once nothing is left to review, rather than
+    waiting for a separate sweep job (spec §7 calls a time-based sweep a
+    'backstop', not the primary mechanism)."""
+    run = get_grading_run(run_id)
+    if run and not run.get('media_purged_at') and is_grading_run_settled(run_id):
+        purge_grading_run_media(run_id)
+
+
 def get_grading_run_by_job_id(job_id):
     """Look up the grading_run created at upload time (sub-phase 2f) so the
     /internal/grading/results callback can find where to attach results --

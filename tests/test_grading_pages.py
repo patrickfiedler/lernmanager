@@ -59,7 +59,7 @@ def test_page_a_bulk_release_partitions_conflicts(app, client, as_admin):
 
     resp = as_admin.get(f'/admin/grading-run/{run_id2}')
     body = resp.get_data(as_text=True)
-    assert "einzeln über" in body  # conflict-needs-decision messaging
+    assert "Vergleichen &amp; entscheiden" in body  # conflict-needs-decision messaging, links to the 2i supersede page
 
 
 def test_page_a_release_bulk_action(app, client, as_admin):

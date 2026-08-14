@@ -38,9 +38,16 @@
         {% endif %}
         {% if needs_decision %}
         <p style="margin-top: 0.5rem; color: #92400e;">
-            ⚠️ {{ needs_decision|length }} Schüler haben bereits eine andere freigegebene Bewertung für dieses Thema —
-            diese müssen einzeln über "Prüfen" entschieden werden.
+            ⚠️ {{ needs_decision|length }} Schüler haben bereits eine andere freigegebene Bewertung für dieses Thema:
         </p>
+        <ul style="margin: 0.25rem 0 0; padding-left: 1.5rem;">
+            {% for r in needs_decision %}
+            <li>
+                {{ r.nachname }}, {{ r.vorname }} —
+                <a href="{{ url_for('admin_grading_result_supersede', result_id=r.id) }}">Vergleichen &amp; entscheiden</a>
+            </li>
+            {% endfor %}
+        </ul>
         {% endif %}
     </div>
 </div>
@@ -127,6 +134,20 @@
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button type="submit" class="btn btn-danger">🗑️ Lauf verwerfen</button>
         </form>
+        <p style="margin-top: 1rem;">
+            {% if run.media_purged_at %}
+            Medien bereits gelöscht ({{ run.media_purged_at }}).
+            {% else %}
+            Löscht die bewerteten Bilder dieses Laufs (lokal und auf dem Bewertungsdienst). Läuft automatisch,
+            sobald alle Ergebnisse entschieden sind -- hier vorzeitig möglich.
+            {% endif %}
+        </p>
+        {% if not run.media_purged_at %}
+        <form method="POST" action="{{ url_for('admin_grading_run_purge_media', run_id=run.id) }}" onsubmit="return confirm('Medien dieses Laufs jetzt löschen?');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-secondary">🗑️ Medien jetzt löschen</button>
+        </form>
+        {% endif %}
     </div>
 </details>
 {% endblock %}
