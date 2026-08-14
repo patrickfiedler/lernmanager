@@ -3880,6 +3880,70 @@ def record_llm_usage(student_id, question_type, tokens_used=0):
 GRADING_RESULT_STATUSES = {'imported', 'under_review', 'active', 'corrected', 'discarded', 'superseded'}
 
 
+def get_task_grading_keyword(task_id):
+    """The graded_artifact keyword to use as the grading-service rubric slug
+    for this task -- the LATEST subtask (highest reihenfolge) carrying a
+    graded_artifact wins, since MBI's growing-rubric pattern accumulates
+    criteria toward a capstone (conventions.md 'Growing rubric pattern'; the
+    keyword is shared across all subtasks in the chain, but the last one's
+    criteria list is the authoritative superset). None if the task has no
+    graded_artifact anywhere."""
+    keyword = None
+    for st in get_subtasks(task_id):  # already ordered by reihenfolge ascending
+        if not st.get('graded_artifact_json'):
+            continue
+        try:
+            ga = json.loads(st['graded_artifact_json'])
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if ga.get('keyword'):
+            keyword = ga['keyword']
+    return keyword
+
+
+def list_tasks_with_graded_artifact():
+    """Tasks with at least one graded_artifact-bearing subtask -- the unit
+    picker on the grading-service upload page (sub-phase 2f)."""
+    with db_session() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT t.* FROM task t JOIN subtask s ON s.task_id = t.id "
+            "WHERE s.graded_artifact_json IS NOT NULL "
+            "ORDER BY t.fach, t.stufe, t.number, t.name"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def build_grading_manifest(klasse_id):
+    """
+    Manifest for the grading service (grading-service-deployment.md §5):
+    real names + login only, held in memory / a spool-local temp file by the
+    service, never persisted -- what makes provider:ovh/anthropic legal
+    (satisfies the fail-closed anonymiser gate) without shipping a permanent
+    roster copy to the grading host.
+
+    Returns (manifest_dict, unmatched) -- unmatched students (no netzwerk_id
+    yet, e.g. added after the last annual roster refresh) are excluded from
+    the manifest and listed separately so the upload page can warn before
+    submitting, per spec §5: "an unmatched folder is an error the teacher
+    sees, not a guess the system makes."
+    """
+    klasse = get_klasse(klasse_id)
+    students = get_students_in_klasse(klasse_id)
+    matched = []
+    unmatched = []
+    for s in students:
+        if s.get('netzwerk_id'):
+            matched.append({
+                'login': s['netzwerk_id'],
+                'names': [s['vorname'], s['nachname']],
+                'lernpfad': s.get('lernpfad', ''),
+            })
+        else:
+            unmatched.append({'nachname': s['nachname'], 'vorname': s['vorname']})
+    manifest = {'klasse': klasse['name'] if klasse else '', 'students': matched}
+    return manifest, unmatched
+
+
 def create_grading_run(job_id, klasse_id, task_id, rubric, provider, model,
                         total_students=0, flagged_count=0, zero_score_count=0, graded_at=None):
     """Create a grading_run row for one imported batch. Returns the new id."""

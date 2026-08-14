@@ -1,0 +1,205 @@
+{% extends 'base.html' %}
+
+{% block title %}KI-Bewertung hochladen - {{ klasse.name }} - Lernmanager{% endblock %}
+
+{% block content %}
+<div class="flex flex-between flex-center mb-2">
+    <h1>🎯 KI-Bewertung hochladen — {{ klasse.name }}</h1>
+    <a href="{{ url_for('admin_klasse_detail', klasse_id=klasse.id) }}" class="btn btn-secondary">← Zurück zur Klasse</a>
+</div>
+
+<div id="service-status-banner" class="card mb-2" style="display: none;">
+    <div style="padding: 0.75rem 1rem;"></div>
+</div>
+
+{% if unmatched %}
+<div class="card mb-2" style="border: 1px solid #f59e0b;">
+    <div class="card-header" style="background: #fffbeb; color: #92400e;">
+        ⚠️ {{ unmatched|length }} Schüler ohne Netzwerk-ID
+    </div>
+    <div style="padding: 0.75rem 1rem;">
+        <p style="font-size: 0.9rem; color: #4b5563; margin-bottom: 0.5rem;">
+            Diese Schüler können nicht automatisch zugeordnet werden (kein Netzwerk-ID-Eintrag —
+            vermutlich nach dem letzten Roster-Abgleich hinzugefügt). Ihre Ordner im Zip werden als
+            nicht zugeordnet markiert, nicht stillschweigend übersprungen.
+        </p>
+        <ul style="margin: 0; padding-left: 1.5rem; font-size: 0.9rem;">
+            {% for s in unmatched %}
+            <li>{{ s.nachname }}, {{ s.vorname }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+</div>
+{% endif %}
+
+<div class="card">
+    <div class="card-header">📤 Neue Bewertung starten</div>
+    <form id="grading-upload-form" style="padding: 1rem;">
+        <div class="form-group">
+            <label for="task-select">Thema (Rubric)</label>
+            <select id="task-select" class="form-control" required>
+                <option value="">-- Thema wählen --</option>
+                {% for task in tasks %}
+                <option value="{{ task.id }}" data-rubric="{{ task.grading_keyword }}">
+                    {{ task.fach }} ({{ task.stufe }}): {{ task.name }}
+                </option>
+                {% endfor %}
+            </select>
+            {% if not tasks %}
+            <small class="text-muted">Kein Thema mit KI-Bewertungskriterien gefunden.</small>
+            {% endif %}
+        </div>
+
+        <div class="form-group">
+            <label for="provider-select">Anbieter</label>
+            <select id="provider-select" class="form-control" required>
+                <option value="ollama" selected>🔒 Lokal (Ollama, M920x) — keine Daten verlassen die Schule</option>
+                <option value="ovh">☁️ OVHcloud — schneller, benötigt unterschriebenen AV-Vertrag</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label for="archive-input">Zip-Datei (aus scan-folders)</label>
+            <input type="file" id="archive-input" class="form-control" accept=".zip" required>
+        </div>
+
+        <p style="font-size: 0.85rem; color: #6b7280;">
+            {{ matched_count }} Schüler dieser Klasse werden automatisch zugeordnet.
+        </p>
+
+        <button type="submit" id="submit-btn" class="btn btn-primary">Hochladen und Bewertung starten</button>
+        <div id="upload-progress" style="display: none; margin-top: 0.75rem;">
+            <progress id="upload-progress-bar" max="100" value="0" style="width: 100%;"></progress>
+            <small id="upload-progress-text" class="text-muted"></small>
+        </div>
+        <div id="upload-result" style="margin-top: 0.75rem;"></div>
+    </form>
+</div>
+
+<script id="grading-manifest" type="application/json">{{ manifest_json|safe }}</script>
+{% endblock %}
+
+{% block scripts %}
+const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+const klasseId = {{ klasse.id }};
+const manifest = JSON.parse(document.getElementById('grading-manifest').textContent);
+const initialServiceOnline = {{ 'true' if service_online else 'false' }};
+
+function renderServiceBanner(configured, online) {
+    const banner = document.getElementById('service-status-banner');
+    const inner = banner.querySelector('div');
+    const submitBtn = document.getElementById('submit-btn');
+    if (!configured) {
+        banner.style.display = 'block';
+        inner.style.background = '#f3f4f6';
+        inner.style.color = '#4b5563';
+        inner.textContent = 'ℹ️ Bewertungsdienst nicht konfiguriert (GRADING_SERVICE_URL fehlt).';
+        submitBtn.disabled = true;
+    } else if (!online) {
+        banner.style.display = 'block';
+        inner.style.background = '#fef2f2';
+        inner.style.color = '#991b1b';
+        inner.textContent = '🔴 Bewertungsdienst offline (M920x nicht erreichbar). Hochladen erst möglich, wenn er wieder online ist.';
+        submitBtn.disabled = true;
+    } else {
+        banner.style.display = 'none';
+        submitBtn.disabled = false;
+    }
+}
+
+renderServiceBanner(true, initialServiceOnline);
+fetch('{{ url_for("admin_grading_health") }}')
+    .then(r => r.json())
+    .then(data => renderServiceBanner(data.configured, data.online))
+    .catch(() => renderServiceBanner(true, false));
+
+document.getElementById('grading-upload-form').addEventListener('submit', function(e) {
+    e.preventDefault();
+
+    const taskSelect = document.getElementById('task-select');
+    const taskId = taskSelect.value;
+    const rubric = taskSelect.selectedOptions[0] ? taskSelect.selectedOptions[0].dataset.rubric : '';
+    const provider = document.getElementById('provider-select').value;
+    const archiveInput = document.getElementById('archive-input');
+    const resultDiv = document.getElementById('upload-result');
+    const submitBtn = document.getElementById('submit-btn');
+    const progressWrap = document.getElementById('upload-progress');
+    const progressBar = document.getElementById('upload-progress-bar');
+    const progressText = document.getElementById('upload-progress-text');
+
+    if (!taskId || !rubric || !archiveInput.files.length) {
+        resultDiv.innerHTML = '<span style="color: #991b1b;">Bitte Thema und Zip-Datei auswählen.</span>';
+        return;
+    }
+
+    submitBtn.disabled = true;
+    resultDiv.innerHTML = '';
+    progressWrap.style.display = 'block';
+    progressText.textContent = 'Lade Zip-Datei hoch …';
+
+    // Step 1: browser -> nginx /grading/ proxy -> grading service directly.
+    // Never touches Flask -- see grading-service-deployment.md §4 and the
+    // nginx config documented alongside this route.
+    const formData = new FormData();
+    formData.append('rubric', rubric);
+    formData.append('provider', provider);
+    formData.append('manifest', JSON.stringify(manifest));
+    formData.append('archive', archiveInput.files[0]);
+
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/grading/jobs');
+    xhr.upload.addEventListener('progress', function(evt) {
+        if (evt.lengthComputable) {
+            const pct = Math.round((evt.loaded / evt.total) * 100);
+            progressBar.value = pct;
+            progressText.textContent = `Lade Zip-Datei hoch … ${pct}%`;
+        }
+    });
+    xhr.onload = function() {
+        if (xhr.status !== 200 && xhr.status !== 202) {
+            progressWrap.style.display = 'none';
+            submitBtn.disabled = false;
+            let msg = xhr.responseText;
+            try { msg = JSON.parse(xhr.responseText).error || msg; } catch (e) {}
+            resultDiv.innerHTML = `<span style="color: #991b1b;">Fehler beim Hochladen: ${msg}</span>`;
+            return;
+        }
+        const jobResponse = JSON.parse(xhr.responseText);
+        progressText.textContent = 'Bewertung gestartet, wird registriert …';
+
+        // Step 2: tiny JSON POST through Flask -- Lernmanager receives only
+        // the job_id (spec §10 Phase 2), never the archive bytes.
+        fetch('{{ url_for("admin_klasse_grading_upload_complete", klasse_id=klasse.id) }}', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+            body: JSON.stringify({
+                job_id: jobResponse.job_id, task_id: parseInt(taskId, 10),
+                rubric: rubric, provider: provider, students: jobResponse.students,
+            }),
+        })
+            .then(r => r.json().then(data => ({ ok: r.ok, data })))
+            .then(({ ok, data }) => {
+                progressWrap.style.display = 'none';
+                if (!ok) {
+                    submitBtn.disabled = false;
+                    resultDiv.innerHTML = `<span style="color: #991b1b;">Fehler: ${data.error}</span>`;
+                    return;
+                }
+                resultDiv.innerHTML = '<span style="color: #10b981; font-weight: 500;">✅ Bewertung gestartet. ' +
+                    'Ergebnisse erscheinen hier, sobald sie fertig sind.</span>';
+            })
+            .catch(() => {
+                progressWrap.style.display = 'none';
+                submitBtn.disabled = false;
+                resultDiv.innerHTML = '<span style="color: #991b1b;">Fehler bei der Registrierung. Job-ID: ' +
+                    jobResponse.job_id + '</span>';
+            });
+    };
+    xhr.onerror = function() {
+        progressWrap.style.display = 'none';
+        submitBtn.disabled = false;
+        resultDiv.innerHTML = '<span style="color: #991b1b;">Netzwerkfehler beim Hochladen.</span>';
+    };
+    xhr.send(formData);
+});
+{% endblock %}

@@ -9,6 +9,8 @@ import shutil
 import zipfile
 import ipaddress
 import traceback
+import urllib.request
+import urllib.error
 from functools import wraps
 from datetime import date, datetime
 from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify, send_from_directory, abort, Response
@@ -329,6 +331,22 @@ def internal_grading_results():
     return jsonify({'status': 'ok', 'grading_run_id': run_id}), 200
 
 
+@app.route('/internal/auth-check')
+def internal_auth_check():
+    """
+    nginx `auth_request` target for the /grading/ proxy location (sub-phase
+    2f): the browser's admin-upload POST goes straight to the grading
+    service, bypassing Flask entirely for the large file body -- but nginx
+    still needs to confirm the *browser* is an authenticated admin before it
+    injects the shared grading-service Bearer token. nginx forwards the
+    client's cookies to this subrequest automatically; we just check the
+    session. 204 (not 200) so nginx has nothing to accidentally proxy back.
+    """
+    if 'admin_id' not in session:
+        return '', 401
+    return '', 204
+
+
 # ============ Auth Routes ============
 
 @app.route('/')
@@ -567,6 +585,81 @@ def admin_klasse_detail(klasse_id):
                            has_queue=bool(queue), sidequests=sidequests,
                            practice_unlocked_ids=practice_unlocked_ids,
                            andere_klassen=andere_klassen)
+
+
+def _grading_service_health():
+    """GET the grading service's unauthenticated /health over WireGuard,
+    server-side (never exposes GRADING_SERVICE_URL/_TOKEN to the browser).
+    Returns True/False; 'not configured' is reported separately by the caller."""
+    if not config.GRADING_SERVICE_URL:
+        return None
+    try:
+        with urllib.request.urlopen(f"{config.GRADING_SERVICE_URL}/health", timeout=3) as resp:
+            return resp.status == 200
+    except (urllib.error.URLError, OSError, TimeoutError):
+        return False
+
+
+@app.route('/admin/grading/health')
+@admin_required
+def admin_grading_health():
+    """AJAX: powers the 'Grading service offline' banner on the upload page
+    (grading-service-deployment.md §Phase 2 -- M920x is a home machine, this
+    must fail visibly rather than obscurely)."""
+    status = _grading_service_health()
+    if status is None:
+        return jsonify({'configured': False, 'online': False})
+    return jsonify({'configured': True, 'online': status})
+
+
+@app.route('/admin/klasse/<int:klasse_id>/grading/upload')
+@admin_required
+def admin_klasse_grading_upload(klasse_id):
+    klasse = models.get_klasse(klasse_id)
+    if not klasse:
+        flash('Klasse nicht gefunden.', 'danger')
+        return redirect(url_for('admin_klassen'))
+
+    tasks = models.list_tasks_with_graded_artifact()
+    for t in tasks:
+        t['grading_keyword'] = models.get_task_grading_keyword(t['id'])
+    tasks = [t for t in tasks if t['grading_keyword']]
+
+    manifest, unmatched = models.build_grading_manifest(klasse_id)
+
+    return render_template(
+        'admin/grading_upload.html', klasse=klasse, tasks=tasks,
+        manifest_json=json.dumps(manifest, ensure_ascii=False),
+        unmatched=unmatched, matched_count=len(manifest['students']),
+        service_online=_grading_service_health(),
+    )
+
+
+@app.route('/admin/klasse/<int:klasse_id>/grading/upload/complete', methods=['POST'])
+@admin_required
+def admin_klasse_grading_upload_complete(klasse_id):
+    """
+    Called by the upload page's JS *after* the browser's direct multipart
+    POST to /grading/jobs (nginx-proxied straight to the M920x, bypassing
+    Flask -- see docs/shared/grading-with-llm/grading-service-deployment.md
+    §4) has already returned a job_id. This tiny JSON request is the only
+    grading-service traffic that goes through Flask -- "Lernmanager receives
+    only the job_id" (spec §10 Phase 2).
+    """
+    payload = request.get_json(silent=True) or {}
+    job_id = payload.get('job_id')
+    task_id = payload.get('task_id')
+    rubric = payload.get('rubric')
+    provider = payload.get('provider')
+    total_students = payload.get('students', 0)
+    if not job_id or not task_id or not rubric or not provider:
+        return jsonify({'error': 'job_id, task_id, rubric and provider are required'}), 400
+
+    run_id = models.create_grading_run(
+        job_id=job_id, klasse_id=klasse_id, task_id=task_id, rubric=rubric,
+        provider=provider, model=None, total_students=total_students,
+    )
+    return jsonify({'grading_run_id': run_id}), 201
 
 
 @app.route('/admin/klasse/<int:klasse_id>/llm-feedback', methods=['POST'])
