@@ -493,6 +493,75 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_student_artifact_file_student_task
             ON student_artifact_file(student_id, task_id);
 
+            -- ============ Grading Service (grading-with-llm Phase 2) ============
+            -- One row per imported batch from the grading service (spec §7/§10 Phase 2).
+            -- Klasse/task-level summary; per-student outcomes live in grading_result.
+            CREATE TABLE IF NOT EXISTS grading_run (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id TEXT NOT NULL,
+                klasse_id INTEGER NOT NULL,
+                task_id INTEGER NOT NULL,
+                rubric TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                model TEXT,
+                imported_at TEXT NOT NULL,
+                graded_at TEXT,
+                total_students INTEGER NOT NULL DEFAULT 0,
+                flagged_count INTEGER NOT NULL DEFAULT 0,
+                zero_score_count INTEGER NOT NULL DEFAULT 0,
+                media_purged_at TEXT,
+                FOREIGN KEY (klasse_id) REFERENCES klasse(id),
+                FOREIGN KEY (task_id) REFERENCES task(id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_grading_run_klasse ON grading_run(klasse_id);
+            CREATE INDEX IF NOT EXISTS idx_grading_run_task ON grading_run(task_id);
+
+            -- Per-student outcome within a grading_run. State machine, per
+            -- grading-service-deployment.md §7:
+            --   imported -> under_review -> active -> (visible to student)
+            --                    |-> corrected -> active  (teacher overrode a score)
+            --                    |-> discarded            (bad run, re-grade)
+            --                    |-> superseded            (another run made active instead)
+            -- task_id is denormalized from grading_run so the partial unique index
+            -- below can enforce "at most one active row per (student, artifact)"
+            -- (spec §7) without a cross-table constraint, which SQLite can't express.
+            CREATE TABLE IF NOT EXISTS grading_result (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                grading_run_id INTEGER NOT NULL,
+                task_id INTEGER NOT NULL,
+                student_id INTEGER,
+                netzwerk_id TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'imported',
+                llm_total_score REAL,
+                llm_max_score REAL,
+                teacher_total_score REAL,
+                note INTEGER,
+                flagged INTEGER NOT NULL DEFAULT 0,
+                confidence TEXT,
+                error TEXT,
+                criteria_json TEXT NOT NULL,
+                document_file TEXT,
+                media_json TEXT,
+                media_skipped_json TEXT,
+                reviewed_at TEXT,
+                released_at TEXT,
+                released_by INTEGER,
+                superseded_by_id INTEGER,
+                created_at TEXT NOT NULL,
+                UNIQUE(grading_run_id, netzwerk_id),
+                FOREIGN KEY (grading_run_id) REFERENCES grading_run(id) ON DELETE CASCADE,
+                FOREIGN KEY (task_id) REFERENCES task(id),
+                FOREIGN KEY (student_id) REFERENCES student(id),
+                FOREIGN KEY (released_by) REFERENCES admin(id),
+                FOREIGN KEY (superseded_by_id) REFERENCES grading_result(id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_grading_result_run ON grading_result(grading_run_id);
+            CREATE INDEX IF NOT EXISTS idx_grading_result_student ON grading_result(student_id);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_grading_result_one_active_per_artifact
+            ON grading_result(student_id, task_id) WHERE status = 'active';
+
             -- ============ Warmup / Spaced Repetition ============
 
             -- Per-student per-question stats for spaced repetition.
@@ -3798,6 +3867,245 @@ def record_llm_usage(student_id, question_type, tokens_used=0):
         conn.execute(
             "INSERT INTO llm_usage (student_id, question_type, tokens_used) VALUES (?, ?, ?)",
             (student_id, question_type, tokens_used)
+        )
+
+
+# ============ Grading Service (grading-with-llm Phase 2) ============
+# State machine per grading-service-deployment.md §7:
+#   imported -> under_review -> active -> (visible to student)
+#                    |-> corrected -> active   (teacher overrode a score, still active)
+#                    |-> discarded             (bad run, re-grade)
+#                    |-> superseded            (another run made active instead)
+
+GRADING_RESULT_STATUSES = {'imported', 'under_review', 'active', 'corrected', 'discarded', 'superseded'}
+
+
+def create_grading_run(job_id, klasse_id, task_id, rubric, provider, model,
+                        total_students=0, flagged_count=0, zero_score_count=0, graded_at=None):
+    """Create a grading_run row for one imported batch. Returns the new id."""
+    imported_at = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
+    with db_session() as conn:
+        cursor = conn.execute(
+            "INSERT INTO grading_run (job_id, klasse_id, task_id, rubric, provider, model, "
+            "imported_at, graded_at, total_students, flagged_count, zero_score_count) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (job_id, klasse_id, task_id, rubric, provider, model, imported_at, graded_at,
+             total_students, flagged_count, zero_score_count)
+        )
+        return cursor.lastrowid
+
+
+def get_grading_run(run_id):
+    """Return a grading_run row (dict) enriched with klasse/task names, or None."""
+    with db_session() as conn:
+        row = conn.execute(
+            "SELECT gr.*, k.name as klasse_name, t.name as task_name "
+            "FROM grading_run gr "
+            "JOIN klasse k ON k.id = gr.klasse_id "
+            "JOIN task t ON t.id = gr.task_id "
+            "WHERE gr.id = ?",
+            (run_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def list_grading_runs(klasse_id=None):
+    """List grading_run rows, newest first. Optionally filtered by class."""
+    with db_session() as conn:
+        if klasse_id is not None:
+            rows = conn.execute(
+                "SELECT gr.*, k.name as klasse_name, t.name as task_name "
+                "FROM grading_run gr JOIN klasse k ON k.id = gr.klasse_id JOIN task t ON t.id = gr.task_id "
+                "WHERE gr.klasse_id = ? ORDER BY gr.id DESC",
+                (klasse_id,)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT gr.*, k.name as klasse_name, t.name as task_name "
+                "FROM grading_run gr JOIN klasse k ON k.id = gr.klasse_id JOIN task t ON t.id = gr.task_id "
+                "ORDER BY gr.id DESC"
+            ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def mark_grading_run_media_purged(run_id):
+    """Record that this run's media directory has been deleted (retention, spec §7)."""
+    purged_at = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
+    with db_session() as conn:
+        conn.execute("UPDATE grading_run SET media_purged_at = ? WHERE id = ?", (purged_at, run_id))
+
+
+def create_grading_result(grading_run_id, task_id, student_id, netzwerk_id, criteria,
+                           llm_total_score=None, llm_max_score=None, flagged=False,
+                           confidence=None, error=None, document_file=None,
+                           media=None, media_skipped=None):
+    """
+    Create one grading_result row (status='imported'). `criteria` is the list
+    of per-criterion dicts from students/*.json, reshaped into the review-UI
+    contract (teacher-review-ui.md §5): each gets teacher_score=None,
+    overridden=False, reviewed_at=None added, plus review_required/confirmed
+    if the rubric criterion carries review_required (sub-phase 2d).
+    """
+    created_at = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
+    criteria_json = json.dumps([
+        {
+            'name': c.get('name'),
+            'llm_score': c.get('score'),
+            'max_score': c.get('max_score'),
+            'feedback': c.get('feedback', ''),
+            'teacher_score': c.get('score'),
+            'overridden': False,
+            'reviewed_at': None,
+            'review_required': bool(c.get('review_required')),
+            'confirmed': not bool(c.get('review_required')),
+        }
+        for c in criteria
+    ])
+    with db_session() as conn:
+        cursor = conn.execute(
+            "INSERT INTO grading_result (grading_run_id, task_id, student_id, netzwerk_id, status, "
+            "llm_total_score, llm_max_score, flagged, confidence, error, criteria_json, document_file, "
+            "media_json, media_skipped_json, created_at) "
+            "VALUES (?, ?, ?, ?, 'imported', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (grading_run_id, task_id, student_id, netzwerk_id, llm_total_score, llm_max_score,
+             1 if flagged else 0, confidence, error, criteria_json, document_file,
+             json.dumps(media or []), json.dumps(media_skipped or []), created_at)
+        )
+        return cursor.lastrowid
+
+
+def _row_to_grading_result(row):
+    d = dict(row)
+    d['criteria'] = json.loads(d['criteria_json'])
+    d['media'] = json.loads(d.pop('media_json') or '[]')
+    d['media_skipped'] = json.loads(d.pop('media_skipped_json') or '[]')
+    del d['criteria_json']
+    d['flagged'] = bool(d['flagged'])
+    return d
+
+
+def get_grading_result(result_id):
+    """Return one grading_result (dict, criteria/media parsed), or None."""
+    with db_session() as conn:
+        row = conn.execute("SELECT * FROM grading_result WHERE id = ?", (result_id,)).fetchone()
+    return _row_to_grading_result(row) if row else None
+
+
+def list_grading_results(grading_run_id):
+    """List all grading_result rows for a run, joined with student name where resolved."""
+    with db_session() as conn:
+        rows = conn.execute(
+            "SELECT gres.*, s.nachname, s.vorname "
+            "FROM grading_result gres LEFT JOIN student s ON s.id = gres.student_id "
+            "WHERE gres.grading_run_id = ? ORDER BY s.nachname, s.vorname, gres.netzwerk_id",
+            (grading_run_id,)
+        ).fetchall()
+    return [_row_to_grading_result(r) for r in rows]
+
+
+def get_active_grading_result(student_id, task_id):
+    """The currently-active grading_result for (student, artifact), or None -- spec §7's
+    'at most one active' rule. Used to detect supersede conflicts before release."""
+    if student_id is None:
+        return None
+    with db_session() as conn:
+        row = conn.execute(
+            "SELECT * FROM grading_result WHERE student_id = ? AND task_id = ? AND status = 'active'",
+            (student_id, task_id)
+        ).fetchone()
+    return _row_to_grading_result(row) if row else None
+
+
+def save_grading_result_review(result_id, criteria):
+    """
+    Page B 'Speichern' (teacher-review-ui.md §4): persist per-criterion
+    teacher_score only where it differs from llm_score, mark overridden,
+    stamp reviewed_at. Does NOT release -- status only advances to
+    'under_review' if it was still 'imported'. Recomputes teacher_total_score.
+    """
+    reviewed_at = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
+    saved = []
+    total = 0
+    for c in criteria:
+        teacher_score = c.get('teacher_score', c.get('llm_score'))
+        overridden = teacher_score != c.get('llm_score')
+        entry = dict(c)
+        entry['teacher_score'] = teacher_score
+        entry['overridden'] = overridden
+        entry['reviewed_at'] = reviewed_at
+        if 'review_required' in entry and entry['review_required'] and c.get('confirmed'):
+            entry['confirmed'] = True
+        saved.append(entry)
+        if teacher_score is not None:
+            total += teacher_score
+
+    with db_session() as conn:
+        conn.execute(
+            "UPDATE grading_result SET criteria_json = ?, teacher_total_score = ?, reviewed_at = ?, "
+            "status = CASE WHEN status = 'imported' THEN 'under_review' ELSE status END "
+            "WHERE id = ?",
+            (json.dumps(saved), total, reviewed_at, result_id)
+        )
+
+
+def release_grading_result(result_id, admin_id):
+    """
+    Page A/B release action (spec §7). Transitions this result to 'active'.
+    If another result already holds 'active' for the same (student, task),
+    that is a supersede: the caller must have already resolved it (picked a
+    winner) -- this function does not choose for them. Raises ValueError if
+    an unresolved conflict exists, so a route can't silently double-release.
+    """
+    released_at = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
+    with db_session() as conn:
+        row = conn.execute("SELECT * FROM grading_result WHERE id = ?", (result_id,)).fetchone()
+        if row is None:
+            raise ValueError(f"grading_result {result_id} not found")
+        if row['student_id'] is None:
+            raise ValueError("cannot release a result with no matched student_id")
+
+        conflict = conn.execute(
+            "SELECT id FROM grading_result WHERE student_id = ? AND task_id = ? "
+            "AND status = 'active' AND id != ?",
+            (row['student_id'], row['task_id'], result_id)
+        ).fetchone()
+        if conflict:
+            raise ValueError(
+                f"grading_result {conflict['id']} is already active for this student+task -- "
+                f"resolve the supersede first (mark it superseded, pointing to {result_id})"
+            )
+
+        conn.execute(
+            "UPDATE grading_result SET status = 'active', released_at = ?, released_by = ? WHERE id = ?",
+            (released_at, admin_id, result_id)
+        )
+
+
+def supersede_grading_result(losing_result_id, winning_result_id):
+    """Resolve a supersede conflict: mark the losing result 'superseded',
+    pointing at the winner. Caller then calls release_grading_result on the winner."""
+    with db_session() as conn:
+        conn.execute(
+            "UPDATE grading_result SET status = 'superseded', superseded_by_id = ? WHERE id = ?",
+            (winning_result_id, losing_result_id)
+        )
+
+
+def discard_grading_result(result_id):
+    """Mark a single result 'discarded' (bad run, re-grade)."""
+    with db_session() as conn:
+        conn.execute("UPDATE grading_result SET status = 'discarded' WHERE id = ?", (result_id,))
+
+
+def discard_grading_run(run_id):
+    """Bulk-discard every non-active result in a run (Page A 'discard whole run').
+    Active results are left alone -- discarding a batch shouldn't retract
+    feedback students can already see; discard those individually if truly needed."""
+    with db_session() as conn:
+        conn.execute(
+            "UPDATE grading_result SET status = 'discarded' "
+            "WHERE grading_run_id = ? AND status NOT IN ('active', 'superseded')",
+            (run_id,)
         )
 
 
