@@ -297,6 +297,38 @@ def datenschutz():
     )
 
 
+# ============ Internal / Machine Routes ============
+# Called by the grading service (grading-with-llm), not a browser -- shared-secret
+# auth instead of session auth, CSRF-exempt (no session, no form, no cookie to forge).
+
+@app.route('/internal/grading/results', methods=['POST'])
+@csrf.exempt
+def internal_grading_results():
+    secret = request.headers.get('X-Grading-Callback-Secret', '')
+    if not config.GRADING_SERVICE_CALLBACK_SECRET or secret != config.GRADING_SERVICE_CALLBACK_SECRET:
+        return jsonify({'error': 'invalid or missing callback secret'}), 401
+
+    payload = request.get_json(silent=True)
+    if not payload or 'job_id' not in payload:
+        return jsonify({'error': 'invalid payload'}), 400
+
+    try:
+        run_id = models.import_grading_callback(
+            job_id=payload['job_id'],
+            provider=payload.get('provider'),
+            model=payload.get('model'),
+            graded_at=payload.get('graded_at'),
+            students=payload.get('students', []),
+        )
+    except ValueError as e:
+        # Logged, not 500'd -- a callback for an unknown/deleted run shouldn't
+        # look like a Lernmanager bug to the grading service's retry logic.
+        app.logger.warning(f"grading callback rejected: {e}")
+        return jsonify({'error': str(e)}), 404
+
+    return jsonify({'status': 'ok', 'grading_run_id': run_id}), 200
+
+
 # ============ Auth Routes ============
 
 @app.route('/')

@@ -49,3 +49,11 @@ LLM_ENABLED = bool(LLM_API_KEY)
 # OVHcloud Qwen3-32B fp8 pricing (per 1M tokens, as of 2026-03):
 #   input: €0.09 | output: €0.27
 # Cost per artifact check: ~€0.0002 (9 criteria) to ~€0.0004 (23 criteria)
+
+# Grading service (grading-with-llm, runs on the M920x over WireGuard).
+# GRADING_SERVICE_CALLBACK_SECRET must match that box's _CALLBACK_SECRET env
+# var -- checked against the X-Grading-Callback-Secret header on
+# /internal/grading/results (grading-service-deployment.md §7/§10 Phase 2).
+GRADING_SERVICE_URL = os.environ.get('GRADING_SERVICE_URL', '')
+GRADING_SERVICE_TOKEN = os.environ.get('GRADING_SERVICE_TOKEN', '')
+GRADING_SERVICE_CALLBACK_SECRET = os.environ.get('GRADING_SERVICE_CALLBACK_SECRET', '')

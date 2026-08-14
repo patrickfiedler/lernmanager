@@ -3935,6 +3935,83 @@ def mark_grading_run_media_purged(run_id):
         conn.execute("UPDATE grading_run SET media_purged_at = ? WHERE id = ?", (purged_at, run_id))
 
 
+def get_grading_run_by_job_id(job_id):
+    """Look up the grading_run created at upload time (sub-phase 2f) so the
+    /internal/grading/results callback can find where to attach results --
+    the grading service itself has no notion of klasse/task."""
+    with db_session() as conn:
+        row = conn.execute("SELECT * FROM grading_run WHERE job_id = ?", (job_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def get_student_by_netzwerk_id(netzwerk_id):
+    """Resolve a scan-folders folder name to an enrolled student, or None if
+    unmatched (grading_result.student_id stays NULL -- surfaced in the review
+    UI as needing manual reconciliation, never silently dropped)."""
+    with db_session() as conn:
+        row = conn.execute("SELECT id FROM student WHERE netzwerk_id = ?", (netzwerk_id,)).fetchone()
+    return row['id'] if row else None
+
+
+def import_grading_callback(job_id, provider, model, graded_at, students):
+    """
+    Import the grading service's POST /internal/grading/results payload
+    (worker.fire_callback's shape) into grading_result rows under the
+    grading_run that sub-phase 2f created at upload time. Idempotent per
+    student: re-delivering the same job_id is a no-op for students who
+    already have a grading_result in this run (callback delivery is
+    fire-and-forget on the service side -- spec §4 -- so a retry is possible).
+
+    Returns the grading_run id, or raises ValueError if no grading_run
+    matches job_id (an upload that bypassed the normal flow, or a callback
+    arriving after the run was deleted).
+    """
+    run = get_grading_run_by_job_id(job_id)
+    if run is None:
+        raise ValueError(f"no grading_run for job_id={job_id!r} -- was it created at upload time?")
+
+    with db_session() as conn:
+        already_imported = {
+            r['netzwerk_id'] for r in conn.execute(
+                "SELECT netzwerk_id FROM grading_result WHERE grading_run_id = ?", (run['id'],)
+            ).fetchall()
+        }
+
+    flagged_count = 0
+    zero_score_count = 0
+    imported = 0
+    for s in students:
+        netzwerk_id = s.get('student_id')  # grading-with-llm's field name for this key, not Lernmanager's numeric id
+        if netzwerk_id in already_imported:
+            continue
+        student_id = get_student_by_netzwerk_id(netzwerk_id)
+        total_score = s.get('total_score')
+        max_score = s.get('max_score')
+        flagged = bool(s.get('flagged'))
+        if flagged:
+            flagged_count += 1
+        if total_score == 0:
+            zero_score_count += 1
+        create_grading_result(
+            grading_run_id=run['id'], task_id=run['task_id'], student_id=student_id,
+            netzwerk_id=netzwerk_id, criteria=s.get('criteria', []),
+            llm_total_score=total_score, llm_max_score=max_score, flagged=flagged,
+            confidence=s.get('confidence'), error=s.get('error'),
+            document_file=s.get('document_file'), media=s.get('media'),
+            media_skipped=s.get('media_skipped'),
+        )
+        imported += 1
+
+    with db_session() as conn:
+        conn.execute(
+            "UPDATE grading_run SET provider = ?, model = ?, graded_at = ?, "
+            "total_students = total_students + ?, flagged_count = flagged_count + ?, "
+            "zero_score_count = zero_score_count + ? WHERE id = ?",
+            (provider, model, graded_at, imported, flagged_count, zero_score_count, run['id'])
+        )
+    return run['id']
+
+
 def create_grading_result(grading_run_id, task_id, student_id, netzwerk_id, criteria,
                            llm_total_score=None, llm_max_score=None, flagged=False,
                            confidence=None, error=None, document_file=None,
