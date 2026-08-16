@@ -1,5 +1,6 @@
 import re
 import random
+import secrets
 import ipaddress
 import unicodedata
 from datetime import datetime
@@ -237,14 +238,14 @@ def generate_username(existing_usernames=None, vorname=None, nachname=None):
 def generate_password():
     """Generate password in cvcvcvnn format (e.g., 'bacado42')."""
     password = ''
-    password += random.choice(CONSONANTS)
-    password += random.choice(VOWELS)
-    password += random.choice(CONSONANTS)
-    password += random.choice(VOWELS)
-    password += random.choice(CONSONANTS)
-    password += random.choice(VOWELS)
-    password += str(random.randint(0, 9))
-    password += str(random.randint(0, 9))
+    password += secrets.choice(CONSONANTS)
+    password += secrets.choice(VOWELS)
+    password += secrets.choice(CONSONANTS)
+    password += secrets.choice(VOWELS)
+    password += secrets.choice(CONSONANTS)
+    password += secrets.choice(VOWELS)
+    password += str(secrets.randbelow(10))
+    password += str(secrets.randbelow(10))
     return password
 
 
