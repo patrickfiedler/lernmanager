@@ -63,7 +63,6 @@ def run():
             existing_ids.add(netzwerk_id)
             conn.execute("UPDATE student SET netzwerk_id = ? WHERE id = ?", (netzwerk_id, row['id']))
             assigned += 1
-            print(f"  {row['nachname']}, {row['vorname']} -> {netzwerk_id}")
         conn.commit()
         print(f"Backfilled netzwerk_id for {assigned} student(s) ({len(rows) - assigned} already had one).")
     finally:
