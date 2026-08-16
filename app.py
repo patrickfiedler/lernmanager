@@ -1442,10 +1442,15 @@ def _extract_import_zip_files(tmp_id, task_list):
         with zipfile.ZipFile(tmp_path) as zf:
             zip_names = set(zf.namelist())
             os.makedirs(config.UPLOAD_FOLDER, exist_ok=True)
+            upload_dir = os.path.abspath(config.UPLOAD_FOLDER)
             for task_data in task_list:
                 for mat in task_data['task'].get('materials', []):
                     if mat.get('typ') == 'datei' and mat.get('pfad') in zip_names:
-                        dest = os.path.join(config.UPLOAD_FOLDER, mat['pfad'])
+                        dest = os.path.abspath(os.path.join(upload_dir, mat['pfad']))
+                        # Zip entry names aren't restricted by the format -- a crafted
+                        # '../../etc/...' pfad would otherwise write outside upload_dir.
+                        if os.path.commonpath([upload_dir, dest]) != upload_dir:
+                            continue
                         with zf.open(mat['pfad']) as src, open(dest, 'wb') as dst:
                             dst.write(src.read())
                         extracted.append(mat['pfad'])

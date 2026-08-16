@@ -67,12 +67,17 @@ def load_task_zip(filepath):
 def extract_zip_materials(zip_path, task_data, dry_run=False):
     """Copy material files from ZIP to UPLOAD_FOLDER. Returns list of extracted filenames."""
     extracted = []
+    upload_root = Path(config.UPLOAD_FOLDER).resolve()
     with zipfile.ZipFile(zip_path) as zf:
         zip_names = set(zf.namelist())
         for mat in task_data.get('task', {}).get('materials', []):
             if mat.get('typ') == 'datei' and mat.get('pfad') in zip_names:
+                # Zip entry names aren't restricted by the format -- a crafted
+                # '../../etc/...' pfad would otherwise write outside upload_root.
+                dest = (upload_root / mat['pfad']).resolve()
+                if dest != upload_root and upload_root not in dest.parents:
+                    continue
                 if not dry_run:
-                    dest = Path(config.UPLOAD_FOLDER) / mat['pfad']
                     dest.parent.mkdir(parents=True, exist_ok=True)
                     dest.write_bytes(zf.read(mat['pfad']))
                 extracted.append(mat['pfad'])
