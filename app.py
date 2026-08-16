@@ -415,9 +415,17 @@ def logout():
 # network and/or a scheduled lesson block. Both dimensions are optional and
 # admin-configurable (app_settings); a route opts into whichever it needs.
 
+_TRUSTED_PROXY_ADDRS = {'127.0.0.1', '::1'}
+
+
 def _get_client_ip():
-    """Real client IP behind nginx (X-Real-IP), falling back to remote_addr for local/dev."""
-    return request.headers.get('X-Real-IP') or request.remote_addr
+    """Real client IP behind nginx (X-Real-IP). Only trusted when the immediate
+    connection is from the local reverse proxy (deploy/nginx.conf proxies to
+    127.0.0.1:8081) -- otherwise a direct request to the app port could spoof
+    the header to bypass IP-range gates (school_only materials, checkpoints)."""
+    if request.remote_addr in _TRUSTED_PROXY_ADDRS:
+        return request.headers.get('X-Real-IP') or request.remote_addr
+    return request.remote_addr
 
 
 def _checkpoint_school_gate_ok(subtask):
