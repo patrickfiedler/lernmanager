@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import sys
 from hashlib import sha256
 from contextlib import contextmanager
@@ -4083,6 +4084,9 @@ def _grading_upload_dir():
     return os.path.join(config.UPLOAD_FOLDER, 'grading')
 
 
+_SAFE_NETZWERK_ID = re.compile(r'^[a-z0-9._-]+$')
+
+
 def _copy_grading_media(run_id, job_id, netzwerk_id, media_list):
     """
     Download each graded image from the grading service's GET
@@ -4098,15 +4102,25 @@ def _copy_grading_media(run_id, job_id, netzwerk_id, media_list):
     matches the fire-and-forget philosophy of the callback itself. The
     review UI's media_skipped[] messaging already covers "no image was
     found here"; a failed copy reads the same way to a teacher.
+
+    netzwerk_id here is caller-controlled (it's `student_id` straight out of
+    the callback payload, security-review 2026-08-16 finding #4) -- it must
+    never reach os.path.join unvalidated, or a crafted/compromised payload
+    can write outside instance/uploads/grading/ entirely.
     """
     if not media_list or not config.GRADING_SERVICE_URL:
+        return []
+    if not _SAFE_NETZWERK_ID.match(netzwerk_id or ''):
         return []
     dest_dir = os.path.join(_grading_upload_dir(), str(run_id), netzwerk_id)
     os.makedirs(dest_dir, exist_ok=True)
 
     copied = []
     for m in media_list:
-        filename = os.path.basename(m['file'])
+        raw_filename = m.get('file')
+        if not raw_filename:
+            continue
+        filename = os.path.basename(raw_filename)
         url = f"{config.GRADING_SERVICE_URL}/jobs/{job_id}/media/{netzwerk_id}/{filename}"
         req = urllib.request.Request(url, headers={
             'Authorization': f'Bearer {config.GRADING_SERVICE_TOKEN}',
