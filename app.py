@@ -5,6 +5,7 @@ import sys
 import json
 import uuid
 import glob
+import hmac
 import shutil
 import zipfile
 import ipaddress
@@ -307,7 +308,9 @@ def datenschutz():
 @csrf.exempt
 def internal_grading_results():
     secret = request.headers.get('X-Grading-Callback-Secret', '')
-    if not config.GRADING_SERVICE_CALLBACK_SECRET or secret != config.GRADING_SERVICE_CALLBACK_SECRET:
+    if not config.GRADING_SERVICE_CALLBACK_SECRET or not hmac.compare_digest(
+        secret, config.GRADING_SERVICE_CALLBACK_SECRET
+    ):
         return jsonify({'error': 'invalid or missing callback secret'}), 401
 
     payload = request.get_json(silent=True)
@@ -629,7 +632,7 @@ def admin_klasse_grading_upload(klasse_id):
 
     return render_template(
         'admin/grading_upload.html', klasse=klasse, tasks=tasks,
-        manifest_json=json.dumps(manifest, ensure_ascii=False),
+        manifest=manifest,
         unmatched=unmatched, matched_count=len(manifest['students']),
         service_online=_grading_service_health(),
     )

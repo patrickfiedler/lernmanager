@@ -76,7 +76,7 @@
     </form>
 </div>
 
-<script id="grading-manifest" type="application/json">{{ manifest_json|safe }}</script>
+<script id="grading-manifest" type="application/json">{{ manifest|tojson }}</script>
 {% endblock %}
 
 {% block scripts %}

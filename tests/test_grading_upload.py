@@ -101,6 +101,26 @@ def test_upload_page_renders_task_picker_and_manifest(app, client, as_admin):
     assert "mueller.anna" in body  # embedded manifest
 
 
+def test_upload_page_manifest_escapes_script_breakout(app, client, as_admin):
+    """
+    The manifest is embedded via Jinja's |tojson filter (not json.dumps + |safe),
+    which HTML-escapes '<', '>', '&' so a crafted student name can't close the
+    <script> tag early and inject markup into an admin's session (finding #10).
+    """
+    klasse_id = models.create_klasse("6a")
+    student_id = models.create_student(
+        "</script><script>alert(1)</script>", "Anna", "hacker1", "pw",
+        netzwerk_id="hacker.anna",
+    )
+    models.add_student_to_klasse(student_id, klasse_id)
+
+    resp = as_admin.get(f'/admin/klasse/{klasse_id}/grading/upload')
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert "</script><script>alert(1)</script>" not in body
+    assert "\\u003c/script\\u003e" in body
+
+
 def test_upload_complete_creates_grading_run(app, client, as_admin):
     klasse_id = models.create_klasse("6a")
     task_id = _task_with_graded_artifact()
