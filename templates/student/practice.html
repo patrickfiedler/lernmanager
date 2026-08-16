@@ -142,7 +142,7 @@
             area.appendChild(input);
             setTimeout(() => input.focus(), 50);
         } else {
-            const singleCorrect = q.correct.length === 1;
+            const singleCorrect = q.correct_count === 1;
             const order = shuffleIndices(q.options.length);
             order.forEach(function(origIdx) {
                 const opt = q.options[origIdx];

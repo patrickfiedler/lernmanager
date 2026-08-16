@@ -3950,10 +3950,14 @@ def _serialize_question_for_js(item):
         # Don't send answers to client
         pass
     else:
-        # MC: send options (shuffled) + correct indices
+        # MC: send options + correct_count (single- vs multi-select rendering)
+        # only -- never the correct indices themselves before grading. Grading
+        # happens server-side in student_warmup_answer, which rebuilds the
+        # question from the pool; the /antwort response carries correct_answer
+        # for post-answer highlighting.
         options = q.get('options', [])
         result['options'] = options
-        result['correct'] = q.get('correct', [])
+        result['correct_count'] = len(q.get('correct', []))
     if q.get('image'):
         result['image'] = q['image']
     return result
