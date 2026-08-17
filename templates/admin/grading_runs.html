@@ -1,0 +1,47 @@
+{% extends 'base.html' %}
+
+{% block title %}Bewertungsläufe - Lernmanager{% endblock %}
+
+{% block content %}
+<div class="flex flex-between flex-center mb-2">
+    <h1>🎯 Bewertungsläufe</h1>
+    <a href="{{ url_for('admin_grading_upload') }}" class="btn btn-primary">📤 Neue Bewertung hochladen</a>
+</div>
+
+{% if not runs %}
+<div class="card">
+    <div style="padding: 1rem;">
+        <p class="text-muted" style="margin: 0;">Noch keine Bewertung importiert.</p>
+    </div>
+</div>
+{% else %}
+<div class="card">
+    <div style="overflow-x: auto;">
+        <table class="table" style="margin: 0;">
+            <thead>
+                <tr>
+                    <th>Thema</th>
+                    <th>Klasse</th>
+                    <th>Anbieter</th>
+                    <th>Importiert</th>
+                    <th>Schüler</th>
+                    <th>Markiert</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for run in runs %}
+                <tr>
+                    <td><a href="{{ url_for('admin_grading_run_detail', run_id=run.id) }}">{{ run.task_name }}</a></td>
+                    <td>{{ run.klasse_name or '— (mehrere Klassen)' }}</td>
+                    <td>{{ run.provider }}{% if run.model %} · {{ run.model }}{% endif %}</td>
+                    <td>{{ run.imported_at }}</td>
+                    <td>{{ run.total_students }}</td>
+                    <td>{{ run.flagged_count }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

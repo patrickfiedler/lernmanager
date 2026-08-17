@@ -1,36 +1,24 @@
 {% extends 'base.html' %}
 
-{% block title %}KI-Bewertung hochladen - {{ klasse.name }} - Lernmanager{% endblock %}
+{% block title %}KI-Bewertung hochladen - Lernmanager{% endblock %}
 
 {% block content %}
+<script src="{{ url_for('static', filename='js/fflate.min.js') }}"></script>
+
 <div class="flex flex-between flex-center mb-2">
-    <h1>🎯 KI-Bewertung hochladen — {{ klasse.name }}</h1>
-    <a href="{{ url_for('admin_klasse_detail', klasse_id=klasse.id) }}" class="btn btn-secondary">← Zurück zur Klasse</a>
+    <h1>🎯 KI-Bewertung hochladen</h1>
+    <a href="{{ url_for('admin_grading_runs') }}" class="btn btn-secondary">← Zu Bewertungsläufen</a>
 </div>
+
+<p class="text-muted mb-2" style="font-size: 0.9rem;">
+    Ein Zip aus scan-folders kann Schüler aus mehreren Klassen enthalten — die Zuordnung
+    passiert nach der Auswahl der Zip-Datei automatisch anhand der Netzwerk-IDs, nicht über
+    eine Klassenauswahl.
+</p>
 
 <div id="service-status-banner" class="card mb-2" style="display: none;">
     <div style="padding: 0.75rem 1rem;"></div>
 </div>
-
-{% if unmatched %}
-<div class="card mb-2" style="border: 1px solid #f59e0b;">
-    <div class="card-header" style="background: #fffbeb; color: #92400e;">
-        ⚠️ {{ unmatched|length }} Schüler ohne Netzwerk-ID
-    </div>
-    <div style="padding: 0.75rem 1rem;">
-        <p style="font-size: 0.9rem; color: #4b5563; margin-bottom: 0.5rem;">
-            Diese Schüler können nicht automatisch zugeordnet werden (kein Netzwerk-ID-Eintrag —
-            vermutlich nach dem letzten Roster-Abgleich hinzugefügt). Ihre Ordner im Zip werden als
-            nicht zugeordnet markiert, nicht stillschweigend übersprungen.
-        </p>
-        <ul style="margin: 0; padding-left: 1.5rem; font-size: 0.9rem;">
-            {% for s in unmatched %}
-            <li>{{ s.nachname }}, {{ s.vorname }}</li>
-            {% endfor %}
-        </ul>
-    </div>
-</div>
-{% endif %}
 
 <div class="card">
     <div class="card-header">📤 Neue Bewertung starten</div>
@@ -61,13 +49,12 @@
         <div class="form-group">
             <label for="archive-input">Zip-Datei (aus scan-folders)</label>
             <input type="file" id="archive-input" class="form-control" accept=".zip" required>
+            <small class="text-muted" id="parse-status"></small>
         </div>
 
-        <p style="font-size: 0.85rem; color: #6b7280;">
-            {{ matched_count }} Schüler dieser Klasse werden automatisch zugeordnet.
-        </p>
+        <div id="match-summary" style="display: none; margin-bottom: 1rem;"></div>
 
-        <button type="submit" id="submit-btn" class="btn btn-primary">Hochladen und Bewertung starten</button>
+        <button type="submit" id="submit-btn" class="btn btn-primary" disabled>Hochladen und Bewertung starten</button>
         <div id="upload-progress" style="display: none; margin-top: 0.75rem;">
             <progress id="upload-progress-bar" max="100" value="0" style="width: 100%;"></progress>
             <small id="upload-progress-text" class="text-muted"></small>
@@ -75,131 +62,347 @@
         <div id="upload-result" style="margin-top: 0.75rem;"></div>
     </form>
 </div>
-
-<script id="grading-manifest" type="application/json">{{ manifest|tojson }}</script>
 {% endblock %}
 
 {% block scripts %}
 const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
-const klasseId = {{ klasse.id }};
-const manifest = JSON.parse(document.getElementById('grading-manifest').textContent);
 const initialServiceOnline = {{ 'true' if service_online else 'false' }};
 
 function renderServiceBanner(configured, online) {
     const banner = document.getElementById('service-status-banner');
     const inner = banner.querySelector('div');
-    const submitBtn = document.getElementById('submit-btn');
     if (!configured) {
         banner.style.display = 'block';
         inner.style.background = '#f3f4f6';
         inner.style.color = '#4b5563';
         inner.textContent = 'ℹ️ Bewertungsdienst nicht konfiguriert (GRADING_SERVICE_URL fehlt).';
-        submitBtn.disabled = true;
+        serviceOnline = false;
     } else if (!online) {
         banner.style.display = 'block';
         inner.style.background = '#fef2f2';
         inner.style.color = '#991b1b';
         inner.textContent = '🔴 Bewertungsdienst offline (M920x nicht erreichbar). Hochladen erst möglich, wenn er wieder online ist.';
-        submitBtn.disabled = true;
+        serviceOnline = false;
     } else {
         banner.style.display = 'none';
-        submitBtn.disabled = false;
+        serviceOnline = true;
     }
+    updateSubmitEnabled();
 }
 
+let serviceOnline = false;
 renderServiceBanner(true, initialServiceOnline);
 fetch('{{ url_for("admin_grading_health") }}')
     .then(r => r.json())
     .then(data => renderServiceBanner(data.configured, data.online))
     .catch(() => renderServiceBanner(true, false));
 
-document.getElementById('grading-upload-form').addEventListener('submit', function(e) {
+// Folder names come from inside the uploaded zip -- attacker-controlled in
+// principle (a crafted folder name), even though the uploader is an admin.
+// Escaped before going into innerHTML anywhere below.
+function escapeHtml(s) {
+    const div = document.createElement('div');
+    div.textContent = String(s);
+    return div.innerHTML;
+}
+
+// --- Login normalization -- must match scan-folders/grading-upload.psm1's
+// ConvertTo-NormalizedLogin exactly (lowercase + umlaut fold), or a folder
+// matches on one side and not the other.
+const UMLAUT_MAP = { 'ä': 'ae', 'ö': 'oe', 'ü': 'ue', 'ß': 'ss' };
+function normalizeLogin(name) {
+    let result = name.trim().toLowerCase();
+    for (const [umlaut, ascii] of Object.entries(UMLAUT_MAP)) {
+        result = result.split(umlaut).join(ascii);
+    }
+    return result;
+}
+
+// --- Client-side zip parsing (streaming, not fflate.unzipSync) -----------
+// A folder-mode scan-folders archive can be several hundred MB (spec §4).
+// Loading the whole thing into one buffer + one decompressed map would risk
+// OOMing the tab. Instead: stream the File through fflate's incremental
+// Unzip, and for each entry collect only that entry's chunks into a Blob
+// (browser-managed, not held as a second copy on the JS heap) before moving
+// on to the next file.
+//
+// Returns { studentsFound: Map<login, {raw, files: [{name, blob}]}> },
+// where "files" is empty for a pure "0 results" non-submitter folder.
+function parseZipStreaming(file, onProgress) {
+    return new Promise((resolve, reject) => {
+        const students = new Map();
+        let pending = 0;
+        let streamDone = false;
+
+        function ensureStudent(login) {
+            if (!students.has(login)) students.set(login, { files: [] });
+            return students.get(login);
+        }
+
+        function maybeResolve() {
+            if (streamDone && pending === 0) resolve(students);
+        }
+
+        const uz = new fflate.Unzip();
+        uz.register(fflate.UnzipInflate);
+        uz.onfile = (entry) => {
+            const isDir = entry.name.endsWith('/');
+            const parts = entry.name.split('/').filter(p => p.length > 0);
+            if (parts.length < 2) return; // root-level entry (e.g. logfile.log.md), not a student's
+
+            let login;
+            if (parts[0] === '0 results') {
+                login = parts[1]; // spec §6 gotcha #2: already normalized here
+            } else {
+                login = normalizeLogin(parts[0]); // spec §6 gotcha #1: raw name, must normalize
+            }
+
+            if (isDir) {
+                // A pure directory entry -- most commonly "0 results/<login>/",
+                // the deliberate record of a non-submitter (spec §6: "load-
+                // bearing... must produce zero-score rows, not absent rows").
+                // Register the student with zero files rather than dropping
+                // them silently.
+                ensureStudent(login);
+                return;
+            }
+            const leaf = parts[parts.length - 1];
+
+            const chunks = [];
+            pending++;
+            entry.ondata = (err, chunk, final) => {
+                if (err) {
+                    pending--;
+                    reject(err);
+                    return;
+                }
+                if (chunk) chunks.push(chunk);
+                if (final) {
+                    ensureStudent(login).files.push({ name: leaf, blob: new Blob(chunks) });
+                    pending--;
+                    if (onProgress) onProgress(login, leaf);
+                    maybeResolve();
+                }
+            };
+            entry.start();
+        };
+
+        const reader = file.stream().getReader();
+        function pump() {
+            reader.read().then(({ done, value }) => {
+                if (done) {
+                    uz.push(new Uint8Array(0), true);
+                    streamDone = true;
+                    maybeResolve();
+                    return;
+                }
+                uz.push(value, false);
+                pump();
+            }).catch(reject);
+        }
+        pump();
+    });
+}
+
+// --- Wiring: parse on file select, resolve logins, enable submit ---------
+let parsedStudents = null; // Map<login, {files}> from the zip
+let matchedRoster = null;  // [{login, names, lernpfad}] resolved by the server
+
+function updateSubmitEnabled() {
+    const taskOk = document.getElementById('task-select').value !== '';
+    const submitBtn = document.getElementById('submit-btn');
+    submitBtn.disabled = !(serviceOnline && taskOk && matchedRoster && matchedRoster.length > 0);
+}
+
+document.getElementById('task-select').addEventListener('change', updateSubmitEnabled);
+
+document.getElementById('archive-input').addEventListener('change', async function () {
+    const parseStatus = document.getElementById('parse-status');
+    const summaryDiv = document.getElementById('match-summary');
+    const file = this.files[0];
+    parsedStudents = null;
+    matchedRoster = null;
+    summaryDiv.style.display = 'none';
+    summaryDiv.innerHTML = '';
+    updateSubmitEnabled();
+    if (!file) return;
+
+    parseStatus.textContent = 'Zip wird gelesen …';
+    let students;
+    try {
+        students = await parseZipStreaming(file, (login) => {
+            parseStatus.textContent = `Zip wird gelesen … (${students ? students.size : 0} Ordner gefunden)`;
+        });
+    } catch (e) {
+        parseStatus.textContent = '';
+        summaryDiv.style.display = 'block';
+        summaryDiv.innerHTML = `<span style="color: #991b1b;">Fehler beim Lesen der Zip-Datei: ${escapeHtml(e)}</span>`;
+        return;
+    }
+    parsedStudents = students;
+    parseStatus.textContent = `${students.size} Ordner gefunden, gleiche mit Schülerliste ab …`;
+
+    let resp;
+    try {
+        resp = await fetch('{{ url_for("admin_grading_match_logins") }}', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+            body: JSON.stringify({ logins: Array.from(students.keys()) }),
+        });
+    } catch (e) {
+        parseStatus.textContent = '';
+        summaryDiv.style.display = 'block';
+        summaryDiv.innerHTML = '<span style="color: #991b1b;">Netzwerkfehler beim Abgleichen der Netzwerk-IDs.</span>';
+        return;
+    }
+    const data = await resp.json();
+    parseStatus.textContent = '';
+    matchedRoster = data.matches;
+
+    const rows = [];
+    rows.push(`<div class="card"><div style="padding: 0.75rem 1rem;">`);
+    rows.push(`<strong>${data.matches.length} Schüler zugeordnet</strong>`);
+    if (data.unmatched.length) {
+        rows.push(`<p style="margin: 0.5rem 0 0; color: #92400e;">⚠️ ${data.unmatched.length} Ordner ohne passende Netzwerk-ID `
+            + `(werden nicht mit hochgeladen — siehe „Netzwerk-IDs abgleichen"): `
+            + `${data.unmatched.map(l => `<code>${escapeHtml(l)}</code>`).join(', ')}</p>`);
+    }
+    rows.push(`</div></div>`);
+    summaryDiv.style.display = 'block';
+    summaryDiv.innerHTML = rows.join('');
+    updateSubmitEnabled();
+});
+
+// --- Chunked upload: open job -> per-file POST (retry+backoff) -> complete
+async function withRetry(fn, maxRetries, label) {
+    let attempt = 0;
+    while (true) {
+        attempt++;
+        try {
+            return await fn();
+        } catch (e) {
+            if (attempt >= maxRetries) throw new Error(`${label} nach ${attempt} Versuchen fehlgeschlagen: ${e}`);
+            await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt)));
+        }
+    }
+}
+
+async function runPool(items, worker, concurrency) {
+    let idx = 0;
+    async function next() {
+        while (idx < items.length) {
+            const i = idx++;
+            await worker(items[i], i);
+        }
+    }
+    await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, next));
+}
+
+document.getElementById('grading-upload-form').addEventListener('submit', async function (e) {
     e.preventDefault();
+    if (!parsedStudents || !matchedRoster || !matchedRoster.length) return;
 
     const taskSelect = document.getElementById('task-select');
     const taskId = taskSelect.value;
     const rubric = taskSelect.selectedOptions[0] ? taskSelect.selectedOptions[0].dataset.rubric : '';
     const provider = document.getElementById('provider-select').value;
-    const archiveInput = document.getElementById('archive-input');
     const resultDiv = document.getElementById('upload-result');
     const submitBtn = document.getElementById('submit-btn');
     const progressWrap = document.getElementById('upload-progress');
     const progressBar = document.getElementById('upload-progress-bar');
     const progressText = document.getElementById('upload-progress-text');
 
-    if (!taskId || !rubric || !archiveInput.files.length) {
-        resultDiv.innerHTML = '<span style="color: #991b1b;">Bitte Thema und Zip-Datei auswählen.</span>';
-        return;
-    }
-
     submitBtn.disabled = true;
     resultDiv.innerHTML = '';
     progressWrap.style.display = 'block';
-    progressText.textContent = 'Lade Zip-Datei hoch …';
+    progressBar.value = 0;
+    progressText.textContent = 'Öffne Bewertungsauftrag …';
 
-    // Step 1: browser -> nginx /grading/ proxy -> grading service directly.
-    // Never touches Flask -- see grading-service-deployment.md §4 and the
-    // nginx config documented alongside this route.
-    const formData = new FormData();
-    formData.append('rubric', rubric);
-    formData.append('provider', provider);
-    formData.append('manifest', JSON.stringify(manifest));
-    formData.append('archive', archiveInput.files[0]);
+    try {
+        // Step 1: open the job -- manifest only, no archive (chunked mode,
+        // mirrors Invoke-GradingUpload's -Fields-only POST /jobs call).
+        const manifestStudents = matchedRoster.map(m => ({
+            login: m.login, names: m.names, lernpfad: m.lernpfad || undefined, files: [],
+        }));
+        const manifest = { rubric, collected_at: new Date().toISOString(), students: manifestStudents };
 
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', '/grading/jobs');
-    xhr.upload.addEventListener('progress', function(evt) {
-        if (evt.lengthComputable) {
-            const pct = Math.round((evt.loaded / evt.total) * 100);
-            progressBar.value = pct;
-            progressText.textContent = `Lade Zip-Datei hoch … ${pct}%`;
+        const openForm = new FormData();
+        openForm.append('rubric', rubric);
+        openForm.append('provider', provider);
+        openForm.append('manifest', JSON.stringify(manifest));
+
+        const openResp = await fetch('/grading/jobs', { method: 'POST', body: openForm });
+        if (!openResp.ok) {
+            const msg = await openResp.text();
+            throw new Error(`Öffnen fehlgeschlagen: ${msg}`);
         }
-    });
-    xhr.onload = function() {
-        if (xhr.status !== 200 && xhr.status !== 202) {
-            progressWrap.style.display = 'none';
-            submitBtn.disabled = false;
-            let msg = xhr.responseText;
-            try { msg = JSON.parse(xhr.responseText).error || msg; } catch (e) {}
-            resultDiv.innerHTML = `<span style="color: #991b1b;">Fehler beim Hochladen: ${msg}</span>`;
-            return;
-        }
-        const jobResponse = JSON.parse(xhr.responseText);
-        progressText.textContent = 'Bewertung gestartet, wird registriert …';
+        const { job_id: jobId } = await openResp.json();
 
-        // Step 2: tiny JSON POST through Flask -- Lernmanager receives only
+        // Step 2: one POST per file, small concurrency, retry x3 with backoff
+        // (mirrors Invoke-GradingUpload's per-file loop).
+        const uploadTargets = [];
+        for (const m of matchedRoster) {
+            const entry = parsedStudents.get(m.login);
+            if (!entry) continue;
+            for (const f of entry.files) uploadTargets.push({ login: m.login, file: f });
+        }
+
+        let uploaded = 0;
+        const failed = [];
+        progressText.textContent = `Lade Dateien hoch … 0/${uploadTargets.length}`;
+        await runPool(uploadTargets, async (target) => {
+            try {
+                await withRetry(async () => {
+                    const fd = new FormData();
+                    fd.append('files', target.file.blob, target.file.name);
+                    const r = await fetch(`/grading/jobs/${jobId}/students/${target.login}`, {
+                        method: 'POST', body: fd,
+                    });
+                    if (!r.ok) throw new Error(await r.text());
+                }, 3, `${target.login}/${target.file.name}`);
+            } catch (err) {
+                failed.push(`${target.login}/${target.file.name}`);
+            }
+            uploaded++;
+            progressBar.value = Math.round((uploaded / uploadTargets.length) * 100);
+            progressText.textContent = `Lade Dateien hoch … ${uploaded}/${uploadTargets.length}`;
+        }, 3);
+
+        // Step 3: close the job.
+        progressText.textContent = 'Schließe Bewertungsauftrag ab …';
+        const completeResp = await fetch(`/grading/jobs/${jobId}/complete`, { method: 'POST' });
+        if (!completeResp.ok) throw new Error(await completeResp.text());
+        const completeData = await completeResp.json();
+
+        // Step 4: tiny JSON POST through Flask -- Lernmanager receives only
         // the job_id (spec §10 Phase 2), never the archive bytes.
-        fetch('{{ url_for("admin_klasse_grading_upload_complete", klasse_id=klasse.id) }}', {
+        const registerResp = await fetch('{{ url_for("admin_grading_upload_complete") }}', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
             body: JSON.stringify({
-                job_id: jobResponse.job_id, task_id: parseInt(taskId, 10),
-                rubric: rubric, provider: provider, students: jobResponse.students,
+                job_id: jobId, task_id: parseInt(taskId, 10),
+                rubric: rubric, provider: provider, students: completeData.students,
             }),
-        })
-            .then(r => r.json().then(data => ({ ok: r.ok, data })))
-            .then(({ ok, data }) => {
-                progressWrap.style.display = 'none';
-                if (!ok) {
-                    submitBtn.disabled = false;
-                    resultDiv.innerHTML = `<span style="color: #991b1b;">Fehler: ${data.error}</span>`;
-                    return;
-                }
-                resultDiv.innerHTML = '<span style="color: #10b981; font-weight: 500;">✅ Bewertung gestartet. ' +
-                    'Ergebnisse erscheinen hier, sobald sie fertig sind.</span>';
-            })
-            .catch(() => {
-                progressWrap.style.display = 'none';
-                submitBtn.disabled = false;
-                resultDiv.innerHTML = '<span style="color: #991b1b;">Fehler bei der Registrierung. Job-ID: ' +
-                    jobResponse.job_id + '</span>';
-            });
-    };
-    xhr.onerror = function() {
+        });
+        const registerData = await registerResp.json();
+        progressWrap.style.display = 'none';
+        if (!registerResp.ok) {
+            submitBtn.disabled = false;
+            resultDiv.innerHTML = `<span style="color: #991b1b;">Fehler bei der Registrierung: ${registerData.error}</span>`;
+            return;
+        }
+
+        let msg = '<span style="color: #10b981; font-weight: 500;">✅ Bewertung gestartet. ' +
+            'Ergebnisse erscheinen unter Bewertungsläufen, sobald sie fertig sind.</span>';
+        if (failed.length) {
+            msg += `<br><span style="color: #92400e;">⚠️ ${failed.length} Datei(en) trotz Wiederholung nicht hochgeladen: `
+                + `${escapeHtml(failed.join(', '))}</span>`;
+        }
+        resultDiv.innerHTML = msg;
+    } catch (err) {
         progressWrap.style.display = 'none';
         submitBtn.disabled = false;
-        resultDiv.innerHTML = '<span style="color: #991b1b;">Netzwerkfehler beim Hochladen.</span>';
-    };
-    xhr.send(formData);
+        resultDiv.innerHTML = `<span style="color: #991b1b;">Fehler beim Hochladen: ${escapeHtml(err)}</span>`;
+    }
 });
 {% endblock %}

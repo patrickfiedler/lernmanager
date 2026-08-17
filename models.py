@@ -502,7 +502,7 @@ def init_db():
             CREATE TABLE IF NOT EXISTS grading_run (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 job_id TEXT NOT NULL,
-                klasse_id INTEGER NOT NULL,
+                klasse_id INTEGER,
                 task_id INTEGER NOT NULL,
                 rubric TEXT NOT NULL,
                 provider TEXT NOT NULL,
@@ -513,6 +513,7 @@ def init_db():
                 flagged_count INTEGER NOT NULL DEFAULT 0,
                 zero_score_count INTEGER NOT NULL DEFAULT 0,
                 media_purged_at TEXT,
+                UNIQUE(job_id),
                 FOREIGN KEY (klasse_id) REFERENCES klasse(id),
                 FOREIGN KEY (task_id) REFERENCES task(id)
             );
@@ -4001,40 +4002,27 @@ def list_tasks_with_graded_artifact():
     return [dict(r) for r in rows]
 
 
-def build_grading_manifest(klasse_id):
-    """
-    Manifest for the grading service (grading-service-deployment.md §5):
-    real names + login only, held in memory / a spool-local temp file by the
-    service, never persisted -- what makes provider:ovh/anthropic legal
-    (satisfies the fail-closed anonymiser gate) without shipping a permanent
-    roster copy to the grading host.
-
-    Returns (manifest_dict, unmatched) -- unmatched students (no netzwerk_id
-    yet, e.g. added after the last annual roster refresh) are excluded from
-    the manifest and listed separately so the upload page can warn before
-    submitting, per spec §5: "an unmatched folder is an error the teacher
-    sees, not a guess the system makes."
-    """
-    klasse = get_klasse(klasse_id)
-    students = get_students_in_klasse(klasse_id)
-    matched = []
-    unmatched = []
-    for s in students:
-        if s.get('netzwerk_id'):
-            matched.append({
-                'login': s['netzwerk_id'],
-                'names': [s['vorname'], s['nachname']],
-                'lernpfad': s.get('lernpfad', ''),
-            })
-        else:
-            unmatched.append({'nachname': s['nachname'], 'vorname': s['vorname']})
-    manifest = {'klasse': klasse['name'] if klasse else '', 'students': matched}
-    return manifest, unmatched
+def get_task_by_grading_keyword(rubric):
+    """Reverse of get_task_grading_keyword: find the task whose
+    graded_artifact keyword chain matches this rubric slug. Returns the task
+    id, or None if zero or more than one task matches -- callers must not
+    guess (used by import_grading_callback to auto-create a grading_run for
+    a job Lernmanager never registered itself; task_id is NOT NULL on both
+    grading_run and grading_result, so a wrong guess would misroute grades,
+    not just fail loudly)."""
+    matches = [
+        t['id'] for t in list_tasks_with_graded_artifact()
+        if get_task_grading_keyword(t['id']) == rubric
+    ]
+    return matches[0] if len(matches) == 1 else None
 
 
 def create_grading_run(job_id, klasse_id, task_id, rubric, provider, model,
                         total_students=0, flagged_count=0, zero_score_count=0, graded_at=None):
-    """Create a grading_run row for one imported batch. Returns the new id."""
+    """Create a grading_run row for one imported batch. klasse_id may be None
+    -- a single upload can span students from several classes, or none known
+    yet (a scan-folders-originated run auto-created from a results callback,
+    see import_grading_callback). Returns the new id."""
     imported_at = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
     with db_session() as conn:
         cursor = conn.execute(
@@ -4048,12 +4036,15 @@ def create_grading_run(job_id, klasse_id, task_id, rubric, provider, model,
 
 
 def get_grading_run(run_id):
-    """Return a grading_run row (dict) enriched with klasse/task names, or None."""
+    """Return a grading_run row (dict) enriched with klasse/task names, or
+    None. klasse_name is None for a classless run (multi-class upload, or a
+    scan-folders run auto-created from a results callback) -- LEFT JOIN, not
+    INNER, so such a run doesn't silently vanish from get_grading_run."""
     with db_session() as conn:
         row = conn.execute(
             "SELECT gr.*, k.name as klasse_name, t.name as task_name "
             "FROM grading_run gr "
-            "JOIN klasse k ON k.id = gr.klasse_id "
+            "LEFT JOIN klasse k ON k.id = gr.klasse_id "
             "JOIN task t ON t.id = gr.task_id "
             "WHERE gr.id = ?",
             (run_id,)
@@ -4062,19 +4053,20 @@ def get_grading_run(run_id):
 
 
 def list_grading_runs(klasse_id=None):
-    """List grading_run rows, newest first. Optionally filtered by class."""
+    """List grading_run rows, newest first. Optionally filtered by class
+    (classless runs are excluded when filtering, included otherwise)."""
     with db_session() as conn:
         if klasse_id is not None:
             rows = conn.execute(
                 "SELECT gr.*, k.name as klasse_name, t.name as task_name "
-                "FROM grading_run gr JOIN klasse k ON k.id = gr.klasse_id JOIN task t ON t.id = gr.task_id "
+                "FROM grading_run gr LEFT JOIN klasse k ON k.id = gr.klasse_id JOIN task t ON t.id = gr.task_id "
                 "WHERE gr.klasse_id = ? ORDER BY gr.id DESC",
                 (klasse_id,)
             ).fetchall()
         else:
             rows = conn.execute(
                 "SELECT gr.*, k.name as klasse_name, t.name as task_name "
-                "FROM grading_run gr JOIN klasse k ON k.id = gr.klasse_id JOIN task t ON t.id = gr.task_id "
+                "FROM grading_run gr LEFT JOIN klasse k ON k.id = gr.klasse_id JOIN task t ON t.id = gr.task_id "
                 "ORDER BY gr.id DESC"
             ).fetchall()
     return [dict(r) for r in rows]
@@ -4154,6 +4146,33 @@ def get_grading_run_by_job_id(job_id):
     return dict(row) if row else None
 
 
+def match_netzwerk_logins(logins):
+    """Resolve a list of already-normalized netzwerk_id logins (the browser
+    parses the scan-folders zip client-side and normalizes folder names the
+    same way ConvertTo-NormalizedLogin does in grading-upload.psm1) against
+    the *global* student roster -- not one class's, since a single upload can
+    now span several classes. Returns only matches, as
+    {login, names: [vorname, nachname], lernpfad}, one per input login found.
+    Deliberately not "return the whole roster and let the browser filter" --
+    keeps the admin-only upload page from carrying every enrolled student's
+    real name on every page load, only the ones actually present in this zip
+    (grading-service-deployment.md §5's manifest shape)."""
+    if not logins:
+        return []
+    with db_session() as conn:
+        placeholders = ','.join('?' * len(logins))
+        rows = conn.execute(
+            f"SELECT netzwerk_id, vorname, nachname, lernpfad FROM student "
+            f"WHERE netzwerk_id IN ({placeholders})",
+            logins
+        ).fetchall()
+    return [
+        {'login': r['netzwerk_id'], 'names': [r['vorname'], r['nachname']],
+         'lernpfad': r['lernpfad'] or ''}
+        for r in rows
+    ]
+
+
 def get_student_by_netzwerk_id(netzwerk_id):
     """Resolve a scan-folders folder name to an enrolled student, or None if
     unmatched (grading_result.student_id stays NULL -- surfaced in the review
@@ -4223,22 +4242,48 @@ def _copy_grading_media(run_id, job_id, netzwerk_id, media_list):
     return copied
 
 
-def import_grading_callback(job_id, provider, model, graded_at, students):
+def import_grading_callback(job_id, provider, model, graded_at, students, rubric=None):
     """
     Import the grading service's POST /internal/grading/results payload
     (worker.fire_callback's shape) into grading_result rows under the
     grading_run that sub-phase 2f created at upload time. Idempotent per
     student: re-delivering the same job_id is a no-op for students who
     already have a grading_result in this run (callback delivery is
-    fire-and-forget on the service side -- spec §4 -- so a retry is possible).
+    fire-and-forget on the service side -- spec §4 -- so a retry is possible;
+    UNIQUE(job_id) on grading_run also makes the auto-create below race-safe
+    against a concurrent duplicate delivery).
+
+    If no grading_run exists yet for job_id, this is a scan-folders-
+    originated job that was never registered with Lernmanager at upload time
+    -- auto-create one (klasse_id=NULL, task_id resolved from rubric via
+    get_task_by_grading_keyword) rather than dropping the results. Only when
+    exactly one task's graded_artifact keyword matches rubric: task_id is
+    NOT NULL on both grading_run and grading_result, so guessing wrong would
+    misroute grades, not just fail loudly. Zero or ambiguous matches raise
+    ValueError instead of guessing -- see todo.md § Graded Artifacts for the
+    manual "import by job ID" recovery path for that case.
 
     Returns the grading_run id, or raises ValueError if no grading_run
-    matches job_id (an upload that bypassed the normal flow, or a callback
-    arriving after the run was deleted).
+    matches job_id and none could be safely auto-created.
     """
     run = get_grading_run_by_job_id(job_id)
     if run is None:
-        raise ValueError(f"no grading_run for job_id={job_id!r} -- was it created at upload time?")
+        task_id = get_task_by_grading_keyword(rubric) if rubric else None
+        if task_id is None:
+            raise ValueError(
+                f"no grading_run for job_id={job_id!r} and rubric={rubric!r} did not "
+                f"resolve to exactly one task -- cannot auto-create without guessing"
+            )
+        try:
+            run_id = create_grading_run(
+                job_id=job_id, klasse_id=None, task_id=task_id, rubric=rubric,
+                provider=provider or 'unknown', model=model,
+            )
+            run = get_grading_run(run_id)
+        except sqlite3.IntegrityError:
+            # Lost a race against a concurrent duplicate callback delivery --
+            # the other one already created it under UNIQUE(job_id).
+            run = get_grading_run_by_job_id(job_id)
 
     with db_session() as conn:
         already_imported = {

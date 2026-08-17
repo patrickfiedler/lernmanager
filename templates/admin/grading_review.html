@@ -11,7 +11,7 @@
     </h1>
     <a href="{{ url_for('admin_grading_run_detail', run_id=run.id) }}" class="btn btn-secondary">← Zur Übersicht</a>
 </div>
-<p class="text-muted" style="margin-top: -0.5rem;">{{ run.klasse_name }} · {{ run.rubric }} · {{ result.document_file or '—' }}</p>
+<p class="text-muted" style="margin-top: -0.5rem;">{% if run.klasse_name %}{{ run.klasse_name }} · {% endif %}{{ run.rubric }} · {{ result.document_file or '—' }}</p>
 
 {% if supersede_conflict %}
 <div class="card mb-2" style="border: 1px solid #f59e0b;">

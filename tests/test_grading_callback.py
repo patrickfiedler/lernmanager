@@ -142,3 +142,84 @@ def test_route_unknown_job_id_returns_404(app, client):
         headers={"X-Grading-Callback-Secret": "s3cr3t"},
     )
     assert resp.status_code == 404
+
+
+# --- Auto-create: a scan-folders-originated job that was never registered
+# with Lernmanager at upload time (scan-folders.ps1 uploads straight to the
+# grading service and never called /admin/grading/upload/complete). Fixed
+# 2026-08-17 alongside the multi-class upload redesign -- see todo.md
+# § Graded Artifacts.
+
+def test_import_grading_callback_autocreates_run_for_unique_rubric_match(db):
+    task_id = models.create_task("Bilder entdecken", "desc", "lz", "MBI", "6", "pflicht")
+    models.create_subtask(
+        task_id, "Aufgabe 1", reihenfolge=1,
+        graded_artifact_json=json.dumps({"keyword": "unit-3-bilder-entdecken"}),
+    )
+    models.create_student("Mueller", "Anna", "u-auto1", "pw", netzwerk_id="mueller.anna")
+
+    run_id = models.import_grading_callback(
+        job_id="scan-folders-job-1", provider="ollama", model="qwen3.6",
+        graded_at="2026-08-17T12:00:00Z", students=_STUDENTS_PAYLOAD,
+        rubric="unit-3-bilder-entdecken",
+    )
+
+    run = models.get_grading_run(run_id)
+    assert run["klasse_id"] is None
+    assert run["task_id"] == task_id
+    assert run["rubric"] == "unit-3-bilder-entdecken"
+    assert len(models.list_grading_results(run_id)) == 1
+
+
+def test_import_grading_callback_does_not_guess_when_rubric_unknown(db):
+    try:
+        models.import_grading_callback(
+            job_id="scan-folders-job-2", provider="ollama", model=None,
+            graded_at=None, students=[], rubric="no-such-rubric",
+        )
+        assert False, "expected ValueError"
+    except ValueError:
+        pass
+    assert models.get_grading_run_by_job_id("scan-folders-job-2") is None
+
+
+def test_import_grading_callback_does_not_guess_when_rubric_ambiguous(db):
+    for i in range(2):
+        task_id = models.create_task(f"Task {i}", "desc", "lz", "MBI", "6", "pflicht")
+        models.create_subtask(
+            task_id, "Aufgabe 1", reihenfolge=1,
+            graded_artifact_json=json.dumps({"keyword": "shared-keyword"}),
+        )
+    try:
+        models.import_grading_callback(
+            job_id="scan-folders-job-3", provider="ollama", model=None,
+            graded_at=None, students=[], rubric="shared-keyword",
+        )
+        assert False, "expected ValueError"
+    except ValueError:
+        pass
+
+
+def test_route_autocreates_run_for_scan_folders_job(app, client):
+    config.GRADING_SERVICE_CALLBACK_SECRET = "s3cr3t"
+    task_id = models.create_task("Bilder entdecken", "desc", "lz", "MBI", "6", "pflicht")
+    models.create_subtask(
+        task_id, "Aufgabe 1", reihenfolge=1,
+        graded_artifact_json=json.dumps({"keyword": "unit-3-bilder-entdecken"}),
+    )
+    models.create_student("Mueller", "Anna", "u-auto2", "pw", netzwerk_id="mueller.anna")
+
+    resp = client.post(
+        '/internal/grading/results',
+        data=json.dumps({
+            "job_id": "scan-folders-job-route", "provider": "ollama", "model": "qwen3.6",
+            "rubric": "unit-3-bilder-entdecken", "graded_at": "2026-08-17T12:00:00Z",
+            "students": _STUDENTS_PAYLOAD,
+        }),
+        content_type='application/json',
+        headers={"X-Grading-Callback-Secret": "s3cr3t"},
+    )
+    assert resp.status_code == 200, resp.get_json()
+    run = models.get_grading_run_by_job_id("scan-folders-job-route")
+    assert run is not None
+    assert run["klasse_id"] is None

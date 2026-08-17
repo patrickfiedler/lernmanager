@@ -325,6 +325,7 @@ def internal_grading_results():
             model=payload.get('model'),
             graded_at=payload.get('graded_at'),
             students=payload.get('students', []),
+            rubric=payload.get('rubric'),
         )
     except ValueError as e:
         # Logged, not 500'd -- a callback for an unknown/deleted run shouldn't
@@ -678,39 +679,67 @@ def admin_bewertung_netzwerk_ids_apply():
     return redirect(url_for('admin_bewertung_netzwerk_ids'))
 
 
-@app.route('/admin/klasse/<int:klasse_id>/grading/upload')
+@app.route('/admin/grading/upload')
 @admin_required
-def admin_klasse_grading_upload(klasse_id):
-    klasse = models.get_klasse(klasse_id)
-    if not klasse:
-        flash('Klasse nicht gefunden.', 'danger')
-        return redirect(url_for('admin_klassen'))
-
+def admin_grading_upload():
+    """
+    Class-agnostic upload page (multi-class + chunked upload redesign,
+    todo.md § Graded Artifacts 2026-08-17). Replaces the old per-class
+    /admin/klasse/<id>/grading/upload: a single scan-folders zip can contain
+    students from several classes, or a class only the teacher's local
+    machine knows about (a grade-wide "5"/"6" scan), so the page no longer
+    pre-builds a manifest from one class's roster server-side. Instead the
+    browser parses the zip client-side and calls
+    /admin/grading/match-logins to resolve whatever logins it finds against
+    the global roster -- see that route and grading_upload.html.
+    """
     tasks = models.list_tasks_with_graded_artifact()
     for t in tasks:
         t['grading_keyword'] = models.get_task_grading_keyword(t['id'])
     tasks = [t for t in tasks if t['grading_keyword']]
 
-    manifest, unmatched = models.build_grading_manifest(klasse_id)
-
     return render_template(
-        'admin/grading_upload.html', klasse=klasse, tasks=tasks,
-        manifest=manifest,
-        unmatched=unmatched, matched_count=len(manifest['students']),
+        'admin/grading_upload.html', tasks=tasks,
         service_online=_grading_service_health(),
     )
 
 
-@app.route('/admin/klasse/<int:klasse_id>/grading/upload/complete', methods=['POST'])
+@app.route('/admin/grading/match-logins', methods=['POST'])
 @admin_required
-def admin_klasse_grading_upload_complete(klasse_id):
+def admin_grading_match_logins():
     """
-    Called by the upload page's JS *after* the browser's direct multipart
-    POST to /grading/jobs (nginx-proxied straight to the M920x, bypassing
-    Flask -- see docs/shared/grading-with-llm/grading-service-deployment.md
-    §4) has already returned a job_id. This tiny JSON request is the only
-    grading-service traffic that goes through Flask -- "Lernmanager receives
-    only the job_id" (spec §10 Phase 2).
+    AJAX: the browser has already unzipped the archive client-side and
+    normalized the top-level folder names (same umlaut-fold rule as
+    scan-folders' ConvertTo-NormalizedLogin, so both sides agree) -- this
+    resolves those logins against the *global* student roster and returns
+    only the matches. Deliberately not "hand the browser the whole roster
+    and let it filter locally": keeps real names off the page for students
+    who aren't even in this zip (grading-service-deployment.md §5's
+    manifest shape -- names travel only for students actually being graded).
+    """
+    payload = request.get_json(silent=True) or {}
+    logins = payload.get('logins')
+    if not isinstance(logins, list) or not all(isinstance(l, str) for l in logins):
+        return jsonify({'error': 'logins must be a list of strings'}), 400
+
+    matches = models.match_netzwerk_logins(logins)
+    matched_logins = {m['login'] for m in matches}
+    unmatched = [l for l in logins if l not in matched_logins]
+    return jsonify({'matches': matches, 'unmatched': unmatched})
+
+
+@app.route('/admin/grading/upload/complete', methods=['POST'])
+@admin_required
+def admin_grading_upload_complete():
+    """
+    Called by the upload page's JS *after* the browser's direct chunked
+    upload to the grading service (nginx-proxied straight to the M920x,
+    bypassing Flask -- see docs/shared/grading-with-llm/grading-service-
+    deployment.md §4) has already returned a job_id. This tiny JSON request
+    is the only grading-service traffic that goes through Flask --
+    "Lernmanager receives only the job_id" (spec §10 Phase 2). klasse_id is
+    intentionally not recorded here (a run can span several classes now) --
+    classes touched are derived per-result via student_klasse when needed.
     """
     payload = request.get_json(silent=True) or {}
     job_id = payload.get('job_id')
@@ -722,10 +751,19 @@ def admin_klasse_grading_upload_complete(klasse_id):
         return jsonify({'error': 'job_id, task_id, rubric and provider are required'}), 400
 
     run_id = models.create_grading_run(
-        job_id=job_id, klasse_id=klasse_id, task_id=task_id, rubric=rubric,
+        job_id=job_id, klasse_id=None, task_id=task_id, rubric=rubric,
         provider=provider, model=None, total_students=total_students,
     )
     return jsonify({'grading_run_id': run_id}), 201
+
+
+@app.route('/admin/grading/runs')
+@admin_required
+def admin_grading_runs():
+    """Overview list of grading_run rows -- the entry point into
+    grading_run_detail, which previously had no link pointing at it from
+    anywhere in the nav (found while building the multi-class redesign)."""
+    return render_template('admin/grading_runs.html', runs=models.list_grading_runs())
 
 
 # --- Page A: grading_run_detail (teacher-review-ui.md §2 -- class-level view) ---

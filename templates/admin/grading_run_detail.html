@@ -4,8 +4,12 @@
 
 {% block content %}
 <div class="flex flex-between flex-center mb-2">
-    <h1>🎯 {{ run.task_name }} — {{ run.klasse_name }}</h1>
+    <h1>🎯 {{ run.task_name }}{% if run.klasse_name %} — {{ run.klasse_name }}{% endif %}</h1>
+    {% if run.klasse_id %}
     <a href="{{ url_for('admin_klasse_detail', klasse_id=run.klasse_id) }}" class="btn btn-secondary">← Zurück zur Klasse</a>
+    {% else %}
+    <a href="{{ url_for('admin_grading_runs') }}" class="btn btn-secondary">← Zurück zu Bewertungen</a>
+    {% endif %}
 </div>
 
 <div class="card mb-2">

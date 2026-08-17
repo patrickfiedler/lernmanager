@@ -14,7 +14,7 @@
     </div>
     <div class="flex gap-1">
         <a href="{{ url_for('admin_topic_queue', klasse_id=klasse.id) }}" class="btn btn-secondary">📋 Themen-Reihenfolge</a>
-        <a href="{{ url_for('admin_klasse_grading_upload', klasse_id=klasse.id) }}" class="btn btn-secondary">🎯 KI-Bewertung hochladen</a>
+        <a href="{{ url_for('admin_grading_upload') }}" class="btn btn-secondary">🎯 KI-Bewertung hochladen</a>
         <a href="{{ url_for('admin_unterricht', klasse_id=klasse.id) }}" class="btn btn-primary">📅 Unterricht</a>
         <a href="{{ url_for('admin_klasse_bericht', klasse_id=klasse.id) }}" class="btn btn-success">📊 Klassenbericht</a>
         <form method="POST" action="{{ url_for('admin_klasse_loeschen', klasse_id=klasse.id) }}" style="display: inline;" onsubmit="return confirm('Klasse wirklich löschen?');">

@@ -146,3 +146,34 @@ def test_unresolved_student_id_none_never_active(db):
         assert False, "expected ValueError for unmatched student_id"
     except ValueError:
         pass
+
+
+# --- klasse_id nullable (migrate_041, multi-class upload redesign) --------
+
+def test_create_grading_run_without_klasse(db):
+    task_id = models.create_task("unit-3-bilder-entdecken", "desc", "lz", "MBI", "6", "pflicht")
+    run_id = models.create_grading_run("job-10", None, task_id, "unit-3-bilder-entdecken", "ollama", "qwen3.6")
+    run = models.get_grading_run(run_id)
+    assert run["klasse_id"] is None
+    assert run["klasse_name"] is None
+    assert run["task_id"] == task_id
+
+
+def test_list_grading_runs_includes_classless_runs(db):
+    klasse_id, task_id, _, _ = _setup()
+    models.create_grading_run("job-11a", klasse_id, task_id, "unit-3-bilder-entdecken", "ollama", "qwen3.6")
+    models.create_grading_run("job-11b", None, task_id, "unit-3-bilder-entdecken", "ollama", "qwen3.6")
+
+    job_ids = {r["job_id"] for r in models.list_grading_runs()}
+    assert {"job-11a", "job-11b"} <= job_ids
+
+
+def test_grading_run_job_id_is_unique(db):
+    task_id = models.create_task("unit-3-bilder-entdecken", "desc", "lz", "MBI", "6", "pflicht")
+    models.create_grading_run("job-dup", None, task_id, "unit-3-bilder-entdecken", "ollama", "qwen3.6")
+    import sqlite3
+    try:
+        models.create_grading_run("job-dup", None, task_id, "unit-3-bilder-entdecken", "ollama", "qwen3.6")
+        assert False, "expected IntegrityError for duplicate job_id"
+    except sqlite3.IntegrityError:
+        pass

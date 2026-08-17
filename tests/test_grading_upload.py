@@ -52,18 +52,52 @@ def test_list_tasks_with_graded_artifact_excludes_plain_tasks(db):
     assert plain_id not in ids
 
 
-def test_build_grading_manifest_splits_matched_and_unmatched(db):
+def test_get_task_by_grading_keyword_resolves_unique_match(db):
+    task_id = _task_with_graded_artifact(keyword="unit-3-bilder-entdecken")
+    assert models.get_task_by_grading_keyword("unit-3-bilder-entdecken") == task_id
+
+
+def test_get_task_by_grading_keyword_none_when_no_match(db):
+    _task_with_graded_artifact(keyword="unit-3-bilder-entdecken")
+    assert models.get_task_by_grading_keyword("no-such-rubric") is None
+
+
+def test_get_task_by_grading_keyword_none_when_ambiguous(db):
+    """Two tasks sharing a rubric keyword must not be guessed at --
+    auto-create (import_grading_callback) would misroute grades onto the
+    wrong task otherwise."""
+    _task_with_graded_artifact(keyword="shared-keyword")
+    _task_with_graded_artifact(keyword="shared-keyword")
+    assert models.get_task_by_grading_keyword("shared-keyword") is None
+
+
+def test_match_netzwerk_logins_returns_only_matches(db):
     klasse_id = models.create_klasse("6a")
     s1 = models.create_student("Mueller", "Anna", "u1", "pw", netzwerk_id="mueller.anna")
-    s2 = models.create_student("Ohne", "Id", "u2", "pw")  # no netzwerk_id
     models.add_student_to_klasse(s1, klasse_id)
-    models.add_student_to_klasse(s2, klasse_id)
 
-    manifest, unmatched = models.build_grading_manifest(klasse_id)
+    matches = models.match_netzwerk_logins(["mueller.anna", "unknown.folder"])
 
-    assert manifest["klasse"] == "6a"
-    assert manifest["students"] == [{"login": "mueller.anna", "names": ["Anna", "Mueller"], "lernpfad": "bergweg"}]
-    assert unmatched == [{"nachname": "Ohne", "vorname": "Id"}]
+    assert matches == [{"login": "mueller.anna", "names": ["Anna", "Mueller"], "lernpfad": "bergweg"}]
+
+
+def test_match_netzwerk_logins_spans_multiple_classes(db):
+    """The whole point of the redesign: matching is global, not scoped to
+    one class -- a zip can contain students from several classes at once."""
+    k1 = models.create_klasse("6a")
+    k2 = models.create_klasse("6b")
+    s1 = models.create_student("Mueller", "Anna", "u1", "pw", netzwerk_id="mueller.anna")
+    s2 = models.create_student("Schmidt", "Ben", "u2", "pw", netzwerk_id="schmidt.ben")
+    models.add_student_to_klasse(s1, k1)
+    models.add_student_to_klasse(s2, k2)
+
+    matches = models.match_netzwerk_logins(["mueller.anna", "schmidt.ben"])
+    logins = {m["login"] for m in matches}
+    assert logins == {"mueller.anna", "schmidt.ben"}
+
+
+def test_match_netzwerk_logins_empty_input(db):
+    assert models.match_netzwerk_logins([]) == []
 
 
 def test_health_route_reports_not_configured_when_url_empty(app, client, as_admin):
@@ -83,51 +117,59 @@ def test_health_route_reports_offline_when_unreachable(app, client, as_admin):
 
 
 def test_upload_page_requires_admin(app, client):
-    klasse_id = models.create_klasse("6a")
-    resp = client.get(f'/admin/klasse/{klasse_id}/grading/upload')
+    resp = client.get('/admin/grading/upload')
     assert resp.status_code in (302, 401, 403)
 
 
-def test_upload_page_renders_task_picker_and_manifest(app, client, as_admin):
-    klasse_id = models.create_klasse("6a")
-    task_id = _task_with_graded_artifact()
-    student_id = models.create_student("Mueller", "Anna", "muanna", "pw", netzwerk_id="mueller.anna")
-    models.add_student_to_klasse(student_id, klasse_id)
+def test_upload_page_renders_task_picker(app, client, as_admin):
+    _task_with_graded_artifact()
 
-    resp = as_admin.get(f'/admin/klasse/{klasse_id}/grading/upload')
+    resp = as_admin.get('/admin/grading/upload')
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
     assert "unit-3-bilder-entdecken" in body
-    assert "mueller.anna" in body  # embedded manifest
+    # No manifest/roster embedded anymore -- the page resolves logins found
+    # in the client-parsed zip via /admin/grading/match-logins instead.
+    assert "grading-manifest" not in body
 
 
-def test_upload_page_manifest_escapes_script_breakout(app, client, as_admin):
-    """
-    The manifest is embedded via Jinja's |tojson filter (not json.dumps + |safe),
-    which HTML-escapes '<', '>', '&' so a crafted student name can't close the
-    <script> tag early and inject markup into an admin's session (finding #10).
-    """
+def test_match_logins_route_requires_admin(app, client):
+    resp = client.post('/admin/grading/match-logins', json={"logins": []})
+    assert resp.status_code in (302, 401, 403)
+
+
+def test_match_logins_route_returns_matches_and_unmatched(app, client, as_admin):
     klasse_id = models.create_klasse("6a")
-    student_id = models.create_student(
-        "</script><script>alert(1)</script>", "Anna", "hacker1", "pw",
-        netzwerk_id="hacker.anna",
-    )
+    student_id = models.create_student("Mueller", "Anna", "muanna", "pw", netzwerk_id="mueller.anna")
     models.add_student_to_klasse(student_id, klasse_id)
+    token = _csrf_token(as_admin)
 
-    resp = as_admin.get(f'/admin/klasse/{klasse_id}/grading/upload')
+    resp = as_admin.post(
+        '/admin/grading/match-logins',
+        json={"logins": ["mueller.anna", "unknown.folder"]},
+        headers={"X-CSRFToken": token},
+    )
     assert resp.status_code == 200
-    body = resp.get_data(as_text=True)
-    assert "</script><script>alert(1)</script>" not in body
-    assert "\\u003c/script\\u003e" in body
+    data = resp.get_json()
+    assert data["matches"] == [{"login": "mueller.anna", "names": ["Anna", "Mueller"], "lernpfad": "bergweg"}]
+    assert data["unmatched"] == ["unknown.folder"]
+
+
+def test_match_logins_route_rejects_non_list_payload(app, client, as_admin):
+    token = _csrf_token(as_admin)
+    resp = as_admin.post(
+        '/admin/grading/match-logins', json={"logins": "not-a-list"},
+        headers={"X-CSRFToken": token},
+    )
+    assert resp.status_code == 400
 
 
 def test_upload_complete_creates_grading_run(app, client, as_admin):
-    klasse_id = models.create_klasse("6a")
     task_id = _task_with_graded_artifact()
     token = _csrf_token(as_admin)
 
     resp = as_admin.post(
-        f'/admin/klasse/{klasse_id}/grading/upload/complete',
+        '/admin/grading/upload/complete',
         json={"job_id": "job-xyz", "task_id": task_id, "rubric": "unit-3-bilder-entdecken",
               "provider": "ollama", "students": 5},
         headers={"X-CSRFToken": token},
@@ -135,15 +177,14 @@ def test_upload_complete_creates_grading_run(app, client, as_admin):
     assert resp.status_code == 201, resp.get_json()
     run = models.get_grading_run_by_job_id("job-xyz")
     assert run is not None
-    assert run["klasse_id"] == klasse_id
+    assert run["klasse_id"] is None  # a run can now span several classes
     assert run["task_id"] == task_id
 
 
 def test_upload_complete_missing_fields_rejected(app, client, as_admin):
-    klasse_id = models.create_klasse("6a")
     token = _csrf_token(as_admin)
     resp = as_admin.post(
-        f'/admin/klasse/{klasse_id}/grading/upload/complete',
+        '/admin/grading/upload/complete',
         json={"job_id": "x"}, headers={"X-CSRFToken": token},
     )
     assert resp.status_code == 400

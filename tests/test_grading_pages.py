@@ -192,3 +192,32 @@ def test_download_grading_media_blocks_path_traversal(app, client, as_admin, tmp
     config.UPLOAD_FOLDER = str(tmp_path)
     resp = as_admin.get('/grading-medien/../../../../etc/passwd')
     assert resp.status_code == 404
+
+
+def test_page_a_renders_for_classless_run(app, client, as_admin):
+    """A multi-class (or scan-folders-autocreated) run has klasse_id=None --
+    the page must still render, not 500 on a missing klasse_name/back-link."""
+    task_id = models.create_task("unit-3-bilder-entdecken", "desc", "lz", "MBI", "6", "pflicht")
+    run_id = models.create_grading_run("job-classless", None, task_id, "unit-3-bilder-entdecken", "ollama", "qwen3.6")
+
+    resp = as_admin.get(f'/admin/grading-run/{run_id}')
+    assert resp.status_code == 200
+    assert 'href="/admin/grading/runs"' in resp.get_data(as_text=True)
+
+
+def test_grading_runs_list_requires_admin(app, client):
+    resp = client.get('/admin/grading/runs')
+    assert resp.status_code in (302, 401, 403)
+
+
+def test_grading_runs_list_shows_classed_and_classless_runs(app, client, as_admin):
+    klasse_id, task_id, run_id = _setup(job_id="job-list-a")
+    task_id2 = models.create_task("unit-2-sb3-bergweg", "desc", "lz", "MBI", "6", "pflicht")
+    models.create_grading_run("job-list-b", None, task_id2, "unit-2-sb3-bergweg", "ollama", "qwen3.6")
+
+    resp = as_admin.get('/admin/grading/runs')
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert "unit-3-bilder-entdecken" in body
+    assert "unit-2-sb3-bergweg" in body
+    assert "mehrere Klassen" in body
