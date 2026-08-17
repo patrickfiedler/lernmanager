@@ -27,6 +27,12 @@
                     <a href="{{ url_for('admin_klassen') }}">Klassen</a>
                     <a href="{{ url_for('admin_themen') }}">Themen</a>
                     <details class="nav-dropdown">
+                        <summary>Bewertung ▾</summary>
+                        <div class="nav-dropdown-menu">
+                            <a href="{{ url_for('admin_bewertung_netzwerk_ids') }}">Netzwerk-IDs abgleichen</a>
+                        </div>
+                    </details>
+                    <details class="nav-dropdown">
                         <summary>Auswertung ▾</summary>
                         <div class="nav-dropdown-menu">
                             <a href="{{ url_for('admin_analytics') }}">Aktivität</a>

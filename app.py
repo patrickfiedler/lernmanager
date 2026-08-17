@@ -9,6 +9,7 @@ import hmac
 import shutil
 import zipfile
 import ipaddress
+import sqlite3
 import traceback
 import urllib.request
 import urllib.error
@@ -26,7 +27,7 @@ import models
 import llm_grading
 import artifact_processor
 import artifact_checker
-from utils import generate_username, generate_password, allowed_file, generate_credentials_pdf, generate_student_self_report_pdf, generate_class_report_pdf, generate_student_report_pdf, slugify, format_bytes, is_ip_allowed, is_within_time_window
+from utils import generate_username, generate_password, allowed_file, generate_credentials_pdf, generate_student_self_report_pdf, generate_class_report_pdf, generate_student_report_pdf, slugify, format_bytes, is_ip_allowed, is_within_time_window, parse_netzwerk_csv
 from import_task import validate_task_structure, check_duplicate, import_task as do_import_task, overwrite_task_from_import, ValidationError
 
 app = Flask(__name__)
@@ -621,6 +622,60 @@ def admin_grading_health():
     if status is None:
         return jsonify({'configured': False, 'online': False})
     return jsonify({'configured': True, 'online': status})
+
+
+@app.route('/admin/bewertung/netzwerk-ids', methods=['GET', 'POST'])
+@admin_required
+def admin_bewertung_netzwerk_ids():
+    """CSV-based netzwerk_id matcher: upload the school's real roster export
+    (Nachname, Vorname, Login), Lernmanager matches it against students by
+    name and reports differences for manual review -- see
+    models.diff_netzwerk_ids() (ports grading-with-llm's
+    scripts/validate_student_ids.py mismatch-reporting approach). Nothing is
+    written until the admin submits the review form below."""
+    diff = None
+    if request.method == 'POST':
+        file = request.files.get('roster_csv')
+        if not file or not file.filename:
+            flash('Bitte eine CSV-Datei auswählen.', 'warning')
+        else:
+            try:
+                csv_rows = parse_netzwerk_csv(file.stream)
+                diff = models.diff_netzwerk_ids(csv_rows)
+            except ValueError as e:
+                flash(f'Fehler beim Einlesen der CSV: {e}', 'danger')
+
+    return render_template('admin/bewertung_netzwerk_ids.html', diff=diff)
+
+
+@app.route('/admin/bewertung/netzwerk-ids/apply', methods=['POST'])
+@admin_required
+def admin_bewertung_netzwerk_ids_apply():
+    """Writes the netzwerk_id corrections the admin checked off on the diff
+    report. Runs one update at a time so a single collision (another
+    student already has that ID) doesn't roll back the whole batch."""
+    applied, conflicts = 0, []
+    for change in request.form.getlist('change'):
+        student_id, _, login = change.partition(':')
+        if not student_id.isdigit() or not login:
+            continue
+        try:
+            models.update_student_netzwerk_id(int(student_id), login)
+            applied += 1
+        except sqlite3.IntegrityError:
+            conflicts.append(login)
+
+    if applied:
+        flash(f'{applied} Netzwerk-ID(s) aktualisiert. ✅', 'success')
+    if conflicts:
+        flash(
+            f'{len(conflicts)} übersprungen wegen Konflikt (Login bereits vergeben): '
+            f'{", ".join(conflicts)}', 'danger'
+        )
+    if not applied and not conflicts:
+        flash('Keine Änderungen ausgewählt.', 'warning')
+
+    return redirect(url_for('admin_bewertung_netzwerk_ids'))
 
 
 @app.route('/admin/klasse/<int:klasse_id>/grading/upload')

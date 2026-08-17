@@ -830,6 +830,91 @@ def get_existing_netzwerk_ids():
         return {r['netzwerk_id'] for r in rows}
 
 
+def get_all_students_with_netzwerk_id():
+    """All students (any class, any school year) with their current
+    netzwerk_id and a comma-joined list of class names, for the
+    admin/bewertung/netzwerk-ids CSV matcher."""
+    with db_session() as conn:
+        rows = conn.execute(
+            "SELECT s.id, s.nachname, s.vorname, s.netzwerk_id, "
+            "GROUP_CONCAT(k.name, ', ') AS klassen "
+            "FROM student s "
+            "LEFT JOIN student_klasse sk ON sk.student_id = s.id "
+            "LEFT JOIN klasse k ON k.id = sk.klasse_id "
+            "GROUP BY s.id ORDER BY s.nachname, s.vorname"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def update_student_netzwerk_id(student_id, netzwerk_id):
+    """Overwrite one student's netzwerk_id (manual correction after CSV
+    matching). Can raise sqlite3.IntegrityError -- the partial unique index
+    idx_student_netzwerk_id rejects assigning an ID already used by another
+    student; the caller should catch that per-row rather than let the whole
+    batch fail."""
+    with db_session() as conn:
+        conn.execute("UPDATE student SET netzwerk_id = ? WHERE id = ?", (netzwerk_id, student_id))
+
+
+def diff_netzwerk_ids(csv_rows):
+    """
+    Cross-check CSV-provided real network logins against the DB roster.
+
+    Reuses grading-with-llm/scripts/validate_student_ids.py's approach --
+    exact matches, entries only on one side, and a first-4-chars similarity
+    hint for likely renames/typos -- but resolves everything per student row
+    (that script only ever printed a report; here each mismatch needs to map
+    to one student so the admin can apply it with a click).
+
+    csv_rows: list of {'nachname', 'vorname', 'login'} from
+    utils.parse_netzwerk_csv().
+
+    Returns {'updates', 'unchanged', 'csv_unmatched', 'db_unmatched'}:
+      - updates: DB student found by name, CSV login differs from current netzwerk_id
+      - unchanged: DB student found by name, CSV login already matches
+      - csv_unmatched: CSV row whose name matched zero or >1 DB students
+      - db_unmatched: DB student with no matching CSV row (each gets
+        'similar_csv_logins' -- CSV logins sharing the current ID's first 4
+        chars, i.e. validate_student_ids.py's mismatch hint)
+    """
+    students = get_all_students_with_netzwerk_id()
+
+    def name_key(nachname, vorname):
+        return (_normalize_umlauts(nachname.strip()).lower(), _normalize_umlauts(vorname.strip()).lower())
+
+    by_name = {}
+    for s in students:
+        by_name.setdefault(name_key(s['nachname'], s['vorname']), []).append(s)
+
+    matched_student_ids = set()
+    updates, unchanged, csv_unmatched = [], [], []
+
+    for row in csv_rows:
+        candidates = by_name.get(name_key(row['nachname'], row['vorname']), [])
+        if len(candidates) != 1:
+            csv_unmatched.append(row)
+            continue
+        student = candidates[0]
+        matched_student_ids.add(student['id'])
+        csv_login = row['login'].strip().lower()
+        if (student['netzwerk_id'] or '') == csv_login:
+            unchanged.append(student)
+        else:
+            updates.append({**student, 'csv_login': csv_login})
+
+    db_unmatched = [dict(s) for s in students if s['id'] not in matched_student_ids]
+
+    csv_logins_unmatched = {r['login'].strip().lower() for r in csv_unmatched}
+    for s in db_unmatched:
+        prefix = (s['netzwerk_id'] or '')[:4]
+        s['similar_csv_logins'] = sorted(l for l in csv_logins_unmatched if prefix and l[:4] == prefix)
+
+    return {
+        'updates': updates, 'unchanged': unchanged,
+        'csv_unmatched': csv_unmatched, 'db_unmatched': db_unmatched,
+    }
+
+
 def _normalize_umlauts(text):
     """ä/ö/ü/ß -> ae/oe/ue/ss. Same mapping as grading-with-llm's
     scripts/generate_student_ids.py (kept in sync by hand, not imported --

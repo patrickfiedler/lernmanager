@@ -1,0 +1,118 @@
+{% extends 'base.html' %}
+
+{% block title %}Netzwerk-IDs abgleichen - Lernmanager{% endblock %}
+
+{% block content %}
+<h1>🪪 Netzwerk-IDs abgleichen</h1>
+<p class="text-muted mb-2">
+    Gleicht Lernmanagers gespeicherte Netzwerk-IDs (für die KI-Bewertung: ordnet
+    scan-folders-Ordnernamen einem Schüler zu) gegen eine echte Schul-Roster-CSV ab.
+    Nachname/Vorname stehen in Spalte 1/2, die Login-Spalte wird automatisch erkannt.
+    Es wird nichts automatisch übernommen — nur nach eigener Bestätigung unten.
+</p>
+
+<div class="card mb-2">
+    <div class="card-header">📤 Roster-CSV hochladen</div>
+    <form method="POST" enctype="multipart/form-data" style="padding: 1rem;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="form-group">
+            <label for="roster_csv">CSV-Datei</label>
+            <input type="file" id="roster_csv" name="roster_csv" class="form-control" accept=".csv" required>
+        </div>
+        <button type="submit" class="btn btn-primary">Abgleichen</button>
+    </form>
+</div>
+
+{% if diff %}
+
+{% if diff.updates %}
+<div class="card mb-2">
+    <div class="card-header">🔄 {{ diff.updates|length }} Abweichung(en) — zur Übernahme markiert</div>
+    <form method="POST" action="{{ url_for('admin_bewertung_netzwerk_ids_apply') }}" style="padding: 1rem;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div style="overflow-x: auto;">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Übernehmen</th>
+                        <th>Name</th>
+                        <th>Klasse(n)</th>
+                        <th>Aktuelle ID</th>
+                        <th>CSV-ID</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for u in diff.updates %}
+                    <tr>
+                        <td><input type="checkbox" name="change" value="{{ u.id }}:{{ u.csv_login }}" checked></td>
+                        <td>{{ u.nachname }}, {{ u.vorname }}</td>
+                        <td>{{ u.klassen or '—' }}</td>
+                        <td><code>{{ u.netzwerk_id or '(keine)' }}</code></td>
+                        <td><code>{{ u.csv_login }}</code></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <button type="submit" class="btn btn-primary mt-1">Ausgewählte Änderungen übernehmen</button>
+    </form>
+</div>
+{% endif %}
+
+{% if diff.db_unmatched %}
+<div class="card mb-2" style="border: 1px solid #f59e0b;">
+    <div class="card-header" style="background: #fffbeb; color: #92400e;">
+        ⚠️ {{ diff.db_unmatched|length }} Schüler ohne passende CSV-Zeile
+    </div>
+    <div style="padding: 0.75rem 1rem;">
+        <p class="text-muted mb-1" style="font-size: 0.9rem;">
+            Kein Namens-Treffer in der CSV — z.B. Klasse nicht im Export enthalten, oder Namensschreibweise
+            weicht ab. Keine automatische Aktion. Wo die aktuelle ID zu einer nicht zugeordneten CSV-Zeile
+            passt (gleiche ersten 4 Zeichen), steht ein Vorschlag dabei.
+        </p>
+        <table class="table">
+            <thead>
+                <tr><th>Name</th><th>Klasse(n)</th><th>Aktuelle ID</th><th>Ähnliche CSV-Logins</th></tr>
+            </thead>
+            <tbody>
+                {% for s in diff.db_unmatched %}
+                <tr>
+                    <td>{{ s.nachname }}, {{ s.vorname }}</td>
+                    <td>{{ s.klassen or '—' }}</td>
+                    <td><code>{{ s.netzwerk_id or '(keine)' }}</code></td>
+                    <td>{{ s.similar_csv_logins|join(', ') or '—' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+{% if diff.csv_unmatched %}
+<div class="card mb-2" style="border: 1px solid #f59e0b;">
+    <div class="card-header" style="background: #fffbeb; color: #92400e;">
+        ⚠️ {{ diff.csv_unmatched|length }} CSV-Zeile(n) ohne eindeutigen Schüler
+    </div>
+    <div style="padding: 0.75rem 1rem;">
+        <p class="text-muted mb-1" style="font-size: 0.9rem;">
+            Name kommt in Lernmanager nicht oder mehrfach vor. Keine automatische Aktion.
+        </p>
+        <table class="table">
+            <thead><tr><th>Name (CSV)</th><th>Login (CSV)</th></tr></thead>
+            <tbody>
+                {% for r in diff.csv_unmatched %}
+                <tr><td>{{ r.nachname }}, {{ r.vorname }}</td><td><code>{{ r.login }}</code></td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+<div class="card">
+    <div class="card-header">✅ {{ diff.unchanged|length }} bereits korrekt</div>
+</div>
+
+{% endif %}
+{% endblock %}

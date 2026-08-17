@@ -58,6 +58,82 @@ def slugify(text):
     text = re.sub(r'[^a-z0-9]+', '-', text).strip('-')
     return text
 
+
+def find_netzwerk_login_column(headers):
+    """
+    Given a CSV header row (list of strings), return the index of the column
+    holding the real school network login/username, or None if none can be
+    identified confidently.
+
+    Used by parse_netzwerk_csv() below for the admin/bewertung/netzwerk-ids
+    roster import (models.diff_netzwerk_ids reuses grading-with-llm's
+    scripts/validate_student_ids.py mismatch-reporting approach on top of
+    this). Nachname/Vorname are read positionally (row[0]/row[1]), matching
+    the convention scripts/generate_student_ids.py already established for
+    this school's roster exports -- only the login column is new territory,
+    since that script only ever derived IDs from names, never consumed a
+    real login column.
+    """
+    # Keyword substring match, same style as generate_student_ids.py's
+    # find_mbi_tracker_column/find_kurs_column. First header containing any
+    # of these (case-insensitive) wins. If your real export uses a header
+    # not covered here, add it to this list -- the error message on a failed
+    # upload lists the CSV's actual headers so the gap is easy to spot.
+    keywords = (
+        'benutzername', 'nutzername', 'login', 'kennung',
+        'account', 'netzwerk-id', 'netzwerkid', 'username',
+    )
+    for i, header in enumerate(headers):
+        h = header.strip().lower()
+        if any(kw in h for kw in keywords):
+            return i
+    return None
+
+
+def parse_netzwerk_csv(file_stream):
+    """
+    Parse an uploaded roster CSV for the Netzwerk-ID matcher. Mirrors
+    grading-with-llm/scripts/generate_student_ids.py's parse_csv_roster()
+    (flexible-ish column handling, tolerant of short/blank rows) but reads a
+    real login value per row instead of deriving one.
+
+    Returns list of {'nachname', 'vorname', 'login'} dicts.
+    Raises ValueError with a message safe to flash to the admin.
+    """
+    import csv
+    import io
+
+    raw = file_stream.read()
+    try:
+        text = raw.decode('utf-8-sig')
+    except UnicodeDecodeError:
+        text = raw.decode('cp1252')
+
+    reader = csv.reader(io.StringIO(text))
+    rows = list(reader)
+    if not rows:
+        raise ValueError("CSV ist leer.")
+
+    headers = rows[0]
+    login_idx = find_netzwerk_login_column(headers)
+    if login_idx is None:
+        raise ValueError(
+            f"Keine Login-Spalte in der CSV gefunden. Vorhandene Spalten: {', '.join(headers)}"
+        )
+
+    students = []
+    for row in rows[1:]:
+        if len(row) < 2:
+            continue
+        nachname = row[0].strip()
+        vorname = row[1].strip()
+        login = row[login_idx].strip() if len(row) > login_idx else ''
+        if not nachname or not vorname or not login:
+            continue
+        students.append({'nachname': nachname, 'vorname': vorname, 'login': login})
+
+    return students
+
 # English adjectives (at least one per letter A-Z)
 ADJECTIVES = [
     # A
