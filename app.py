@@ -613,6 +613,49 @@ def _grading_service_health():
         return False
 
 
+def _grading_job_status(job_id):
+    """GET the grading service's authenticated /jobs/<id> server-side (same
+    never-expose-token-to-browser rule as _grading_service_health). Returns
+    the parsed job dict ({'status', 'progress', 'error', ...}) or a dict with
+    an 'offline' key if the service can't be reached -- callers branch on
+    that instead of raising, since a job stuck 'pending import' because the
+    M920x is asleep is an expected, not exceptional, state here."""
+    if not config.GRADING_SERVICE_URL:
+        return {'offline': True}
+    req = urllib.request.Request(
+        f"{config.GRADING_SERVICE_URL}/jobs/{job_id}",
+        headers={'Authorization': f'Bearer {config.GRADING_SERVICE_TOKEN}'},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            return json.loads(resp.read())
+    except (urllib.error.URLError, OSError, TimeoutError, ValueError):
+        return {'offline': True}
+
+
+def _grading_job_retry(job_id):
+    """POST {job_id}/retry server-side. Returns (ok, message) for the caller
+    to flash -- 409 means the job wasn't in 'failed' status (stale UI, e.g.
+    someone already retried it or it finished since the page loaded), which
+    is a normal race here, not a bug to surface as a 500."""
+    if not config.GRADING_SERVICE_URL:
+        return False, 'Bewertungsdienst nicht konfiguriert.'
+    req = urllib.request.Request(
+        f"{config.GRADING_SERVICE_URL}/jobs/{job_id}/retry",
+        method='POST',
+        headers={'Authorization': f'Bearer {config.GRADING_SERVICE_TOKEN}'},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            return True, 'Job erneut in die Warteschlange gestellt.'
+    except urllib.error.HTTPError as e:
+        if e.code == 409:
+            return False, 'Job ist nicht mehr im Status "failed" (evtl. schon läuft er wieder). Seite neu laden.'
+        return False, f'Bewertungsdienst antwortete mit Fehler {e.code}.'
+    except (urllib.error.URLError, OSError, TimeoutError):
+        return False, 'Bewertungsdienst nicht erreichbar.'
+
+
 @app.route('/admin/grading/health')
 @admin_required
 def admin_grading_health():
@@ -799,11 +842,30 @@ def admin_grading_run_detail(run_id):
         else:
             no_conflict.append(r)
 
+    # graded_at is only set once the results callback lands (models.py
+    # import_grading_callback) -- until then, the job is still on the
+    # service and the only source of truth for its status is the service
+    # itself (no local status column, see task_plan.md § Decisions).
+    job_status = _grading_job_status(run['job_id']) if not run['graded_at'] else None
+
     return render_template(
         'admin/grading_run_detail.html', run=run, results=results, reviewable=reviewable,
         non_submitters=non_submitters, no_conflict=no_conflict, needs_decision=needs_decision,
-        override_rate=models.get_grading_run_override_rate(run_id),
+        override_rate=models.get_grading_run_override_rate(run_id), job_status=job_status,
     )
+
+
+@app.route('/admin/grading-run/<int:run_id>/retry-job', methods=['POST'])
+@admin_required
+def admin_grading_run_retry_job(run_id):
+    run = models.get_grading_run(run_id)
+    if not run:
+        flash('Bewertungslauf nicht gefunden.', 'danger')
+        return redirect(url_for('admin_klassen'))
+
+    ok, message = _grading_job_retry(run['job_id'])
+    flash(message, 'success' if ok else 'danger')
+    return redirect(url_for('admin_grading_run_detail', run_id=run_id))
 
 
 @app.route('/admin/grading-run/<int:run_id>/discard', methods=['POST'])

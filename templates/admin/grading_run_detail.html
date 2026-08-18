@@ -20,7 +20,30 @@
                 <tr><td>Rubric</td><td><code>{{ run.rubric }}</code></td></tr>
                 <tr><td>Anbieter / Modell</td><td>{{ run.provider }}{% if run.model %} / {{ run.model }}{% endif %}</td></tr>
                 <tr><td>Importiert</td><td>{{ run.imported_at }}</td></tr>
-                <tr><td>Bewertet</td><td>{{ run.graded_at or '—' }}</td></tr>
+                <tr>
+                    <td>Bewertet</td>
+                    <td>
+                        {% if run.graded_at %}
+                            {{ run.graded_at }}
+                        {% elif job_status is none %}
+                            —
+                        {% elif job_status.offline %}
+                            <span class="badge badge-warning">⚠️ Bewertungsdienst nicht erreichbar</span>
+                        {% elif job_status.status == 'failed' %}
+                            <span class="badge badge-danger">❌ fehlgeschlagen{% if job_status.error %}: {{ job_status.error }}{% endif %}</span>
+                            <form method="POST" action="{{ url_for('admin_grading_run_retry_job', run_id=run.id) }}" style="display: inline;">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button type="submit" class="btn btn-sm btn-secondary">🔄 Erneut versuchen</button>
+                            </form>
+                        {% elif job_status.status == 'queued' %}
+                            <span class="badge badge-warning">⏳ wartet in der Warteschlange</span>
+                        {% elif job_status.status == 'running' %}
+                            <span class="badge badge-primary">⚙️ läuft{% if job_status.progress %} ({{ job_status.progress.done }}/{{ job_status.progress.total }}){% endif %}</span>
+                        {% else %}
+                            <span class="badge">{{ job_status.status or '—' }}</span>
+                        {% endif %}
+                    </td>
+                </tr>
                 <tr><td>Schüler</td><td>{{ run.total_students }} ({{ run.flagged_count }} markiert, {{ run.zero_score_count }} mit 0 Punkten)</td></tr>
                 {% if override_rate is not none %}
                 <tr><td>Korrektur-Rate</td><td>{{ (override_rate * 100)|round(1) }}% der geprüften Kriterien wurden angepasst</td></tr>
