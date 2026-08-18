@@ -7,13 +7,32 @@
 <p class="text-muted mb-2">
     Gleicht Lernmanagers gespeicherte Netzwerk-IDs (für die KI-Bewertung: ordnet
     scan-folders-Ordnernamen einem Schüler zu) gegen eine echte Schul-Roster-CSV ab.
-    Nachname/Vorname stehen in Spalte 1/2, die Login-Spalte wird automatisch erkannt.
     Es wird nichts automatisch übernommen — nur nach eigener Bestätigung unten.
 </p>
 
 <div class="card mb-2">
     <div class="card-header">📤 Roster-CSV hochladen</div>
-    <form method="POST" enctype="multipart/form-data" style="padding: 1rem;">
+    <div style="padding: 1rem 1rem 0;">
+        <p class="text-muted mb-1" style="font-size: 0.9rem;">
+            Erwartetes Format: Kopfzeile + je eine Zeile pro Schüler. Nachname/Vorname stehen
+            positionsbasiert in Spalte 1/2 (Kopfzeilen-Text dafür ist egal). Die Login-Spalte wird über
+            ihren Namen erkannt — Kopfzeile muss eines von
+            <code>Benutzername</code>, <code>Nutzername</code>, <code>Login</code>, <code>Kennung</code>,
+            <code>Account</code>, <code>Netzwerk-ID</code>, <code>Username</code> enthalten (Groß-/Kleinschreibung egal).
+        </p>
+        <div style="overflow-x: auto;">
+            <table class="table" style="font-size: 0.85rem;">
+                <thead>
+                    <tr><th>Nachname</th><th>Vorname</th><th>Login</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>Muster</td><td>Max</td><td>mmuster</td></tr>
+                    <tr><td>Beispiel</td><td>Erika</td><td>ebeispiel</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <form method="POST" enctype="multipart/form-data" style="padding: 0 1rem 1rem;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="form-group">
             <label for="roster_csv">CSV-Datei</label>
