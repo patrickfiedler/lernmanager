@@ -635,6 +635,7 @@ def admin_bewertung_netzwerk_ids():
     scripts/validate_student_ids.py mismatch-reporting approach). Nothing is
     written until the admin submits the review form below."""
     diff = None
+    klassenstufen_diff = None
     if request.method == 'POST':
         file = request.files.get('roster_csv')
         if not file or not file.filename:
@@ -643,10 +644,14 @@ def admin_bewertung_netzwerk_ids():
             try:
                 csv_rows = parse_netzwerk_csv(file.stream)
                 diff = models.diff_netzwerk_ids(csv_rows)
+                klassenstufen_diff = models.diff_klassenstufen(csv_rows)
             except ValueError as e:
                 flash(f'Fehler beim Einlesen der CSV: {e}', 'danger')
 
-    return render_template('admin/bewertung_netzwerk_ids.html', diff=diff)
+    return render_template(
+        'admin/bewertung_netzwerk_ids.html', diff=diff,
+        klassenstufen_diff=klassenstufen_diff,
+    )
 
 
 @app.route('/admin/bewertung/netzwerk-ids/apply', methods=['POST'])
@@ -1051,6 +1056,21 @@ def admin_klasse_umbenennen(klasse_id):
     else:
         models.update_klasse_name(klasse_id, name)
         flash(f'Klasse umbenannt zu „{name}". ✅', 'success')
+    return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id))
+
+
+@app.route('/admin/klasse/<int:klasse_id>/klassenstufe-setzen', methods=['POST'])
+@admin_required
+def admin_klasse_klassenstufe(klasse_id):
+    raw = request.form.get('klassenstufe', '').strip()
+    if not raw:
+        models.update_klasse_klassenstufe(klasse_id, None)
+        flash('Klassenstufe entfernt.', 'success')
+    elif raw.isdigit():
+        models.update_klasse_klassenstufe(klasse_id, int(raw))
+        flash(f'Klassenstufe auf {raw} gesetzt. ✅', 'success')
+    else:
+        flash('Klassenstufe muss eine Zahl sein.', 'danger')
     return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id))
 
 

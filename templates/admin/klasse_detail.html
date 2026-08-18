@@ -11,6 +11,11 @@
             <input type="text" name="name" class="form-control" value="{{ klasse.name }}" style="width: 12rem;" title="Neuer Klassenname">
             <button type="submit" class="btn btn-secondary btn-sm">✏️ Umbenennen</button>
         </form>
+        <form method="POST" action="{{ url_for('admin_klasse_klassenstufe', klasse_id=klasse.id) }}" class="flex gap-1 flex-center">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="number" name="klassenstufe" class="form-control" value="{{ klasse.klassenstufe or '' }}" style="width: 6rem;" title="Klassenstufe" placeholder="Stufe">
+            <button type="submit" class="btn btn-secondary btn-sm">🎓 Stufe setzen</button>
+        </form>
     </div>
     <div class="flex gap-1">
         <a href="{{ url_for('admin_topic_queue', klasse_id=klasse.id) }}" class="btn btn-secondary">📋 Themen-Reihenfolge</a>

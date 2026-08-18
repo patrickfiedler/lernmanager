@@ -90,15 +90,36 @@ def find_netzwerk_login_column(headers):
     return None
 
 
+def _find_exact_column(headers, name):
+    """Case-insensitive exact header match, for the optional columns
+    (Klasse/Klassenstufe/Seilbahn) whose names are fixed by convention in
+    this school's student_mapping.csv export -- unlike the login column,
+    there's no need for find_netzwerk_login_column's fuzzy keyword matching
+    here, and exact matching avoids 'Klasse' accidentally matching the
+    'Klassenstufe' column."""
+    for i, header in enumerate(headers):
+        if header.strip().lower() == name:
+            return i
+    return None
+
+
 def parse_netzwerk_csv(file_stream):
     """
-    Parse an uploaded roster CSV for the Netzwerk-ID matcher. Mirrors
-    grading-with-llm/scripts/generate_student_ids.py's parse_csv_roster()
-    (flexible-ish column handling, tolerant of short/blank rows) but reads a
-    real login value per row instead of deriving one.
+    Parse an uploaded roster CSV for the admin/bewertung/netzwerk-ids page.
+    Mirrors grading-with-llm/scripts/generate_student_ids.py's
+    parse_csv_roster() (flexible-ish column handling, tolerant of
+    short/blank rows) but reads a real login value per row instead of
+    deriving one.
 
-    Returns list of {'nachname', 'vorname', 'login'} dicts.
-    Raises ValueError with a message safe to flash to the admin.
+    Also opportunistically picks up Klasse/Klassenstufe/Seilbahn columns if
+    present (the school's student_mapping.csv has these alongside the login
+    column) -- used by models.diff_netzwerk_ids()/diff_klassenstufen() for
+    the Lernpfad and Klassenstufe cross-checks. Any of the three is optional;
+    missing ones come back as ''.
+
+    Returns list of {'nachname', 'vorname', 'login', 'klasse',
+    'klassenstufe', 'seilbahn'} dicts. Raises ValueError with a message safe
+    to flash to the admin.
     """
     import csv
     import io
@@ -120,6 +141,12 @@ def parse_netzwerk_csv(file_stream):
         raise ValueError(
             f"Keine Login-Spalte in der CSV gefunden. Vorhandene Spalten: {', '.join(headers)}"
         )
+    klasse_idx = _find_exact_column(headers, 'klasse')
+    klassenstufe_idx = _find_exact_column(headers, 'klassenstufe')
+    seilbahn_idx = _find_exact_column(headers, 'seilbahn')
+
+    def cell(row, idx):
+        return row[idx].strip() if idx is not None and len(row) > idx else ''
 
     students = []
     for row in rows[1:]:
@@ -130,7 +157,12 @@ def parse_netzwerk_csv(file_stream):
         login = row[login_idx].strip() if len(row) > login_idx else ''
         if not nachname or not vorname or not login:
             continue
-        students.append({'nachname': nachname, 'vorname': vorname, 'login': login})
+        students.append({
+            'nachname': nachname, 'vorname': vorname, 'login': login,
+            'klasse': cell(row, klasse_idx),
+            'klassenstufe': cell(row, klassenstufe_idx),
+            'seilbahn': cell(row, seilbahn_idx),
+        })
 
     return students
 

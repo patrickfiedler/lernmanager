@@ -7,7 +7,8 @@
 <p class="text-muted mb-2">
     Gleicht Lernmanagers gespeicherte Netzwerk-IDs (für die KI-Bewertung: ordnet
     scan-folders-Ordnernamen einem Schüler zu) gegen eine echte Schul-Roster-CSV ab.
-    Es wird nichts automatisch übernommen — nur nach eigener Bestätigung unten.
+    Prüft außerdem Lernpfad (Seilbahn-Spalte) und Klassenstufe gegen die CSV.
+    Es wird nichts automatisch übernommen — nur die Netzwerk-ID-Änderungen unten, nach eigener Bestätigung.
 </p>
 
 <div class="card mb-2">
@@ -19,15 +20,21 @@
             ihren Namen erkannt — Kopfzeile muss eines von
             <code>Benutzername</code>, <code>Nutzername</code>, <code>Login</code>, <code>Kennung</code>,
             <code>Account</code>, <code>Netzwerk-ID</code>, <code>Username</code> enthalten (Groß-/Kleinschreibung egal).
+            <code>Klasse</code>, <code>Klassenstufe</code> und <code>Seilbahn</code> sind optional (exakter
+            Spaltenname), aktivieren aber die beiden Prüfungen unten. Bei <code>Seilbahn</code> zählt jeder
+            nicht-leere Wert (z.B. <code>x</code>) als "ja".
         </p>
         <div style="overflow-x: auto;">
             <table class="table" style="font-size: 0.85rem;">
                 <thead>
-                    <tr><th>Nachname</th><th>Vorname</th><th>Login</th></tr>
+                    <tr>
+                        <th>Nachname</th><th>Vorname</th><th>Klasse</th><th>Klassenstufe</th>
+                        <th>Login</th><th>Seilbahn</th>
+                    </tr>
                 </thead>
                 <tbody>
-                    <tr><td>Muster</td><td>Max</td><td>mmuster</td></tr>
-                    <tr><td>Beispiel</td><td>Erika</td><td>ebeispiel</td></tr>
+                    <tr><td>Muster</td><td>Max</td><td>6a</td><td>6</td><td>mmuster</td><td></td></tr>
+                    <tr><td>Beispiel</td><td>Erika</td><td>6a</td><td>6</td><td>ebeispiel</td><td>x</td></tr>
                 </tbody>
             </table>
         </div>
@@ -122,6 +129,60 @@
             <tbody>
                 {% for r in diff.csv_unmatched %}
                 <tr><td>{{ r.nachname }}, {{ r.vorname }}</td><td><code>{{ r.login }}</code></td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+{% if diff.lernpfad_mismatches %}
+<div class="card mb-2" style="border: 1px solid #f59e0b;">
+    <div class="card-header" style="background: #fffbeb; color: #92400e;">
+        ⚠️ {{ diff.lernpfad_mismatches|length }} Lernpfad-Abweichung(en) (Seilbahn)
+    </div>
+    <div style="padding: 0.75rem 1rem;">
+        <p class="text-muted mb-1" style="font-size: 0.9rem;">
+            CSV-Seilbahn-Spalte und Lernmanager-Lernpfad widersprechen sich. Keine automatische Aktion —
+            Lernpfad manuell auf der Schülerseite korrigieren.
+        </p>
+        <table class="table">
+            <thead><tr><th>Name</th><th>Klasse(n)</th><th>Lernpfad (Lernmanager)</th><th>Seilbahn (CSV)</th></tr></thead>
+            <tbody>
+                {% for m in diff.lernpfad_mismatches %}
+                <tr>
+                    <td>{{ m.nachname }}, {{ m.vorname }}</td>
+                    <td>{{ m.klassen or '—' }}</td>
+                    <td><code>{{ m.lernpfad or '—' }}</code></td>
+                    <td><code>{{ 'ja' if m.csv_seilbahn else 'nein' }}</code></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+{% if klassenstufen_diff %}
+<div class="card mb-2">
+    <div class="card-header">🎓 Klassenstufen-Abgleich</div>
+    <div style="padding: 0.75rem 1rem;">
+        <table class="table">
+            <thead><tr><th>Klasse</th><th>Klassenstufe (CSV)</th><th>Klassenstufe (Lernmanager)</th><th>Status</th></tr></thead>
+            <tbody>
+                {% for k in klassenstufen_diff %}
+                <tr>
+                    <td>{{ k.klasse_name }}</td>
+                    <td><code>{{ k.csv_klassenstufe }}</code></td>
+                    <td><code>{{ k.db_klassenstufe or '—' }}</code></td>
+                    <td>
+                        {% if k.status == 'match' %}✅ passt
+                        {% elif k.status == 'mismatch' %}⚠️ weicht ab
+                        {% elif k.status == 'not_set' %}⚪ nicht gesetzt
+                        {% else %}❓ Klasse nicht in Lernmanager
+                        {% endif %}
+                    </td>
+                </tr>
                 {% endfor %}
             </tbody>
         </table>

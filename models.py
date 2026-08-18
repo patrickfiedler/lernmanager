@@ -92,7 +92,8 @@ def init_db():
                 name TEXT NOT NULL,
                 llm_artifact_feedback_enabled INTEGER NOT NULL DEFAULT 0,
                 llm_transparency_mode INTEGER DEFAULT NULL,
-                artifact_gate_required INTEGER NOT NULL DEFAULT 1
+                artifact_gate_required INTEGER NOT NULL DEFAULT 1,
+                klassenstufe INTEGER DEFAULT NULL
             );
 
             -- Students (Schüler)
@@ -704,10 +705,25 @@ def update_klasse_name(klasse_id, name):
         conn.execute("UPDATE klasse SET name = ? WHERE id = ?", (name, klasse_id))
 
 
+def update_klasse_klassenstufe(klasse_id, klassenstufe):
+    """Set a class's grade level (5, 6, ...), or None to clear it."""
+    with db_session() as conn:
+        conn.execute("UPDATE klasse SET klassenstufe = ? WHERE id = ?", (klassenstufe, klasse_id))
+
+
 def get_klasse(klasse_id):
     """Get a class by ID."""
     with db_session() as conn:
         row = conn.execute("SELECT * FROM klasse WHERE id = ?", (klasse_id,)).fetchone()
+        result = dict(row) if row else None
+    return result
+
+
+def get_klasse_by_name(name):
+    """Get a class by exact name match (used by the student_mapping.csv
+    Klassenstufe cross-check -- admin/bewertung/netzwerk-ids)."""
+    with db_session() as conn:
+        row = conn.execute("SELECT * FROM klasse WHERE name = ?", (name,)).fetchone()
         result = dict(row) if row else None
     return result
 
@@ -833,11 +849,11 @@ def get_existing_netzwerk_ids():
 
 def get_all_students_with_netzwerk_id():
     """All students (any class, any school year) with their current
-    netzwerk_id and a comma-joined list of class names, for the
+    netzwerk_id, lernpfad and a comma-joined list of class names, for the
     admin/bewertung/netzwerk-ids CSV matcher."""
     with db_session() as conn:
         rows = conn.execute(
-            "SELECT s.id, s.nachname, s.vorname, s.netzwerk_id, "
+            "SELECT s.id, s.nachname, s.vorname, s.netzwerk_id, s.lernpfad, "
             "GROUP_CONCAT(k.name, ', ') AS klassen "
             "FROM student s "
             "LEFT JOIN student_klasse sk ON sk.student_id = s.id "
@@ -870,13 +886,23 @@ def diff_netzwerk_ids(csv_rows):
     csv_rows: list of {'nachname', 'vorname', 'login'} from
     utils.parse_netzwerk_csv().
 
-    Returns {'updates', 'unchanged', 'csv_unmatched', 'db_unmatched'}:
+    Also cross-checks Lernpfad: if the CSV has a Seilbahn column (see
+    utils.parse_netzwerk_csv), a matched student whose 'seilbahn' cell is
+    non-empty is expected to have lernpfad='seilbahn' in Lernmanager, and
+    vice versa. Mismatches go in the returned 'lernpfad_mismatches' list.
+    Rows/students only differ in login are unaffected -- this doesn't touch
+    'updates'/'unchanged', it just adds a second, independent report.
+
+    Returns {'updates', 'unchanged', 'csv_unmatched', 'db_unmatched',
+    'lernpfad_mismatches'}:
       - updates: DB student found by name, CSV login differs from current netzwerk_id
       - unchanged: DB student found by name, CSV login already matches
       - csv_unmatched: CSV row whose name matched zero or >1 DB students
       - db_unmatched: DB student with no matching CSV row (each gets
         'similar_csv_logins' -- CSV logins sharing the current ID's first 4
         chars, i.e. validate_student_ids.py's mismatch hint)
+      - lernpfad_mismatches: matched students where CSV Seilbahn flag and
+        DB lernpfad disagree, each {..student fields.., 'csv_seilbahn'}
     """
     students = get_all_students_with_netzwerk_id()
 
@@ -888,7 +914,7 @@ def diff_netzwerk_ids(csv_rows):
         by_name.setdefault(name_key(s['nachname'], s['vorname']), []).append(s)
 
     matched_student_ids = set()
-    updates, unchanged, csv_unmatched = [], [], []
+    updates, unchanged, csv_unmatched, lernpfad_mismatches = [], [], [], []
 
     for row in csv_rows:
         candidates = by_name.get(name_key(row['nachname'], row['vorname']), [])
@@ -903,6 +929,10 @@ def diff_netzwerk_ids(csv_rows):
         else:
             updates.append({**student, 'csv_login': csv_login})
 
+        csv_seilbahn = bool(row.get('seilbahn', '').strip())
+        if csv_seilbahn != (student['lernpfad'] == 'seilbahn'):
+            lernpfad_mismatches.append({**student, 'csv_seilbahn': csv_seilbahn})
+
     db_unmatched = [dict(s) for s in students if s['id'] not in matched_student_ids]
 
     csv_logins_unmatched = {r['login'].strip().lower() for r in csv_unmatched}
@@ -913,7 +943,57 @@ def diff_netzwerk_ids(csv_rows):
     return {
         'updates': updates, 'unchanged': unchanged,
         'csv_unmatched': csv_unmatched, 'db_unmatched': db_unmatched,
+        'lernpfad_mismatches': lernpfad_mismatches,
     }
+
+
+def diff_klassenstufen(csv_rows):
+    """
+    Compare each CSV row's (Klasse, Klassenstufe) against Lernmanager's
+    klasse.klassenstufe field. This is a class-level check, not a per-student
+    one -- Klassenstufe is a fact about the class, so we dedupe to one entry
+    per distinct Klasse name found in the CSV rather than repeating it once
+    per student in that class.
+
+    csv_rows: list of dicts from utils.parse_netzwerk_csv() -- rows lacking
+    either the 'klasse' or 'klassenstufe' column value are skipped (the CSV
+    upload may not always carry these columns).
+
+    Returns list of dicts, one per distinct CSV Klasse name:
+      {'klasse_name', 'csv_klassenstufe', 'db_klassenstufe', 'status'}
+    """
+    seen = {}
+    for row in csv_rows:
+        name = (row.get('klasse') or '').strip()
+        stufe = (row.get('klassenstufe') or '').strip()
+        if not name or not stufe:
+            continue
+        seen.setdefault(name, stufe)  # first CSV row for this class wins
+
+    results = []
+    for klasse_name, csv_stufe in sorted(seen.items()):
+        klasse = get_klasse_by_name(klasse_name)
+        entry = {
+            'klasse_name': klasse_name,
+            'csv_klassenstufe': csv_stufe,
+        }
+
+        if klasse is None:
+            entry['db_klassenstufe'] = None
+            entry['status'] = 'not_in_lernmanager'
+        else:
+            db_stufe = klasse['klassenstufe']
+            entry['db_klassenstufe'] = db_stufe
+            if db_stufe is None:
+                entry['status'] = 'not_set'
+            elif int(db_stufe) == int(csv_stufe):
+                entry['status'] = 'match'
+            else:
+                entry['status'] = 'mismatch'
+
+        results.append(entry)
+
+    return results
 
 
 def _normalize_umlauts(text):
