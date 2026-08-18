@@ -7,6 +7,7 @@ task_definitions/
 # Internal scripts (kept locally, not public)
 anonymize_db.py
 deploy/db_crypto.py
+deploy/lernmanager.nginx.conf
 run-local.sh
 crontab_weekly_reports.txt
 *.tar.gz
