@@ -336,6 +336,12 @@ def internal_grading_results():
     return jsonify({'status': 'ok', 'grading_run_id': run_id}), 200
 
 
+_MAX_LERNPFAD_LOGINS = 500  # generous over real school-class scale (~20-90);
+# past this a request signals a bug rather than a real job, and could
+# otherwise pressure match_netzwerk_logins()'s `IN (?,?,?...)` SQL against
+# SQLite's bound-parameter limit or spike memory (2026-08-19 security review).
+
+
 @app.route('/internal/grading/lernpfad', methods=['POST'])
 @csrf.exempt
 def internal_grading_lernpfad():
@@ -361,6 +367,8 @@ def internal_grading_lernpfad():
     logins = payload.get('logins')
     if not isinstance(logins, list) or not all(isinstance(l, str) for l in logins):
         return jsonify({'error': 'logins must be a list of strings'}), 400
+    if len(logins) > _MAX_LERNPFAD_LOGINS:
+        return jsonify({'error': f'logins exceeds max of {_MAX_LERNPFAD_LOGINS}'}), 400
 
     matches = models.match_netzwerk_logins(logins)
     return jsonify({'lernpfad': {m['login']: m['lernpfad'] for m in matches if m.get('lernpfad')}})

@@ -63,3 +63,18 @@ def test_route_empty_logins_returns_empty_map(app, client):
     )
     assert resp.status_code == 200
     assert resp.get_json()["lernpfad"] == {}
+
+
+def test_route_rejects_logins_over_cap(app, client):
+    """2026-08-19 security review finding #3: an authenticated caller
+    sending an oversized logins list could pressure
+    match_netzwerk_logins()'s SQL IN(...) against SQLite's bound-parameter
+    limit -- reject past the cap instead of ever building that query."""
+    from app import _MAX_LERNPFAD_LOGINS
+    config.GRADING_SERVICE_CALLBACK_SECRET = "s3cr3t"
+    resp = client.post(
+        '/internal/grading/lernpfad',
+        json={"logins": [f"student{i}" for i in range(_MAX_LERNPFAD_LOGINS + 1)]},
+        headers={"X-Grading-Callback-Secret": "s3cr3t"},
+    )
+    assert resp.status_code == 400
