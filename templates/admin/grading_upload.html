@@ -330,6 +330,12 @@ document.getElementById('grading-upload-form').addEventListener('submit', async 
         openForm.append('rubric', rubric);
         openForm.append('provider', provider);
         openForm.append('manifest', JSON.stringify(manifest));
+        // Without this, the grading service never fires the results callback
+        // (worker.py: `if job.get("callback_url")`) -- it just sits at
+        // "done" with nothing delivered. Same URL scan-folders' -CallbackUrl
+        // default uses; must match an entry in the M920x's
+        // GRADING_SERVICE_CALLBACK_ALLOWLIST.
+        openForm.append('callback_url', 'https://lernen.mrfiedler.de/internal/grading/results');
 
         const openResp = await fetch('/grading/jobs', { method: 'POST', body: openForm });
         if (!openResp.ok) {
