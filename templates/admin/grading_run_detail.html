@@ -44,7 +44,7 @@
                         {% endif %}
                     </td>
                 </tr>
-                <tr><td>Schüler</td><td>{{ run.total_students }} ({{ run.flagged_count }} markiert, {{ run.zero_score_count }} mit 0 Punkten)</td></tr>
+                <tr><td>Schüler</td><td>{{ run.total_students }} ({{ run.flagged_count }} zur Prüfung markiert, {{ run.zero_score_count }} mit 0 Punkten)</td></tr>
                 {% if override_rate is not none %}
                 <tr><td>Korrektur-Rate</td><td>{{ (override_rate * 100)|round(1) }}% der geprüften Kriterien wurden angepasst</td></tr>
                 {% endif %}

@@ -7,7 +7,7 @@
     <h1>
         {% if result.student_id %}{{ result.nachname }}, {{ result.vorname }}{% else %}{{ result.netzwerk_id }} (nicht zugeordnet){% endif %}
         {% if position %}<span class="text-muted" style="font-size: 1rem;">{{ position }} / {{ queue_total }}</span>{% endif %}
-        {% if remaining_flagged %}<span class="badge badge-warning">{{ remaining_flagged }} markiert noch offen</span>{% endif %}
+        {% if remaining_flagged %}<span class="badge badge-warning">{{ remaining_flagged }} zur Prüfung markiert</span>{% endif %}
     </h1>
     <a href="{{ url_for('admin_grading_run_detail', run_id=run.id) }}" class="btn btn-secondary">← Zur Übersicht</a>
 </div>
