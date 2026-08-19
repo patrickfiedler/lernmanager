@@ -336,6 +336,36 @@ def internal_grading_results():
     return jsonify({'status': 'ok', 'grading_run_id': run_id}), 200
 
 
+@app.route('/internal/grading/lernpfad', methods=['POST'])
+@csrf.exempt
+def internal_grading_lernpfad():
+    """
+    Called by the grading service (M920x) when a job's manifest is missing
+    `lernpfad` for one or more students -- confirmed 2026-08-19 this is
+    every scan-folders-batch.ps1 job, which has no local Seilbahn/track
+    data source at all (its manifest's `lernpfad` field was actually a
+    school course code, never "seilbahn"). Reuses match_netzwerk_logins(),
+    the same lookup admin_grading_match_logins() already does for the
+    browser upload path -- just under machine (shared-secret) auth instead
+    of an admin session, so the M920x can call it directly. Keeps
+    student.lernpfad the only copy of this data anywhere (grading-with-llm
+    todo.md, "scan-folders-batch.ps1 Seilbahn gap").
+    """
+    secret = request.headers.get('X-Grading-Callback-Secret', '')
+    if not config.GRADING_SERVICE_CALLBACK_SECRET or not hmac.compare_digest(
+        secret, config.GRADING_SERVICE_CALLBACK_SECRET
+    ):
+        return jsonify({'error': 'invalid or missing callback secret'}), 401
+
+    payload = request.get_json(silent=True) or {}
+    logins = payload.get('logins')
+    if not isinstance(logins, list) or not all(isinstance(l, str) for l in logins):
+        return jsonify({'error': 'logins must be a list of strings'}), 400
+
+    matches = models.match_netzwerk_logins(logins)
+    return jsonify({'lernpfad': {m['login']: m['lernpfad'] for m in matches if m.get('lernpfad')}})
+
+
 @app.route('/internal/auth-check')
 def internal_auth_check():
     """
