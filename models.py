@@ -4458,9 +4458,14 @@ def _row_to_grading_result(row):
 
 
 def get_grading_result(result_id):
-    """Return one grading_result (dict, criteria/media parsed), or None."""
+    """Return one grading_result (dict, criteria/media parsed, student name joined), or None."""
     with db_session() as conn:
-        row = conn.execute("SELECT * FROM grading_result WHERE id = ?", (result_id,)).fetchone()
+        row = conn.execute(
+            "SELECT gres.*, s.nachname, s.vorname "
+            "FROM grading_result gres LEFT JOIN student s ON s.id = gres.student_id "
+            "WHERE gres.id = ?",
+            (result_id,)
+        ).fetchone()
     return _row_to_grading_result(row) if row else None
 
 
