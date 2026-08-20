@@ -72,6 +72,27 @@
     </div>
 </div>
 
+{% if fork_choices %}
+<!-- Fork/Choice branch reassignment -->
+<div class="card mt-2">
+    <div class="card-header">🔀 Verzweigungs-Wahl</div>
+    {% for fc in fork_choices %}
+    <form method="POST" action="{{ url_for('admin_schueler_fork_zweig', student_id=student.id) }}" class="flex gap-1 flex-center mt-1">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="fork_group" value="{{ fc.fork_group }}">
+        <input type="hidden" name="task_id" value="{{ fc.task_id }}">
+        <span style="min-width: 160px;">{{ fc.task_name }}</span>
+        <select name="branch" class="form-control" style="width: auto;">
+            {% for b in fc.branches %}
+            <option value="{{ b.branch }}" {% if b.branch == fc.fork_branch %}selected{% endif %}>{{ b.label }}</option>
+            {% endfor %}
+        </select>
+        <button type="submit" class="btn btn-secondary">Zweig ändern</button>
+    </form>
+    {% endfor %}
+</div>
+{% endif %}
+
 <!-- Move Student -->
 {% if klassen %}
 <div class="card mt-2">

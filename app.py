@@ -1400,6 +1400,7 @@ def admin_schueler_detail(student_id):
     artifact_feedback = models.get_all_artifact_feedback_for_student(student_id)
     artifact_files = models.get_all_student_artifact_files_for_student(student_id)
     data_summary = models.get_student_data_summary(student_id)
+    fork_choices = models.get_student_fork_choices(student_id)
 
     return render_template('admin/schueler_detail.html',
                            student=student,
@@ -1409,7 +1410,8 @@ def admin_schueler_detail(student_id):
                            student_tasks=student_tasks,
                            artifact_feedback=artifact_feedback,
                            artifact_files=artifact_files,
-                           data_summary=data_summary)
+                           data_summary=data_summary,
+                           fork_choices=fork_choices)
 
 
 @app.route('/admin/schueler/<int:student_id>/loeschen', methods=['POST'])
@@ -1461,6 +1463,27 @@ def admin_schueler_lernpfad(student_id):
         return redirect(url_for('admin_schueler_detail', student_id=student_id))
     models.update_student_setting(student_id, 'lernpfad', lernpfad)
     flash('Lernpfad gespeichert. ✅', 'success')
+    return redirect(url_for('admin_schueler_detail', student_id=student_id))
+
+
+@app.route('/admin/schueler/<int:student_id>/fork-zweig', methods=['POST'])
+@admin_required
+def admin_schueler_fork_zweig(student_id):
+    """Teacher reassignment of a student's fork/choice branch pick.
+
+    Bypasses the student-side lock (is_fork_choice_locked) -- this is the
+    override mechanism for the branch-imbalance risk noted in the design doc
+    (docs/shared/lernmanager/fork-choice-artifact-model.md decision 1).
+    """
+    fork_group = request.form.get('fork_group')
+    branch = request.form.get('branch')
+    task_id = request.form.get('task_id', type=int)
+    valid_branches = models.get_fork_branches(task_id, fork_group) if task_id and fork_group else set()
+    if not fork_group or branch not in valid_branches:
+        flash('Ungültige Zweig-Wahl.', 'danger')
+        return redirect(url_for('admin_schueler_detail', student_id=student_id))
+    models.set_student_fork_choice(student_id, fork_group, branch)
+    flash('Zweig-Wahl aktualisiert. ✅', 'success')
     return redirect(url_for('admin_schueler_detail', student_id=student_id))
 
 
@@ -2004,6 +2027,17 @@ def admin_thema_aufgaben(task_id):
         kern_standard_tag_list = request.form.getlist('kern_standard_tag[]')
         checkpoint_hints_list = request.form.getlist('checkpoint_hints[]')
         school_only_list = request.form.getlist('school_only[]')
+        fork_group_list = request.form.getlist('fork_group[]')
+        fork_branch_list = request.form.getlist('fork_branch[]')
+        fork_branch_label_list = request.form.getlist('fork_branch_label[]')
+        fork_branch_note_list = request.form.getlist('fork_branch_note[]')
+        fork_required_list = request.form.getlist('fork_required[]')
+
+        # A subtask needs both fork_group and fork_branch, or neither.
+        for i, (fg, fb) in enumerate(zip(fork_group_list, fork_branch_list)):
+            if bool(fg.strip()) != bool(fb.strip()):
+                flash(f'Aufgabe {i+1}: Fork-Gruppe und Zweig müssen beide oder keins ausgefüllt sein.', 'danger')
+                return redirect(url_for('admin_thema_detail', task_id=task_id))
 
         # Validate all subtask quiz JSONs before saving
         for i, qj in enumerate(quiz_json_list):
@@ -2027,7 +2061,11 @@ def admin_thema_aufgaben(task_id):
                                checkpoint_type_list=checkpoint_type_list,
                                kern_standard_tag_list=kern_standard_tag_list,
                                checkpoint_hints_list=checkpoint_hints_list,
-                               school_only_list=school_only_list)
+                               school_only_list=school_only_list,
+                               fork_group_list=fork_group_list, fork_branch_list=fork_branch_list,
+                               fork_branch_label_list=fork_branch_label_list,
+                               fork_branch_note_list=fork_branch_note_list,
+                               fork_required_list=fork_required_list)
         flash('Aufgaben aktualisiert.', 'success')
         return redirect(url_for('admin_thema_detail', task_id=task_id))
 

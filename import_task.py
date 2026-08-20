@@ -97,6 +97,42 @@ def _validate_artifact_gate(gate, label):
     return gate, None
 
 
+def _validate_fork_groups(subtasks, errors):
+    """Fork/Choice cross-subtask checks.
+
+    Design: docs/shared/lernmanager/fork-choice-artifact-model.md decision 5.
+    fork_group/fork_branch validity per-subtask is checked by the caller;
+    this handles checks that need the whole subtask list: at least 2 branches
+    per fork_group, exactly one fork_branch_label per branch, and each
+    branch's subtasks contiguous in list order.
+    """
+    groups = {}
+    for i, sub in enumerate(subtasks):
+        if not isinstance(sub, dict) or not sub.get('fork_group'):
+            continue
+        groups.setdefault(sub['fork_group'], []).append((i, sub))
+
+    for fork_group, members in groups.items():
+        branches = {}
+        for i, sub in members:
+            branches.setdefault(sub.get('fork_branch'), []).append(i)
+
+        if len(branches) < 2:
+            errors.append(f"fork_group '{fork_group}' has only {len(branches)} branch(es); a fork needs at least 2")
+
+        for branch, indices in branches.items():
+            label_count = sum(1 for i, sub in members if sub.get('fork_branch') == branch and sub.get('fork_branch_label'))
+            if label_count != 1:
+                errors.append(
+                    f"fork_group '{fork_group}' branch '{branch}': exactly one subtask must carry "
+                    f"'fork_branch_label' (found {label_count})"
+                )
+            indices.sort()
+            if indices != list(range(indices[0], indices[0] + len(indices))):
+                positions = [i + 1 for i in indices]
+                errors.append(f"fork_group '{fork_group}' branch '{branch}': subtasks must be contiguous (positions {positions})")
+
+
 def _validate_connections(connections, warnings=None):
     """Validate connections.building_on / arriving_at (Clayden-style unit connections).
 
@@ -243,6 +279,9 @@ def validate_task_structure(data, warnings=None):
                     errors.append(f"Subtask {i+1} has checkpoint_type but missing/invalid 'kern_standard_tag'. Must be one of: {', '.join(VALID_KERN_STANDARD_TAGS)}")
                 if sub.get('kern_standard_tag') and not sub.get('checkpoint_type'):
                     errors.append(f"Subtask {i+1} has 'kern_standard_tag' but no 'checkpoint_type'")
+                # fork_group/fork_branch are required together (Fork/Choice Artifact Model)
+                if bool(sub.get('fork_group')) != bool(sub.get('fork_branch')):
+                    errors.append(f"Subtask {i+1}: 'fork_group' and 'fork_branch' must both be set or both empty")
                 # Quiz-checkpoints render as radio-button retry sessions (single-select
                 # only) - a multi-correct MC question there could never be answered right.
                 if sub.get('checkpoint_type') == 'quiz' and sub.get('quiz'):
@@ -266,6 +305,7 @@ def validate_task_structure(data, warnings=None):
                     _, warn = _validate_artifact_gate(sub['artifact_gate'], f"Subtask {i+1}")
                     if warn and warnings is not None:
                         warnings.append(warn)
+            _validate_fork_groups(task['subtasks'], errors)
 
     # Validate materials
     if 'materials' in task:
@@ -417,11 +457,19 @@ def import_task(task_data, dry_run=False, warnings=None):
         checkpoint_type = sub.get('checkpoint_type') or None
         kern_standard_tag = sub.get('kern_standard_tag') or None
         checkpoint_hints_json = json.dumps(sub['checkpoint_hints'], ensure_ascii=False) if sub.get('checkpoint_hints') else None
+        fork_group = sub.get('fork_group') or None
+        fork_branch = sub.get('fork_branch') or None
+        fork_branch_label = sub.get('fork_branch_label') or None
+        fork_branch_note = sub.get('fork_branch_note') or None
+        fork_required = 1 if sub.get('fork_required', True) else 0
         sub_id = models.create_subtask(task_id, sub['beschreibung'], reihenfolge, estimated_minutes, sub_quiz_json,
                                        path=path, path_model=path_model, graded_artifact_json=graded_artifact_json,
                                        fertig_wenn=fertig_wenn, tipps=tipps, artifact_gate_json=artifact_gate_json,
                                        checkpoint_type=checkpoint_type, kern_standard_tag=kern_standard_tag,
-                                       checkpoint_hints_json=checkpoint_hints_json)
+                                       checkpoint_hints_json=checkpoint_hints_json,
+                                       fork_group=fork_group, fork_branch=fork_branch,
+                                       fork_branch_label=fork_branch_label, fork_branch_note=fork_branch_note,
+                                       fork_required=fork_required)
         subtask_id_by_position[reihenfolge] = sub_id
 
     # Create materials and restore subtask assignments

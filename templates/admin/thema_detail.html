@@ -148,6 +148,12 @@
                             <option value="0" {% if not st.school_only %}selected{% endif %}>Überall verfügbar</option>
                             <option value="1" {% if st.school_only %}selected{% endif %}>🔒 Nur Schulnetzwerk</option>
                         </select>
+                        <input type="text" name="fork_group[]" class="form-control" style="width: 100px;" placeholder="Fork-Gruppe" value="{{ st.fork_group or '' }}" title="Fork-Gruppe: gleicher Wert bei allen Aufgaben aller Zweige dieser Verzweigung">
+                        <input type="text" name="fork_branch[]" class="form-control" style="width: 70px;" placeholder="Zweig" value="{{ st.fork_branch or '' }}" title="Zweig-Kennung innerhalb der Fork-Gruppe (z.B. a, b, c)">
+                        <select name="fork_required[]" class="form-control" style="width: 120px;" title="Pflicht-Verzweigung oder Zusatz">
+                            <option value="1" {% if st.fork_required != 0 %}selected{% endif %}>Pflicht-Zweig</option>
+                            <option value="0" {% if st.fork_required == 0 %}selected{% endif %}>Zusatz-Zweig</option>
+                        </select>
                         <input type="number" name="estimated_minutes[]" class="form-control" style="width: 80px;" min="5" max="180" placeholder="Min" value="{{ st.estimated_minutes or '' }}" title="Geschätzte Dauer in Minuten">
                         <button type="button" class="btn btn-danger btn-sm" onclick="removeSubtask(this)">✕ Entfernen</button>
                     </div>
@@ -163,6 +169,14 @@
                 <div class="form-group mt-1">
                     <label style="font-size: 0.875rem; color: #374151;">💡 Tipps: <small class="text-muted">(optional — ausklappbar unter der Aufgabe)</small></label>
                     <textarea name="tipps[]" class="form-control" rows="2" placeholder="z.B. Nutze den Zoom-Regler um Details besser zu sehen.">{{ st.tipps or '' }}</textarea>
+                </div>
+                <div class="form-group mt-1">
+                    <label style="font-size: 0.875rem; color: #374151;">🔀 Zweig-Name: <small class="text-muted">(nur bei der ersten Aufgabe eines Zweigs ausfüllen — Schüler sehen diesen Namen bei der Wahl)</small></label>
+                    <input type="text" name="fork_branch_label[]" class="form-control" placeholder="z.B. Medien-Wetterbericht" value="{{ st.fork_branch_label or '' }}">
+                </div>
+                <div class="form-group mt-1">
+                    <label style="font-size: 0.875rem; color: #374151;">🔀 Zweig-Hinweis: <small class="text-muted">(optional, nur bei der ersten Aufgabe — Markdown, hilft bei der Wahl)</small></label>
+                    <textarea name="fork_branch_note[]" class="form-control" rows="2" placeholder="Kurzer Hinweis, was diesen Zweig ausmacht...">{{ st.fork_branch_note or '' }}</textarea>
                 </div>
                 <details class="subtask-quiz-toggle">
                     <summary>🪜 Checkpoint-Tipps (eskalierend) {% if st.checkpoint_hints_json %}<span class="badge badge-primary">vorhanden</span>{% endif %}</summary>
@@ -577,6 +591,12 @@ function addSubtask() {
                     <option value="0" selected>Überall verfügbar</option>
                     <option value="1">🔒 Nur Schulnetzwerk</option>
                 </select>
+                <input type="text" name="fork_group[]" class="form-control" style="width: 100px;" placeholder="Fork-Gruppe" title="Fork-Gruppe: gleicher Wert bei allen Aufgaben aller Zweige dieser Verzweigung">
+                <input type="text" name="fork_branch[]" class="form-control" style="width: 70px;" placeholder="Zweig" title="Zweig-Kennung innerhalb der Fork-Gruppe (z.B. a, b, c)">
+                <select name="fork_required[]" class="form-control" style="width: 120px;" title="Pflicht-Verzweigung oder Zusatz">
+                    <option value="1" selected>Pflicht-Zweig</option>
+                    <option value="0">Zusatz-Zweig</option>
+                </select>
                 <input type="number" name="estimated_minutes[]" class="form-control" style="width: 80px;" min="5" max="180" placeholder="Min" title="Geschätzte Dauer in Minuten">
                 <button type="button" class="btn btn-danger btn-sm" onclick="removeSubtask(this)">✕ Entfernen</button>
             </div>
@@ -592,6 +612,14 @@ function addSubtask() {
         <div class="form-group mt-1">
             <label style="font-size: 0.875rem; color: #374151;">💡 Tipps: <small class="text-muted">(optional — ausklappbar unter der Aufgabe)</small></label>
             <textarea name="tipps[]" class="form-control" rows="2" placeholder="z.B. Nutze den Zoom-Regler um Details besser zu sehen."></textarea>
+        </div>
+        <div class="form-group mt-1">
+            <label style="font-size: 0.875rem; color: #374151;">🔀 Zweig-Name: <small class="text-muted">(nur bei der ersten Aufgabe eines Zweigs ausfüllen — Schüler sehen diesen Namen bei der Wahl)</small></label>
+            <input type="text" name="fork_branch_label[]" class="form-control" placeholder="z.B. Medien-Wetterbericht">
+        </div>
+        <div class="form-group mt-1">
+            <label style="font-size: 0.875rem; color: #374151;">🔀 Zweig-Hinweis: <small class="text-muted">(optional, nur bei der ersten Aufgabe — Markdown, hilft bei der Wahl)</small></label>
+            <textarea name="fork_branch_note[]" class="form-control" rows="2" placeholder="Kurzer Hinweis, was diesen Zweig ausmacht..."></textarea>
         </div>
         <details class="subtask-quiz-toggle">
             <summary>🪜 Checkpoint-Tipps (eskalierend)</summary>

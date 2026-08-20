@@ -1623,6 +1623,11 @@ def export_task_to_dict(task_id):
                 'checkpoint_type': subtask.get('checkpoint_type') or None,
                 'kern_standard_tag': subtask.get('kern_standard_tag') or None,
                 'checkpoint_hints': json.loads(subtask['checkpoint_hints_json']) if subtask.get('checkpoint_hints_json') else None,
+                'fork_group': subtask.get('fork_group') or None,
+                'fork_branch': subtask.get('fork_branch') or None,
+                'fork_branch_label': subtask.get('fork_branch_label') or None,
+                'fork_branch_note': subtask.get('fork_branch_note') or None,
+                'fork_required': bool(subtask.get('fork_required', 1)) if subtask.get('fork_group') else None,
             }
             if subtask.get('quiz_json'):
                 st_data['quiz'] = json.loads(subtask['quiz_json'])
@@ -1840,6 +1845,46 @@ def set_student_fork_choice(student_id, fork_group, fork_branch):
         ''', (student_id, fork_group, fork_branch))
 
 
+def get_student_fork_choices(student_id):
+    """All of a student's fork choices, across all their tasks, with reassignment metadata.
+
+    Returns a list of dicts: {fork_group, fork_branch, task_id, task_name,
+    branches: [{branch, label}, ...]} — one row per (task, fork_group) the
+    student has picked a branch for. Used by the admin student-detail page
+    to let a teacher reassign a pick (bypasses the student-side lock — see
+    docs/shared/lernmanager/fork-choice-artifact-model.md decision 1).
+    """
+    with db_session() as conn:
+        choices = conn.execute(
+            "SELECT fork_group, fork_branch FROM student_fork_choice WHERE student_id = ?",
+            (student_id,)
+        ).fetchall()
+        result = []
+        for c in choices:
+            branch_rows = conn.execute('''
+                SELECT DISTINCT s.fork_branch, s.fork_branch_label, s.task_id, t.name as task_name
+                FROM subtask s JOIN task t ON t.id = s.task_id
+                WHERE s.fork_group = ?
+            ''', (c['fork_group'],)).fetchall()
+            if not branch_rows:
+                continue
+            task_id = branch_rows[0]['task_id']
+            task_name = branch_rows[0]['task_name']
+            labels = {}
+            for r in branch_rows:
+                if r['fork_branch_label']:
+                    labels[r['fork_branch']] = r['fork_branch_label']
+            branches = sorted({r['fork_branch'] for r in branch_rows})
+            result.append({
+                'fork_group': c['fork_group'],
+                'fork_branch': c['fork_branch'],
+                'task_id': task_id,
+                'task_name': task_name,
+                'branches': [{'branch': b, 'label': labels.get(b, b)} for b in branches],
+            })
+        return result
+
+
 def _filter_fork_subtasks(subtasks, student_id):
     """Resolve fork_group subtasks against student_fork_choice.
 
@@ -1898,12 +1943,13 @@ def get_subtasks(task_id):
 def create_subtask(task_id, beschreibung, reihenfolge=0, estimated_minutes=None, quiz_json=None,
                    path=None, path_model='skip', graded_artifact_json=None, fertig_wenn=None, tipps=None,
                    artifact_gate_json=None, checkpoint_type=None, kern_standard_tag=None,
-                   checkpoint_hints_json=None):
+                   checkpoint_hints_json=None, fork_group=None, fork_branch=None,
+                   fork_branch_label=None, fork_branch_note=None, fork_required=1):
     """Create a subtask."""
     with db_session() as conn:
         cursor = conn.execute(
-            "INSERT INTO subtask (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json, artifact_gate_json, fertig_wenn, tipps, checkpoint_type, kern_standard_tag, checkpoint_hints_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json, artifact_gate_json, fertig_wenn, tipps, checkpoint_type, kern_standard_tag, checkpoint_hints_json)
+            "INSERT INTO subtask (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json, artifact_gate_json, fertig_wenn, tipps, checkpoint_type, kern_standard_tag, checkpoint_hints_json, fork_group, fork_branch, fork_branch_label, fork_branch_note, fork_required) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json, artifact_gate_json, fertig_wenn, tipps, checkpoint_type, kern_standard_tag, checkpoint_hints_json, fork_group, fork_branch, fork_branch_label, fork_branch_note, fork_required)
         )
         return cursor.lastrowid
 
@@ -1917,7 +1963,9 @@ def delete_subtask(subtask_id):
 def update_subtasks(task_id, subtasks_list, estimated_minutes_list=None, quiz_json_list=None,
                     path_list=None, path_model_list=None, graded_artifact_json_list=None,
                     fertig_wenn_list=None, tipps_list=None, checkpoint_type_list=None,
-                    kern_standard_tag_list=None, checkpoint_hints_list=None, school_only_list=None):
+                    kern_standard_tag_list=None, checkpoint_hints_list=None, school_only_list=None,
+                    fork_group_list=None, fork_branch_list=None, fork_branch_label_list=None,
+                    fork_branch_note_list=None, fork_required_list=None):
     """Update subtasks for a task in-place by position.
 
     UPDATEs existing subtasks at matching positions (preserves their IDs and thus
@@ -1996,25 +2044,52 @@ def update_subtasks(task_id, subtasks_list, estimated_minutes_list=None, quiz_js
             if school_only_list and i < len(school_only_list):
                 school_only = 1 if school_only_list[i] == '1' else 0
 
+            fork_group = None
+            if fork_group_list and i < len(fork_group_list):
+                fg = fork_group_list[i].strip() if fork_group_list[i] else ''
+                fork_group = fg if fg else None
+
+            fork_branch = None
+            if fork_branch_list and i < len(fork_branch_list):
+                fb = fork_branch_list[i].strip() if fork_branch_list[i] else ''
+                fork_branch = fb if fb else None
+
+            fork_branch_label = None
+            if fork_branch_label_list and i < len(fork_branch_label_list):
+                fbl = fork_branch_label_list[i].strip() if fork_branch_label_list[i] else ''
+                fork_branch_label = fbl if fbl else None
+
+            fork_branch_note = None
+            if fork_branch_note_list and i < len(fork_branch_note_list):
+                fbn = fork_branch_note_list[i].strip() if fork_branch_note_list[i] else ''
+                fork_branch_note = fbn if fbn else None
+
+            fork_required = 1
+            if fork_required_list and i < len(fork_required_list):
+                fork_required = 1 if fork_required_list[i] == '1' else 0
+
             if i in old_by_pos:
                 # UPDATE in-place — preserves subtask ID and student_subtask records
                 conn.execute("""
                     UPDATE subtask SET beschreibung=?, estimated_minutes=?,
                     quiz_json=?, path=?, path_model=?, graded_artifact_json=?,
                     fertig_wenn=?, tipps=?, checkpoint_type=?, kern_standard_tag=?,
-                    checkpoint_hints_json=?, school_only=?
+                    checkpoint_hints_json=?, school_only=?,
+                    fork_group=?, fork_branch=?, fork_branch_label=?, fork_branch_note=?, fork_required=?
                     WHERE id=?
                 """, (beschreibung.strip(), estimated_minutes, subtask_quiz,
                       path, path_model, graded_artifact, fertig_wenn, tipps,
                       checkpoint_type, kern_standard_tag, checkpoint_hints, school_only,
+                      fork_group, fork_branch, fork_branch_label, fork_branch_note, fork_required,
                       old_by_pos[i]['id']))
             else:
                 # INSERT new subtask at this position
                 conn.execute(
-                    "INSERT INTO subtask (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json, fertig_wenn, tipps, checkpoint_type, kern_standard_tag, checkpoint_hints_json, school_only) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO subtask (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json, fertig_wenn, tipps, checkpoint_type, kern_standard_tag, checkpoint_hints_json, school_only, fork_group, fork_branch, fork_branch_label, fork_branch_note, fork_required) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (task_id, beschreibung.strip(), i, estimated_minutes, subtask_quiz,
                      path, path_model, graded_artifact, fertig_wenn, tipps,
-                     checkpoint_type, kern_standard_tag, checkpoint_hints, school_only)
+                     checkpoint_type, kern_standard_tag, checkpoint_hints, school_only,
+                     fork_group, fork_branch, fork_branch_label, fork_branch_note, fork_required)
                 )
 
         # DELETE subtasks at positions no longer present
@@ -2069,6 +2144,11 @@ def update_subtasks_from_import(task_id, subtasks_data):
             checkpoint_type = sub.get('checkpoint_type') or None
             kern_standard_tag = sub.get('kern_standard_tag') or None
             checkpoint_hints = json.dumps(sub['checkpoint_hints'], ensure_ascii=False) if sub.get('checkpoint_hints') else None
+            fork_group = sub.get('fork_group') or None
+            fork_branch = sub.get('fork_branch') or None
+            fork_branch_label = sub.get('fork_branch_label') or None
+            fork_branch_note = sub.get('fork_branch_note') or None
+            fork_required = 1 if sub.get('fork_required', True) else 0
 
             if pos in old_by_pos:
                 # UPDATE existing subtask — keeps the ID, preserves student_subtask
@@ -2077,18 +2157,21 @@ def update_subtasks_from_import(task_id, subtasks_data):
                     UPDATE subtask SET beschreibung=?, estimated_minutes=?,
                     quiz_json=?, path=?, path_model=?, graded_artifact_json=?, artifact_gate_json=?,
                     fertig_wenn=?, tipps=?, checkpoint_type=?, kern_standard_tag=?,
-                    checkpoint_hints_json=?
+                    checkpoint_hints_json=?,
+                    fork_group=?, fork_branch=?, fork_branch_label=?, fork_branch_note=?, fork_required=?
                     WHERE id=?
                 """, (sub['beschreibung'], estimated_minutes, quiz_json,
                       path, path_model, ga_json, gate_json, fertig_wenn, tipps,
-                      checkpoint_type, kern_standard_tag, checkpoint_hints, sub_id))
+                      checkpoint_type, kern_standard_tag, checkpoint_hints,
+                      fork_group, fork_branch, fork_branch_label, fork_branch_note, fork_required, sub_id))
                 subtask_id_by_position[pos] = sub_id
             else:
                 # INSERT new subtask at this position
                 cursor = conn.execute(
-                    "INSERT INTO subtask (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json, artifact_gate_json, fertig_wenn, tipps, checkpoint_type, kern_standard_tag, checkpoint_hints_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO subtask (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json, artifact_gate_json, fertig_wenn, tipps, checkpoint_type, kern_standard_tag, checkpoint_hints_json, fork_group, fork_branch, fork_branch_label, fork_branch_note, fork_required) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (task_id, sub['beschreibung'], pos, estimated_minutes, quiz_json, path, path_model, ga_json, gate_json, fertig_wenn, tipps,
-                     checkpoint_type, kern_standard_tag, checkpoint_hints)
+                     checkpoint_type, kern_standard_tag, checkpoint_hints,
+                     fork_group, fork_branch, fork_branch_label, fork_branch_note, fork_required)
                 )
                 subtask_id_by_position[pos] = cursor.lastrowid
 
