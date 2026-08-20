@@ -214,6 +214,23 @@ def _resolve_subtask_by_position(subtasks, position):
     return None
 
 
+def _resolve_resume_subtask(subtasks, subtask_quiz_status):
+    """Where a student should land on param-less re-entry to a topic.
+
+    First not-yet-completed subtask; or, if a subtask is done but its own
+    quiz hasn't been passed yet, that subtask itself (not past it) so the
+    quiz stays reachable. Falls back to the last subtask if everything is
+    already done (the topic should be abgeschlossen by then; kept for
+    robustness against that edge case).
+    """
+    for st in subtasks:
+        if not st.get('erledigt'):
+            return st
+        if st.get('quiz_json') and not subtask_quiz_status.get(st['id'], False):
+            return st
+    return subtasks[-1] if subtasks else None
+
+
 def _filter_quiz_for_path(quiz, student):
     """Drop quiz questions tagged with a path the student's path doesn't cover.
 
@@ -2920,10 +2937,11 @@ def student_klasse(slug):
             if requested_subtask:
                 current_subtask = requested_subtask
             elif subtasks:
-                current_subtask = subtasks[0]
+                current_subtask = _resolve_resume_subtask(subtasks, subtask_quiz_status)
         elif subtasks:
-            # Default to first visible subtask
-            current_subtask = subtasks[0]
+            # No position requested (dashboard "Weiter lernen", quiz Zurück/Abbrechen, etc.)
+            # -- resume at actual progress, not always position 1.
+            current_subtask = _resolve_resume_subtask(subtasks, subtask_quiz_status)
 
         # Load materials filtered by current Aufgabe
         if current_subtask:
