@@ -11,7 +11,7 @@
     <h1 class="topic-headline">{{ task.name }}</h1>
 
     <!-- Progress Section with Dots -->
-    {% if subtasks %}
+    {% if subtasks or pending_fork_dot_positions %}
     <div class="progress-section">
         <div class="progress-header">
             <div class="progress-text" id="progress-text">
@@ -20,6 +20,10 @@
             </div>
             <div class="progress-dots-column">
             <div class="progress-dots" role="group" aria-label="Aufgabenfortschritt">
+                {% macro fork_pending_dot() %}
+                <div class="dot dot-fork-pending" role="img" aria-label="Verzweigung: Wahl noch offen" title="Verzweigung: Wahl noch offen"><img src="{{ url_for('static', filename='icons/fork.svg') }}" alt=""></div>
+                {% endmacro %}
+                {% if 0 in pending_fork_dot_positions %}{{ fork_pending_dot() }}{% endif %}
                 {% for sub in subtasks %}
                 {% set has_quiz = sub.quiz_json %}
                 {% set quiz_passed = subtask_quiz_status.get(sub.id, false) %}
@@ -47,7 +51,9 @@
                      onkeydown="handleDotKeydown(event)"
                      title="Quiz zu Aufgabe {{ disp }}{% if quiz_passed %} (bestanden){% elif quiz_available %} (verfügbar){% endif %}">?</div>
                 {% endif %}
+                {% if loop.index in pending_fork_dot_positions %}{{ fork_pending_dot() }}{% endif %}
                 {% endfor %}
+                {% if (subtasks|length) in pending_fork_dot_positions %}{{ fork_pending_dot() }}{% endif %}
                 {% if capstone_gate %}
                 {% set all_done = subtasks|selectattr('erledigt')|list|length == subtasks|length %}
                 <div class="dot dot-gate {% if capstone_gate_passed %}completed{% elif all_done %}available{% endif %}"
@@ -83,13 +89,32 @@
     {% endif %}
 
     <!-- Current Task/Subtask with Side Navigation -->
-    {% if current_subtask or subtasks %}
+    {% if current_subtask or subtasks or pending_fork %}
     {% set active_subtask = current_subtask or (subtasks|rejectattr('erledigt')|list|first) %}
     {% set current_index = subtasks.index(active_subtask) if active_subtask and active_subtask in subtasks else 0 %}
     {% set has_prev = current_index > 0 %}
     {% set current_has_unpassed_quiz = active_subtask.quiz_json and not subtask_quiz_status.get(active_subtask.id, false) %}
     {% set has_next = current_has_unpassed_quiz or current_index < (subtasks|length - 1) or (current_index == (subtasks|length - 1) and task.quiz_json) %}
 
+    {% if pending_fork %}
+    <div id="fork-picker-card" class="card mt-2" style="border-left: 4px solid #f59e0b;">
+        <div class="card-header">🔀 Wähle deinen Weg</div>
+        <p style="padding: 0 1rem;">Ab hier geht es in verschiedene Richtungen weiter. Wähle einen der folgenden Wege — du kannst deine Wahl noch ändern, bis du die erste Aufgabe darin abgeschlossen hast. Danach ist sie festgelegt.</p>
+        {% for branch in pending_fork.branches %}
+        <div class="card mt-1" style="margin: 0 1rem 1rem;">
+            <div class="card-header">{{ branch.label or branch.branch }}</div>
+            {% if branch.note %}
+            <div class="markdown-content" style="padding: 0 1rem;">{{ branch.note | markdown }}</div>
+            {% endif %}
+            <form method="POST" action="{{ url_for('student_fork_choice', slug=task|topic_slug, fork_group=pending_fork.fork_group) }}" style="padding: 0.5rem 1rem 1rem;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="branch" value="{{ branch.branch }}">
+                <button type="submit" class="btn btn-primary">{{ branch.label or branch.branch }} wählen</button>
+            </form>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
     <div class="task-navigation-wrapper">
         <!-- Desktop: Left Button -->
         <button class="nav-button-side nav-prev {% if not has_prev %}nav-disabled{% endif %}"
@@ -273,6 +298,7 @@
             </button>
         </div>
     </div>
+    {% endif %}
 
 
     <!-- Completed Subtasks (collapsible) -->

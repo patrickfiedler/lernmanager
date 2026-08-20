@@ -1395,6 +1395,15 @@ tr.unsaved-row td {
     background: #10b981;
 }
 
+.dot.dot-fork-pending {
+    background: #f59e0b;
+}
+
+.dot.dot-fork-pending img {
+    width: 0.85rem;
+    height: 0.85rem;
+}
+
 /* Zusatz task dots — circle with dashed border, ★ prefix in number */
 .dot.dot-subtask.optional {
     background: white;

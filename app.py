@@ -2896,6 +2896,26 @@ def student_klasse(slug):
         # Q5A: Calculate completed based on VISIBLE subtasks only
         completed_subtasks = [st for st in subtasks if st['erledigt']]
 
+    # Fork/Choice: pending (unresolved) fork_groups on this task, excluded from
+    # `subtasks` above. One placeholder dot per pending group, positioned by
+    # where it sits among the currently-visible subtasks (see
+    # docs/shared/lernmanager/fork-choice-artifact-model.md).
+    pending_fork_groups = models.get_pending_fork_groups(task['task_id'], student_id) if task else []
+    pending_fork_dot_positions = {}
+    for fg in pending_fork_groups:
+        idx = sum(1 for s in subtasks if s['reihenfolge'] < fg['min_reihenfolge'])
+        pending_fork_dot_positions[idx] = fg
+
+    # The selection screen replaces the normal subtask content once every
+    # subtask before the fork is done -- checked directly against completion
+    # status, not against `current_subtask` (which defaults to position 1 on
+    # a fresh page load, not "first incomplete" -- see todo.md § Bugs).
+    pending_fork = None
+    if pending_fork_groups:
+        fg = pending_fork_groups[0]
+        if all(s['erledigt'] for s in subtasks if s['reihenfolge'] < fg['min_reihenfolge']):
+            pending_fork = fg
+
     # Check for next queued topic (only when current is completed)
     next_topic = None
     if task and task.get('abgeschlossen'):
@@ -3000,7 +3020,9 @@ def student_klasse(slug):
                            artifact_checkpoint_status=artifact_checkpoint_status,
                            artifact_criteria=artifact_criteria,
                            artifact_llm_feedback=artifact_llm_feedback,
-                           artifact_last_position=artifact_last_position)
+                           artifact_last_position=artifact_last_position,
+                           pending_fork=pending_fork,
+                           pending_fork_dot_positions=pending_fork_dot_positions)
 
 
 @app.route('/schueler/thema/<slug>/aufgabe/<int:position>', methods=['POST'])
@@ -3059,6 +3081,42 @@ def student_toggle_subtask(slug, position):
         return jsonify({'status': 'ok', 'task_complete': True})
 
     return jsonify({'status': 'ok', 'task_complete': False})
+
+
+@app.route('/schueler/thema/<slug>/fork/<fork_group>/waehlen', methods=['POST'])
+@student_required
+def student_fork_choice(slug, fork_group):
+    """Record a student's branch pick for a fork_group.
+
+    Design: docs/shared/lernmanager/fork-choice-artifact-model.md decision 2 --
+    the pick can be revised freely until the student completes a subtask in
+    the chosen branch, then it's locked.
+    """
+    student_id = session['student_id']
+    task, klasse = _resolve_student_topic(student_id, slug)
+    if not task:
+        flash('Thema nicht gefunden.', 'danger')
+        return redirect(url_for('student_dashboard'))
+
+    branch = request.form.get('branch')
+    valid_branches = models.get_fork_branches(task['task_id'], fork_group)
+    if not valid_branches or branch not in valid_branches:
+        flash('Diese Wahl ist nicht möglich.', 'danger')
+        return redirect(url_for('student_klasse', slug=slug))
+
+    existing = models.get_student_fork_choice(student_id, fork_group)
+    if existing and models.is_fork_choice_locked(student_id, fork_group, existing):
+        flash('Diese Wahl ist bereits festgelegt und kann nicht mehr geändert werden.', 'danger')
+        return redirect(url_for('student_klasse', slug=slug))
+
+    models.set_student_fork_choice(student_id, fork_group, branch)
+    models.log_analytics_event(
+        event_type='fork_choice',
+        user_id=student_id,
+        user_type='student',
+        metadata={'task_id': task['task_id'], 'fork_group': fork_group, 'branch': branch}
+    )
+    return redirect(url_for('student_klasse', slug=slug))
 
 
 def _artifact_upload_dir():

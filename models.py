@@ -185,6 +185,11 @@ def init_db():
                 kern_standard_tag TEXT,  -- kern/standard (NULL = not a checkpoint)
                 checkpoint_hints_json TEXT,  -- JSON array of escalating Tipp-button hints (quiz checkpoints)
                 school_only INTEGER NOT NULL DEFAULT 0,  -- 1=Quiz-Checkpoint only accessible from school network
+                fork_group TEXT,  -- groups subtasks (across branches) into one fork/choice decision point
+                fork_branch TEXT,  -- which branch within fork_group this subtask belongs to (e.g. 'a', 'b', 'c')
+                fork_branch_label TEXT,  -- student-facing branch name, set once on branch's first subtask
+                fork_branch_note TEXT,  -- optional steering note shown on the selection screen
+                fork_required INTEGER NOT NULL DEFAULT 1,  -- 0=enrichment fork (unpicked branches stay as Zusatz)
                 FOREIGN KEY (task_id) REFERENCES task(id) ON DELETE CASCADE
             );
 
@@ -325,6 +330,17 @@ def init_db():
                 UNIQUE(klasse_id, task_id),
                 FOREIGN KEY (klasse_id) REFERENCES klasse(id) ON DELETE CASCADE,
                 FOREIGN KEY (task_id) REFERENCES task(id) ON DELETE CASCADE
+            );
+
+            -- Student's chosen branch for a given fork_group (one row per student per fork)
+            CREATE TABLE IF NOT EXISTS student_fork_choice (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_id INTEGER NOT NULL,
+                fork_group TEXT NOT NULL,
+                fork_branch TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                UNIQUE(student_id, fork_group),
+                FOREIGN KEY (student_id) REFERENCES student(id) ON DELETE CASCADE
             );
 
             -- Lessons (Unterricht)
@@ -1716,6 +1732,157 @@ def is_question_visible_for_path(question, student_path):
     return PATH_ORDER[question_path] <= PATH_ORDER[student_path]
 
 
+# ============ Fork/Choice ============
+# Design: docs/shared/lernmanager/fork-choice-artifact-model.md
+
+def get_pending_fork_groups(task_id, student_id):
+    """Fork groups on this task with no stored choice yet for this student.
+
+    Returns an ordered list (by min reihenfolge) of dicts:
+    {fork_group, min_reihenfolge, branches: [{branch, label, note}, ...]},
+    branches ordered by their first subtask's reihenfolge. Used both to block
+    premature topic completion (any pending group blocks it) and to render
+    the branch-selection card + placeholder progress dot.
+    """
+    with db_session() as conn:
+        rows = conn.execute('''
+            SELECT fork_group, fork_branch, fork_branch_label, fork_branch_note, reihenfolge
+            FROM subtask
+            WHERE task_id = ? AND fork_group IS NOT NULL AND COALESCE(hidden, 0) = 0
+            ORDER BY reihenfolge
+        ''', (task_id,)).fetchall()
+        if not rows:
+            return []
+        chosen = {
+            row['fork_group'] for row in conn.execute(
+                "SELECT fork_group FROM student_fork_choice WHERE student_id = ?", (student_id,)
+            ).fetchall()
+        }
+
+    groups = {}
+    for r in rows:
+        group = r['fork_group']
+        if group in chosen:
+            continue
+        entry = groups.setdefault(group, {'fork_group': group, 'min_reihenfolge': r['reihenfolge'], 'branches': {}})
+        entry['min_reihenfolge'] = min(entry['min_reihenfolge'], r['reihenfolge'])
+        branch = entry['branches'].setdefault(r['fork_branch'], {
+            'branch': r['fork_branch'], 'label': None, 'note': None, 'first_reihenfolge': r['reihenfolge']
+        })
+        branch['first_reihenfolge'] = min(branch['first_reihenfolge'], r['reihenfolge'])
+        if r['fork_branch_label']:
+            branch['label'] = r['fork_branch_label']
+        if r['fork_branch_note']:
+            branch['note'] = r['fork_branch_note']
+
+    result = []
+    for group in sorted(groups.values(), key=lambda g: g['min_reihenfolge']):
+        branches = sorted(group['branches'].values(), key=lambda b: b['first_reihenfolge'])
+        for b in branches:
+            b.pop('first_reihenfolge')
+        result.append({
+            'fork_group': group['fork_group'],
+            'min_reihenfolge': group['min_reihenfolge'],
+            'branches': branches,
+        })
+    return result
+
+
+def get_fork_branches(task_id, fork_group):
+    """Set of valid branch keys for a fork_group, regardless of choice state.
+
+    Used to validate a branch pick even when re-picking an already-chosen
+    group (get_pending_fork_groups only covers unresolved ones).
+    """
+    with db_session() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT fork_branch FROM subtask WHERE task_id = ? AND fork_group = ?",
+            (task_id, fork_group)
+        ).fetchall()
+        return {r['fork_branch'] for r in rows}
+
+
+def get_student_fork_choice(student_id, fork_group):
+    """The branch a student already picked for fork_group, or None."""
+    with db_session() as conn:
+        row = conn.execute(
+            "SELECT fork_branch FROM student_fork_choice WHERE student_id = ? AND fork_group = ?",
+            (student_id, fork_group)
+        ).fetchone()
+        return row['fork_branch'] if row else None
+
+
+def is_fork_choice_locked(student_id, fork_group, fork_branch):
+    """True once the student has completed a subtask in the chosen branch.
+
+    Matches the design doc's decision 2: the pick can be revised freely up to
+    that point, then it's locked (a re-pick would orphan completed work).
+    """
+    with db_session() as conn:
+        row = conn.execute('''
+            SELECT 1 FROM subtask s
+            JOIN student_subtask ss ON ss.subtask_id = s.id
+            JOIN student_task st ON st.id = ss.student_task_id
+            WHERE st.student_id = ? AND s.fork_group = ? AND s.fork_branch = ? AND ss.erledigt = 1
+            LIMIT 1
+        ''', (student_id, fork_group, fork_branch)).fetchone()
+        return row is not None
+
+
+def set_student_fork_choice(student_id, fork_group, fork_branch):
+    """Store/update a student's branch pick. Caller must check is_fork_choice_locked first."""
+    with db_session() as conn:
+        conn.execute('''
+            INSERT INTO student_fork_choice (student_id, fork_group, fork_branch, timestamp)
+            VALUES (?, ?, ?, datetime('now'))
+            ON CONFLICT(student_id, fork_group) DO UPDATE SET
+                fork_branch = excluded.fork_branch, timestamp = excluded.timestamp
+        ''', (student_id, fork_group, fork_branch))
+
+
+def _filter_fork_subtasks(subtasks, student_id):
+    """Resolve fork_group subtasks against student_fork_choice.
+
+    Unresolved fork_group: all its subtasks (every branch) are excluded from
+    the list entirely — position-indexing (_resolve_subtask_by_position and
+    everything built on it) stays undisturbed; the template renders a single
+    placeholder dot instead (see get_pending_fork_groups). Resolved: only the
+    chosen branch's subtasks remain at their normal position; sibling
+    branches are dropped (fork_required truthy) or kept non-required
+    (fork_required=0, Zusatz — reuses the existing '.optional' dot styling).
+    """
+    fork_groups = {s['fork_group'] for s in subtasks if s.get('fork_group')}
+    if not fork_groups:
+        return subtasks
+
+    with db_session() as conn:
+        placeholders = ','.join('?' * len(fork_groups))
+        choices = {
+            row['fork_group']: row['fork_branch']
+            for row in conn.execute(
+                f"SELECT fork_group, fork_branch FROM student_fork_choice "
+                f"WHERE student_id = ? AND fork_group IN ({placeholders})",
+                [student_id, *fork_groups]
+            ).fetchall()
+        }
+
+    result = []
+    for s in subtasks:
+        group = s.get('fork_group')
+        if not group:
+            result.append(s)
+            continue
+        chosen = choices.get(group)
+        if chosen is None:
+            continue
+        if s.get('fork_branch') == chosen:
+            result.append(s)
+        elif not s.get('fork_required', 1):
+            s['required'] = False
+            result.append(s)
+    return result
+
+
 # ============ Subtask functions ============
 
 def get_subtasks(task_id):
@@ -2214,7 +2381,7 @@ def get_visible_subtasks_for_student(student_id, klasse_id, task_id):
             for d in subtasks:
                 d['required'] = is_subtask_required_for_path(d, effective_path)
                 result.append(d)
-            return result
+            return _filter_fork_subtasks(result, student_id)
         else:
             # Legacy fallback: subtask_visibility query
             rows = conn.execute('''
@@ -2239,7 +2406,7 @@ def get_visible_subtasks_for_student(student_id, klasse_id, task_id):
                 d = dict(r)
                 d['required'] = True  # Legacy: all visible = required
                 result.append(d)
-            return result
+            return _filter_fork_subtasks(result, student_id)
 
 
 _IS_SEILBAHN_SQL = """
@@ -2537,6 +2704,11 @@ def check_task_completion(student_task_id):
         task_info = conn.execute(
             "SELECT quiz_json, subtask_quiz_required FROM task WHERE id = ?", (task_id,)
         ).fetchone()
+
+        # A pending (unresolved) fork blocks completion even if every currently
+        # visible subtask is done — its subtasks aren't in the visible list yet.
+        if get_pending_fork_groups(task_id, student_id):
+            return False
 
         # Get visible subtasks (with path-based required flag)
         visible_subtasks = get_visible_subtasks_for_student(student_id, klasse_id, task_id)
