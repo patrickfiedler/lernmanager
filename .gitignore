@@ -5,6 +5,7 @@ static/uploads/*
 task_definitions/
 
 # Internal scripts (kept locally, not public)
+scripts/
 anonymize_db.py
 deploy/db_crypto.py
 deploy/lernmanager.nginx.conf
