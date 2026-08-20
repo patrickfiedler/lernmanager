@@ -1,0 +1,11 @@
+<!-- Hand-built, not derived from a Font Awesome icon (no matching shape exists in the Free set). Stroke weight and rounded-cap style matched to sit alongside the other FA-derived icons in this folder. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <path fill="none" stroke="#1e293b" stroke-width="48" stroke-linecap="round" stroke-linejoin="round"
+    d="M64 256L176 256
+       M176 256A100 100 0 0 1 276 156
+       L372 156
+       M324 190L372 156L324 122
+       M176 256A100 100 0 0 0 276 356
+       L372 356
+       M324 322L372 356L324 390"/>
+</svg>

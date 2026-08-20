@@ -1,0 +1,6 @@
+<!-- Modified from Font Awesome Free "computer-mouse" (CC BY 4.0), fontawesome.com/license/free. Split into left/right button facets and recolored to highlight the right button. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512">
+  <path fill="#1e293b" d="M0 192l176 0L176 0 160 0C71.6 0 0 71.6 0 160l0 32z"/>
+  <path fill="#1e293b" d="M0 224L0 352c0 88.4 71.6 160 160 160l64 0c88.4 0 160-71.6 160-160l0-128-192 0z"/>
+  <path fill="#dc2626" d="M384 192l0-32C384 71.6 312.4 0 224 0L208 0l0 192 176 0z"/>
+</svg>
