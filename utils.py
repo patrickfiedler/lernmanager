@@ -366,30 +366,20 @@ def allowed_file(filename):
            filename.rsplit('.', 1)[1].lower() in {'pdf', 'png', 'jpg', 'jpeg', 'gif'}
 
 
-def generate_credentials_pdf(students, klasse_name):
-    """Generate a PDF with student credentials.
-
-    Args:
-        students: List of dicts with 'nachname', 'vorname', 'username', 'password'
-        klasse_name: Name of the class
-
-    Returns:
-        BytesIO object containing the PDF
-    """
-    from io import BytesIO
+def _credentials_group_elements(students, klasse_name, styles):
+    """Build the reportlab elements (title/warning/table/footer) for one
+    class/course's credentials block -- shared by generate_credentials_pdf()
+    (single group) and generate_credentials_pdf_grouped() (multiple groups,
+    one per course, page-broken apart) so both produce identical-looking
+    blocks."""
     from reportlab.lib import colors
-    from reportlab.lib.pagesizes import A4
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.styles import ParagraphStyle
     from reportlab.lib.units import cm
-    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.platypus import Table, TableStyle, Paragraph, Spacer
     from datetime import datetime
 
-    buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=2*cm, bottomMargin=2*cm)
     elements = []
-    styles = getSampleStyleSheet()
 
-    # Title
     title_style = ParagraphStyle(
         'CustomTitle',
         parent=styles['Heading1'],
@@ -400,7 +390,6 @@ def generate_credentials_pdf(students, klasse_name):
     elements.append(Paragraph(f"Erstellt am {datetime.now().strftime('%d.%m.%Y %H:%M')}", styles['Normal']))
     elements.append(Spacer(1, 0.5*cm))
 
-    # Warning
     warning_style = ParagraphStyle(
         'Warning',
         parent=styles['Normal'],
@@ -413,10 +402,7 @@ def generate_credentials_pdf(students, klasse_name):
     ))
     elements.append(Spacer(1, 0.5*cm))
 
-    # Table header
     data = [['Name', 'Benutzername', 'Passwort']]
-
-    # Table rows
     for s in students:
         data.append([
             f"{s['nachname']}, {s['vorname']}",
@@ -424,7 +410,6 @@ def generate_credentials_pdf(students, klasse_name):
             s['password']
         ])
 
-    # Create table
     table = Table(data, colWidths=[8*cm, 5*cm, 4*cm])
     table.setStyle(TableStyle([
         # Header
@@ -452,7 +437,6 @@ def generate_credentials_pdf(students, klasse_name):
     elements.append(table)
     elements.append(Spacer(1, 1*cm))
 
-    # Footer
     footer_style = ParagraphStyle(
         'Footer',
         parent=styles['Normal'],
@@ -463,6 +447,52 @@ def generate_credentials_pdf(students, klasse_name):
         f"Anzahl Schueler: {len(students)} | Lernmanager",
         footer_style
     ))
+
+    return elements
+
+
+def generate_credentials_pdf(students, klasse_name):
+    """Generate a PDF with student credentials for one class.
+
+    Args:
+        students: List of dicts with 'nachname', 'vorname', 'username', 'password'
+        klasse_name: Name of the class
+
+    Returns:
+        BytesIO object containing the PDF
+    """
+    return generate_credentials_pdf_grouped([(klasse_name, students)])
+
+
+def generate_credentials_pdf_grouped(groups):
+    """Generate one PDF covering several classes/courses, each starting on
+    its own page -- for roster-sync creates spanning multiple courses in one
+    batch (e.g. 5 GHU, 5 SKS, 5 PT), so a teacher can hand out one course's
+    pages without hunting through a flat list for the right names.
+
+    Args:
+        groups: list of (klasse_name, students) tuples, in the order they
+        should appear. Each students list is the same shape as
+        generate_credentials_pdf() takes.
+
+    Returns:
+        BytesIO object containing the PDF
+    """
+    from io import BytesIO
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib.units import cm
+    from reportlab.platypus import SimpleDocTemplate, PageBreak
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=2*cm, bottomMargin=2*cm)
+    styles = getSampleStyleSheet()
+
+    elements = []
+    for i, (klasse_name, students) in enumerate(groups):
+        if i > 0:
+            elements.append(PageBreak())
+        elements.extend(_credentials_group_elements(students, klasse_name, styles))
 
     doc.build(elements)
     buffer.seek(0)

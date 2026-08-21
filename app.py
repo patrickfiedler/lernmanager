@@ -27,7 +27,7 @@ import models
 import llm_grading
 import artifact_processor
 import artifact_checker
-from utils import generate_username, generate_password, allowed_file, generate_credentials_pdf, generate_student_self_report_pdf, generate_class_report_pdf, generate_student_report_pdf, slugify, format_bytes, is_ip_allowed, is_within_time_window, parse_netzwerk_csv
+from utils import generate_username, generate_password, allowed_file, generate_credentials_pdf, generate_credentials_pdf_grouped, generate_student_self_report_pdf, generate_class_report_pdf, generate_student_report_pdf, slugify, format_bytes, is_ip_allowed, is_within_time_window, parse_netzwerk_csv
 from import_task import validate_task_structure, check_duplicate, import_task as do_import_task, overwrite_task_from_import, ValidationError
 
 app = Flask(__name__)
@@ -878,6 +878,7 @@ def admin_bewertung_roster_apply():
             created_students.append({
                 'nachname': nachname, 'vorname': vorname,
                 'username': username, 'password': password,
+                'klasse_name': klasse['name'],
             })
         except sqlite3.IntegrityError:
             students_skipped.append(f'{nachname}, {vorname} (Netzwerk-ID {netzwerk_id} bereits vergeben)')
@@ -904,11 +905,15 @@ def admin_bewertung_roster_apply():
         flash('Keine Änderungen ausgewählt.', 'warning')
 
     if created_students:
-        pdf_buffer = generate_credentials_pdf(created_students, 'Roster-Abgleich')
+        groups = {}
+        for s in created_students:
+            groups.setdefault(s['klasse_name'], []).append(s)
+        grouped = [(name, groups[name]) for name in sorted(groups)]
+        pdf_buffer = generate_credentials_pdf_grouped(grouped)
         return Response(
             pdf_buffer.getvalue(),
             mimetype='application/pdf',
-            headers={'Content-Disposition': 'attachment; filename=zugangsdaten_roster_abgleich.pdf'}
+            headers={'Content-Disposition': 'attachment; filename=zugangsdaten_schuelerdaten_abgleich.pdf'}
         )
 
     return redirect(url_for('admin_bewertung_netzwerk_ids'))
