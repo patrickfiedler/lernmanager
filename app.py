@@ -734,6 +734,8 @@ def admin_bewertung_netzwerk_ids():
     written until the admin submits the review form below."""
     diff = None
     klassenstufen_diff = None
+    klassen_kurs_diff = None
+    student_enrollment_diff = None
     if request.method == 'POST':
         file = request.files.get('roster_csv')
         if not file or not file.filename:
@@ -743,12 +745,16 @@ def admin_bewertung_netzwerk_ids():
                 csv_rows = parse_netzwerk_csv(file.stream)
                 diff = models.diff_netzwerk_ids(csv_rows)
                 klassenstufen_diff = models.diff_klassenstufen(csv_rows)
+                klassen_kurs_diff = models.diff_klassen_kurs(csv_rows)
+                student_enrollment_diff = models.diff_student_enrollment(csv_rows, klassen_kurs_diff)
             except ValueError as e:
                 flash(f'Fehler beim Einlesen der CSV: {e}', 'danger')
 
     return render_template(
         'admin/bewertung_netzwerk_ids.html', diff=diff,
         klassenstufen_diff=klassenstufen_diff,
+        klassen_kurs_diff=klassen_kurs_diff,
+        student_enrollment_diff=student_enrollment_diff,
     )
 
 
@@ -778,6 +784,116 @@ def admin_bewertung_netzwerk_ids_apply():
         )
     if not applied and not conflicts:
         flash('Keine Änderungen ausgewählt.', 'warning')
+
+    return redirect(url_for('admin_bewertung_netzwerk_ids'))
+
+
+@app.route('/admin/bewertung/netzwerk-ids/roster-apply', methods=['POST'])
+@admin_required
+def admin_bewertung_roster_apply():
+    """Writes the class links/creations and student creates/moves the admin
+    checked off on the roster-sync diff report (extends the netzwerk-ids
+    page -- see models.diff_klassen_kurs()/diff_student_enrollment()).
+
+    Order matters within this one POST: classes first (link existing ones,
+    create new ones), then students -- a student row targeting a
+    just-created class needs that class's id to already exist. Each row is
+    still applied independently (try/except per row) so one bad row
+    doesn't roll back the rest, same pattern as the netzwerk-id apply
+    route above.
+    """
+    klassen_applied, klassen_conflicts = 0, []
+
+    for value in request.form.getlist('klasse_link'):
+        klasse_id, _, kurs_code = value.partition(':')
+        if not klasse_id.isdigit() or not kurs_code:
+            continue
+        try:
+            models.set_klasse_kurs_code(int(klasse_id), kurs_code)
+            klassen_applied += 1
+        except sqlite3.IntegrityError:
+            klassen_conflicts.append(kurs_code)
+
+    for kurs_code in request.form.getlist('klasse_create'):
+        stufe = request.form.get(f'klasse_create_stufe__{kurs_code}', '').strip()
+        name = request.form.get(f'klasse_create_name__{kurs_code}', '').strip()
+        if not name:
+            continue
+        try:
+            klasse_id = models.create_klasse(name)
+            models.set_klasse_kurs_code(klasse_id, kurs_code)
+            if stufe.isdigit():
+                models.update_klasse_klassenstufe(klasse_id, int(stufe))
+            klassen_applied += 1
+        except sqlite3.IntegrityError:
+            klassen_conflicts.append(kurs_code)
+
+    if klassen_applied:
+        flash(f'{klassen_applied} Klasse(n) verknüpft/erstellt. ✅', 'success')
+    if klassen_conflicts:
+        flash(
+            f'{len(klassen_conflicts)} Klassen-Zuordnung(en) übersprungen wegen Konflikt: '
+            f'{", ".join(klassen_conflicts)}', 'danger'
+        )
+
+    students_applied, students_skipped = 0, []
+    created_students = []
+    existing_usernames = models.get_existing_usernames()
+    existing_netzwerk_ids = models.get_existing_netzwerk_ids()
+
+    for value in request.form.getlist('student_create'):
+        nachname, _, rest = value.partition('|')
+        vorname, _, rest = rest.partition('|')
+        netzwerk_id, _, kurs_code = rest.partition('|')
+        if not nachname or not vorname or not netzwerk_id or not kurs_code:
+            continue
+        klasse = models.get_klasse_by_kurs_code(kurs_code)
+        if klasse is None:
+            students_skipped.append(f'{nachname}, {vorname} (Klasse {kurs_code} nicht angelegt)')
+            continue
+        try:
+            username = generate_username(existing_usernames, vorname, nachname)
+            existing_usernames.add(username)
+            password = generate_password()
+            student_id = models.create_student(nachname, vorname, username, password, netzwerk_id=netzwerk_id)
+            existing_netzwerk_ids.add(netzwerk_id)
+            models.add_student_to_klasse(student_id, klasse['id'])
+            students_applied += 1
+            created_students.append({
+                'nachname': nachname, 'vorname': vorname,
+                'username': username, 'password': password,
+            })
+        except sqlite3.IntegrityError:
+            students_skipped.append(f'{nachname}, {vorname} (Netzwerk-ID {netzwerk_id} bereits vergeben)')
+
+    for value in request.form.getlist('student_move'):
+        student_id, _, rest = value.partition(':')
+        from_klasse_id, _, kurs_code = rest.partition(':')
+        if not student_id.isdigit() or not from_klasse_id.isdigit() or not kurs_code:
+            continue
+        klasse = models.get_klasse_by_kurs_code(kurs_code)
+        if klasse is None:
+            students_skipped.append(f'Schüler #{student_id} (Klasse {kurs_code} nicht angelegt)')
+            continue
+        models.move_student_to_klasse(int(student_id), int(from_klasse_id), klasse['id'])
+        students_applied += 1
+
+    if students_applied:
+        flash(f'{students_applied} Schüler-Zuordnung(en) übernommen. ✅', 'success')
+    if students_skipped:
+        flash(
+            f'{len(students_skipped)} übersprungen: {", ".join(students_skipped)}', 'danger'
+        )
+    if not klassen_applied and not klassen_conflicts and not students_applied and not students_skipped:
+        flash('Keine Änderungen ausgewählt.', 'warning')
+
+    if created_students:
+        pdf_buffer = generate_credentials_pdf(created_students, 'Roster-Abgleich')
+        return Response(
+            pdf_buffer.getvalue(),
+            mimetype='application/pdf',
+            headers={'Content-Disposition': 'attachment; filename=zugangsdaten_roster_abgleich.pdf'}
+        )
 
     return redirect(url_for('admin_bewertung_netzwerk_ids'))
 

@@ -111,15 +111,16 @@ def parse_netzwerk_csv(file_stream):
     short/blank rows) but reads a real login value per row instead of
     deriving one.
 
-    Also opportunistically picks up Klasse/Klassenstufe/Seilbahn columns if
-    present (the school's student_mapping.csv has these alongside the login
-    column) -- used by models.diff_netzwerk_ids()/diff_klassenstufen() for
-    the Lernpfad and Klassenstufe cross-checks. Any of the three is optional;
-    missing ones come back as ''.
+    Also opportunistically picks up Klasse/Klassenstufe/Seilbahn/Kurs
+    columns if present (the school's student_mapping.csv has these
+    alongside the login column) -- used by
+    models.diff_netzwerk_ids()/diff_klassenstufen()/diff_klassen_kurs() for
+    the Lernpfad, Klassenstufe and class-group cross-checks. Any of the
+    four is optional; missing ones come back as ''.
 
     Returns list of {'nachname', 'vorname', 'login', 'klasse',
-    'klassenstufe', 'seilbahn'} dicts. Raises ValueError with a message safe
-    to flash to the admin.
+    'klassenstufe', 'seilbahn', 'kurs'} dicts. Raises ValueError with a
+    message safe to flash to the admin.
     """
     import csv
     import io
@@ -144,6 +145,7 @@ def parse_netzwerk_csv(file_stream):
     klasse_idx = _find_exact_column(headers, 'klasse')
     klassenstufe_idx = _find_exact_column(headers, 'klassenstufe')
     seilbahn_idx = _find_exact_column(headers, 'seilbahn')
+    kurs_idx = _find_exact_column(headers, 'kurs')
 
     def cell(row, idx):
         return row[idx].strip() if idx is not None and len(row) > idx else ''
@@ -162,6 +164,7 @@ def parse_netzwerk_csv(file_stream):
             'klasse': cell(row, klasse_idx),
             'klassenstufe': cell(row, klassenstufe_idx),
             'seilbahn': cell(row, seilbahn_idx),
+            'kurs': cell(row, kurs_idx),
         })
 
     return students

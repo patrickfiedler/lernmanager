@@ -93,7 +93,8 @@ def init_db():
                 llm_artifact_feedback_enabled INTEGER NOT NULL DEFAULT 0,
                 llm_transparency_mode INTEGER DEFAULT NULL,
                 artifact_gate_required INTEGER NOT NULL DEFAULT 1,
-                klassenstufe INTEGER DEFAULT NULL
+                klassenstufe INTEGER DEFAULT NULL,
+                kurs_code TEXT DEFAULT NULL
             );
 
             -- Students (Schüler)
@@ -727,6 +728,21 @@ def update_klasse_klassenstufe(klasse_id, klassenstufe):
         conn.execute("UPDATE klasse SET klassenstufe = ? WHERE id = ?", (klassenstufe, klasse_id))
 
 
+def get_klasse_by_kurs_code(kurs_code):
+    """Look up a class by its linked student_mapping.csv Kurs code (e.g.
+    'GHU 5'). Returns None if no class is linked to that code yet -- see
+    diff_klassen_kurs() for the CSV-vs-DB matching this backs."""
+    with db_session() as conn:
+        row = conn.execute("SELECT * FROM klasse WHERE kurs_code = ?", (kurs_code,)).fetchone()
+        return dict(row) if row else None
+
+
+def set_klasse_kurs_code(klasse_id, kurs_code):
+    """Link a class to a student_mapping.csv Kurs code, or None to unlink."""
+    with db_session() as conn:
+        conn.execute("UPDATE klasse SET kurs_code = ? WHERE id = ?", (kurs_code, klasse_id))
+
+
 def get_klasse(klasse_id):
     """Get a class by ID."""
     with db_session() as conn:
@@ -865,12 +881,15 @@ def get_existing_netzwerk_ids():
 
 def get_all_students_with_netzwerk_id():
     """All students (any class, any school year) with their current
-    netzwerk_id, lernpfad and a comma-joined list of class names, for the
-    admin/bewertung/netzwerk-ids CSV matcher."""
+    netzwerk_id, lernpfad, a comma-joined list of class names and a
+    comma-joined list of class ids, for the admin/bewertung/netzwerk-ids
+    CSV matcher (the ids are what diff_student_enrollment() needs to tell
+    whether a student's current class already matches the CSV's target)."""
     with db_session() as conn:
         rows = conn.execute(
             "SELECT s.id, s.nachname, s.vorname, s.netzwerk_id, s.lernpfad, "
-            "GROUP_CONCAT(k.name, ', ') AS klassen "
+            "GROUP_CONCAT(k.name, ', ') AS klassen, "
+            "GROUP_CONCAT(k.id, ',') AS klasse_ids "
             "FROM student s "
             "LEFT JOIN student_klasse sk ON sk.student_id = s.id "
             "LEFT JOIN klasse k ON k.id = sk.klasse_id "
@@ -1010,6 +1029,194 @@ def diff_klassenstufen(csv_rows):
         results.append(entry)
 
     return results
+
+
+def diff_klassen_kurs(csv_rows):
+    """
+    Group student_mapping.csv rows by (Klassenstufe, Kurs) -- Lernmanager's
+    classes are combined groups of 2-3 CSV Klasse (course) values sharing
+    one Kurs code (e.g. Kurs "GHU 5" = courses Ginkgo+Haie+Urvögel = class
+    "Ginkgo-Haie-Urvögel 5"). Group size isn't fixed -- grade 7 only
+    combines 2 courses per group this year, so this derives membership from
+    the data instead of hardcoding a count.
+
+    csv_rows: list of dicts from utils.parse_netzwerk_csv() -- rows missing
+    'klassenstufe', 'kurs' or 'klasse' are skipped.
+
+    For each group, resolves against the DB in three tiers:
+      - 'linked': klasse.kurs_code already points to an existing class --
+        no action needed, just confirms the ongoing link still holds.
+      - 'suggested_link': no class has this kurs_code yet, but exactly one
+        *unlinked* existing class looks like a match on course names (the
+        one-time bootstrap case for classes that predate kurs_code) --
+        admin confirms the link.
+      - 'new': no match at all (e.g. this year's grade-7 groups) -- admin
+        names and creates a new class.
+
+    Returns list of dicts, one per distinct (Klassenstufe, Kurs) group:
+      {'klassenstufe', 'kurs_code', 'klasse_names', 'status', 'klasse'
+      (linked/suggested_link only), 'suggested_name' (new only)}
+    """
+    groups = {}
+    for row in csv_rows:
+        stufe = (row.get('klassenstufe') or '').strip()
+        kurs = (row.get('kurs') or '').strip()
+        klasse_name = (row.get('klasse') or '').strip()
+        if not stufe or not kurs or not klasse_name:
+            continue
+        key = (stufe, kurs)
+        group = groups.setdefault(key, {
+            'klassenstufe': stufe, 'kurs_code': kurs, 'klasse_names': [],
+        })
+        if klasse_name not in group['klasse_names']:
+            group['klasse_names'].append(klasse_name)
+
+    unlinked_klassen = [k for k in get_all_klassen() if not k['kurs_code']]
+
+    results = []
+    for key in sorted(groups.keys()):
+        group = groups[key]
+        linked = get_klasse_by_kurs_code(group['kurs_code'])
+        if linked:
+            results.append({**group, 'status': 'linked', 'klasse': linked})
+            continue
+
+        suggested = _find_bootstrap_klasse_match(group['klasse_names'], group['klassenstufe'], unlinked_klassen)
+        if suggested:
+            results.append({**group, 'status': 'suggested_link', 'klasse': suggested})
+        else:
+            suggested_name = '-'.join(group['klasse_names']) + f" {group['klassenstufe']}"
+            results.append({**group, 'status': 'new', 'suggested_name': suggested_name})
+
+    return results
+
+
+def _find_bootstrap_klasse_match(klasse_names, klassenstufe, unlinked_klassen):
+    """One-time bootstrap matcher: does an unlinked class's name spell out
+    exactly this CSV group's course names, for the same grade? Splits the
+    class name on '-' and pulls the trailing grade-number token off the
+    last part (e.g. "Ginkgo-Haie-Urvögel 5" -> courses
+    {'ginkgo', 'haie', 'urvögel'}, grade '5'), then requires both the grade
+    and the course-name set to match -- grade matters because two grades
+    can share the same course-name set (e.g. GHU 5 and GHU 6), and set
+    comparison is order-independent since CSV order and name order don't
+    match (e.g. Seepferdchen-Krokodile-Schildkröten).
+
+    Returns the single matching klasse dict, or None if zero or more than
+    one class matches (ambiguous -- let the admin decide by hand instead
+    of guessing).
+    """
+    wanted = {n.strip().lower() for n in klasse_names}
+    wanted_stufe = str(klassenstufe).strip()
+
+    matches = []
+    for klasse in unlinked_klassen:
+        tokens = klasse['name'].split('-')
+        if not tokens:
+            continue
+        last_parts = tokens[-1].strip().rsplit(' ', 1)
+        if len(last_parts) != 2 or not last_parts[1].isdigit():
+            continue
+        tokens[-1] = last_parts[0]
+        name_stufe = last_parts[1]
+        name_courses = {t.strip().lower() for t in tokens if t.strip()}
+        if name_courses == wanted and name_stufe == wanted_stufe:
+            matches.append(klasse)
+
+    return matches[0] if len(matches) == 1 else None
+
+
+def diff_student_enrollment(csv_rows, klassen_kurs_diff):
+    """
+    Cross-check each CSV row's target class (via its Kurs group, resolved
+    by diff_klassen_kurs()) against the DB roster. This is the "create new
+    students / move promoted students" half of the roster-sync check --
+    diff_netzwerk_ids() already handles the netzwerk_id-only correction for
+    students who don't need to change class.
+
+    csv_rows: list of dicts from utils.parse_netzwerk_csv().
+    klassen_kurs_diff: the return value of diff_klassen_kurs() for the same
+    csv_rows -- supplies each group's resolved (or pending) target class.
+
+    Matches an existing student primarily by netzwerk_id (CSV Login is
+    stable year over year, per generate_netzwerk_id()), falling back to
+    name matching (same normalization as diff_netzwerk_ids) only for rows
+    with no netzwerk_id hit.
+
+    Returns {'to_create', 'to_move', 'unchanged', 'ambiguous'}:
+      - to_create: no DB student found -- needs create_student() +
+        add_student_to_klasse(). Each row carries 'target_kurs_code' and
+        either 'target_klasse' (existing/linked class dict) or
+        'target_klasse_pending' (suggested name -- the group is still
+        'new' in klassen_kurs_diff, so the class must be created first).
+      - to_move: DB student found, current class differs from target.
+        Carries 'from_klasse_id' (the single class to move them out of)
+        plus the same target fields as to_create.
+      - unchanged: DB student found, already in the target class.
+      - ambiguous: DB student found but currently enrolled in zero or
+        multiple classes, so there's no single unambiguous "from" class to
+        move them out of -- left for the admin to sort out by hand rather
+        than guessed.
+    """
+    groups_by_key = {(g['klassenstufe'], g['kurs_code']): g for g in klassen_kurs_diff}
+
+    students = get_all_students_with_netzwerk_id()
+    by_netzwerk_id = {s['netzwerk_id']: s for s in students if s['netzwerk_id']}
+
+    def name_key(nachname, vorname):
+        return (_normalize_umlauts(nachname.strip()).lower(), _normalize_umlauts(vorname.strip()).lower())
+
+    by_name = {}
+    for s in students:
+        by_name.setdefault(name_key(s['nachname'], s['vorname']), []).append(s)
+
+    to_create, to_move, unchanged, ambiguous = [], [], [], []
+
+    for row in csv_rows:
+        stufe = (row.get('klassenstufe') or '').strip()
+        kurs = (row.get('kurs') or '').strip()
+        if not stufe or not kurs:
+            continue
+        group = groups_by_key.get((stufe, kurs))
+        if group is None:
+            continue
+
+        login = row['login'].strip().lower()
+        target = {
+            'nachname': row['nachname'], 'vorname': row['vorname'],
+            'netzwerk_id': login, 'target_kurs_code': kurs,
+        }
+        if group['status'] == 'new':
+            target['target_klasse_pending'] = group['suggested_name']
+            target_klasse_id = None
+        else:
+            target['target_klasse'] = group['klasse']
+            target_klasse_id = group['klasse']['id']
+
+        student = by_netzwerk_id.get(login)
+        if student is None:
+            candidates = by_name.get(name_key(row['nachname'], row['vorname']), [])
+            student = candidates[0] if len(candidates) == 1 else None
+
+        if student is None:
+            to_create.append(target)
+            continue
+
+        current_ids = [int(i) for i in (student['klasse_ids'] or '').split(',') if i]
+        target['student'] = student
+
+        if target_klasse_id is not None and target_klasse_id in current_ids:
+            unchanged.append(target)
+        elif len(current_ids) == 1:
+            target['from_klasse_id'] = current_ids[0]
+            to_move.append(target)
+        else:
+            ambiguous.append(target)
+
+    return {
+        'to_create': to_create, 'to_move': to_move,
+        'unchanged': unchanged, 'ambiguous': ambiguous,
+    }
 
 
 def _normalize_umlauts(text):

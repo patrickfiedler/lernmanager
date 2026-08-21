@@ -3,12 +3,13 @@
 {% block title %}Netzwerk-IDs abgleichen - Lernmanager{% endblock %}
 
 {% block content %}
-<h1>🪪 Netzwerk-IDs abgleichen</h1>
+<h1>🪪 Roster-Abgleich</h1>
 <p class="text-muted mb-2">
-    Gleicht Lernmanagers gespeicherte Netzwerk-IDs (für die KI-Bewertung: ordnet
-    scan-folders-Ordnernamen einem Schüler zu) gegen eine echte Schul-Roster-CSV ab.
-    Prüft außerdem Lernpfad (Seilbahn-Spalte) und Klassenstufe gegen die CSV.
-    Es wird nichts automatisch übernommen — nur die Netzwerk-ID-Änderungen unten, nach eigener Bestätigung.
+    Gleicht Lernmanager gegen eine echte Schul-Roster-CSV ab: Netzwerk-IDs, Lernpfad
+    (Seilbahn-Spalte) und Klassenstufe pro Schüler — und, falls die CSV eine
+    <code>Kurs</code>-Spalte enthält, auch Klassen (anlegen/verknüpfen über die Kurs-Gruppe)
+    und Schüler-Zuordnung (neu anlegen bei Neuzugängen, verschieben bei Klassenwechsel/Versetzung).
+    Es wird nichts automatisch übernommen — nur was unten angehakt und bestätigt wird.
 </p>
 
 <div class="card mb-2">
@@ -20,21 +21,24 @@
             ihren Namen erkannt — Kopfzeile muss eines von
             <code>Benutzername</code>, <code>Nutzername</code>, <code>Login</code>, <code>Kennung</code>,
             <code>Account</code>, <code>Netzwerk-ID</code>, <code>Username</code> enthalten (Groß-/Kleinschreibung egal).
-            <code>Klasse</code>, <code>Klassenstufe</code> und <code>Seilbahn</code> sind optional (exakter
-            Spaltenname), aktivieren aber die beiden Prüfungen unten. Bei <code>Seilbahn</code> zählt jeder
-            nicht-leere Wert (z.B. <code>x</code>) als "ja".
+            <code>Klasse</code>, <code>Klassenstufe</code>, <code>Seilbahn</code> und <code>Kurs</code>
+            sind optional (exakter Spaltenname), aktivieren aber die jeweiligen Prüfungen unten. Bei
+            <code>Seilbahn</code> zählt jeder nicht-leere Wert (z.B. <code>x</code>) als "ja".
+            <code>Kurs</code> ist der Code einer kombinierten Klasse (mehrere <code>Klasse</code>-Werte
+            teilen sich einen <code>Kurs</code>-Code, z.B. "GHU 5" für die Kurse Ginkgo/Haie/Urvögel) —
+            aktiviert die Klassen- und Schüler-Zuordnung unten.
         </p>
         <div style="overflow-x: auto;">
             <table class="table" style="font-size: 0.85rem;">
                 <thead>
                     <tr>
                         <th>Nachname</th><th>Vorname</th><th>Klasse</th><th>Klassenstufe</th>
-                        <th>Login</th><th>Seilbahn</th>
+                        <th>Login</th><th>Seilbahn</th><th>Kurs</th>
                     </tr>
                 </thead>
                 <tbody>
-                    <tr><td>Muster</td><td>Max</td><td>6a</td><td>6</td><td>mmuster</td><td></td></tr>
-                    <tr><td>Beispiel</td><td>Erika</td><td>6a</td><td>6</td><td>ebeispiel</td><td>x</td></tr>
+                    <tr><td>Muster</td><td>Max</td><td>Ginkgo</td><td>6</td><td>mmuster</td><td></td><td>GHU 6</td></tr>
+                    <tr><td>Beispiel</td><td>Erika</td><td>Haie</td><td>6</td><td>ebeispiel</td><td>x</td><td>GHU 6</td></tr>
                 </tbody>
             </table>
         </div>
@@ -182,6 +186,117 @@
                         {% else %}❓ Klasse nicht in Lernmanager
                         {% endif %}
                     </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+{% if klassen_kurs_diff %}
+<div class="card mb-2">
+    <div class="card-header">🏫 Klassen-Zuordnung</div>
+    <form method="POST" action="{{ url_for('admin_bewertung_roster_apply') }}" style="padding: 1rem;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div style="overflow-x: auto;">
+            <table class="table">
+                <thead>
+                    <tr><th>Übernehmen</th><th>Kurs-Code</th><th>Kurse (CSV)</th><th>Klasse</th></tr>
+                </thead>
+                <tbody>
+                    {% for g in klassen_kurs_diff %}
+                    <tr>
+                        <td>
+                            {% if g.status == 'linked' %}
+                                <span title="Bereits verknüpft">✅</span>
+                            {% elif g.status == 'suggested_link' %}
+                                <input type="checkbox" name="klasse_link" value="{{ g.klasse.id }}:{{ g.kurs_code }}" checked>
+                            {% else %}
+                                <input type="checkbox" name="klasse_create" value="{{ g.kurs_code }}" checked>
+                                <input type="hidden" name="klasse_create_stufe__{{ g.kurs_code }}" value="{{ g.klassenstufe }}">
+                            {% endif %}
+                        </td>
+                        <td><code>{{ g.kurs_code }}</code></td>
+                        <td>{{ g.klasse_names|join(', ') }}</td>
+                        <td>
+                            {% if g.status == 'new' %}
+                                <input type="text" name="klasse_create_name__{{ g.kurs_code }}"
+                                       value="{{ g.suggested_name }}" class="form-control"
+                                       style="display:inline-block; width: auto;">
+                                <span class="text-muted" style="font-size: 0.85rem;">(neu)</span>
+                            {% else %}
+                                {{ g.klasse.name }}
+                                {% if g.status == 'suggested_link' %}
+                                    <span class="text-muted" style="font-size: 0.85rem;">(noch nicht verknüpft)</span>
+                                {% endif %}
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        {% if student_enrollment_diff and (student_enrollment_diff.to_create or student_enrollment_diff.to_move) %}
+        <hr style="margin: 1.5rem 0;">
+        <h3 style="font-size: 1.1rem;">🧑‍🎓 Schüler-Zuordnung</h3>
+        <p class="text-muted mb-1" style="font-size: 0.9rem;">
+            Wird zusammen mit den Klassen oben übernommen — neu angelegte Klassen stehen den
+            Schülern unten also bereits zur Verfügung, wenn beides zusammen bestätigt wird.
+        </p>
+        <div style="overflow-x: auto;">
+            <table class="table">
+                <thead>
+                    <tr><th>Übernehmen</th><th>Name</th><th>Aktion</th><th>Ziel-Klasse</th></tr>
+                </thead>
+                <tbody>
+                    {% for s in student_enrollment_diff.to_create %}
+                    <tr>
+                        <td><input type="checkbox" name="student_create"
+                               value="{{ s.nachname }}|{{ s.vorname }}|{{ s.netzwerk_id }}|{{ s.target_kurs_code }}" checked></td>
+                        <td>{{ s.nachname }}, {{ s.vorname }}</td>
+                        <td>🆕 neu anlegen</td>
+                        <td>{{ s.target_klasse.name if s.target_klasse else s.target_klasse_pending }}</td>
+                    </tr>
+                    {% endfor %}
+                    {% for s in student_enrollment_diff.to_move %}
+                    <tr>
+                        <td><input type="checkbox" name="student_move"
+                               value="{{ s.student.id }}:{{ s.from_klasse_id }}:{{ s.target_kurs_code }}" checked></td>
+                        <td>{{ s.nachname }}, {{ s.vorname }}</td>
+                        <td>➡️ verschieben (aus {{ s.student.klassen }})</td>
+                        <td>{{ s.target_klasse.name if s.target_klasse else s.target_klasse_pending }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+
+        <button type="submit" class="btn btn-primary mt-1">Ausgewählte Klassen/Schüler übernehmen</button>
+    </form>
+</div>
+{% endif %}
+
+{% if student_enrollment_diff and student_enrollment_diff.ambiguous %}
+<div class="card mb-2" style="border: 1px solid #f59e0b;">
+    <div class="card-header" style="background: #fffbeb; color: #92400e;">
+        ⚠️ {{ student_enrollment_diff.ambiguous|length }} Schüler mit unklarer aktueller Klasse
+    </div>
+    <div style="padding: 0.75rem 1rem;">
+        <p class="text-muted mb-1" style="font-size: 0.9rem;">
+            Schüler ist in keiner oder mehreren Klassen gleichzeitig — keine automatische Zuordnung,
+            bitte manuell auf der Schülerseite korrigieren.
+        </p>
+        <table class="table">
+            <thead><tr><th>Name</th><th>Aktuelle Klasse(n)</th><th>Ziel-Klasse (CSV)</th></tr></thead>
+            <tbody>
+                {% for s in student_enrollment_diff.ambiguous %}
+                <tr>
+                    <td>{{ s.nachname }}, {{ s.vorname }}</td>
+                    <td>{{ s.student.klassen or '—' }}</td>
+                    <td>{{ s.target_klasse.name if s.target_klasse else s.target_klasse_pending }}</td>
                 </tr>
                 {% endfor %}
             </tbody>
