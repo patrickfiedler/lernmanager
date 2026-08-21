@@ -362,7 +362,9 @@
                   {% set mat_icon = '📄' %}{% set mat_badge = '' %}
                 {% endif %}
                 <li class="material-item">
-                    {% if mat_badge %}
+                    {% if mat_locked %}
+                    <span class="material-icon"><img src="{{ url_for('static', filename='icons/book-locked.svg') }}" alt="" width="20" height="20"></span>
+                    {% elif mat_badge %}
                     <span class="material-type-badge badge-{{ mat_badge|lower }}">{{ mat_badge }}</span>
                     {% else %}
                     <span class="material-icon">{{ mat_icon }}</span>
@@ -379,8 +381,7 @@
                     {# Other links: plain new-tab link only #}
                     <a href="{{ mat.pfad }}" target="_blank">{{ label }}</a>
                     {% elif mat_locked %}
-                    {# school_only file, student outside network: reference only, no link #}
-                    <span class="material-name-locked text-muted" title="Nur im Schulnetz verfügbar">{{ label }} 🔒</span>
+                    <span class="material-name-locked text-muted">{{ label }}</span>
                     {% elif is_pdf or is_image %}
                     {# Viewable files: split pane primary, download secondary #}
                     <button class="material-name-btn btn-split"
