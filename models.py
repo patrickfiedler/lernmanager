@@ -963,14 +963,16 @@ def diff_netzwerk_ids(csv_rows):
         possible_matches pulled out)
       - lernpfad_mismatches: matched students where CSV Seilbahn flag and
         DB lernpfad disagree, each {..student fields.., 'csv_seilbahn'}
-      - possible_matches: leftover db_unmatched/csv_unmatched pairs that
-        share a nachname and whose vorname differs only by a further given
-        name (e.g. DB "Kirby" / CSV "Kirby Philip") -- the exact-name match
-        above missed these on purpose (no fuzzy matching there), but they're
-        common enough (a second given name added/dropped between the DB and
-        a fresh roster export) to warrant a one-click confirm instead of
-        leaving them stuck as unexplained mismatches. Each dict is the
-        student's fields plus 'csv_nachname'/'csv_vorname'/'csv_login'.
+      - possible_matches: leftover db_unmatched/csv_unmatched pairs the
+        exact-name match above missed but are almost certainly the same
+        student -- either an identical netzwerk_id (name spelling drifted,
+        e.g. DB "Amelie Nele" vs. CSV "Amelie-Nele"), or same nachname with
+        a vorname that's a further given name of the other (e.g. DB "Kirby"
+        vs. CSV "Kirby Philip"). Common enough (school roster spelling
+        conventions changing between exports) to warrant a one-click
+        confirm instead of leaving them stuck as unexplained mismatches on
+        both sides. Each dict is the student's fields plus
+        'csv_nachname'/'csv_vorname'/'csv_login'.
     """
     students = get_all_students_with_netzwerk_id()
 
@@ -1010,19 +1012,43 @@ def diff_netzwerk_ids(csv_rows):
 
     possible_matches = []
     matched_row_idx, matched_extra_student_ids = set(), set()
+
+    def _add_possible_match(student, row_idx):
+        row = csv_unmatched[row_idx]
+        possible_matches.append({
+            **student, 'csv_nachname': row['nachname'], 'csv_vorname': row['vorname'],
+            'csv_login': row['login'].strip().lower(),
+        })
+        matched_row_idx.add(row_idx)
+        matched_extra_student_ids.add(student['id'])
+
+    # Pass 1: identical netzwerk_id -- the strongest possible signal, catches
+    # cases where the login already matches but the name doesn't spell-match
+    # (e.g. DB "Amelie Nele" vs. CSV "Amelie-Nele" -- punctuation drift, not
+    # a different student), independent of nachname/vorname at all.
+    csv_rows_by_login = {}
+    for i, row in enumerate(csv_unmatched):
+        csv_rows_by_login.setdefault(row['login'].strip().lower(), []).append(i)
+
     for s in db_unmatched:
+        login = (s['netzwerk_id'] or '').strip().lower()
+        candidates = [i for i in csv_rows_by_login.get(login, []) if i not in matched_row_idx]
+        if login and len(candidates) == 1:
+            _add_possible_match(s, candidates[0])
+
+    # Pass 2: same nachname, vorname differs only by a further given name
+    # (see _vorname_prefix_match) -- covers the remaining login-also-changed
+    # cases pass 1 can't reach.
+    for s in db_unmatched:
+        if s['id'] in matched_extra_student_ids:
+            continue
         s_nachname = _normalize_umlauts(s['nachname'].strip()).lower()
         for i, row in enumerate(csv_unmatched):
             if i in matched_row_idx:
                 continue
             row_nachname = _normalize_umlauts(row['nachname'].strip()).lower()
             if s_nachname == row_nachname and _vorname_prefix_match(s['vorname'], row['vorname']):
-                possible_matches.append({
-                    **s, 'csv_nachname': row['nachname'], 'csv_vorname': row['vorname'],
-                    'csv_login': row['login'].strip().lower(),
-                })
-                matched_row_idx.add(i)
-                matched_extra_student_ids.add(s['id'])
+                _add_possible_match(s, i)
                 break
 
     db_unmatched = [s for s in db_unmatched if s['id'] not in matched_extra_student_ids]
