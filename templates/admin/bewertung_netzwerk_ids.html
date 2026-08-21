@@ -89,6 +89,50 @@
 </div>
 {% endif %}
 
+{% if diff.possible_matches %}
+<div class="card mb-2">
+    <div class="card-header">🔍 {{ diff.possible_matches|length }} mögliche(r) Treffer (Namensabweichung)</div>
+    <div style="padding: 0 1rem;">
+        <p class="text-muted mb-1" style="font-size: 0.9rem;">
+            Gleicher Nachname, Vorname unterscheidet sich nur durch einen weiteren Vornamen
+            (z.B. "Kirby" in Lernmanager vs. "Kirby Philip" in der CSV). Beim Übernehmen wird
+            Name <strong>und</strong> Netzwerk-ID auf den CSV-Stand gesetzt.
+        </p>
+    </div>
+    <form method="POST" action="{{ url_for('admin_bewertung_netzwerk_ids_apply') }}" style="padding: 0 1rem 1rem;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div style="overflow-x: auto;">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Übernehmen</th>
+                        <th>Lernmanager</th>
+                        <th>CSV</th>
+                        <th>Klasse(n)</th>
+                        <th>Aktuelle ID</th>
+                        <th>CSV-ID</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for m in diff.possible_matches %}
+                    <tr>
+                        <td><input type="checkbox" name="name_match"
+                               value="{{ m.id }}|{{ m.csv_nachname }}|{{ m.csv_vorname }}|{{ m.csv_login }}" checked></td>
+                        <td>{{ m.nachname }}, {{ m.vorname }}</td>
+                        <td>{{ m.csv_nachname }}, {{ m.csv_vorname }}</td>
+                        <td>{{ m.klassen or '—' }}</td>
+                        <td><code>{{ m.netzwerk_id or '(keine)' }}</code></td>
+                        <td><code>{{ m.csv_login }}</code></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <button type="submit" class="btn btn-primary mt-1">Ausgewählte Treffer übernehmen</button>
+    </form>
+</div>
+{% endif %}
+
 {% if diff.db_unmatched %}
 <div class="card mb-2" style="border: 1px solid #f59e0b;">
     <div class="card-header" style="background: #fffbeb; color: #92400e;">

@@ -775,14 +775,30 @@ def admin_bewertung_netzwerk_ids_apply():
         except sqlite3.IntegrityError:
             conflicts.append(login)
 
+    name_matches_applied = 0
+    for value in request.form.getlist('name_match'):
+        student_id, _, rest = value.partition('|')
+        nachname, _, rest = rest.partition('|')
+        vorname, _, login = rest.partition('|')
+        if not student_id.isdigit() or not nachname or not vorname:
+            continue
+        models.update_student_name(int(student_id), nachname, vorname)
+        try:
+            models.update_student_netzwerk_id(int(student_id), login)
+        except sqlite3.IntegrityError:
+            conflicts.append(login)
+        name_matches_applied += 1
+
     if applied:
         flash(f'{applied} Netzwerk-ID(s) aktualisiert. ✅', 'success')
+    if name_matches_applied:
+        flash(f'{name_matches_applied} Namensabweichung(en) übernommen. ✅', 'success')
     if conflicts:
         flash(
             f'{len(conflicts)} übersprungen wegen Konflikt (Login bereits vergeben): '
             f'{", ".join(conflicts)}', 'danger'
         )
-    if not applied and not conflicts:
+    if not applied and not name_matches_applied and not conflicts:
         flash('Keine Änderungen ausgewählt.', 'warning')
 
     return redirect(url_for('admin_bewertung_netzwerk_ids'))

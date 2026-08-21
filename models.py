@@ -908,6 +908,29 @@ def update_student_netzwerk_id(student_id, netzwerk_id):
         conn.execute("UPDATE student SET netzwerk_id = ? WHERE id = ?", (netzwerk_id, student_id))
 
 
+def update_student_name(student_id, nachname, vorname):
+    """Overwrite one student's nachname/vorname (manual correction after CSV
+    matching -- e.g. the CSV carries a second given name Lernmanager doesn't
+    have on record yet, like "Kirby" vs. "Kirby Philip")."""
+    with db_session() as conn:
+        conn.execute(
+            "UPDATE student SET nachname = ?, vorname = ? WHERE id = ?",
+            (nachname, vorname, student_id)
+        )
+
+
+def _vorname_prefix_match(a, b):
+    """True if a and b are equal, or one is the other plus a further given
+    name (e.g. "Kirby" / "Kirby Philip") -- the common way a school roster
+    and Lernmanager's own records drift apart on a student with multiple
+    given names, without being a different student."""
+    a, b = a.strip().lower(), b.strip().lower()
+    if a == b:
+        return True
+    shorter, longer = (a, b) if len(a) < len(b) else (b, a)
+    return bool(shorter) and longer.startswith(shorter + ' ')
+
+
 def diff_netzwerk_ids(csv_rows):
     """
     Cross-check CSV-provided real network logins against the DB roster.
@@ -929,15 +952,25 @@ def diff_netzwerk_ids(csv_rows):
     'updates'/'unchanged', it just adds a second, independent report.
 
     Returns {'updates', 'unchanged', 'csv_unmatched', 'db_unmatched',
-    'lernpfad_mismatches'}:
+    'lernpfad_mismatches', 'possible_matches'}:
       - updates: DB student found by name, CSV login differs from current netzwerk_id
       - unchanged: DB student found by name, CSV login already matches
       - csv_unmatched: CSV row whose name matched zero or >1 DB students
+        (after possible_matches below have been pulled out)
       - db_unmatched: DB student with no matching CSV row (each gets
         'similar_csv_logins' -- CSV logins sharing the current ID's first 4
-        chars, i.e. validate_student_ids.py's mismatch hint)
+        chars, i.e. validate_student_ids.py's mismatch hint; also with
+        possible_matches pulled out)
       - lernpfad_mismatches: matched students where CSV Seilbahn flag and
         DB lernpfad disagree, each {..student fields.., 'csv_seilbahn'}
+      - possible_matches: leftover db_unmatched/csv_unmatched pairs that
+        share a nachname and whose vorname differs only by a further given
+        name (e.g. DB "Kirby" / CSV "Kirby Philip") -- the exact-name match
+        above missed these on purpose (no fuzzy matching there), but they're
+        common enough (a second given name added/dropped between the DB and
+        a fresh roster export) to warrant a one-click confirm instead of
+        leaving them stuck as unexplained mismatches. Each dict is the
+        student's fields plus 'csv_nachname'/'csv_vorname'/'csv_login'.
     """
     students = get_all_students_with_netzwerk_id()
 
@@ -975,10 +1008,30 @@ def diff_netzwerk_ids(csv_rows):
         prefix = (s['netzwerk_id'] or '')[:4]
         s['similar_csv_logins'] = sorted(l for l in csv_logins_unmatched if prefix and l[:4] == prefix)
 
+    possible_matches = []
+    matched_row_idx, matched_extra_student_ids = set(), set()
+    for s in db_unmatched:
+        s_nachname = _normalize_umlauts(s['nachname'].strip()).lower()
+        for i, row in enumerate(csv_unmatched):
+            if i in matched_row_idx:
+                continue
+            row_nachname = _normalize_umlauts(row['nachname'].strip()).lower()
+            if s_nachname == row_nachname and _vorname_prefix_match(s['vorname'], row['vorname']):
+                possible_matches.append({
+                    **s, 'csv_nachname': row['nachname'], 'csv_vorname': row['vorname'],
+                    'csv_login': row['login'].strip().lower(),
+                })
+                matched_row_idx.add(i)
+                matched_extra_student_ids.add(s['id'])
+                break
+
+    db_unmatched = [s for s in db_unmatched if s['id'] not in matched_extra_student_ids]
+    csv_unmatched = [r for i, r in enumerate(csv_unmatched) if i not in matched_row_idx]
+
     return {
         'updates': updates, 'unchanged': unchanged,
         'csv_unmatched': csv_unmatched, 'db_unmatched': db_unmatched,
-        'lernpfad_mismatches': lernpfad_mismatches,
+        'lernpfad_mismatches': lernpfad_mismatches, 'possible_matches': possible_matches,
     }
 
 
