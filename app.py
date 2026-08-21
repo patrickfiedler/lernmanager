@@ -485,15 +485,20 @@ def _get_client_ip():
     return request.remote_addr
 
 
-def _checkpoint_school_gate_ok(subtask):
-    """Chemie Quiz-Checkpoints can be marked school_only (subtask.school_only).
-    Returns True if this subtask is either not restricted, or the current
-    request's client IP falls inside the shared network_gate_ip_ranges setting.
-    Reuses the same gate as download_material() (see admin dashboard 'Netzwerk-Gate')."""
-    if not subtask['school_only']:
-        return True
+def _client_in_school_network():
+    """True if the current request's client IP falls inside the shared
+    network_gate_ip_ranges setting (admin dashboard 'Netzwerk-Gate')."""
     ip_ranges = models.get_setting('network_gate_ip_ranges', '')
     return is_ip_allowed(_get_client_ip(), ip_ranges)
+
+
+def _school_gate_ok(row):
+    """Shared network gate for any row with a school_only column (subtask
+    checkpoints, materials). Returns True if the row is either not restricted,
+    or the current request's client is inside the school network."""
+    if not row['school_only']:
+        return True
+    return _client_in_school_network()
 
 
 # ============ Admin Dashboard ============
@@ -3193,6 +3198,7 @@ def student_klasse(slug):
                            completed_subtasks=completed_subtasks,
                            current_subtask=current_subtask,
                            materials=materials,
+                           client_school_ok=_client_in_school_network(),
                            quiz_attempts=quiz_attempts,
                            subtask_quiz_status=subtask_quiz_status,
                            quiz_bestanden=quiz_bestanden,
@@ -3889,7 +3895,7 @@ def student_quiz_subtask(slug, position):
         return redirect(url_for('student_klasse', slug=slug))
 
     if subtask.get('checkpoint_type') == 'quiz':
-        if not _checkpoint_school_gate_ok(subtask):
+        if not _school_gate_ok(subtask):
             flash('Dieser Checkpoint ist nur im Schulnetzwerk verfügbar.', 'warning')
             return redirect(url_for('student_klasse', slug=slug))
         return _handle_checkpoint_quiz(student, task, slug, subtask, position)
@@ -3933,7 +3939,7 @@ def _resolve_checkpoint_subtask(student_id, slug, subtask_id):
     if not row:
         return None, None
     subtask = dict(row)
-    if not _checkpoint_school_gate_ok(subtask):
+    if not _school_gate_ok(subtask):
         return None, None
     return task, subtask
 

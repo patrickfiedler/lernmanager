@@ -337,6 +337,7 @@
                 {% set is_pdf = ext == 'pdf' %}
                 {% set is_youtube = 'youtube.com' in mat.pfad or 'youtu.be/' in mat.pfad %}
                 {% set label = mat.beschreibung or mat.pfad %}
+                {% set mat_locked = mat.school_only and not client_school_ok %}
                 {# Icon/badge by type/extension #}
                 {% if mat.typ == 'link' %}
                   {% set mat_icon = '▶️' if is_youtube else '🔗' %}
@@ -377,6 +378,9 @@
                     {% elif mat.typ == 'link' %}
                     {# Other links: plain new-tab link only #}
                     <a href="{{ mat.pfad }}" target="_blank">{{ label }}</a>
+                    {% elif mat_locked %}
+                    {# school_only file, student outside network: reference only, no link #}
+                    <span class="material-name-locked text-muted" title="Nur im Schulnetz verfügbar">{{ label }} 🔒</span>
                     {% elif is_pdf or is_image %}
                     {# Viewable files: split pane primary, download secondary #}
                     <button class="material-name-btn btn-split"
