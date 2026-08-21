@@ -1,14 +1,14 @@
 <details class="artifact-file-toggle">
     <summary>📄 Deine Datei: {{ unit_artifact_file.original_filename }}</summary>
     <div class="artifact-file-content">
-        <p><a href="{{ url_for('download_student_artifact', student_id=student.id, task_id=task.task_id) }}">Datei herunterladen</a> · hochgeladen am {{ unit_artifact_file.uploaded_at[:16].replace('T', ' ') }} Uhr{% if artifact_last_position %} für Aufgabe {{ artifact_last_position | aufgabe_label }}{% endif %}</p>
+        <p><a href="{{ url_for('download_student_artifact', student_id=student.id, task_id=task.task_id) }}">Datei herunterladen</a> · hochgeladen am {{ unit_artifact_file.uploaded_at[:16].replace('T', ' ') }} Uhr{% if artifact_last_position %} für Aufgabe {{ artifact_last_position | aufgabe_label(subtasks) }}{% endif %}</p>
         {% set still_ok = artifact_checkpoint_status | selectattr('passed') | list %}
         {% set no_longer_ok = artifact_checkpoint_status | rejectattr('passed') | list %}
         {% if still_ok %}
-        <p>Deine Datei erfüllt noch die Anforderungen von: {% for cp in still_ok %}Aufgabe {{ cp.position | aufgabe_label }}{% if not loop.last %}, {% endif %}{% endfor %}</p>
+        <p>Deine Datei erfüllt noch die Anforderungen von: {% for cp in still_ok %}Aufgabe {{ cp.position | aufgabe_label(subtasks) }}{% if not loop.last %}, {% endif %}{% endfor %}</p>
         {% endif %}
         {% if no_longer_ok %}
-        <p>⚠️ Nicht mehr erfüllt: {% for cp in no_longer_ok %}Aufgabe {{ cp.position | aufgabe_label }}{% if not loop.last %}, {% endif %}{% endfor %}</p>
+        <p>⚠️ Nicht mehr erfüllt: {% for cp in no_longer_ok %}Aufgabe {{ cp.position | aufgabe_label(subtasks) }}{% if not loop.last %}, {% endif %}{% endfor %}</p>
         {% endif %}
         {% if artifact_llm_feedback %}
         <div class="artifact-checklist" style="margin-top:0.75rem;">

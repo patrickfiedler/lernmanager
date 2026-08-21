@@ -191,6 +191,7 @@ def init_db():
                 fork_branch_label TEXT,  -- student-facing branch name, set once on branch's first subtask
                 fork_branch_note TEXT,  -- optional steering note shown on the selection screen
                 fork_required INTEGER NOT NULL DEFAULT 1,  -- 0=enrichment fork (unpicked branches stay as Zusatz)
+                is_intro INTEGER NOT NULL DEFAULT 0,  -- 1=Einführung subtask, excluded from progress-count denominator
                 FOREIGN KEY (task_id) REFERENCES task(id) ON DELETE CASCADE
             );
 
@@ -2230,12 +2231,12 @@ def create_subtask(task_id, beschreibung, reihenfolge=0, estimated_minutes=None,
                    path=None, path_model='skip', graded_artifact_json=None, fertig_wenn=None, tipps=None,
                    artifact_gate_json=None, checkpoint_type=None, kern_standard_tag=None,
                    checkpoint_hints_json=None, fork_group=None, fork_branch=None,
-                   fork_branch_label=None, fork_branch_note=None, fork_required=1):
+                   fork_branch_label=None, fork_branch_note=None, fork_required=1, is_intro=0):
     """Create a subtask."""
     with db_session() as conn:
         cursor = conn.execute(
-            "INSERT INTO subtask (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json, artifact_gate_json, fertig_wenn, tipps, checkpoint_type, kern_standard_tag, checkpoint_hints_json, fork_group, fork_branch, fork_branch_label, fork_branch_note, fork_required) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json, artifact_gate_json, fertig_wenn, tipps, checkpoint_type, kern_standard_tag, checkpoint_hints_json, fork_group, fork_branch, fork_branch_label, fork_branch_note, fork_required)
+            "INSERT INTO subtask (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json, artifact_gate_json, fertig_wenn, tipps, checkpoint_type, kern_standard_tag, checkpoint_hints_json, fork_group, fork_branch, fork_branch_label, fork_branch_note, fork_required, is_intro) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json, artifact_gate_json, fertig_wenn, tipps, checkpoint_type, kern_standard_tag, checkpoint_hints_json, fork_group, fork_branch, fork_branch_label, fork_branch_note, fork_required, is_intro)
         )
         return cursor.lastrowid
 
@@ -2435,6 +2436,7 @@ def update_subtasks_from_import(task_id, subtasks_data):
             fork_branch_label = sub.get('fork_branch_label') or None
             fork_branch_note = sub.get('fork_branch_note') or None
             fork_required = 1 if sub.get('fork_required', True) else 0
+            is_intro = 1 if sub.get('is_intro') else 0
 
             if pos in old_by_pos:
                 # UPDATE existing subtask — keeps the ID, preserves student_subtask
@@ -2444,20 +2446,22 @@ def update_subtasks_from_import(task_id, subtasks_data):
                     quiz_json=?, path=?, path_model=?, graded_artifact_json=?, artifact_gate_json=?,
                     fertig_wenn=?, tipps=?, checkpoint_type=?, kern_standard_tag=?,
                     checkpoint_hints_json=?,
-                    fork_group=?, fork_branch=?, fork_branch_label=?, fork_branch_note=?, fork_required=?
+                    fork_group=?, fork_branch=?, fork_branch_label=?, fork_branch_note=?, fork_required=?,
+                    is_intro=?
                     WHERE id=?
                 """, (sub['beschreibung'], estimated_minutes, quiz_json,
                       path, path_model, ga_json, gate_json, fertig_wenn, tipps,
                       checkpoint_type, kern_standard_tag, checkpoint_hints,
-                      fork_group, fork_branch, fork_branch_label, fork_branch_note, fork_required, sub_id))
+                      fork_group, fork_branch, fork_branch_label, fork_branch_note, fork_required,
+                      is_intro, sub_id))
                 subtask_id_by_position[pos] = sub_id
             else:
                 # INSERT new subtask at this position
                 cursor = conn.execute(
-                    "INSERT INTO subtask (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json, artifact_gate_json, fertig_wenn, tipps, checkpoint_type, kern_standard_tag, checkpoint_hints_json, fork_group, fork_branch, fork_branch_label, fork_branch_note, fork_required) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO subtask (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json, artifact_gate_json, fertig_wenn, tipps, checkpoint_type, kern_standard_tag, checkpoint_hints_json, fork_group, fork_branch, fork_branch_label, fork_branch_note, fork_required, is_intro) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (task_id, sub['beschreibung'], pos, estimated_minutes, quiz_json, path, path_model, ga_json, gate_json, fertig_wenn, tipps,
                      checkpoint_type, kern_standard_tag, checkpoint_hints,
-                     fork_group, fork_branch, fork_branch_label, fork_branch_note, fork_required)
+                     fork_group, fork_branch, fork_branch_label, fork_branch_note, fork_required, is_intro)
                 )
                 subtask_id_by_position[pos] = cursor.lastrowid
 

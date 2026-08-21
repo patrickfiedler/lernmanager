@@ -77,10 +77,18 @@ def topic_slug(task):
 
 
 @app.template_filter('aufgabe_label')
-def aufgabe_label_filter(position):
+def aufgabe_label_filter(position, subtasks):
     """Translate 1-based internal subtask position to the student-facing label.
-    Position 1 is always the Einführung ('E'); Aufgabe N = position - 1."""
-    return 'E' if position == 1 else str(position - 1)
+
+    Driven by subtask.is_intro, not position: the subtask at `position` gets
+    'E' if it's flagged is_intro, else its 1-based rank among non-intro
+    subtasks up to and including that position. Needs the full `subtasks`
+    list (in order) to count correctly.
+    """
+    sub = subtasks[position - 1] if subtasks and 1 <= position <= len(subtasks) else None
+    if sub and sub.get('is_intro'):
+        return 'E'
+    return str(sum(1 for s in (subtasks or [])[:position] if not s.get('is_intro')))
 
 
 @app.template_filter('json_lines')
@@ -2929,8 +2937,8 @@ def student_dashboard():
             visible_with_progress = [s for s in all_subtasks if s['id'] in visible_subtask_ids]
 
             task['subtasks'] = visible_with_progress
-            # Count only path-required subtasks for progress
-            required_subtasks = [s for s in visible_with_progress if s.get('required', True)]
+            # Count only path-required subtasks for progress (excludes Einführung/is_intro subtasks)
+            required_subtasks = [s for s in visible_with_progress if s.get('required', True) and not s.get('is_intro')]
             task['total_subtasks'] = len(required_subtasks)
             task['completed_subtasks'] = sum(1 for s in required_subtasks if s['erledigt'])
 

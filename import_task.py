@@ -462,6 +462,7 @@ def import_task(task_data, dry_run=False, warnings=None):
         fork_branch_label = sub.get('fork_branch_label') or None
         fork_branch_note = sub.get('fork_branch_note') or None
         fork_required = 1 if sub.get('fork_required', True) else 0
+        is_intro = 1 if sub.get('is_intro') else 0
         sub_id = models.create_subtask(task_id, sub['beschreibung'], reihenfolge, estimated_minutes, sub_quiz_json,
                                        path=path, path_model=path_model, graded_artifact_json=graded_artifact_json,
                                        fertig_wenn=fertig_wenn, tipps=tipps, artifact_gate_json=artifact_gate_json,
@@ -469,7 +470,7 @@ def import_task(task_data, dry_run=False, warnings=None):
                                        checkpoint_hints_json=checkpoint_hints_json,
                                        fork_group=fork_group, fork_branch=fork_branch,
                                        fork_branch_label=fork_branch_label, fork_branch_note=fork_branch_note,
-                                       fork_required=fork_required)
+                                       fork_required=fork_required, is_intro=is_intro)
         subtask_id_by_position[reihenfolge] = sub_id
 
     # Create materials and restore subtask assignments
