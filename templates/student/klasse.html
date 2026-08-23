@@ -413,16 +413,8 @@
         <div class="gate-header">📎 Abgabe geprüft ✓</div>
         <p class="gate-success-msg">Deine Datei wurde erfolgreich geprüft.</p>
         {% if capstone_gate_llm_feedback %}
-        <div class="artifact-checklist" style="margin-top:0.75rem;">
-            <div class="checklist-header">KI-Feedback:</div>
-            {% for item in capstone_gate_llm_feedback %}
-            <div class="checklist-item" style="border-left:3px solid {% if item.passed %}#10b981{% else %}#ef4444{% endif %}; padding:0.5rem 0.75rem; margin:0.4rem 0; background:#f9fafb;">
-                <div style="font-weight:500;">{% if item.passed %}✅{% else %}❌{% endif %} {{ item.criterion }}</div>
-                {% if item.note %}<div style="font-size:0.875rem;color:#4b5563;margin-top:0.2rem;">💬 {{ item.note }}{% if item.source != 'deterministic' %} <span style="font-size:0.75rem;color:#6b7280;margin-left:0.4rem;">✨ KI</span>{% endif %}</div>{% endif %}
-            </div>
-            {% endfor %}
-            <p style="font-size:0.8rem;color:#6b7280;margin-top:0.5rem;">Note wird von der Lehrkraft gesetzt.</p>
-        </div>
+        <div id="capstone-gate-feedback" class="mt-2"></div>
+        <script type="application/json" id="capstone-gate-feedback-data">{{ capstone_gate_llm_feedback|tojson }}</script>
         {% endif %}
         <p class="gate-desc" style="margin-top:0.75rem;">Neue Version einreichen:</p>
         {% else %}
@@ -800,32 +792,52 @@ function requestArtifactFeedback(position) {
     .then(r => r.json())
     .then(data => {
         statusEl.textContent = '';
-        if (data.rate_limited) {
-            btn.textContent = 'KI-Check starten →';
-            btn.disabled = true;
-            statusEl.innerHTML = '⏰ Du hast heute schon 10 Mal geprüft. Warte eine Stunde — dann kannst du wieder prüfen.';
-            return;
-        }
         btn.textContent = 'Erneut prüfen →';
         btn.disabled = false;
         if (data.error) {
             statusEl.textContent = '⚠️ ' + data.error;
             return;
         }
-        if (data.llm_disabled) {
+        if (data.rate_limited) {
+            statusEl.innerHTML = '⏰ Du hast heute schon 10 Mal geprüft. Warte eine Stunde — dann kannst du wieder prüfen.';
+        } else if (data.llm_disabled) {
             statusEl.textContent = 'ℹ️ KI-Feedback ist für diese Klasse nicht aktiviert.';
-            return;
-        }
-        if (data.checks_remaining !== undefined && data.checks_remaining <= 3 && data.checks_remaining > 0) {
+        } else if (data.checks_remaining !== undefined && data.checks_remaining <= 3 && data.checks_remaining > 0) {
             statusEl.textContent = `Noch ${data.checks_remaining} Check${data.checks_remaining === 1 ? '' : 's'} in dieser Stunde übrig.`;
         }
-        renderArtifactChecklist(data.feedback, data.extracted_text);
+        // Filename check can still produce feedback even when LLM is off/rate-limited;
+        // only show the "couldn't evaluate" error when that's not the explanation.
+        if ((data.feedback && data.feedback.length) || (!data.rate_limited && !data.llm_disabled)) {
+            renderArtifactChecklist(data.feedback, data.extracted_text);
+        } else {
+            document.getElementById('artifact-checklist').style.display = 'none';
+        }
     })
     .catch(() => {
         btn.textContent = 'KI-Check starten →';
         btn.disabled = false;
         statusEl.textContent = '⚠️ Verbindungsfehler. Bitte nochmal versuchen.';
     });
+}
+
+function renderFeedbackSplit(feedback) {
+    if (!feedback || !feedback.length) return '';
+    const good = feedback.filter(item => item.passed);
+    const bad = feedback.filter(item => !item.passed);
+    const row = item => `<div class="feedback-row">
+        <span class="feedback-icon">${item.passed ? '✅' : '❌'}</span>
+        <div class="feedback-body">
+            <div class="feedback-title">${escapeHtml(item.criterion)}</div>
+            ${item.note ? `<div class="feedback-note">💬 ${escapeHtml(item.note)}${item.source !== 'deterministic' ? ' <span class="feedback-src">✨ KI</span>' : ''}</div>` : ''}
+        </div>
+    </div>`;
+    const col = (title, items, cls) => `<div class="feedback-col ${cls}">
+        <div class="feedback-col-title">${title}</div>
+        ${items.length ? items.map(row).join('') : '<p class="feedback-empty">–</p>'}
+    </div>`;
+    return `<div class="checklist-header">KI-Feedback:</div>
+        <div class="feedback-split">${col('✅ Gut so', good, 'good')}${col("❌ Hier gibt's noch was zu tun", bad, 'bad')}</div>
+        <p style="font-size:0.8rem;color:#6b7280;margin-top:0.5rem;">Note wird von der Lehrkraft gesetzt.</p>`;
 }
 
 function renderArtifactChecklist(feedback, extractedText) {
@@ -835,21 +847,12 @@ function renderArtifactChecklist(feedback, extractedText) {
         container.style.display = '';
         return;
     }
-    const items = feedback.map(item => {
-        const icon = item.passed ? '✅' : '❌';
-        const borderColor = item.passed ? '#10b981' : '#ef4444';
-        return `<div class="checklist-item" style="border-left: 3px solid ${borderColor}; padding: 0.5rem 0.75rem; margin: 0.4rem 0; background: #f9fafb;">
-            <div style="font-weight:500;">${icon} ${escapeHtml(item.criterion)}</div>
-            ${item.note ? `<div style="font-size:0.875rem; color:#4b5563; margin-top:0.2rem;">💬 ${escapeHtml(item.note)}${item.source !== 'deterministic' ? ' <span style="font-size:0.75rem; color:#6b7280; margin-left:0.4rem;">✨ KI</span>' : ''}</div>` : ''}
-        </div>`;
-    }).join('');
     const transparencyBlock = extractedText ? `
         <details style="margin-top:0.75rem; font-size:0.85rem;">
             <summary style="color:#6b7280; cursor:pointer;">✨ Was die KI gesehen hat</summary>
             <div style="background:#f8f9fa; border:1px solid #e5e7eb; border-radius:4px; padding:0.75rem; margin-top:0.25rem; font-family:monospace; white-space:pre-wrap; font-size:0.8rem; color:#374151; max-height:12rem; overflow-y:auto;">${escapeHtml(extractedText)}</div>
         </details>` : '';
-    container.innerHTML = `<div class="checklist-header">KI-Feedback:</div>${items}
-        <p style="font-size:0.8rem;color:#6b7280;margin-top:0.5rem;">Note wird von der Lehrkraft gesetzt.</p>${transparencyBlock}`;
+    container.innerHTML = renderFeedbackSplit(feedback) + transparencyBlock;
     container.style.display = '';
 }
 
@@ -996,6 +999,12 @@ function adjustZoom(delta) {
     const filenameSpan = document.getElementById('gate-filename');
     const submitBtn = document.getElementById('gate-submit-btn');
     const resultDiv = document.getElementById('gate-result');
+
+    const initialFeedbackEl = document.getElementById('capstone-gate-feedback');
+    const initialFeedbackData = document.getElementById('capstone-gate-feedback-data');
+    if (initialFeedbackEl && initialFeedbackData) {
+        initialFeedbackEl.innerHTML = renderFeedbackSplit(JSON.parse(initialFeedbackData.textContent));
+    }
     if (!fileInput) return;
 
     fileInput.addEventListener('change', function() {
@@ -1033,19 +1042,10 @@ function adjustZoom(delta) {
                 if (data.passed) {
                     if (data.llm_feedback && data.llm_feedback.length) {
                         // Show LLM checklist before continuing
-                        const items = data.llm_feedback.map(item => {
-                            const icon = item.passed ? '✅' : '❌';
-                            const color = item.passed ? '#10b981' : '#ef4444';
-                            return `<div class="checklist-item" style="border-left:3px solid ${color};padding:0.5rem 0.75rem;margin:0.4rem 0;background:#f9fafb;">
-                                <div style="font-weight:500;">${icon} ${escapeHtml(item.criterion)}</div>
-                                ${item.note ? `<div style="font-size:0.875rem;color:#4b5563;margin-top:0.2rem;">💬 ${escapeHtml(item.note)}${item.source !== 'deterministic' ? ' <span style="font-size:0.75rem;color:#6b7280;margin-left:0.4rem;">✨ KI</span>' : ''}</div>` : ''}
-                            </div>`;
-                        }).join('');
                         const rateNote = (data.checks_remaining !== undefined && data.checks_remaining <= 3 && data.checks_remaining > 0)
                             ? `<p style="font-size:0.8rem;color:#6b7280;">Noch ${data.checks_remaining} KI-Check${data.checks_remaining === 1 ? '' : 's'} übrig.</p>` : '';
                         resultDiv.innerHTML = `<p class="gate-success-msg" style="margin-bottom:0.5rem;">✓ Abgabe geprüft!</p>
-                            <div class="checklist-header">KI-Feedback:</div>${items}
-                            <p style="font-size:0.8rem;color:#6b7280;margin-top:0.5rem;">Note wird von der Lehrkraft gesetzt.</p>${rateNote}
+                            ${renderFeedbackSplit(data.llm_feedback)}${rateNote}
                             <button class="btn btn-primary mt-1" onclick="location.reload()">Weiter →</button>`;
                         resultDiv.style.display = 'block';
                         submitBtn.style.display = 'none';
@@ -1120,19 +1120,10 @@ function adjustZoom(delta) {
                 if (data.passed) {
                     if (data.llm_feedback && data.llm_feedback.length) {
                         // Show LLM checklist before continuing
-                        const items = data.llm_feedback.map(item => {
-                            const icon = item.passed ? '✅' : '❌';
-                            const color = item.passed ? '#10b981' : '#ef4444';
-                            return `<div class="checklist-item" style="border-left:3px solid ${color};padding:0.5rem 0.75rem;margin:0.4rem 0;background:#f9fafb;">
-                                <div style="font-weight:500;">${icon} ${escapeHtml(item.criterion)}</div>
-                                ${item.note ? `<div style="font-size:0.875rem;color:#4b5563;margin-top:0.2rem;">💬 ${escapeHtml(item.note)}${item.source !== 'deterministic' ? ' <span style="font-size:0.75rem;color:#6b7280;margin-left:0.4rem;">✨ KI</span>' : ''}</div>` : ''}
-                            </div>`;
-                        }).join('');
                         const rateNote = (data.checks_remaining !== undefined && data.checks_remaining <= 3 && data.checks_remaining > 0)
                             ? `<p style="font-size:0.8rem;color:#6b7280;">Noch ${data.checks_remaining} KI-Check${data.checks_remaining === 1 ? '' : 's'} übrig.</p>` : '';
                         resultDiv.innerHTML = `<p class="gate-success-msg" style="margin-bottom:0.5rem;">✓ Abgabe geprüft!</p>
-                            <div class="checklist-header">KI-Feedback:</div>${items}
-                            <p style="font-size:0.8rem;color:#6b7280;margin-top:0.5rem;">Note wird von der Lehrkraft gesetzt.</p>${rateNote}
+                            ${renderFeedbackSplit(data.llm_feedback)}${rateNote}
                             <button class="btn btn-primary mt-1" onclick="location.reload()">Weiter →</button>`;
                         resultDiv.style.display = 'block';
                         submitBtn.style.display = 'none';

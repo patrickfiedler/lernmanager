@@ -1747,6 +1747,39 @@ tr.unsaved-row td {
 .gate-issues { margin: 0.25rem 0 0 1.25rem; font-size: 0.875rem; color: #374151; }
 .gate-matches { margin: 0.25rem 0 0.5rem 1.25rem; font-size: 0.875rem; color: #16a34a; }
 
+/* Artifact feedback split (Gut so / Hier gibt's noch was zu tun) */
+.feedback-split {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+    margin: 0.5rem 0;
+}
+.feedback-col {
+    border-radius: 0.5rem;
+    padding: 0.75rem 0.75rem 0.5rem;
+}
+.feedback-col.good { background: #f0fdf4; border: 1px solid #86efac; }
+.feedback-col.bad { background: #fef2f2; border: 1px solid #fca5a5; }
+.feedback-col-title { font-weight: 700; font-size: 0.85rem; margin-bottom: 0.4rem; }
+.feedback-col.good .feedback-col-title { color: #16a34a; }
+.feedback-col.bad .feedback-col-title { color: #dc2626; }
+.feedback-row {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0.35rem 0;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+.feedback-row:last-child { border-bottom: none; }
+.feedback-icon { flex-shrink: 0; }
+.feedback-title { font-weight: 500; font-size: 0.9rem; }
+.feedback-note { font-size: 0.8rem; color: #4b5563; margin-top: 0.15rem; }
+.feedback-src { font-size: 0.72rem; color: #6b7280; margin-left: 0.3rem; }
+.feedback-empty { font-size: 0.8rem; color: #9ca3af; margin: 0; }
+@media (max-width: 640px) {
+    .feedback-split { grid-template-columns: 1fr; }
+    .feedback-col.bad { order: -1; }
+}
+
 /* Success Banner */
 .success-banner {
     background: #10b981;

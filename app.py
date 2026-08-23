@@ -3448,7 +3448,7 @@ def student_artifact_feedback(slug, position):
 
     student = models.get_student(student_id)
     student_path = (student or {}).get('lernpfad') or 'wanderweg'
-    criteria = _get_criteria_for_path(graded, student_path)
+    full_name = f"{student['vorname']} {student['nachname']}" if student else ''
 
     body = request.get_json(silent=True) or {}
     anonymized_text = body.get('text', '').strip()
@@ -3456,32 +3456,19 @@ def student_artifact_feedback(slug, position):
     if not anonymized_text:
         return jsonify({'error': 'Kein Text empfangen'}), 400
 
-    # If LLM feedback is disabled for this class, return empty (upload-only mode)
-    if not klasse.get('llm_artifact_feedback_enabled'):
-        return jsonify({'feedback': [], 'llm_disabled': True})
+    result = _build_level2_feedback(
+        student_id, klasse, graded, student_path, filename,
+        (student or {}).get('vorname', ''), full_name, anonymized_text
+    )
+    if result['feedback']:
+        models.save_artifact_feedback(student_id, subtask['id'], result['feedback'])
 
-    checks_remaining = models.get_artifact_checks_remaining(student_id)
-    if checks_remaining <= 0:
-        return jsonify({'rate_limited': True}), 429
-
-    # Filename is checked deterministically, never sent to the LLM (see conventions.md).
-    feedback = []
-    expected_filename = graded.get('expected_filename')
-    if expected_filename and filename:
-        full_name = f"{student['vorname']} {student['nachname']}" if student else ''
-        feedback.append(artifact_checker.check_filename(
-            filename, expected_filename, (student or {}).get('vorname', ''), full_name
-        ))
-
-    llm_feedback = llm_grading.grade_artifact_checklist(anonymized_text, criteria)
-    feedback.extend(llm_feedback)
-    if llm_feedback:
-        models.record_llm_usage(student_id, 'artifact_feedback', 0)
-    if feedback:
-        models.save_artifact_feedback(student_id, subtask['id'], feedback)
-
-    checks_remaining = models.get_artifact_checks_remaining(student_id)
-    response = {'feedback': feedback, 'checks_remaining': checks_remaining}
+    response = {
+        'feedback': result['feedback'],
+        'checks_remaining': result['checks_remaining'],
+        'llm_disabled': result['llm_disabled'],
+        'rate_limited': result['rate_limited'],
+    }
     if models.get_effective_transparency_mode(student_id, klasse['id']):
         response['extracted_text'] = anonymized_text
     return jsonify(response)
@@ -3554,45 +3541,38 @@ def student_artifact_gate_check(slug, position):
                 metadata={'student_task_id': task['id']}
             )
 
-    # If gate passes and LLM artifact feedback is configured and enabled, run it now.
+    # Filename check is deterministic and always runs on a passed gate; LLM criteria
+    # only run when the class has LLM feedback enabled (see _build_level2_feedback).
     # This makes the checkpoint card the single upload point for both checks.
-    if result['passed'] and klasse.get('llm_artifact_feedback_enabled'):
+    if result['passed']:
         graded_raw = subtask.get('graded_artifact_json')
         if graded_raw:
             graded = json.loads(graded_raw) if isinstance(graded_raw, str) else graded_raw
-            checks_remaining = models.get_artifact_checks_remaining(student_id)
-            if checks_remaining > 0:
+            student = models.get_student(student_id)
+            full_name = f"{student['vorname']} {student['nachname']}" if student else ''
+            student_path = (student or {}).get('lernpfad') or 'wanderweg'
+
+            anonymized = None
+            criteria = _get_criteria_for_path(graded, student_path)
+            if criteria and klasse.get('llm_artifact_feedback_enabled'):
                 try:
                     extract_bytes = artifact_processor.strip_pptx_metadata(file_bytes) if ext == '.pptx' else file_bytes
                     extracted = artifact_processor.extract_artifact(extract_bytes, filename)
-                    student = models.get_student(student_id)
-                    full_name = f"{student['vorname']} {student['nachname']}" if student else ''
                     anonymized = artifact_processor.anonymize(f"[Dateiname: {filename}]\n\n{extracted}", full_name, klasse['name'])
-                    student_path = (student or {}).get('lernpfad') or 'wanderweg'
-                    criteria = _get_criteria_for_path(graded, student_path)
-
-                    # Filename is checked deterministically, never sent to the LLM (see conventions.md).
-                    feedback = []
-                    expected_filename = graded.get('expected_filename')
-                    if expected_filename:
-                        feedback.append(artifact_checker.check_filename(
-                            filename, expected_filename, (student or {}).get('vorname', ''), full_name
-                        ))
-
-                    llm_feedback = llm_grading.grade_artifact_checklist(anonymized, criteria) if criteria else []
-                    feedback.extend(llm_feedback)
-                    if llm_feedback:
-                        models.record_llm_usage(student_id, 'artifact_feedback', 0)
-                    if feedback:
-                        models.save_artifact_feedback(student_id, subtask['id'], feedback)
-                        checks_remaining = models.get_artifact_checks_remaining(student_id)
-                        result['llm_feedback'] = feedback
-                        result['checks_remaining'] = checks_remaining
-                        if models.get_effective_transparency_mode(student_id, klasse['id']):
-                            result['extracted_text'] = anonymized
                 except Exception as e:
                     print(f"Inline gate LLM feedback error: {type(e).__name__}: {e}", file=sys.stderr)
-                    # LLM failure is non-blocking; gate result stands
+                    # Extraction failure is non-blocking; gate result stands, filename check still runs below
+
+            level2 = _build_level2_feedback(
+                student_id, klasse, graded, student_path, filename,
+                (student or {}).get('vorname', ''), full_name, anonymized or ''
+            )
+            if level2['feedback']:
+                models.save_artifact_feedback(student_id, subtask['id'], level2['feedback'])
+                result['llm_feedback'] = level2['feedback']
+            result['checks_remaining'] = level2['checks_remaining']
+            if anonymized and models.get_effective_transparency_mode(student_id, klasse['id']):
+                result['extracted_text'] = anonymized
 
     return jsonify(result)
 
@@ -3631,6 +3611,38 @@ def _get_criteria_for_path(graded_artifact, student_path):
         if graded_artifact.get(key):
             return graded_artifact[key]
     return []
+
+
+def _build_level2_feedback(student_id, klasse, graded, student_path, filename, vorname, full_name, anonymized_text):
+    """Level 2 artifact feedback: filename check is deterministic and always runs;
+    LLM criteria only run when the class has LLM feedback enabled and the student
+    still has check budget left. Keeping these independent means disabling LLM
+    feedback for a class no longer silently disables the (free) filename check too.
+    """
+    feedback = []
+    expected_filename = graded.get('expected_filename')
+    if expected_filename and filename:
+        feedback.append(artifact_checker.check_filename(filename, expected_filename, vorname, full_name))
+
+    llm_enabled = bool(klasse.get('llm_artifact_feedback_enabled'))
+    rate_limited = False
+    if llm_enabled:
+        criteria = _get_criteria_for_path(graded, student_path)
+        if criteria:
+            if models.get_artifact_checks_remaining(student_id) <= 0:
+                rate_limited = True
+            elif anonymized_text:
+                llm_feedback = llm_grading.grade_artifact_checklist(anonymized_text, criteria)
+                feedback.extend(llm_feedback)
+                if llm_feedback:
+                    models.record_llm_usage(student_id, 'artifact_feedback', 0)
+
+    return {
+        'feedback': feedback,
+        'llm_disabled': not llm_enabled,
+        'rate_limited': rate_limited,
+        'checks_remaining': models.get_artifact_checks_remaining(student_id),
+    }
 
 
 def _artifact_file_details(unit_artifact_file, subtasks, student, klasse):
