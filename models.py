@@ -1732,9 +1732,9 @@ def delete_task(task_id):
 def reset_student_progress_for_task(task_id):
     """Reset all student progress for a task while preserving assignments.
 
-    Deletes student_subtask, quiz_attempt, warmup_history records and
-    resets student_task completion flags. student_task rows stay intact
-    so students remain assigned to the topic.
+    Deletes student_subtask, quiz_attempt, warmup_history and checkpoint_attempt
+    records and resets student_task completion flags. student_task rows stay
+    intact so students remain assigned to the topic.
     """
     with db_session() as conn:
         # Get all student_task IDs and subtask IDs for this task
@@ -1796,6 +1796,10 @@ def reset_student_progress_for_task(task_id):
 
         # Also clear warmup_history linked by task_id
         conn.execute("DELETE FROM warmup_history WHERE task_id = ?", (task_id,))
+
+        # Chemie Quiz-checkpoints log to checkpoint_attempt instead of quiz_attempt
+        # (see has_passed_subtask_quiz) — student_id/module_id scoped, not student_task_id.
+        conn.execute("DELETE FROM checkpoint_attempt WHERE module_id = ?", (task_id,))
 
 
 # ============ Topic Queue ============
