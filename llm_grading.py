@@ -40,6 +40,21 @@ FALLBACK_RESULT = {
 # formal part of the OpenAI-compatible spec — OVH's serving stack happens to honor it
 # on Chat Completions too. If this breaks after an OVH backend change or on another
 # provider, that's why.
+#
+# BUT: non-reasoning models reject the param outright (verified: Meta-Llama-3.3-70B-
+# Instruct -> HTTP 400 "feature 'reasoning_effort for this model' is not currently
+# supported"). Since LLM_MODEL is a swappable .env knob, send it only when the
+# configured model looks like a reasoning model — see _reasoning_kwargs().
+REASONING_MODEL_MARKERS = ('qwen', 'deepseek-r1', 'o1', 'o3')
+
+
+def _reasoning_kwargs():
+    """Extra kwargs for chat.completions.create() — reasoning_effort only when
+    LLM_MODEL matches a known reasoning-model family (see NOTE above)."""
+    model_id = (config.LLM_MODEL or '').lower()
+    if any(marker in model_id for marker in REASONING_MODEL_MARKERS):
+        return {"reasoning_effort": "none"}
+    return {}
 
 
 def _get_client():
@@ -89,7 +104,7 @@ def _call_llm(question_text, expected_or_rubric, student_answer):
             {"role": "user", "content": user_prompt},
         ],
         timeout=config.LLM_TIMEOUT,
-        reasoning_effort="none",
+        **_reasoning_kwargs(),
     )
     text = _message_text(response)
     if not text:
@@ -140,7 +155,7 @@ def filter_noise_answers(question_text: str, answers: list) -> list:
                 {"role": "user", "content": user_prompt},
             ],
             timeout=config.LLM_TIMEOUT,
-            reasoning_effort="none",
+            **_reasoning_kwargs(),
         )
         text = _message_text(response)
         if not text:
@@ -215,7 +230,7 @@ def grade_artifact_checklist(extracted_text: str, criteria: list) -> list:
                 {"role": "user", "content": user_prompt},
             ],
             timeout=config.LLM_ARTIFACT_TIMEOUT,
-            reasoning_effort="none",
+            **_reasoning_kwargs(),
         )
         text = _message_text(response)
 
@@ -328,7 +343,7 @@ def diagnostic_call(kind, **fields):
                 {"role": "user", "content": user_prompt},
             ],
             timeout=timeout,
-            reasoning_effort="none",
+            **_reasoning_kwargs(),
         )
         elapsed = time.time() - start
         choice = response.choices[0]
