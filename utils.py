@@ -499,6 +499,88 @@ def generate_credentials_pdf_grouped(groups):
     return buffer
 
 
+def generate_name_username_pdf(students, klasse_name):
+    """Generate a PDF listing student names and usernames (no passwords) --
+    for teachers who need a class roster with logins but already handed out
+    the credentials sheet, or lost their copy and don't want to reset passwords.
+
+    Args:
+        students: List of dicts with 'nachname', 'vorname', 'username'
+        klasse_name: Name of the class
+
+    Returns:
+        BytesIO object containing the PDF
+    """
+    from io import BytesIO
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import cm
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from datetime import datetime
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=2*cm, bottomMargin=2*cm)
+    styles = getSampleStyleSheet()
+    elements = []
+
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=18,
+        spaceAfter=12
+    )
+    elements.append(Paragraph(f"Namen und Benutzernamen: {klasse_name}", title_style))
+    elements.append(Paragraph(f"Erstellt am {datetime.now().strftime('%d.%m.%Y %H:%M')}", styles['Normal']))
+    elements.append(Spacer(1, 0.5*cm))
+
+    data = [['Name', 'Benutzername']]
+    for s in students:
+        data.append([f"{s['nachname']}, {s['vorname']}", s['username']])
+
+    table = Table(data, colWidths=[8*cm, 5*cm])
+    table.setStyle(TableStyle([
+        # Header
+        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 11),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+        ('TOPPADDING', (0, 0), (-1, 0), 8),
+        # Body
+        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 1), (-1, -1), 10),
+        ('ALIGN', (1, 1), (-1, -1), 'LEFT'),
+        ('FONTNAME', (1, 1), (1, -1), 'Courier'),
+        ('BOTTOMPADDING', (0, 1), (-1, -1), 6),
+        ('TOPPADDING', (0, 1), (-1, -1), 6),
+        # Grid
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+        # Alternating row colors
+        *[('BACKGROUND', (0, i), (-1, i), colors.Color(0.95, 0.95, 0.95))
+          for i in range(2, len(data), 2)]
+    ]))
+
+    elements.append(table)
+    elements.append(Spacer(1, 1*cm))
+
+    footer_style = ParagraphStyle(
+        'Footer',
+        parent=styles['Normal'],
+        fontSize=9,
+        textColor=colors.grey
+    )
+    elements.append(Paragraph(
+        f"Anzahl Schueler: {len(students)} | Lernmanager",
+        footer_style
+    ))
+
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer
+
+
 def generate_class_report_pdf(report_data, date_from=None, date_to=None):
     """Generate a PDF class progress report.
 

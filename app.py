@@ -27,7 +27,7 @@ import models
 import llm_grading
 import artifact_processor
 import artifact_checker
-from utils import generate_username, generate_password, allowed_file, generate_credentials_pdf, generate_credentials_pdf_grouped, generate_student_self_report_pdf, generate_class_report_pdf, generate_student_report_pdf, slugify, format_bytes, is_ip_allowed, is_within_time_window, parse_netzwerk_csv
+from utils import generate_username, generate_password, allowed_file, generate_credentials_pdf, generate_credentials_pdf_grouped, generate_name_username_pdf, generate_student_self_report_pdf, generate_class_report_pdf, generate_student_report_pdf, slugify, format_bytes, is_ip_allowed, is_within_time_window, parse_netzwerk_csv
 from import_task import validate_task_structure, check_duplicate, import_task as do_import_task, overwrite_task_from_import, ValidationError
 
 app = Flask(__name__)
@@ -666,6 +666,27 @@ def admin_klasse_detail(klasse_id):
                            has_queue=bool(queue), sidequests=sidequests,
                            practice_unlocked_ids=practice_unlocked_ids,
                            andere_klassen=andere_klassen)
+
+
+@app.route('/admin/klasse/<int:klasse_id>/namen-benutzernamen-pdf')
+@admin_required
+def admin_klasse_namen_benutzernamen_pdf(klasse_id):
+    """Download a PDF with student names and usernames (no passwords)."""
+    klasse = models.get_klasse(klasse_id)
+    if not klasse:
+        flash('Klasse nicht gefunden.', 'danger')
+        return redirect(url_for('admin_klassen'))
+    students = models.get_students_in_klasse(klasse_id)
+
+    pdf_buffer = generate_name_username_pdf(students, klasse['name'])
+
+    return Response(
+        pdf_buffer.getvalue(),
+        mimetype='application/pdf',
+        headers={
+            'Content-Disposition': f'attachment; filename=namen_benutzernamen_{klasse["name"]}.pdf'
+        }
+    )
 
 
 def _grading_service_health():

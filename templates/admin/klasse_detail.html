@@ -22,6 +22,7 @@
         <a href="{{ url_for('admin_grading_upload') }}" class="btn btn-secondary">🎯 KI-Bewertung hochladen</a>
         <a href="{{ url_for('admin_unterricht', klasse_id=klasse.id) }}" class="btn btn-primary">📅 Unterricht</a>
         <a href="{{ url_for('admin_klasse_bericht', klasse_id=klasse.id) }}" class="btn btn-success">📊 Klassenbericht</a>
+        <a href="{{ url_for('admin_klasse_namen_benutzernamen_pdf', klasse_id=klasse.id) }}" class="btn btn-secondary">📄 Namen &amp; Benutzernamen</a>
         <form method="POST" action="{{ url_for('admin_klasse_loeschen', klasse_id=klasse.id) }}" style="display: inline;" onsubmit="return confirm('Klasse wirklich löschen?');">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button type="submit" class="btn btn-danger">🗑️ Löschen</button>
