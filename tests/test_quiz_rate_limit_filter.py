@@ -25,7 +25,7 @@ def _rate_limited_student_with_topic(app):
     student_id = models.create_student("Test", "Schueler", "ratelimittest", "pw123")
     klasse_id = models.create_klasse("Testklasse")
     models.add_student_to_klasse(student_id, klasse_id)
-    task_id = models.create_task("Testthema", "", "", "MBI", "5/6", "pflicht",
+    task_id = models.create_task("Testthema", "", "", "MBI", "5", "pflicht",
                                   quiz_json=json.dumps(QUIZ))
     models.assign_task_to_student(student_id, klasse_id, task_id)
 

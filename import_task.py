@@ -233,9 +233,18 @@ def validate_task_structure(data, warnings=None):
     if 'fach' in task and task['fach'] not in config.SUBJECTS:
         errors.append(f"Invalid fach '{task['fach']}'. Must be one of: {', '.join(config.SUBJECTS)}")
 
-    # Validate stufe
+    # Validate stufe -- single grade levels since 2026-08-25; the old
+    # double-year values get their own message so the fix is obvious.
     if 'stufe' in task and task['stufe'] not in config.LEVELS:
-        errors.append(f"Invalid stufe '{task['stufe']}'. Must be one of: {', '.join(config.LEVELS)}")
+        if task['stufe'] in config.LEGACY_LEVELS:
+            single = task['stufe'].split('/')[0]
+            errors.append(
+                f"Veraltete stufe '{task['stufe']}'. Klassenstufen sind jetzt einzeln "
+                f"anzugeben (z.B. '{single}') -- ein Doppeljahrgang kann zwei "
+                f"gleichnamige Einheiten nicht auseinanderhalten."
+            )
+        else:
+            errors.append(f"Invalid stufe '{task['stufe']}'. Must be one of: {', '.join(config.LEVELS)}")
 
     # Validate kategorie if provided
     if 'kategorie' in task and task['kategorie'] not in ['pflicht', 'bonus']:

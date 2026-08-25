@@ -31,7 +31,12 @@ ALLOWED_EXTENSIONS = {'pdf', 'png', 'jpg', 'jpeg', 'gif'}
 
 # Subject and level options
 SUBJECTS = ['Englisch', 'Chemie', 'MBI', 'Geographie']
-LEVELS = ['5/6', '7/8', '9/10', '11s', '11/12', 'Seilbahn']
+# Grade levels: single integers (5, 6, 7, ...) since 2026-08-25. The old
+# double-year values ('5/6', '7/8', '9/10') collided as soon as two units
+# shared a name across grades -- see docs/shared/lernmanager/task_json_format.md.
+# LEGACY_LEVELS are still rendered for existing rows but no longer offered.
+LEVELS = ['5', '6', '7', '8', '9', '10', '11s', '11/12', 'Seilbahn']
+LEGACY_LEVELS = ['5/6', '7/8', '9/10']
 
 # LLM grading (for free-text quiz questions and artifact completeness checks)
 # Uses any OpenAI-compatible API endpoint (e.g. OVHcloud AI Endpoints).

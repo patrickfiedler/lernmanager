@@ -12,7 +12,7 @@ def _task_data(subtasks):
             "name": "5 - Testthema",
             "beschreibung": "x",
             "fach": "MBI",
-            "stufe": "5/6",
+            "stufe": "5",
             "subtasks": subtasks,
         }
     }
@@ -41,7 +41,7 @@ def test_import_defaults_is_intro_false_when_absent(db):
 
 
 def test_update_subtasks_from_import_preserves_is_intro(db):
-    task_id = models.create_task("5 - Testthema", "x", "", "MBI", "5/6", "pflicht")
+    task_id = models.create_task("5 - Testthema", "x", "", "MBI", "5", "pflicht")
     models.create_subtask(task_id, "Einführung", 0, path="wanderweg")
 
     subtask_id_by_position = models.update_subtasks_from_import(task_id, [

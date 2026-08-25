@@ -33,7 +33,7 @@ MIXED_QUIZ = {
 def _completed_topic_with_quiz(student_id, klasse_id, quiz):
     """Helper: create a topic, assign to student, mark completed. Returns task_id."""
     task_id = models.create_task(
-        "Testthema", "", "", "MBI", "5/6", "",
+        "Testthema", "", "", "MBI", "5", "",
         quiz_json=json.dumps(quiz),
     )
     models.assign_task_to_student(student_id, klasse_id, task_id)
@@ -109,7 +109,7 @@ def test_warmup_excludes_intro_subtask_quiz(db):
     klasse_id = models.create_klasse("Testklasse")
     models.add_student_to_klasse(student_id, klasse_id)
 
-    task_id = models.create_task("Testthema", "", "", "MBI", "5/6", "pflicht")
+    task_id = models.create_task("Testthema", "", "", "MBI", "5", "pflicht")
     models.assign_task_to_student(student_id, klasse_id, task_id)
 
     intro_id = _add_subtask_with_quiz(task_id, reihenfolge=0, quiz=SIMPLE_QUIZ)
@@ -137,7 +137,7 @@ def test_warmup_excludes_long_answer(db):
             {"type": "long_answer", "text": "Erkläre...", "rubric": "..."},
         ]
     }
-    task_id = models.create_task("Testthema", "", "", "MBI", "5/6", "pflicht",
+    task_id = models.create_task("Testthema", "", "", "MBI", "5", "pflicht",
                                   quiz_json=json.dumps(quiz_with_long_answer))
     models.assign_task_to_student(student_id, klasse_id, task_id)
     with models.db_session() as conn:

@@ -50,6 +50,7 @@
             <div class="form-group">
                 <label>Stufe</label>
                 <select name="stufe" class="form-control" required>
+                    {% if task.stufe and task.stufe not in levels %}<option value="{{ task.stufe }}" selected>{{ task.stufe }} (veraltet)</option>{% endif %}
                     {% for l in levels %}<option value="{{ l }}" {% if task.stufe == l %}selected{% endif %}>{{ l }}</option>{% endfor %}
                 </select>
             </div>

@@ -25,7 +25,7 @@ def _student_with_graded_gate(app, tmp_path):
     student_id = models.create_student("Alex", "Schueler", "artifacttest2", "pw123")
     klasse_id = models.create_klasse("Testklasse")
     models.add_student_to_klasse(student_id, klasse_id)
-    task_id = models.create_task("Testthema", "", "", "MBI", "5/6", "pflicht")
+    task_id = models.create_task("Testthema", "", "", "MBI", "5", "pflicht")
     subtask_id = models.create_subtask(
         task_id, "Aufgabe mit Abgabe-Pruefung", reihenfolge=1,
         artifact_gate_json=json.dumps(GATE_CONFIG),

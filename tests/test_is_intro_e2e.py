@@ -21,7 +21,7 @@ def _setup_task_with_intro_at_position_2(app):
     student_id = models.create_student("Test", "Schueler", "introtest", "pw123")
     klasse_id = models.create_klasse("Testklasse")
     models.add_student_to_klasse(student_id, klasse_id)
-    task_id = models.create_task("Testthema", "", "", "MBI", "5/6", "")
+    task_id = models.create_task("Testthema", "", "", "MBI", "5", "")
 
     models.create_subtask(task_id, "Vorbereitung", reihenfolge=0)
     models.create_subtask(task_id, "Einführung", reihenfolge=1, is_intro=1)

@@ -29,38 +29,38 @@ def _insert_topic_with_subtasks(name, fach, stufe, paths):
 
 def test_duplicate_same_name_same_path_type_is_flagged(db):
     existing_id = _insert_topic_with_subtasks(
-        "5 - Bots", "MBI", "5/6", ["wanderweg", "bergweg"]
+        "5 - Bots", "MBI", "5", ["wanderweg", "bergweg"]
     )
-    data = _make_task_data("5 - Bots", "MBI", "5/6", ["wanderweg", "bergweg"])
+    data = _make_task_data("5 - Bots", "MBI", "5", ["wanderweg", "bergweg"])
 
     assert check_duplicate(data) == existing_id
 
 
 def test_seilbahn_not_duplicate_of_regular_same_name(db):
-    _insert_topic_with_subtasks("5 - Bots", "MBI", "5/6", ["wanderweg", "bergweg"])
-    data = _make_task_data("5 - Bots", "MBI", "5/6", ["seilbahn", "seilbahn"])
+    _insert_topic_with_subtasks("5 - Bots", "MBI", "5", ["wanderweg", "bergweg"])
+    data = _make_task_data("5 - Bots", "MBI", "5", ["seilbahn", "seilbahn"])
 
     assert check_duplicate(data) is None
 
 
 def test_regular_not_duplicate_of_seilbahn_same_name(db):
-    _insert_topic_with_subtasks("5 - Bots", "MBI", "5/6", ["seilbahn", "seilbahn"])
-    data = _make_task_data("5 - Bots", "MBI", "5/6", ["wanderweg", "bergweg"])
+    _insert_topic_with_subtasks("5 - Bots", "MBI", "5", ["seilbahn", "seilbahn"])
+    data = _make_task_data("5 - Bots", "MBI", "5", ["wanderweg", "bergweg"])
 
     assert check_duplicate(data) is None
 
 
 def test_duplicate_seilbahn_vs_seilbahn_is_flagged(db):
     existing_id = _insert_topic_with_subtasks(
-        "5 - Bots", "MBI", "5/6", ["seilbahn", "seilbahn"]
+        "5 - Bots", "MBI", "5", ["seilbahn", "seilbahn"]
     )
-    data = _make_task_data("5 - Bots", "MBI", "5/6", ["seilbahn", "seilbahn"])
+    data = _make_task_data("5 - Bots", "MBI", "5", ["seilbahn", "seilbahn"])
 
     assert check_duplicate(data) == existing_id
 
 
 def test_no_duplicate_different_fach(db):
-    _insert_topic_with_subtasks("5 - Bots", "MBI", "5/6", ["wanderweg"])
-    data = _make_task_data("5 - Bots", "Deutsch", "5/6", ["wanderweg"])
+    _insert_topic_with_subtasks("5 - Bots", "MBI", "5", ["wanderweg"])
+    data = _make_task_data("5 - Bots", "Deutsch", "5", ["wanderweg"])
 
     assert check_duplicate(data) is None

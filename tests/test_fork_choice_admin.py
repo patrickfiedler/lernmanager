@@ -4,7 +4,7 @@ import models
 
 def test_saving_subtasks_persists_fork_fields(app, client, as_admin):
     app.config["WTF_CSRF_ENABLED"] = False
-    task_id = models.create_task("Adminthema", "", "", "MBI", "5/6", "")
+    task_id = models.create_task("Adminthema", "", "", "MBI", "5", "")
     models.create_subtask(task_id, "Basis", reihenfolge=0)
     models.create_subtask(task_id, "Zweig A", reihenfolge=1)
 
@@ -43,7 +43,7 @@ def _setup_chosen_fork():
     student_id = models.create_student("Test", "Schueler", "forkadmintest", "pw123")
     klasse_id = models.create_klasse("Testklasse")
     models.add_student_to_klasse(student_id, klasse_id)
-    task_id = models.create_task("Reassignthema", "", "", "MBI", "5/6", "")
+    task_id = models.create_task("Reassignthema", "", "", "MBI", "5", "")
     a1 = models.create_subtask(task_id, "Weg A", reihenfolge=1)
     b1 = models.create_subtask(task_id, "Weg B", reihenfolge=1)
     with models.db_session() as conn:
@@ -79,7 +79,7 @@ def test_teacher_can_reassign_fork_choice(app, client, as_admin):
 
 def test_fork_group_without_branch_rejected(app, client, as_admin):
     app.config["WTF_CSRF_ENABLED"] = False
-    task_id = models.create_task("Adminthema2", "", "", "MBI", "5/6", "")
+    task_id = models.create_task("Adminthema2", "", "", "MBI", "5", "")
     models.create_subtask(task_id, "Basis", reihenfolge=0)
 
     resp = as_admin.post(f"/admin/thema/{task_id}/aufgaben", data={

@@ -55,7 +55,7 @@ def test_param_less_reentry_shows_actual_progress_not_position_one(app, client):
     student_id = models.create_student("Test", "Schueler", "resumetest", "pw123")
     klasse_id = models.create_klasse("Testklasse")
     models.add_student_to_klasse(student_id, klasse_id)
-    task_id = models.create_task("Resumethema", "", "", "MBI", "5/6", "")
+    task_id = models.create_task("Resumethema", "", "", "MBI", "5", "")
     s1 = models.create_subtask(task_id, "Erste Aufgabe", reihenfolge=0)
     models.create_subtask(task_id, "Zweite Aufgabe", reihenfolge=1)
     models.assign_task_to_student(student_id, klasse_id, task_id)

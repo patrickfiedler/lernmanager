@@ -31,6 +31,9 @@
             <div class="form-group">
                 <label for="stufe">Stufe</label>
                 <select id="stufe" name="stufe" class="form-control" required>
+                    {% if task and task.stufe and task.stufe not in levels %}
+                    <option value="{{ task.stufe }}" selected>{{ task.stufe }} (veraltet)</option>
+                    {% endif %}
                     {% for level in levels %}
                     <option value="{{ level }}" {% if task and task.stufe == level %}selected{% endif %}>{{ level }}</option>
                     {% endfor %}
@@ -77,7 +80,7 @@
         <div class="form-group">
             <label for="why_learn_this">Wofür brauchen die Schüler das? 💡</label>
             <textarea id="why_learn_this" name="why_learn_this" class="form-control" rows="2" placeholder="z.B. 'Du lernst, wie Computer funktionieren - das brauchst du, um digitale Geräte zu verstehen.'">{{ task.why_learn_this if task else '' }}</textarea>
-            <small class="text-muted">Kurze Erklärung (1-2 Sätze), altersgerecht für Stufe {{ task.stufe if task else 'X/Y' }}. Wird den Schülern prominent angezeigt.</small>
+            <small class="text-muted">Kurze Erklärung (1-2 Sätze), altersgerecht für Stufe {{ task.stufe if task else 'X' }}. Wird den Schülern prominent angezeigt.</small>
         </div>
 
         <button type="submit" class="btn btn-primary">{% if task %}Speichern{% else %}Erstellen{% endif %}</button>

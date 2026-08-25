@@ -5,7 +5,7 @@ import models
 
 
 def test_attribution_stored_and_exported(db):
-    task_id = models.create_task("Testthema", "", "", "MBI", "5/6", "pflicht")
+    task_id = models.create_task("Testthema", "", "", "MBI", "5", "pflicht")
     models.create_material(task_id, "link", "https://example.com/foto.jpg",
                             "Beispielfoto", attribution="Max Mustermann")
 
@@ -17,7 +17,7 @@ def test_attribution_stored_and_exported(db):
 
 
 def test_attribution_optional(db):
-    task_id = models.create_task("Testthema", "", "", "MBI", "5/6", "pflicht")
+    task_id = models.create_task("Testthema", "", "", "MBI", "5", "pflicht")
     models.create_material(task_id, "link", "https://example.com", "Ohne Quelle")
 
     materials = models.get_materials(task_id)
@@ -25,7 +25,7 @@ def test_attribution_optional(db):
 
 
 def test_attribution_renders_on_admin_page(as_admin):
-    task_id = models.create_task("Testthema", "", "", "MBI", "5/6", "pflicht")
+    task_id = models.create_task("Testthema", "", "", "MBI", "5", "pflicht")
     models.create_material(task_id, "link", "https://example.com/foto.jpg",
                             "Beispielfoto", attribution="Max Mustermann")
 

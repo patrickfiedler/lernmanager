@@ -11,7 +11,7 @@ def _setup_forked_task(app):
     student_id = models.create_student("Test", "Schueler", "forktest", "pw123")
     klasse_id = models.create_klasse("Testklasse")
     models.add_student_to_klasse(student_id, klasse_id)
-    task_id = models.create_task("Testthema", "", "", "MBI", "5/6", "")
+    task_id = models.create_task("Testthema", "", "", "MBI", "5", "")
 
     base1 = models.create_subtask(task_id, "Basis 1", reihenfolge=1)
     a1 = models.create_subtask(task_id, "Branch A - 1", reihenfolge=2)

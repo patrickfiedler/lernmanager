@@ -25,7 +25,7 @@ def _student_with_gated_subtask(app, tmp_path):
     klasse_id = models.create_klasse("Testklasse")
     models.add_student_to_klasse(student_id, klasse_id)
     models.add_student_to_klasse(other_student_id, klasse_id)
-    task_id = models.create_task("Testthema", "", "", "MBI", "5/6", "pflicht")
+    task_id = models.create_task("Testthema", "", "", "MBI", "5", "pflicht")
     subtask_id = models.create_subtask(
         task_id, "Aufgabe mit Abgabe-Pruefung", reihenfolge=1,
         artifact_gate_json=json.dumps(GATE_CONFIG)
@@ -45,7 +45,7 @@ def _student_with_two_checkpoints(app, tmp_path):
     student_id = models.create_student("Test", "Schueler", "artifacttest", "pw123")
     klasse_id = models.create_klasse("Testklasse")
     models.add_student_to_klasse(student_id, klasse_id)
-    task_id = models.create_task("Testthema", "", "", "MBI", "5/6", "pflicht")
+    task_id = models.create_task("Testthema", "", "", "MBI", "5", "pflicht")
     models.create_subtask(task_id, "Einfuehrung", reihenfolge=1)
     subtask1_id = models.create_subtask(
         task_id, "Checkpoint 1", reihenfolge=2,

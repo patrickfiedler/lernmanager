@@ -59,6 +59,47 @@ def slugify(text):
     return text
 
 
+def parse_stufen(stufe):
+    """Return the set of grade numbers a topic's `stufe` value covers.
+
+    '6' -> {6}, '11/12' -> {11, 12}, '11s' -> {11}. Legacy double-year values
+    ('5/6', '7/8', '9/10') still resolve to both grades so existing rows keep
+    matching. Non-numeric values ('Seilbahn') return an empty set, i.e. they
+    never count as an exact grade match.
+    """
+    if not stufe:
+        return set()
+    grades = set()
+    for part in str(stufe).split('/'):
+        digits = re.sub(r'\D', '', part)
+        if digits:
+            grades.add(int(digits))
+    return grades
+
+
+def stufe_sort_key(stufe):
+    """Sort key for a `stufe` value: numeric grades first (ascending), rest last."""
+    grades = parse_stufen(stufe)
+    return (min(grades), str(stufe)) if grades else (99, str(stufe or ''))
+
+
+def split_tasks_by_stufe(tasks, klassenstufen):
+    """Split topics into (exact grade match, everything else).
+
+    `klassenstufen` is an iterable of grade numbers (klasse.klassenstufe).
+    If none are set, nothing is split -- everything lands in `others` and the
+    caller renders a single flat list, exactly as before.
+    """
+    grades = {int(k) for k in klassenstufen if k}
+    if not grades:
+        return [], list(tasks)
+    exact, others = [], []
+    for task in tasks:
+        target = exact if parse_stufen(task.get('stufe')) & grades else others
+        target.append(task)
+    return exact, others
+
+
 def find_netzwerk_login_column(headers):
     """
     Given a CSV header row (list of strings), return the index of the column
