@@ -1046,6 +1046,10 @@ function adjustZoom(delta) {
                     submitBtn.textContent = 'Datei prüfen';
                     return;
                 }
+                // The result below describes the newly uploaded file, so feedback
+                // rendered from the previous upload is stale -- drop it rather than
+                // leaving two feedback tables stacked in one card.
+                if (initialFeedbackEl) initialFeedbackEl.innerHTML = '';
                 if (data.passed) {
                     if (data.llm_feedback && data.llm_feedback.length) {
                         // Show LLM checklist before continuing
