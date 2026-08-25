@@ -68,3 +68,22 @@ def test_progress_denominator_excludes_is_intro(app, client):
 
     # 4 subtasks total, 1 is_intro -> denominator is 3, not 4
     assert "von 3 Aufgaben erledigt" in body
+
+
+def test_intro_checkbox_says_read_and_understood(app, client):
+    """An Einführung is read, not accomplished -- the completion label differs."""
+    student_id = _setup_task_with_intro_at_position_2(app)
+    _login(client, student_id)
+
+    intro = client.get("/schueler/thema/testthema?aufgabe=2").get_data(as_text=True)
+    assert "Ich habe das gelesen und verstanden! ✓" in intro
+    assert "Ich habe das geschafft!" not in intro
+
+
+def test_regular_task_keeps_the_original_label(app, client):
+    student_id = _setup_task_with_intro_at_position_2(app)
+    _login(client, student_id)
+
+    regular = client.get("/schueler/thema/testthema?aufgabe=1").get_data(as_text=True)
+    assert "Ich habe das geschafft! ✓" in regular
+    assert "gelesen und verstanden" not in regular
