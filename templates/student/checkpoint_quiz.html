@@ -9,6 +9,7 @@
 </div>
 
 <p class="text-muted mb-2">Du hast so viele Versuche wie du brauchst — nimm dir Zeit.</p>
+<p class="text-muted mb-2">Die KI prüft hier live, ob deine Antwort passt, damit du direkt weitermachen kannst. Die Note für diesen Checkpoint vergibt deine Lehrkraft danach.</p>
 
 <div id="checkpoint-container">
     <div class="mb-1 text-muted" id="progress-text"></div>
@@ -301,11 +302,15 @@
             var summary = document.getElementById('summary-card');
             summary.style.display = '';
             document.getElementById('summary-title').textContent = '✅ Checkpoint abgeschlossen';
+            var gradingNote = document.createElement('p');
+            gradingNote.className = 'text-muted text-center';
+            gradingNote.textContent = 'Deine Lehrkraft sieht sich das Ergebnis an und vergibt dafür die Note.';
+            document.getElementById('summary-title').insertAdjacentElement('afterend', gradingNote);
             if (data.needs_review) {
                 var note = document.createElement('p');
                 note.className = 'text-muted text-center';
                 note.textContent = 'Eine Antwort konnte nicht automatisch bewertet werden — deine Lehrkraft schaut sie sich noch an.';
-                document.getElementById('summary-title').insertAdjacentElement('afterend', note);
+                gradingNote.insertAdjacentElement('afterend', note);
             }
             if (data.redirect_url) {
                 setTimeout(function() { window.location.href = data.redirect_url; }, 1200);
