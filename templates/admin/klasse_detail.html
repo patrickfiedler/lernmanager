@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% import 'admin/_thema_options.html' as thema_opts %}
 
 {% block title %}{{ klasse.name }} - Lernmanager{% endblock %}
 
@@ -71,13 +72,14 @@
         <div class="flex gap-1">
             <select name="task_id" class="form-control" style="flex: 1;" required>
                 <option value="">-- Thema wählen --</option>
-                {% for task in tasks %}
-                <option value="{{ task.id }}">{{ task.fach }} ({{ task.stufe }}): {{ task.name }}</option>
-                {% endfor %}
+                {{ thema_opts.thema_options(themen_exact, themen_other) }}
             </select>
             <button type="submit" class="btn btn-primary">Zuweisen</button>
         </div>
     </form>
+    {% if not klasse.klassenstufe %}
+    <small class="text-muted">Keine Klassenstufe gesetzt — Themen werden unsortiert angezeigt. Trage die Stufe oben ein, damit passende Themen zuerst erscheinen.</small>
+    {% endif %}
 </div>
 
 <!-- Unlock practice questions for class -->
@@ -108,9 +110,7 @@
         <div class="flex gap-1">
             <select name="task_id" class="form-control" style="flex: 1;" required>
                 <option value="">-- Thema wählen --</option>
-                {% for task in tasks if task.id not in practice_unlocked_ids %}
-                <option value="{{ task.id }}">{{ task.fach }} ({{ task.stufe }}): {{ task.name }}</option>
-                {% endfor %}
+                {{ thema_opts.thema_options(themen_exact, themen_other, practice_unlocked_ids) }}
             </select>
             <button type="submit" class="btn btn-secondary">Freischalten</button>
         </div>
@@ -281,9 +281,7 @@
         <div class="flex gap-1 flex-center mb-1">
             <select name="task_id" class="form-control" style="flex: 1;" required>
                 <option value="">-- Thema wählen --</option>
-                {% for task in tasks %}
-                <option value="{{ task.id }}">{{ task.fach }} ({{ task.stufe }}): {{ task.name }}</option>
-                {% endfor %}
+                {{ thema_opts.thema_options(themen_exact, themen_other) }}
             </select>
         </div>
         <div style="max-height: 180px; overflow-y: auto; border: 1px solid #ddd; border-radius: 4px; padding: 0.5rem; margin-bottom: 0.5rem;">

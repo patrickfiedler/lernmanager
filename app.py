@@ -27,7 +27,7 @@ import models
 import llm_grading
 import artifact_processor
 import artifact_checker
-from utils import generate_username, generate_password, allowed_file, generate_credentials_pdf, generate_credentials_pdf_grouped, generate_name_username_pdf, generate_student_self_report_pdf, generate_class_report_pdf, generate_student_report_pdf, slugify, format_bytes, is_ip_allowed, is_within_time_window, parse_netzwerk_csv
+from utils import generate_username, generate_password, allowed_file, generate_credentials_pdf, generate_credentials_pdf_grouped, generate_name_username_pdf, generate_student_self_report_pdf, generate_class_report_pdf, generate_student_report_pdf, slugify, format_bytes, is_ip_allowed, is_within_time_window, parse_netzwerk_csv, split_tasks_by_stufe, stufe_sort_key
 from import_task import validate_task_structure, check_duplicate, import_task as do_import_task, overwrite_task_from_import, ValidationError
 
 app = Flask(__name__)
@@ -661,8 +661,10 @@ def admin_klasse_detail(klasse_id):
     sidequests = models.get_sidequests_for_klasse(klasse_id)
     practice_unlocked_ids = models.get_practice_unlocked_task_ids(klasse_id)
     andere_klassen = [k for k in models.get_all_klassen() if k['id'] != klasse_id]
+    themen_exact, themen_other = split_tasks_by_stufe(tasks, [klasse.get('klassenstufe')])
     return render_template('admin/klasse_detail.html', klasse=klasse, students=students,
-                           tasks=tasks, unterricht=unterricht, schedule=schedule,
+                           tasks=tasks, themen_exact=themen_exact, themen_other=themen_other,
+                           unterricht=unterricht, schedule=schedule,
                            has_queue=bool(queue), sidequests=sidequests,
                            practice_unlocked_ids=practice_unlocked_ids,
                            andere_klassen=andere_klassen)
@@ -1561,10 +1563,11 @@ def admin_topic_queue(klasse_id):
     queued_ids = {q['task_id'] for q in queue}
     all_tasks = models.get_all_tasks()
     available_tasks = [t for t in all_tasks if t['id'] not in queued_ids]
+    themen_exact, themen_other = split_tasks_by_stufe(available_tasks, [klasse.get('klassenstufe')])
 
     return render_template('admin/topic_queue.html',
                            klasse=klasse, queue=queue,
-                           available_tasks=available_tasks)
+                           themen_exact=themen_exact, themen_other=themen_other)
 
 
 # ============ Admin: Schüler ============
@@ -1590,11 +1593,18 @@ def admin_schueler_detail(student_id):
     data_summary = models.get_student_data_summary(student_id)
     fork_choices = models.get_student_fork_choices(student_id)
 
+    # The topic dropdown is not tied to one class, so match against every
+    # grade level this student sits in.
+    themen_exact, themen_other = split_tasks_by_stufe(
+        tasks, [k.get('klassenstufe') for k in klassen])
+
     return render_template('admin/schueler_detail.html',
                            student=student,
                            klassen=klassen,
                            all_klassen=all_klassen,
                            tasks=tasks,
+                           themen_exact=themen_exact,
+                           themen_other=themen_other,
                            student_tasks=student_tasks,
                            artifact_feedback=artifact_feedback,
                            artifact_files=artifact_files,

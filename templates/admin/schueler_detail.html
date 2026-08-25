@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% import 'admin/_thema_options.html' as thema_opts %}
 
 {% block title %}{{ student.vorname }} {{ student.nachname }} - Lernmanager{% endblock %}
 
@@ -132,9 +133,7 @@
             <label>Thema:</label>
             <select name="task_id" id="student-task-select" class="form-control" style="flex: 1;" required>
                 <option value="">-- Thema wählen --</option>
-                {% for task in tasks %}
-                <option value="{{ task.id }}">{{ task.fach }} ({{ task.stufe }}): {{ task.name }}</option>
-                {% endfor %}
+                {{ thema_opts.thema_options(themen_exact, themen_other) }}
             </select>
         </div>
         <div class="flex gap-1 flex-center">

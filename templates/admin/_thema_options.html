@@ -1,0 +1,25 @@
+{# Topic <option> lists for the admin assignment dropdowns.
+
+   thema_options() renders exact grade matches in their own optgroup above the
+   rest. If the class has no klassenstufe set, `exact` is empty and the macro
+   falls back to a single flat list -- see utils.split_tasks_by_stufe(). #}
+
+{% macro thema_option(task) -%}
+<option value="{{ task.id }}" data-name="{{ task.name }}" data-fach="{{ task.fach }}" data-stufe="{{ task.stufe }}">{{ task.fach }} ({{ task.stufe }}): {{ task.name }}</option>
+{%- endmacro %}
+
+{% macro thema_options(exact, others, exclude_ids=None) -%}
+{% set skip = exclude_ids or [] %}
+{% set shown_exact = exact | rejectattr('id', 'in', skip) | list %}
+{% set shown_others = others | rejectattr('id', 'in', skip) | list %}
+{% if shown_exact %}
+<optgroup label="🎯 Passend zur Klassenstufe">
+    {% for task in shown_exact %}{{ thema_option(task) }}{% endfor %}
+</optgroup>
+<optgroup label="Andere Klassenstufen">
+    {% for task in shown_others %}{{ thema_option(task) }}{% endfor %}
+</optgroup>
+{% else %}
+{% for task in shown_others %}{{ thema_option(task) }}{% endfor %}
+{% endif %}
+{%- endmacro %}
