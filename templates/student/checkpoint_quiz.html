@@ -93,8 +93,9 @@
             input.id = 'fill-input';
             input.placeholder = 'Antwort eingeben...';
             input.autocomplete = 'off';
+            input.addEventListener('input', updateCheckBtnState);
             input.addEventListener('keydown', function(e) {
-                if (e.key === 'Enter' && !answered) {
+                if (e.key === 'Enter' && !answered && !document.getElementById('check-btn').disabled) {
                     e.preventDefault();
                     checkAnswer();
                 }
@@ -107,6 +108,7 @@
             textarea.id = 'short-answer-input';
             textarea.rows = 4;
             textarea.placeholder = 'Antwort eingeben...';
+            textarea.addEventListener('input', updateCheckBtnState);
             area.appendChild(textarea);
             setTimeout(() => textarea.focus(), 50);
         } else {
@@ -120,6 +122,7 @@
                 cb.type = 'radio';
                 cb.name = 'mc-answer';
                 cb.value = origIdx;
+                cb.addEventListener('change', updateCheckBtnState);
                 const span = document.createElement('span');
                 span.textContent = (typeof opt === 'object') ? opt.text : opt;
                 label.appendChild(cb);
@@ -144,6 +147,19 @@
         var hintBtn = document.getElementById('hint-btn');
         if (hintBtn) hintBtn.style.display = 'none';
         document.querySelectorAll('#answer-area input, #answer-area textarea').forEach(function(el) { el.disabled = false; });
+        updateCheckBtnState();
+    }
+
+    // Prüfen stays disabled until there's actually an answer to grade -- an
+    // accidental empty submit would otherwise burn a real attempt against the
+    // checkpoint's 3-vs-2 scoring rule (chemie-data-contract.md §3a).
+    function updateCheckBtnState() {
+        document.getElementById('check-btn').disabled = isAnswerEmpty();
+    }
+
+    function isAnswerEmpty() {
+        const answer = getAnswer();
+        return Array.isArray(answer) ? answer.length === 0 : !answer.trim();
     }
 
     function getAnswer() {
@@ -193,12 +209,16 @@
     }
 
     window.checkAnswer = function() {
-        if (answered) return;
+        if (answered || isAnswerEmpty()) return;
         const answer = getAnswer();
 
         post('{{ url_for("student_checkpoint_answer") }}', {
             slug: slug, subtask_id: subtaskId, question_index: currentIdx, answer: answer
         }).then(data => {
+            if (data.error === 'llm_unavailable') {
+                showError(data.message);
+                return;
+            }
             if (data.error) return;
             showFeedback(data.correct);
             var hintBtn = document.getElementById('hint-btn');
@@ -209,6 +229,20 @@
             }
         });
     };
+
+    // Loud, honest failure -- never silently treated as wrong. Question stays
+    // open (check-btn re-enabled by the caller's normal disabled-state logic
+    // since the answer text is untouched) so the student can just retry.
+    function showError(message) {
+        var fb = document.getElementById('feedback-area');
+        fb.innerHTML = '';
+        var line = document.createElement('div');
+        line.className = 'quiz-option';
+        line.style.cssText = 'border-left: 4px solid var(--warning-color, #ffc107); padding-left: 1rem; background: #fff8e1;';
+        line.textContent = '⚠️ ' + message;
+        fb.appendChild(line);
+        fb.style.display = 'block';
+    }
 
     window.requestHint = function() {
         post('{{ url_for("student_checkpoint_hint") }}', {
@@ -267,6 +301,12 @@
             var summary = document.getElementById('summary-card');
             summary.style.display = '';
             document.getElementById('summary-title').textContent = '✅ Checkpoint abgeschlossen';
+            if (data.needs_review) {
+                var note = document.createElement('p');
+                note.className = 'text-muted text-center';
+                note.textContent = 'Eine Antwort konnte nicht automatisch bewertet werden — deine Lehrkraft schaut sie sich noch an.';
+                document.getElementById('summary-title').insertAdjacentElement('afterend', note);
+            }
             if (data.redirect_url) {
                 setTimeout(function() { window.location.href = data.redirect_url; }, 1200);
             }

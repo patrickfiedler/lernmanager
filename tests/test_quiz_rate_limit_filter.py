@@ -30,7 +30,7 @@ def _rate_limited_student_with_topic(app):
     models.assign_task_to_student(student_id, klasse_id, task_id)
 
     for _ in range(config.LLM_MAX_CALLS_PER_STUDENT_PER_HOUR):
-        models.record_llm_usage(student_id, "quiz")
+        models.record_llm_usage(student_id, "llm_grading")
 
     return student_id, task_id
 

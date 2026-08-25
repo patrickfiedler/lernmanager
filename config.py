@@ -54,6 +54,12 @@ LLM_TIMEOUT = 5  # seconds (quiz grading — short answers)
 LLM_ARTIFACT_TIMEOUT = 60  # seconds (artifact checklist — up to 20 criteria)
 LLM_MAX_CALLS_PER_STUDENT_PER_HOUR = 20          # quiz/warmup answers
 LLM_MAX_ARTIFACT_CHECKS_PER_STUDENT_PER_HOUR = 10  # artifact KI-Check uploads
+# Chemie Checkpoint-Punktekonto: graded checkpoint quizzes must not run out of
+# budget mid-session just because the same student also did warmup/practice
+# earlier that hour -- own pool, own (higher) ceiling. A module has up to ~8
+# quiz-checkpoints, majority short_answer, plus retries -- 60 gives headroom
+# for a full lesson without being effectively unlimited.
+LLM_MAX_CHECKPOINT_CALLS_PER_STUDENT_PER_HOUR = 60
 LLM_ENABLED = bool(LLM_API_KEY)
 # OVHcloud Qwen3-32B fp8 pricing (per 1M tokens, as of 2026-03):
 #   input: €0.09 | output: €0.27

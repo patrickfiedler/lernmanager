@@ -261,7 +261,8 @@ def grade_artifact_checklist(extracted_text: str, criteria: list) -> list:
         return []
 
 
-def grade_answer(question_text, expected_or_rubric, student_answer, student_id=None):
+def grade_answer(question_text, expected_or_rubric, student_answer, student_id=None,
+                  usage_tag='llm_grading', strict=False):
     """Grade a free-text answer using LLM.
 
     Args:
@@ -269,28 +270,37 @@ def grade_answer(question_text, expected_or_rubric, student_answer, student_id=N
         expected_or_rubric: Expected answer or grading rubric (sent to LLM)
         student_answer: Student's text answer (sent to LLM)
         student_id: For rate limiting only (NOT sent to LLM)
+        usage_tag: llm_usage bucket to rate-limit and record against -- callers whose
+            calls must not share a budget with casual warmup/practice use (e.g. Chemie
+            checkpoint quizzes) pass their own tag (see models.check_llm_rate_limit).
+        strict: when True (graded checkpoints, where a silent "assume correct" fallback
+            would inflate a real grade), return None instead of FALLBACK_RESULT on any
+            failure -- caller must handle "couldn't grade" as its own case, not as wrong.
 
-    Returns: {"correct": bool, "feedback": str, "source": "llm"|"fallback"}
+    Returns: {"correct": bool, "feedback": str, "source": "llm"|"fallback"} normally,
+        or None if strict=True and grading could not happen (disabled/rate-limited/error).
     """
-    if not config.LLM_ENABLED:
-        return FALLBACK_RESULT
+    fallback = None if strict else FALLBACK_RESULT
 
-    if not models.check_llm_rate_limit(student_id):
-        return FALLBACK_RESULT
+    if not config.LLM_ENABLED:
+        return fallback
+
+    if not models.check_llm_rate_limit(student_id, usage_tag):
+        return fallback
 
     try:
         llm_response = _call_llm(question_text, expected_or_rubric, student_answer)
         if llm_response is None:
-            print("LLM grading: response was not valid JSON", file=sys.stderr)
-            return FALLBACK_RESULT
-        models.record_llm_usage(student_id, 'llm_grading', 0)
+            print(f"LLM grading ({usage_tag}): response was not valid JSON", file=sys.stderr)
+            return fallback
+        models.record_llm_usage(student_id, usage_tag, 0)
         llm_response["source"] = "llm"
         llm_response["llm_provider"] = config.LLM_PROVIDER
         llm_response["llm_model"] = config.LLM_MODEL
         return llm_response
     except Exception as e:
-        print(f"LLM grading error: {type(e).__name__}: {e}", file=sys.stderr)
-        return FALLBACK_RESULT
+        print(f"LLM grading error ({usage_tag}): {type(e).__name__}: {e}", file=sys.stderr)
+        return fallback
 
 
 def diagnostic_call(kind, **fields):

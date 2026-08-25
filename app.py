@@ -4028,7 +4028,7 @@ def _checkpoint_progress(subtask_id):
     session. Kept server-side, never trusted from the client, since these
     numbers feed the 0/2/3 score directly."""
     all_progress = session.get('checkpoint_progress', {})
-    return all_progress.get(str(subtask_id), {'attempts': {}, 'hints_used': {}, 'solved': {}, 'gave_up': {}})
+    return all_progress.get(str(subtask_id), {'attempts': {}, 'hints_used': {}, 'solved': {}, 'gave_up': {}, 'llm_errors': {}})
 
 
 def _save_checkpoint_progress(subtask_id, progress):
@@ -4061,7 +4061,7 @@ def _score_checkpoint_session(question_results):
 def _handle_checkpoint_quiz(student, task, slug, subtask, position):
     """GET: render a Chemie Quiz-checkpoint as an immediate-retry session."""
     quiz = json.loads(subtask['quiz_json'])
-    llm_available = models.check_llm_rate_limit(student['id'])
+    llm_available = models.check_llm_rate_limit(student['id'], usage_tag='checkpoint_quiz')
     questions = [q for q in quiz.get('questions', [])
                  if llm_available or q.get('type', 'multiple_choice') != 'short_answer']
     if not questions:
@@ -4094,11 +4094,37 @@ def student_checkpoint_answer():
     if question_index is None or not (0 <= question_index < len(questions)):
         return jsonify({'error': 'Invalid question'}), 400
 
-    correct, _feedback, _source = _grade_warmup_answer(questions[question_index], data.get('answer'))
+    question = questions[question_index]
+    answer = data.get('answer')
+    qtype = question.get('type', 'multiple_choice')
+    is_empty = (not (answer or '').strip()) if qtype in ('fill_blank', 'short_answer') else not answer
+    if is_empty:
+        # Reject before touching progress -- an accidental empty submit must never
+        # burn an attempt against the 3-vs-2 scoring rule (chemie-data-contract.md §3a).
+        return jsonify({'error': 'empty', 'message': 'Bitte gib eine Antwort ein, bevor du prüfst.'}), 400
 
     subtask_id = subtask['id']
-    progress = _checkpoint_progress(subtask_id)
     qidx = str(question_index)
+
+    # Checkpoint grading is graded (feeds a real school grade), so it must never
+    # silently fall back to "assume correct" like warmup does on an LLM outage --
+    # strict=True surfaces failure as correct=None instead.
+    correct, _feedback, _source = _grade_warmup_answer(
+        question, answer, usage_tag='checkpoint_quiz', strict=True
+    )
+
+    progress = _checkpoint_progress(subtask_id)
+    if correct is None:
+        progress.setdefault('llm_errors', {})
+        progress['llm_errors'][qidx] = progress['llm_errors'].get(qidx, 0) + 1
+        _save_checkpoint_progress(subtask_id, progress)
+        return jsonify({
+            'error': 'llm_unavailable',
+            'message': ('Bewertung aktuell nicht möglich. Versuch es gleich nochmal — '
+                        'falls es weiter nicht klappt, nutze „Ich weiß es nicht", '
+                        'deine Lehrkraft prüft die Antwort dann von Hand.')
+        }), 503
+
     progress['attempts'][qidx] = progress['attempts'].get(qidx, 0) + 1
     if correct:
         progress['solved'][qidx] = True
@@ -4200,21 +4226,31 @@ def student_checkpoint_finish():
             'gave_up': gave_up,
             'attempts': progress['attempts'].get(qidx, 0),
             'hints_used': progress['hints_used'].get(qidx, 0),
+            # True only if an /antwort call for this question got correct=None
+            # (LLM grading unavailable) at least once -- see student_checkpoint_answer.
+            'llm_error': progress.get('llm_errors', {}).get(qidx, 0) > 0,
         })
 
     score = _score_checkpoint_session(question_results)
     total_attempts = sum(r['attempts'] for r in question_results) or 1
     total_hints = sum(r['hints_used'] for r in question_results)
 
+    # A give-up only needs manual review if it was forced by an LLM failure, not
+    # a genuine "student didn't know it" -- otherwise the 0 stands as-is.
+    review_questions = [i for i, r in enumerate(question_results) if r['gave_up'] and r['llm_error']]
+    needs_review = bool(review_questions)
+    review_notes = json.dumps({'questions': review_questions}) if needs_review else None
+
     student_task_id = task['id']
     models.create_checkpoint_attempt(
         student_id, checkpoint_id=subtask_id, module_id=task['task_id'],
         checkpoint_type='quiz', kern_standard_tag=subtask['kern_standard_tag'],
-        score=score, attempt_count=total_attempts, hint_count=total_hints
+        score=score, attempt_count=total_attempts, hint_count=total_hints,
+        needs_review=needs_review, review_notes=review_notes
     )
     models.log_analytics_event(
         event_type='checkpoint_attempt', user_id=student_id, user_type='student',
-        metadata={'student_task_id': student_task_id, 'subtask_id': subtask_id, 'score': score}
+        metadata={'student_task_id': student_task_id, 'subtask_id': subtask_id, 'score': score, 'needs_review': needs_review}
     )
 
     toggle_result = models.toggle_student_subtask(student_task_id, subtask_id, True)
@@ -4229,7 +4265,7 @@ def student_checkpoint_finish():
     all_progress.pop(str(subtask_id), None)
     session['checkpoint_progress'] = all_progress
 
-    return jsonify({'score': score, 'redirect_url': url_for('student_klasse', slug=slug)})
+    return jsonify({'score': score, 'needs_review': needs_review, 'redirect_url': url_for('student_klasse', slug=slug)})
 
 
 @app.route('/schueler/thema/<slug>/quiz-ergebnis')
@@ -4433,13 +4469,17 @@ def student_settings():
 
 # ============ Warmup / Spaced Repetition ============
 
-def _grade_warmup_answer(question, answer):
-    """Grade a single warmup answer. Returns (correct: bool, feedback: str, source: str).
+def _grade_warmup_answer(question, answer, usage_tag='llm_grading', strict=False):
+    """Grade a single warmup answer. Returns (correct: bool|None, feedback: str, source: str).
 
     MC: compare selected indices to correct set.
     fill_blank: case-insensitive exact match, then LLM fallback.
     short_answer: rubric-graded via LLM (no exact match, free text).
-    source: 'match' | 'llm' | 'fallback' | 'empty' | 'mc'
+    source: 'match' | 'llm' | 'fallback' | 'empty' | 'mc' | 'error'
+
+    usage_tag/strict: passed through to llm_grading.grade_answer (see there). When
+    strict=True and grading could not happen at all, correct is None, not False --
+    callers must not treat that as a wrong answer (see student_checkpoint_answer).
     """
     qtype = question.get('type', 'multiple_choice')
 
@@ -4453,8 +4493,10 @@ def _grade_warmup_answer(question, answer):
         # LLM fallback
         result = llm_grading.grade_answer(
             question['text'], ', '.join(question['answers']),
-            student_text, session.get('student_id')
+            student_text, session.get('student_id'), usage_tag=usage_tag, strict=strict
         )
+        if result is None:
+            return None, '', 'error'
         return result['correct'], result.get('feedback', ''), result.get('source', 'llm')
     elif qtype == 'short_answer':
         student_text = (answer or '').strip()
@@ -4462,8 +4504,10 @@ def _grade_warmup_answer(question, answer):
             return False, 'Keine Antwort.', 'empty'
         result = llm_grading.grade_answer(
             question['text'], question['rubric'],
-            student_text, session.get('student_id')
+            student_text, session.get('student_id'), usage_tag=usage_tag, strict=strict
         )
+        if result is None:
+            return None, '', 'error'
         return result['correct'], result.get('feedback', ''), result.get('source', 'llm')
     else:
         # Multiple choice

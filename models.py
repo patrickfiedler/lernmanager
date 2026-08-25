@@ -282,6 +282,8 @@ def init_db():
                 attempt_count INTEGER NOT NULL DEFAULT 1,
                 hint_count INTEGER NOT NULL DEFAULT 0,
                 timestamp TEXT NOT NULL,
+                needs_review INTEGER NOT NULL DEFAULT 0,  -- 1 = a question's score is a give-up forced by LLM grading being unavailable, not a real give-up -- teacher should re-grade by hand
+                review_notes TEXT,  -- JSON: {"questions": [question_index, ...]} that need manual re-grading
                 FOREIGN KEY (student_id) REFERENCES student(id) ON DELETE CASCADE,
                 FOREIGN KEY (checkpoint_id) REFERENCES subtask(id) ON DELETE CASCADE,
                 FOREIGN KEY (module_id) REFERENCES task(id) ON DELETE CASCADE
@@ -3222,18 +3224,22 @@ def has_passed_subtask_quiz(student_task_id, subtask_id):
 
 def create_checkpoint_attempt(student_id, checkpoint_id, module_id, checkpoint_type,
                                kern_standard_tag, score, attempt_count=1, hint_count=0,
-                               timestamp=None):
+                               timestamp=None, needs_review=False, review_notes=None):
     """Log one completed Chemie checkpoint. One row per completion, not per submission
     (retries live in attempt_count/hint_count). See docs/shared/lernmanager/chemie-data-contract.md.
+
+    needs_review/review_notes: set when the session contains a question that was
+    given up on only because LLM grading was unavailable (not a real give-up) --
+    flags the row for a teacher to re-grade by hand.
     """
     with db_session() as conn:
         cursor = conn.execute('''
             INSERT INTO checkpoint_attempt
             (student_id, checkpoint_id, module_id, checkpoint_type, kern_standard_tag,
-             score, attempt_count, hint_count, timestamp)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+             score, attempt_count, hint_count, timestamp, needs_review, review_notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), ?, ?)
         ''', (student_id, checkpoint_id, module_id, checkpoint_type, kern_standard_tag,
-              score, attempt_count, hint_count, timestamp))
+              score, attempt_count, hint_count, timestamp, 1 if needs_review else 0, review_notes))
         return cursor.lastrowid
 
 
@@ -4420,20 +4426,23 @@ def set_bool_setting(key, value):
 
 # ============ LLM Usage Tracking ============
 
-def check_llm_rate_limit(student_id):
-    """Check if student is within their hourly quiz/warmup LLM call limit.
+def check_llm_rate_limit(student_id, usage_tag='llm_grading'):
+    """Check if student is within their hourly LLM call limit for the given
+    usage_tag's pool. Each tag has its own counter and ceiling so unrelated
+    usage can't exhaust another pool's budget -- see record_llm_usage.
 
     Returns True if calls are allowed, False if rate limit exceeded.
-    Artifact checks use a separate counter (check_artifact_rate_limit).
     """
+    limit = (config.LLM_MAX_CHECKPOINT_CALLS_PER_STUDENT_PER_HOUR if usage_tag == 'checkpoint_quiz'
+             else config.LLM_MAX_CALLS_PER_STUDENT_PER_HOUR)
     with db_session() as conn:
         row = conn.execute(
             "SELECT COUNT(*) as cnt FROM llm_usage "
-            "WHERE student_id = ? AND question_type != 'artifact_feedback' "
+            "WHERE student_id = ? AND question_type = ? "
             "AND timestamp > datetime('now', '-1 hour')",
-            (student_id,)
+            (student_id, usage_tag)
         ).fetchone()
-        return row['cnt'] < config.LLM_MAX_CALLS_PER_STUDENT_PER_HOUR
+        return row['cnt'] < limit
 
 
 def get_artifact_checks_remaining(student_id):
