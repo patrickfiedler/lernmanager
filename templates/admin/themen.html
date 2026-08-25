@@ -13,20 +13,43 @@
 </div>
 
 {% if tasks %}
+<div class="card mb-2">
+    <div class="flex gap-1 flex-center" style="flex-wrap: wrap;">
+        <input type="search" id="f-suche" class="form-control" style="flex: 1; min-width: 12rem;"
+               placeholder="🔍 Thema suchen …">
+        <select id="f-fach" class="form-control" style="width: auto;">
+            <option value="">Alle Fächer</option>
+            {% for fach in faecher %}<option value="{{ fach }}">{{ fach }}</option>{% endfor %}
+        </select>
+        <select id="f-stufe" class="form-control" style="width: auto;">
+            <option value="">Alle Stufen</option>
+            {% for stufe in stufen %}<option value="{{ stufe }}">{{ stufe }}</option>{% endfor %}
+        </select>
+        <select id="f-kategorie" class="form-control" style="width: auto;">
+            <option value="">Pflicht + Bonus</option>
+            <option value="pflicht">Nur Pflicht</option>
+            <option value="bonus">Nur Bonus</option>
+        </select>
+        <button type="button" id="f-reset" class="btn btn-secondary">Zurücksetzen</button>
+    </div>
+    <small class="text-muted" id="f-count"></small>
+</div>
+
 <div class="card">
-    <table class="table">
+    <table class="table" id="themen-table">
         <thead>
             <tr>
-                <th>Name</th>
-                <th>Fach</th>
-                <th>Stufe</th>
-                <th>Kategorie</th>
+                <th class="sortable" data-sort="name" style="cursor: pointer;">Name <span class="sort-arrow"></span></th>
+                <th class="sortable" data-sort="fach" style="cursor: pointer;">Fach <span class="sort-arrow"></span></th>
+                <th class="sortable" data-sort="stufe" style="cursor: pointer;">Stufe <span class="sort-arrow"></span></th>
+                <th class="sortable" data-sort="kategorie" style="cursor: pointer;">Kategorie <span class="sort-arrow"></span></th>
                 <th>Aktionen</th>
             </tr>
         </thead>
-        <tbody>
+        <tbody id="themen-body">
             {% for task in tasks %}
-            <tr>
+            <tr data-name="{{ task.name }}" data-fach="{{ task.fach }}" data-stufe="{{ task.stufe }}"
+                data-stufe-key="{{ task.stufe_key }}" data-kategorie="{{ task.kategorie }}">
                 <td>
                     <a href="{{ url_for('admin_thema_detail', task_id=task.id) }}">
                         <strong>{{ task.name }}</strong>
@@ -49,6 +72,7 @@
             {% endfor %}
         </tbody>
     </table>
+    <p class="text-muted text-center" id="f-empty" style="display: none;">Kein Thema passt zu den Filtern.</p>
 </div>
 {% else %}
 <div class="card text-center text-muted">
@@ -56,4 +80,81 @@
     <a href="{{ url_for('admin_thema_neu') }}" class="btn btn-primary mt-1">Erstes Thema erstellen</a>
 </div>
 {% endif %}
+{% endblock %}
+
+{% block scripts %}
+const body = document.getElementById('themen-body');
+if (body) {
+    const rows = [...body.querySelectorAll('tr')];
+    const inputs = {
+        suche: document.getElementById('f-suche'),
+        fach: document.getElementById('f-fach'),
+        stufe: document.getElementById('f-stufe'),
+        kategorie: document.getElementById('f-kategorie'),
+    };
+    const countEl = document.getElementById('f-count');
+    const emptyEl = document.getElementById('f-empty');
+
+    // A row survives when every active filter matches (AND). The search box
+    // covers name + Fach + Stufe and is split on whitespace, so "mbi 6" works
+    // as a narrowing query rather than a literal substring.
+    function rowMatchesFilters(row) {
+        const d = row.dataset;
+        if (inputs.fach.value && d.fach !== inputs.fach.value) return false;
+        if (inputs.stufe.value && d.stufe !== inputs.stufe.value) return false;
+        if (inputs.kategorie.value && d.kategorie !== inputs.kategorie.value) return false;
+
+        const haystack = `${d.name} ${d.fach} ${d.stufe}`.toLowerCase();
+        return inputs.suche.value.toLowerCase().split(/\s+/)
+            .every(term => !term || haystack.includes(term));
+    }
+
+    function applyFilters() {
+        let visible = 0;
+        rows.forEach(row => {
+            const show = rowMatchesFilters(row);
+            row.style.display = show ? '' : 'none';
+            if (show) visible++;
+        });
+        countEl.textContent = visible === rows.length
+            ? `${rows.length} Themen`
+            : `${visible} von ${rows.length} Themen`;
+        emptyEl.style.display = visible ? 'none' : '';
+    }
+
+    // Sorting: `stufe` uses the numeric key computed server-side
+    // (utils.stufe_sort_key), everything else compares as text.
+    let sortKey = null, sortAsc = true;
+
+    function sortRows(key) {
+        sortAsc = (key === sortKey) ? !sortAsc : true;
+        sortKey = key;
+        const value = row => key === 'stufe'
+            ? Number(row.dataset.stufeKey)
+            : (row.dataset[key] || '').toLowerCase();
+        rows.sort((a, b) => {
+            const [x, y] = [value(a), value(b)];
+            if (x === y) return a.dataset.name.localeCompare(b.dataset.name, 'de');
+            return (x > y ? 1 : -1) * (sortAsc ? 1 : -1);
+        });
+        rows.forEach(row => body.appendChild(row));
+        document.querySelectorAll('#themen-table .sort-arrow').forEach(el => el.textContent = '');
+        document.querySelector(`#themen-table th[data-sort="${key}"] .sort-arrow`)
+            .textContent = sortAsc ? '▲' : '▼';
+    }
+
+    Object.values(inputs).forEach(el => {
+        el.addEventListener('input', applyFilters);
+        el.addEventListener('change', applyFilters);
+    });
+    document.getElementById('f-reset').addEventListener('click', () => {
+        Object.values(inputs).forEach(el => el.value = '');
+        applyFilters();
+    });
+    document.querySelectorAll('#themen-table th.sortable').forEach(th => {
+        th.addEventListener('click', () => sortRows(th.dataset.sort));
+    });
+
+    applyFilters();
+}
 {% endblock %}

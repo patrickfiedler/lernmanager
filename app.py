@@ -1766,7 +1766,17 @@ def admin_schueler_bericht(student_id):
 @admin_required
 def admin_themen():
     tasks = models.get_all_tasks()
-    return render_template('admin/themen.html', tasks=tasks, subjects=config.SUBJECTS, levels=config.LEVELS)
+    # Re-sort in Python: SQL orders `stufe` as text, so '10' would sort before '5'.
+    tasks.sort(key=lambda t: (t['fach'] or '', stufe_sort_key(t['stufe']),
+                              t['number'] or 0, t['name'] or ''))
+    for task in tasks:
+        task['stufe_key'] = stufe_sort_key(task['stufe'])[0]
+
+    # Filter options come from what actually exists, so legacy values stay usable.
+    faecher = sorted({t['fach'] for t in tasks if t['fach']})
+    stufen = sorted({t['stufe'] for t in tasks if t['stufe']}, key=stufe_sort_key)
+
+    return render_template('admin/themen.html', tasks=tasks, faecher=faecher, stufen=stufen)
 
 
 @app.route('/admin/themen/export')
