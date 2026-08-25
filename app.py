@@ -4026,9 +4026,21 @@ def _resolve_checkpoint_subtask(student_id, slug, subtask_id):
 def _checkpoint_progress(subtask_id):
     """Server-side attempt/hint/solved counters for one in-progress checkpoint
     session. Kept server-side, never trusted from the client, since these
-    numbers feed the 0/2/3 score directly."""
+    numbers feed the 0/2/3 score directly.
+
+    session_uid: a short id (not the answer text itself, safe for the session
+    cookie) correlating this session's checkpoint_answer rows so they can be
+    stamped with the real checkpoint_attempt_id once the session finishes --
+    see create_checkpoint_answer/create_checkpoint_attempt."""
     all_progress = session.get('checkpoint_progress', {})
-    return all_progress.get(str(subtask_id), {'attempts': {}, 'hints_used': {}, 'solved': {}, 'gave_up': {}, 'llm_errors': {}})
+    progress = all_progress.get(str(subtask_id)) or {
+        'attempts': {}, 'hints_used': {}, 'solved': {}, 'gave_up': {}, 'llm_errors': {}
+    }
+    # setdefault, not unconditional -- a session already in progress when this
+    # field was introduced must keep the uid it was first given, not get a new
+    # one on every request.
+    progress.setdefault('session_uid', uuid.uuid4().hex)
+    return progress
 
 
 def _save_checkpoint_progress(subtask_id, progress):
@@ -4109,15 +4121,26 @@ def student_checkpoint_answer():
     # Checkpoint grading is graded (feeds a real school grade), so it must never
     # silently fall back to "assume correct" like warmup does on an LLM outage --
     # strict=True surfaces failure as correct=None instead.
-    correct, _feedback, _source = _grade_warmup_answer(
+    correct, feedback, source = _grade_warmup_answer(
         question, answer, usage_tag='checkpoint_quiz', strict=True
     )
 
     progress = _checkpoint_progress(subtask_id)
+    # MC answers arrive as a list of indices, not text -- store as JSON so the
+    # log is unambiguous either way (see get_checkpoint_answers_for_attempt).
+    answer_text = json.dumps(answer) if isinstance(answer, list) else str(answer)
+    llm_model = config.LLM_MODEL if source in ('llm', 'fallback', 'error') else None
+
     if correct is None:
         progress.setdefault('llm_errors', {})
         progress['llm_errors'][qidx] = progress['llm_errors'].get(qidx, 0) + 1
         _save_checkpoint_progress(subtask_id, progress)
+        models.create_checkpoint_answer(
+            student_id, subtask_id, progress['session_uid'], question_index,
+            attempt_no=progress['attempts'].get(qidx, 0) + 1, answer_text=answer_text,
+            correct=None, feedback=feedback, grader=source, llm_model=llm_model,
+            hints_used_before=progress['hints_used'].get(qidx, 0)
+        )
         return jsonify({
             'error': 'llm_unavailable',
             'message': ('Bewertung aktuell nicht möglich. Versuch es gleich nochmal — '
@@ -4129,6 +4152,12 @@ def student_checkpoint_answer():
     if correct:
         progress['solved'][qidx] = True
     _save_checkpoint_progress(subtask_id, progress)
+    models.create_checkpoint_answer(
+        student_id, subtask_id, progress['session_uid'], question_index,
+        attempt_no=progress['attempts'][qidx], answer_text=answer_text,
+        correct=correct, feedback=feedback, grader=source, llm_model=llm_model,
+        hints_used_before=progress['hints_used'].get(qidx, 0)
+    )
 
     return jsonify({'correct': correct, 'attempts': progress['attempts'][qidx]})
 
@@ -4194,6 +4223,12 @@ def student_checkpoint_give_up():
     progress = _checkpoint_progress(subtask_id)
     progress['gave_up'][qidx] = True
     _save_checkpoint_progress(subtask_id, progress)
+    models.create_checkpoint_answer(
+        student_id, subtask_id, progress['session_uid'], question_index,
+        attempt_no=progress['attempts'].get(qidx, 0) + 1, answer_text=None,
+        correct=False, feedback=correct_answer, grader='gaveup',
+        hints_used_before=progress['hints_used'].get(qidx, 0), gave_up=True
+    )
 
     return jsonify({'correct_answer': correct_answer})
 
@@ -4246,7 +4281,8 @@ def student_checkpoint_finish():
         student_id, checkpoint_id=subtask_id, module_id=task['task_id'],
         checkpoint_type='quiz', kern_standard_tag=subtask['kern_standard_tag'],
         score=score, attempt_count=total_attempts, hint_count=total_hints,
-        needs_review=needs_review, review_notes=review_notes
+        needs_review=needs_review, review_notes=review_notes,
+        quiz_snapshot_json=subtask['quiz_json'], session_uid=progress['session_uid']
     )
     models.log_analytics_event(
         event_type='checkpoint_attempt', user_id=student_id, user_type='student',

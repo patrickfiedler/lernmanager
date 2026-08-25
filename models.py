@@ -271,10 +271,14 @@ def init_db():
             -- Checkpoint-Punktekonto attempt log (Chemie 11/12 grading model)
             -- One row per completed checkpoint, not per submission (retries live in
             -- attempt_count/hint_count). See docs/shared/lernmanager/chemie-data-contract.md
+            -- checkpoint_id deliberately carries no FK constraint (unlike student_id/
+            -- module_id): deleting/editing away an Aufgabe must not cascade-delete a
+            -- student's graded checkpoint history (migrate_047). quiz_snapshot_json
+            -- is what keeps the row readable once that Aufgabe is gone.
             CREATE TABLE IF NOT EXISTS checkpoint_attempt (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 student_id INTEGER NOT NULL,
-                checkpoint_id INTEGER NOT NULL,  -- = subtask.id
+                checkpoint_id INTEGER NOT NULL,  -- = subtask.id, no FK -- see above
                 module_id INTEGER NOT NULL,  -- = task.id
                 checkpoint_type TEXT NOT NULL,  -- quiz/abnahme/artefakt
                 kern_standard_tag TEXT NOT NULL,  -- kern/standard
@@ -284,13 +288,50 @@ def init_db():
                 timestamp TEXT NOT NULL,
                 needs_review INTEGER NOT NULL DEFAULT 0,  -- 1 = a question's score is a give-up forced by LLM grading being unavailable, not a real give-up -- teacher should re-grade by hand
                 review_notes TEXT,  -- JSON: {"questions": [question_index, ...]} that need manual re-grading
+                quiz_snapshot_json TEXT,  -- quiz_json as it was at completion time (content can be edited later)
+                superseded_at TEXT,  -- set instead of deleting on a "Fortschritte zurücksetzen" re-import -- see reset_student_progress_for_task
                 FOREIGN KEY (student_id) REFERENCES student(id) ON DELETE CASCADE,
-                FOREIGN KEY (checkpoint_id) REFERENCES subtask(id) ON DELETE CASCADE,
                 FOREIGN KEY (module_id) REFERENCES task(id) ON DELETE CASCADE
             );
 
             CREATE INDEX IF NOT EXISTS idx_checkpoint_attempt_student_module
             ON checkpoint_attempt(student_id, module_id);
+
+            CREATE INDEX IF NOT EXISTS idx_checkpoint_attempt_checkpoint
+            ON checkpoint_attempt(checkpoint_id);
+
+            -- Per-question answer log behind a checkpoint_attempt's aggregate score
+            -- (migrate_047). Written as answers happen, before checkpoint_attempt
+            -- exists -- see create_checkpoint_answer/create_checkpoint_attempt.
+            -- checkpoint_id/checkpoint_attempt_id carry no FK constraint, same
+            -- reasoning as checkpoint_attempt.checkpoint_id above.
+            CREATE TABLE IF NOT EXISTS checkpoint_answer (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                checkpoint_attempt_id INTEGER,
+                student_id INTEGER NOT NULL,
+                checkpoint_id INTEGER NOT NULL,
+                session_uid TEXT NOT NULL,
+                question_index INTEGER NOT NULL,
+                attempt_no INTEGER NOT NULL,
+                answer_text TEXT,
+                correct INTEGER,  -- 0/1/NULL -- NULL = LLM grading failed, not "wrong"
+                feedback TEXT,
+                grader TEXT NOT NULL,  -- match/llm/fallback/error/mc/gaveup
+                llm_model TEXT,
+                hints_used_before INTEGER NOT NULL DEFAULT 0,
+                gave_up INTEGER NOT NULL DEFAULT 0,
+                timestamp TEXT NOT NULL,
+                FOREIGN KEY (student_id) REFERENCES student(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_checkpoint_answer_attempt
+            ON checkpoint_answer(checkpoint_attempt_id);
+
+            CREATE INDEX IF NOT EXISTS idx_checkpoint_answer_session
+            ON checkpoint_answer(session_uid);
+
+            CREATE INDEX IF NOT EXISTS idx_checkpoint_answer_student_checkpoint
+            ON checkpoint_answer(student_id, checkpoint_id);
 
             -- Subtask visibility (per-class and per-student overrides)
             CREATE TABLE IF NOT EXISTS subtask_visibility (
@@ -1830,7 +1871,16 @@ def reset_student_progress_for_task(task_id):
 
         # Chemie Quiz-checkpoints log to checkpoint_attempt instead of quiz_attempt
         # (see has_passed_subtask_quiz) — student_id/module_id scoped, not student_task_id.
-        conn.execute("DELETE FROM checkpoint_attempt WHERE module_id = ?", (task_id,))
+        # Soft-delete (supersede), not DELETE: the score is a real grade component
+        # (Kern-Sperre/Punktekonto), not just progress-tracking, so a content
+        # re-import must not erase it. has_passed_subtask_quiz ignores superseded
+        # rows, so the progression gate still resets correctly (the original reason
+        # this was a DELETE, commit f9d6a24) while the grade record survives.
+        conn.execute(
+            "UPDATE checkpoint_attempt SET superseded_at = CURRENT_TIMESTAMP "
+            "WHERE module_id = ? AND superseded_at IS NULL",
+            (task_id,)
+        )
 
 
 # ============ Topic Queue ============
@@ -2952,7 +3002,8 @@ def toggle_student_subtask(student_task_id, subtask_id, erledigt):
                     WHERE student_task_id = ? AND subtask_id = ? AND bestanden = 1
                     UNION
                     SELECT 1 FROM checkpoint_attempt
-                    WHERE checkpoint_id = ? AND student_id = (SELECT student_id FROM student_task WHERE id = ?)
+                    WHERE checkpoint_id = ? AND superseded_at IS NULL
+                    AND student_id = (SELECT student_id FROM student_task WHERE id = ?)
                     LIMIT 1
                 ''', (student_task_id, subtask_id, subtask_id, student_task_id)).fetchone()
 
@@ -3213,7 +3264,7 @@ def has_passed_subtask_quiz(student_task_id, subtask_id):
             return True
         row = conn.execute('''
             SELECT 1 FROM checkpoint_attempt
-            WHERE checkpoint_id = ?
+            WHERE checkpoint_id = ? AND superseded_at IS NULL
             AND student_id = (SELECT student_id FROM student_task WHERE id = ?)
             LIMIT 1
         ''', (subtask_id, student_task_id)).fetchone()
@@ -3224,38 +3275,97 @@ def has_passed_subtask_quiz(student_task_id, subtask_id):
 
 def create_checkpoint_attempt(student_id, checkpoint_id, module_id, checkpoint_type,
                                kern_standard_tag, score, attempt_count=1, hint_count=0,
-                               timestamp=None, needs_review=False, review_notes=None):
+                               timestamp=None, needs_review=False, review_notes=None,
+                               quiz_snapshot_json=None, session_uid=None):
     """Log one completed Chemie checkpoint. One row per completion, not per submission
     (retries live in attempt_count/hint_count). See docs/shared/lernmanager/chemie-data-contract.md.
 
     needs_review/review_notes: set when the session contains a question that was
     given up on only because LLM grading was unavailable (not a real give-up) --
     flags the row for a teacher to re-grade by hand.
+
+    quiz_snapshot_json: the checkpoint's quiz_json as it was at completion time --
+    content can be edited later, so this is what makes a future review UI show the
+    question actually answered, not whatever the Aufgabe says today.
+
+    session_uid: if given, backfills checkpoint_answer rows written during this
+    session (checkpoint_attempt_id was NULL until this row existed) -- see
+    create_checkpoint_answer.
     """
     with db_session() as conn:
         cursor = conn.execute('''
             INSERT INTO checkpoint_attempt
             (student_id, checkpoint_id, module_id, checkpoint_type, kern_standard_tag,
-             score, attempt_count, hint_count, timestamp, needs_review, review_notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), ?, ?)
+             score, attempt_count, hint_count, timestamp, needs_review, review_notes,
+             quiz_snapshot_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), ?, ?, ?)
         ''', (student_id, checkpoint_id, module_id, checkpoint_type, kern_standard_tag,
-              score, attempt_count, hint_count, timestamp, 1 if needs_review else 0, review_notes))
-        return cursor.lastrowid
+              score, attempt_count, hint_count, timestamp, 1 if needs_review else 0, review_notes,
+              quiz_snapshot_json))
+        attempt_id = cursor.lastrowid
+        if session_uid:
+            conn.execute('''
+                UPDATE checkpoint_answer SET checkpoint_attempt_id = ?
+                WHERE session_uid = ? AND checkpoint_attempt_id IS NULL
+            ''', (attempt_id, session_uid))
+        return attempt_id
 
 
-def get_checkpoint_attempts_for_student(student_id, module_id=None):
-    """Get a student's checkpoint attempts, newest first. module_id narrows to one Thema."""
+def create_checkpoint_answer(student_id, checkpoint_id, session_uid, question_index,
+                              attempt_no, answer_text, correct, feedback, grader,
+                              llm_model=None, hints_used_before=0, gave_up=False):
+    """Log one graded attempt at one checkpoint question -- the per-question detail
+    checkpoint_attempt never captured (see migrate_047). Written as answers happen,
+    before checkpoint_attempt exists (checkpoint_attempt_id starts NULL and is
+    backfilled by create_checkpoint_attempt via session_uid once the session ends).
+
+    correct: True/False/None (None = LLM grading failed, matches the strict=True
+    contract in llm_grading.grade_answer -- don't collapse to False, that would
+    misrepresent an ungraded attempt as a wrong one in a future review UI).
+    """
+    with db_session() as conn:
+        conn.execute('''
+            INSERT INTO checkpoint_answer
+            (student_id, checkpoint_id, session_uid, question_index, attempt_no,
+             answer_text, correct, feedback, grader, llm_model, hints_used_before,
+             gave_up, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ''', (student_id, checkpoint_id, session_uid, question_index, attempt_no,
+              answer_text, correct, feedback, grader, llm_model, hints_used_before,
+              1 if gave_up else 0))
+
+
+def get_checkpoint_attempts_for_student(student_id, module_id=None, include_superseded=False):
+    """Get a student's checkpoint attempts, newest first. module_id narrows to one Thema.
+
+    include_superseded: superseded rows (see reset_student_progress_for_task) are
+    excluded by default -- they're the pre-reset grade record, not the current one.
+    A review UI can pass True to show them as history.
+    """
+    superseded_clause = '' if include_superseded else 'AND superseded_at IS NULL'
     with db_session() as conn:
         if module_id is not None:
-            rows = conn.execute('''
-                SELECT * FROM checkpoint_attempt WHERE student_id = ? AND module_id = ?
+            rows = conn.execute(f'''
+                SELECT * FROM checkpoint_attempt WHERE student_id = ? AND module_id = ? {superseded_clause}
                 ORDER BY timestamp DESC
             ''', (student_id, module_id)).fetchall()
         else:
-            rows = conn.execute('''
-                SELECT * FROM checkpoint_attempt WHERE student_id = ?
+            rows = conn.execute(f'''
+                SELECT * FROM checkpoint_attempt WHERE student_id = ? {superseded_clause}
                 ORDER BY timestamp DESC
             ''', (student_id,)).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_checkpoint_answers_for_attempt(checkpoint_attempt_id):
+    """All logged answer attempts for one completed checkpoint session, in the order
+    they were submitted -- the per-question detail behind a checkpoint_attempt's
+    aggregate score. For a future teacher-review UI."""
+    with db_session() as conn:
+        rows = conn.execute('''
+            SELECT * FROM checkpoint_answer WHERE checkpoint_attempt_id = ?
+            ORDER BY question_index, attempt_no
+        ''', (checkpoint_attempt_id,)).fetchall()
         return [dict(r) for r in rows]
 
 

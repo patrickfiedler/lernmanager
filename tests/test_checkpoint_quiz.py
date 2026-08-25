@@ -158,3 +158,98 @@ def test_finish_scores_worst_case_across_questions(app, client):
     })
     assert resp.status_code == 200
     assert resp.get_json()["score"] == 0
+
+
+def test_answers_are_logged_per_attempt_and_backfilled_on_finish(app, client):
+    """migrate_047: checkpoint_answer must capture every submitted attempt (not
+    just the final one) with the real answer text, then get stamped with the
+    checkpoint_attempt_id once the session finishes."""
+    student_id, subtask_id = _checkpoint_student(app)
+    _login(client, student_id)
+
+    client.post("/schueler/checkpoint/antwort", json={
+        "slug": "redoxreaktionen", "subtask_id": subtask_id, "question_index": 0, "answer": [1]
+    })
+    client.post("/schueler/checkpoint/antwort", json={
+        "slug": "redoxreaktionen", "subtask_id": subtask_id, "question_index": 0, "answer": [0]
+    })
+
+    with models.db_session() as conn:
+        unstamped = conn.execute(
+            "SELECT COUNT(*) FROM checkpoint_answer WHERE student_id = ? AND checkpoint_attempt_id IS NULL",
+            (student_id,)
+        ).fetchone()[0]
+    assert unstamped == 2  # both attempts logged, not stamped yet (no checkpoint_attempt exists until /fertig)
+
+    resp = client.post("/schueler/checkpoint/fertig", json={
+        "slug": "redoxreaktionen", "subtask_id": subtask_id
+    })
+    attempt_id = models.get_checkpoint_attempts_for_student(student_id)[0]["id"]
+
+    logged = models.get_checkpoint_answers_for_attempt(attempt_id)
+    assert len(logged) == 2
+    assert logged[0]["attempt_no"] == 1 and logged[0]["correct"] == 0
+    assert json.loads(logged[0]["answer_text"]) == [1]
+    assert logged[1]["attempt_no"] == 2 and logged[1]["correct"] == 1
+    assert json.loads(logged[1]["answer_text"]) == [0]
+
+
+def test_reset_supersedes_checkpoint_attempt_instead_of_deleting(app, client):
+    """The teacher's explicit call (2026-08-25): a content re-import with
+    'Fortschritte zuruecksetzen' must not erase graded checkpoint history --
+    soft-delete via superseded_at, and the gate must ignore superseded rows."""
+    student_id, subtask_id = _checkpoint_student(app)
+    _login(client, student_id)
+
+    with models.db_session() as conn:
+        task_id = conn.execute(
+            "SELECT task_id FROM subtask WHERE id = ?", (subtask_id,)
+        ).fetchone()["task_id"]
+        student_task_id = conn.execute(
+            "SELECT id FROM student_task WHERE student_id = ? AND task_id = ?",
+            (student_id, task_id)
+        ).fetchone()["id"]
+
+    client.post("/schueler/checkpoint/antwort", json={
+        "slug": "redoxreaktionen", "subtask_id": subtask_id, "question_index": 0, "answer": [0]
+    })
+    client.post("/schueler/checkpoint/fertig", json={
+        "slug": "redoxreaktionen", "subtask_id": subtask_id
+    })
+    assert models.has_passed_subtask_quiz(student_task_id, subtask_id) is True
+
+    models.reset_student_progress_for_task(task_id)
+
+    # Row survives (superseded, not deleted) -- excluded from the default query...
+    assert models.get_checkpoint_attempts_for_student(student_id) == []
+    # ...but still readable as history, and the answer log is untouched either way.
+    all_attempts = models.get_checkpoint_attempts_for_student(student_id, include_superseded=True)
+    assert len(all_attempts) == 1
+    assert all_attempts[0]["superseded_at"] is not None
+    assert len(models.get_checkpoint_answers_for_attempt(all_attempts[0]["id"])) == 1
+
+    # And the progression gate correctly forgets the pre-reset pass (commit f9d6a24's fix).
+    assert models.has_passed_subtask_quiz(student_task_id, subtask_id) is False
+
+
+def test_deleting_subtask_does_not_cascade_delete_checkpoint_history(app, client):
+    """migrate_047: checkpoint_id carries no FK/cascade, so editing away an
+    Aufgabe must not silently wipe students' logged scores/answers for it."""
+    student_id, subtask_id = _checkpoint_student(app)
+    _login(client, student_id)
+
+    client.post("/schueler/checkpoint/antwort", json={
+        "slug": "redoxreaktionen", "subtask_id": subtask_id, "question_index": 0, "answer": [0]
+    })
+    client.post("/schueler/checkpoint/fertig", json={
+        "slug": "redoxreaktionen", "subtask_id": subtask_id
+    })
+    attempt_id = models.get_checkpoint_attempts_for_student(student_id)[0]["id"]
+
+    with models.db_session() as conn:
+        conn.execute("DELETE FROM subtask WHERE id = ?", (subtask_id,))
+
+    attempts = models.get_checkpoint_attempts_for_student(student_id)
+    assert len(attempts) == 1
+    assert attempts[0]["quiz_snapshot_json"] is not None
+    assert len(models.get_checkpoint_answers_for_attempt(attempt_id)) == 1
