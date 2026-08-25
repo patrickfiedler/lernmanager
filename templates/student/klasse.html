@@ -172,6 +172,10 @@
                 {% if inline_gate_passed %}
                 <div class="gate-header">📎 Abgabe geprüft ✓</div>
                 <p class="gate-success-msg">Deine Datei wurde erfolgreich geprüft.</p>
+                {% if inline_gate_llm_feedback %}
+                <div id="inline-gate-feedback" class="mt-2"></div>
+                <script type="application/json" id="inline-gate-feedback-data">{{ inline_gate_llm_feedback|tojson }}</script>
+                {% endif %}
                 <p class="gate-desc" style="margin-top:0.75rem;">Neue Version einreichen:</p>
                 {% else %}
                 <div class="gate-header">📎 Datei prüfen</div>
@@ -1094,6 +1098,12 @@ function adjustZoom(delta) {
     const filenameSpan = document.getElementById('inline-gate-filename');
     const submitBtn = document.getElementById('inline-gate-submit-btn');
     const resultDiv = document.getElementById('inline-gate-result');
+
+    const initialFeedbackEl = document.getElementById('inline-gate-feedback');
+    const initialFeedbackData = document.getElementById('inline-gate-feedback-data');
+    if (initialFeedbackEl && initialFeedbackData) {
+        initialFeedbackEl.innerHTML = renderFeedbackSplit(JSON.parse(initialFeedbackData.textContent));
+    }
     if (!fileInput) return;
 
     fileInput.addEventListener('change', function() {
@@ -1128,6 +1138,8 @@ function adjustZoom(delta) {
                     submitBtn.textContent = 'Datei prüfen';
                     return;
                 }
+                // Live result supersedes the previous upload's feedback.
+                if (initialFeedbackEl) initialFeedbackEl.innerHTML = '';
                 if (data.passed) {
                     if (data.llm_feedback && data.llm_feedback.length) {
                         // Show LLM checklist before continuing

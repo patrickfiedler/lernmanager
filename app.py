@@ -3206,6 +3206,7 @@ def student_klasse(slug):
     inline_gate_passed = False
     inline_gate_position = None
     inline_gate_keyword = None
+    inline_gate_llm_feedback = None
     if current_subtask and current_subtask.get('artifact_gate_json') and subtasks and current_subtask is not subtasks[-1]:
         try:
             inline_gate = json.loads(current_subtask['artifact_gate_json'])
@@ -3214,6 +3215,11 @@ def student_klasse(slug):
             if current_subtask.get('graded_artifact_json'):
                 ga = json.loads(current_subtask['graded_artifact_json'])
                 inline_gate_keyword = ga.get('keyword')
+                # Mirrors the capstone card: each gate card owns the one persisted
+                # feedback display for its own checkpoint.
+                if inline_gate_passed:
+                    fb = models.get_artifact_feedback(student_id, current_subtask['id'])
+                    inline_gate_llm_feedback = fb['feedback'] if fb else None
         except (json.JSONDecodeError, TypeError, ValueError):
             pass
 
@@ -3272,6 +3278,7 @@ def student_klasse(slug):
                            inline_gate_passed=inline_gate_passed,
                            inline_gate_position=inline_gate_position,
                            inline_gate_keyword=inline_gate_keyword,
+                           inline_gate_llm_feedback=inline_gate_llm_feedback,
                            capstone_gate_keyword=capstone_gate_keyword,
                            artifact_gate_required=bool(klasse.get('artifact_gate_required', 1)),
                            student_path=student.get('lernpfad') if student else None,
