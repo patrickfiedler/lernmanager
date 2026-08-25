@@ -2155,7 +2155,8 @@ def admin_thema_detail(task_id):
     materials = models.get_materials(task_id)
     material_assignments = models.get_material_subtask_assignments(task_id)
     building_on_text, arriving_at_text = _connections_to_admin_fields(task.get('connections_json'))
-    return render_template('admin/thema_detail.html', task=task, subtasks=subtasks, materials=materials, subjects=config.SUBJECTS, levels=config.LEVELS, material_assignments=material_assignments, building_on_text=building_on_text, arriving_at_text=arriving_at_text)
+    delete_impact = models.get_task_deletion_impact(task_id)
+    return render_template('admin/thema_detail.html', task=task, subtasks=subtasks, materials=materials, subjects=config.SUBJECTS, levels=config.LEVELS, material_assignments=material_assignments, building_on_text=building_on_text, arriving_at_text=arriving_at_text, delete_impact=delete_impact)
 
 
 @app.route('/admin/thema/<int:task_id>/bearbeiten', methods=['POST'])
@@ -2205,13 +2206,23 @@ def admin_thema_bearbeiten(task_id):
 @admin_required
 def admin_thema_loeschen(task_id):
     import sqlite3
+    impact = models.get_task_deletion_impact(task_id)
     try:
         artifact_disk_filenames, material_pfade = models.delete_task(task_id)
         _unlink_artifact_files(artifact_disk_filenames)
         _unlink_material_files(material_pfade)
-        flash('Thema gelöscht.', 'success')
-    except sqlite3.IntegrityError:
-        flash('Thema konnte nicht gelöscht werden: Es gibt noch verknüpfte Schülerdaten (z.B. hochgeladene Artefakte).', 'danger')
+        removed = []
+        if impact['artifact_files']:
+            removed.append(f"{impact['artifact_files']} Abgabe(n)")
+        if impact['grading_results']:
+            removed.append(f"{impact['grading_results']} Bewertung(en)")
+        detail = f" Mitgelöscht: {', '.join(removed)}." if removed else ''
+        flash(f'Thema gelöscht.{detail}', 'success')
+    except sqlite3.IntegrityError as exc:
+        # Every known FK into task/subtask is cleared by delete_task(); if this
+        # still fires, a new table gained a non-cascading reference.
+        app.logger.exception('delete_task(%s) hit an unhandled FK constraint', task_id)
+        flash(f'Thema konnte nicht gelöscht werden — nicht behandelte Verknüpfung: {exc}', 'danger')
     return redirect(url_for('admin_themen'))
 
 

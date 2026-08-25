@@ -1685,13 +1685,36 @@ def get_looking_forward_to(unit_slug):
     return result
 
 
+def get_task_deletion_impact(task_id):
+    """Student data that delete_task() would destroy along with the topic.
+
+    Surfaced in the delete confirmation so a teacher is never surprised by
+    losing released grades -- those are the only irreplaceable rows here.
+    """
+    with db_session() as conn:
+        def count(sql):
+            return conn.execute(sql, (task_id,)).fetchone()[0]
+
+        return {
+            'students': count("SELECT COUNT(*) FROM student_task WHERE task_id = ?"),
+            'artifact_files': count("SELECT COUNT(*) FROM student_artifact_file WHERE task_id = ?"),
+            'grading_runs': count("SELECT COUNT(*) FROM grading_run WHERE task_id = ?"),
+            'grading_results': count("SELECT COUNT(*) FROM grading_result WHERE task_id = ?"),
+            'released_grades': count(
+                "SELECT COUNT(*) FROM grading_result WHERE task_id = ? AND released_at IS NOT NULL"
+            ),
+        }
+
+
 def delete_task(task_id):
     """Delete a task and its dependent rows.
 
     subtask/material/student_task cascade via FK ON DELETE CASCADE, but
-    artifact_feedback, artifact_gate_attempt and student_artifact_file were
-    added without cascade (SQLite can't ALTER a FK in place), so they're
-    cleared explicitly here to avoid an IntegrityError.
+    artifact_feedback, artifact_gate_attempt, student_artifact_file,
+    grading_run and grading_result were added without cascade (SQLite can't
+    ALTER a FK in place), so they're cleared explicitly here to avoid an
+    IntegrityError. Those six are the complete set of non-cascading FKs into
+    task/subtask -- keep this in sync when adding another one.
 
     Returns (student_artifact_disk_filenames, material_pfade_to_unlink) for
     the caller to remove from disk. Material filenames aren't task-scoped
@@ -1712,6 +1735,12 @@ def delete_task(task_id):
             "SELECT disk_filename FROM student_artifact_file WHERE task_id = ?", (task_id,)
         ).fetchall()]
         conn.execute("DELETE FROM student_artifact_file WHERE task_id = ?", (task_id,))
+
+        # Grading runs reference the topic's rubric, so they are meaningless
+        # (and unreachable in /admin/grading/runs) once the topic is gone.
+        # grading_result first -- it also FKs grading_run.
+        conn.execute("DELETE FROM grading_result WHERE task_id = ?", (task_id,))
+        conn.execute("DELETE FROM grading_run WHERE task_id = ?", (task_id,))
 
         material_pfade = [r['pfad'] for r in conn.execute(
             "SELECT pfad FROM material WHERE task_id = ? AND typ = 'datei'", (task_id,)

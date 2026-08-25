@@ -80,3 +80,20 @@ venv/
 # MemPalace per-project files (issue #185)
 mempalace.yaml
 entities.json
+
+# THIS REPO IS PUBLIC. Nothing the app hands a teacher for download may be
+# committed. Blanket-ignore the formats those downloads use -- none has ever
+# been tracked, so nothing legitimate is lost. Use `git add -f` if you ever
+# genuinely need one.
+#   zugangsdaten_*.pdf            student names + PLAINTEXT passwords
+#   namen_benutzernamen_*.pdf     student names + usernames
+#   fortschrittsbericht_*.pdf     per-student progress reports
+#   thema_*.zip / thema_*.json    topic exports, bundle school-only Lehrbuch PDFs
+#   themen_export.json            full topic library export
+#   *.csv                         student_mapping rosters (real names, network IDs)
+#   *.docx / *.odt                student artifact uploads
+*.pdf
+*.zip
+*.csv
+*.docx
+*.odt
