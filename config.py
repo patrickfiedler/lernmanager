@@ -35,7 +35,11 @@ SUBJECTS = ['Englisch', 'Chemie', 'MBI', 'Geographie']
 # double-year values ('5/6', '7/8', '9/10') collided as soon as two units
 # shared a name across grades -- see docs/shared/lernmanager/task_json_format.md.
 # LEGACY_LEVELS are still rendered for existing rows but no longer offered.
-LEVELS = ['5', '6', '7', '8', '9', '10', '11s', '11/12', 'Seilbahn']
+# 'Seilbahn' is deliberately absent: it is a *path* (subtask.path / student.lernpfad,
+# see models.VALID_PATHS), not a grade level. It sat here only as a label hack to tell
+# a Seilbahn variant from its regular twin in the admin dropdown -- derive that from
+# the subtask paths instead (import_task._is_seilbahn_topic).
+LEVELS = ['5', '6', '7', '8', '9', '10', '11s', '11/12']
 LEGACY_LEVELS = ['5/6', '7/8', '9/10']
 
 # LLM grading (for free-text quiz questions and artifact completeness checks)

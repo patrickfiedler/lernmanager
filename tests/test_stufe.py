@@ -4,6 +4,7 @@ Legacy double-year values ('5/6') are rejected on import but still resolve to
 both grades so existing DB rows keep matching and sorting sensibly.
 """
 import config
+import models
 import utils
 from import_task import validate_task_structure, ValidationError
 import pytest
@@ -16,6 +17,16 @@ def _task(stufe):
 def test_levels_are_single_grades():
     assert '5/6' not in config.LEVELS
     assert {'5', '6', '7'} <= set(config.LEVELS)
+
+
+def test_seilbahn_is_a_path_not_a_level():
+    assert 'Seilbahn' not in config.LEVELS
+    assert 'seilbahn' in models.VALID_PATHS
+
+
+def test_import_rejects_seilbahn_as_stufe():
+    with pytest.raises(ValidationError):
+        validate_task_structure(_task("Seilbahn"))
 
 
 def test_import_accepts_single_grade():
