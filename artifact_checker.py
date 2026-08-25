@@ -36,14 +36,24 @@ def check_filename(filename: str, expected_filename: str, student_vorname: str =
     feedback list; the caller marks it non-LLM (e.g. source='deterministic').
     """
     stem = filename.rsplit('.', 1)[0] if '.' in filename else filename
+    ext = filename[len(stem):]
     expected = expected_filename.replace('[Vorname]', student_vorname).replace('[Name]', student_name)
     passed = stem.strip().lower() == expected.strip().lower()
+    # Show the name the student should end up with, extension included -- they
+    # compare against a whole filename, not a stem, so spelling out "ohne
+    # Dateiendung" only made the message harder to act on. expected_filename is
+    # authored as a stem (conventions.md), but tolerate one that already has it.
+    if ext and not expected.lower().endswith(ext.lower()):
+        expected_display = expected + ext
+    else:
+        expected_display = expected
     note = (
         "Der Dateiname ist korrekt."
         if passed
-        else f'Der Dateiname sollte „{expected}" sein (ohne Dateiendung), gefunden: „{stem}".'
+        else f'Der Dateiname sollte „{expected_display}" sein.'
     )
-    return {'criterion': f'Dateiname ist „{expected}"', 'passed': passed, 'note': note, 'source': 'deterministic'}
+    return {'criterion': f'Dateiname ist „{expected_display}"', 'passed': passed,
+            'note': note, 'source': 'deterministic'}
 
 
 def _result(issues: list, matches: list = None, warnings: list = None) -> dict:
