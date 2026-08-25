@@ -47,10 +47,13 @@ def check_filename(filename: str, expected_filename: str, student_vorname: str =
         expected_display = expected + ext
     else:
         expected_display = expected
+    # criterion carries the requirement, note says what the student's file
+    # actually looks like -- same split as every LLM criterion. Repeating the
+    # target name in both just said the same thing twice.
     note = (
         "Der Dateiname ist korrekt."
         if passed
-        else f'Der Dateiname sollte „{expected_display}" sein.'
+        else f'Deine Datei heißt „{filename}".'
     )
     return {'criterion': f'Dateiname ist „{expected_display}"', 'passed': passed,
             'note': note, 'source': 'deterministic'}
