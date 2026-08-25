@@ -97,3 +97,6 @@ entities.json
 *.csv
 *.docx
 *.odt
+
+# Screenshots dropped in the repo root for debugging
+Screenshot*
