@@ -290,6 +290,10 @@ def init_db():
                 review_notes TEXT,  -- JSON: {"questions": [question_index, ...]} that need manual re-grading
                 quiz_snapshot_json TEXT,  -- quiz_json as it was at completion time (content can be edited later)
                 superseded_at TEXT,  -- set instead of deleting on a "Fortschritte zurücksetzen" re-import -- see reset_student_progress_for_task
+                teacher_score INTEGER,  -- migrate_048: teacher's override, NULL = not reviewed. Read via effective_checkpoint_score(), never `score` directly
+                teacher_note TEXT,  -- short reason for the override, shown to nobody but the teacher
+                reviewed_at TEXT,
+                reviewed_by INTEGER,  -- admin.id, no FK (an admin row going away must not erase the review record)
                 FOREIGN KEY (student_id) REFERENCES student(id) ON DELETE CASCADE,
                 FOREIGN KEY (module_id) REFERENCES task(id) ON DELETE CASCADE
             );
@@ -321,6 +325,9 @@ def init_db():
                 hints_used_before INTEGER NOT NULL DEFAULT 0,
                 gave_up INTEGER NOT NULL DEFAULT 0,
                 timestamp TEXT NOT NULL,
+                teacher_verdict INTEGER,  -- migrate_048: what the teacher says the answer actually was (0/1), NULL = not judged. Calibration only -- never feeds the score
+                teacher_note TEXT,
+                prompt_version TEXT,  -- which system prompt graded this (llm_grading.prompt_version_for) -- without it, a prompt change makes old/new rows incomparable
                 FOREIGN KEY (student_id) REFERENCES student(id) ON DELETE CASCADE
             );
 
@@ -332,6 +339,9 @@ def init_db():
 
             CREATE INDEX IF NOT EXISTS idx_checkpoint_answer_student_checkpoint
             ON checkpoint_answer(student_id, checkpoint_id);
+
+            CREATE INDEX IF NOT EXISTS idx_checkpoint_attempt_unreviewed
+            ON checkpoint_attempt(timestamp) WHERE teacher_score IS NULL;
 
             -- Subtask visibility (per-class and per-student overrides)
             CREATE TABLE IF NOT EXISTS subtask_visibility (
@@ -3313,7 +3323,8 @@ def create_checkpoint_attempt(student_id, checkpoint_id, module_id, checkpoint_t
 
 def create_checkpoint_answer(student_id, checkpoint_id, session_uid, question_index,
                               attempt_no, answer_text, correct, feedback, grader,
-                              llm_model=None, hints_used_before=0, gave_up=False):
+                              llm_model=None, hints_used_before=0, gave_up=False,
+                              prompt_version=None):
     """Log one graded attempt at one checkpoint question -- the per-question detail
     checkpoint_attempt never captured (see migrate_047). Written as answers happen,
     before checkpoint_attempt exists (checkpoint_attempt_id starts NULL and is
@@ -3322,17 +3333,20 @@ def create_checkpoint_answer(student_id, checkpoint_id, session_uid, question_in
     correct: True/False/None (None = LLM grading failed, matches the strict=True
     contract in llm_grading.grade_answer -- don't collapse to False, that would
     misrepresent an ungraded attempt as a wrong one in a future review UI).
+
+    prompt_version: which system prompt graded this (migrate_048), None when no LLM
+    was involved (exact match / MC / give-up).
     """
     with db_session() as conn:
         conn.execute('''
             INSERT INTO checkpoint_answer
             (student_id, checkpoint_id, session_uid, question_index, attempt_no,
              answer_text, correct, feedback, grader, llm_model, hints_used_before,
-             gave_up, timestamp)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+             gave_up, timestamp, prompt_version)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
         ''', (student_id, checkpoint_id, session_uid, question_index, attempt_no,
               answer_text, correct, feedback, grader, llm_model, hints_used_before,
-              1 if gave_up else 0))
+              1 if gave_up else 0, prompt_version))
 
 
 def get_checkpoint_attempts_for_student(student_id, module_id=None, include_superseded=False):
