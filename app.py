@@ -3099,7 +3099,6 @@ def student_klasse(slug):
     klasse_id = klasse['id']
     subtasks = []
     all_subtasks = []
-    completed_subtasks = []
     current_subtask = None
     materials = []
     quiz_attempts = []
@@ -3155,9 +3154,6 @@ def student_klasse(slug):
             materials = models.get_materials_for_subtask(task['task_id'], current_subtask['id'])
         else:
             materials = models.get_materials(task['task_id'])
-
-        # Q5A: Calculate completed based on VISIBLE subtasks only
-        completed_subtasks = [st for st in subtasks if st['erledigt']]
 
     # Fork/Choice: pending (unresolved) fork_groups on this task, excluded from
     # `subtasks` above. One placeholder dot per pending group, positioned by
@@ -3266,7 +3262,6 @@ def student_klasse(slug):
                            task=task,
                            subtasks=subtasks,
                            all_subtasks=all_subtasks,
-                           completed_subtasks=completed_subtasks,
                            current_subtask=current_subtask,
                            materials=materials,
                            client_school_ok=_client_in_school_network(),

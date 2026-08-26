@@ -309,21 +309,6 @@
     {% endif %}
 
 
-    <!-- Completed Subtasks (collapsible) -->
-    {% if completed_subtasks %}
-    <details class="completed-tasks-toggle mt-2">
-        <summary>✓ {{ completed_subtasks|length }} Aufgabe(n) bereits erledigt</summary>
-        <div class="completed-tasks-content">
-            {% for sub in completed_subtasks %}
-            <div class="completed-task-item">
-                <span class="check-icon">✓</span>
-                <div class="completed-task-text">{{ sub.beschreibung[:100] }}{% if sub.beschreibung|length > 100 %}...{% endif %}</div>
-            </div>
-            {% endfor %}
-        </div>
-    </details>
-    {% endif %}
-
     {% else %}
     <!-- Q3B: Encouraging Empty State -->
     <div class="empty-state-card">
