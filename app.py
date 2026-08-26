@@ -225,13 +225,18 @@ def _resolve_subtask_by_position(subtasks, position):
 def _resolve_resume_subtask(subtasks, subtask_quiz_status):
     """Where a student should land on param-less re-entry to a topic.
 
-    First not-yet-completed subtask; or, if a subtask is done but its own
-    quiz hasn't been passed yet, that subtask itself (not past it) so the
-    quiz stays reachable. Falls back to the last subtask if everything is
-    already done (the topic should be abgeschlossen by then; kept for
-    robustness against that edge case).
+    First not-yet-completed REQUIRED subtask; or, if a required subtask is
+    done but its own quiz hasn't been passed yet, that subtask itself (not
+    past it) so the quiz stays reachable. Optional (Zusatz) subtasks are
+    skipped as resume candidates -- matching check_task_completion, which
+    only counts required subtasks -- so a skipped optional subtask earlier
+    in the order doesn't permanently trap re-entry there. Falls back to the
+    last subtask if everything required is already done (the topic should
+    be abgeschlossen by then; kept for robustness against that edge case).
     """
     for st in subtasks:
+        if not st.get('required', True):
+            continue
         if not st.get('erledigt'):
             return st
         if st.get('quiz_json') and not subtask_quiz_status.get(st['id'], False):

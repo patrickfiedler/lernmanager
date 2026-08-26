@@ -50,6 +50,18 @@ def test_resume_empty_list():
     assert _resolve_resume_subtask([], {}) is None
 
 
+def test_resume_skips_unfinished_optional_subtask():
+    # A skipped Zusatz (optional) subtask must not permanently trap the resume
+    # pointer -- check_task_completion only counts required subtasks, and
+    # resume must match that (was landing back on the optional subtask 1
+    # forever, e.g. after finishing a checkpoint further down the topic).
+    subtasks = [
+        {"id": 1, "erledigt": False, "quiz_json": None, "required": False},
+        {"id": 2, "erledigt": False, "quiz_json": None, "required": True},
+    ]
+    assert _resolve_resume_subtask(subtasks, {})["id"] == 2
+
+
 def test_param_less_reentry_shows_actual_progress_not_position_one(app, client):
     app.config["WTF_CSRF_ENABLED"] = False
     student_id = models.create_student("Test", "Schueler", "resumetest", "pw123")
