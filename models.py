@@ -3383,6 +3383,145 @@ def get_checkpoint_answers_for_attempt(checkpoint_attempt_id):
         return [dict(r) for r in rows]
 
 
+def effective_checkpoint_score(attempt):
+    """The score that counts: the teacher's override if one exists, else the
+    computed one (migrate_048).
+
+    Every consumer of a checkpoint score -- review UI, exports, and whatever
+    eventually computes the Kern-Sperre/Punktekonto -- must go through here rather
+    than reading `score` directly, so "a teacher override wins" is stated once.
+    """
+    teacher_score = attempt.get('teacher_score')
+    return attempt['score'] if teacher_score is None else teacher_score
+
+
+def get_checkpoint_reviews(klasse_id=None, student_id=None, date_from=None,
+                           date_to=None, unreviewed_only=False, limit=300):
+    """Checkpoint sessions for the teacher-review UI, newest first.
+
+    One row per completed checkpoint (checkpoint_attempt), enriched with the
+    student/class/topic names needed to display and filter it. Superseded rows are
+    excluded -- they are the pre-reset grade record, not the current one.
+
+    date_from/date_to: 'YYYY-MM-DD' (inclusive). date_to is compared against the
+    end of that day so a same-day filter is not empty.
+
+    The subtask join is LEFT: checkpoint_id carries no FK on purpose (migrate_047),
+    so an Aufgabe that has since been deleted must still list its results -- the
+    display falls back to quiz_snapshot_json.
+    """
+    sql = '''
+        SELECT ca.*,
+               s.vorname, s.nachname,
+               t.name as task_name,
+               sub.beschreibung as subtask_name,
+               sub.reihenfolge as subtask_position
+        FROM checkpoint_attempt ca
+        JOIN student s ON ca.student_id = s.id
+        LEFT JOIN task t ON ca.module_id = t.id
+        LEFT JOIN subtask sub ON ca.checkpoint_id = sub.id
+        WHERE ca.superseded_at IS NULL
+    '''
+    params = []
+    if klasse_id:
+        # Class membership is many-to-many and lives outside checkpoint_attempt,
+        # so it is an EXISTS rather than a join -- a student in two classes must
+        # not make their checkpoints appear twice.
+        sql += ''' AND EXISTS (SELECT 1 FROM student_klasse sk
+                                WHERE sk.student_id = ca.student_id AND sk.klasse_id = ?)'''
+        params.append(klasse_id)
+    if student_id:
+        sql += ' AND ca.student_id = ?'
+        params.append(student_id)
+    if date_from:
+        sql += ' AND ca.timestamp >= ?'
+        params.append(f'{date_from} 00:00:00')
+    if date_to:
+        sql += ' AND ca.timestamp <= ?'
+        params.append(f'{date_to} 23:59:59')
+    if unreviewed_only:
+        sql += ' AND ca.teacher_score IS NULL'
+    sql += ' ORDER BY ca.timestamp DESC LIMIT ?'
+    params.append(limit)
+
+    with db_session() as conn:
+        rows = [dict(r) for r in conn.execute(sql, params).fetchall()]
+    for row in rows:
+        row['effective_score'] = effective_checkpoint_score(row)
+        row['student_name'] = f"{row['vorname']} {row['nachname']}"
+    return rows
+
+
+def get_checkpoint_students():
+    """Students who actually have checkpoint results, for the review page's filter.
+
+    Deliberately not "all students": the dropdown should offer the handful of
+    people there is something to review for, not the whole school.
+    """
+    with db_session() as conn:
+        rows = conn.execute('''
+            SELECT DISTINCT s.id, s.vorname, s.nachname
+            FROM checkpoint_attempt ca
+            JOIN student s ON ca.student_id = s.id
+            WHERE ca.superseded_at IS NULL
+            ORDER BY s.nachname, s.vorname
+        ''').fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_checkpoint_answers_for_attempts(attempt_ids):
+    """All logged answers for several checkpoint sessions at once, grouped by
+    attempt id. Batched deliberately: the review UI renders up to `limit` sessions
+    and a per-session query would mean hundreds of round trips.
+    """
+    if not attempt_ids:
+        return {}
+    placeholders = ','.join('?' * len(attempt_ids))
+    with db_session() as conn:
+        rows = conn.execute(f'''
+            SELECT * FROM checkpoint_answer
+            WHERE checkpoint_attempt_id IN ({placeholders})
+            ORDER BY question_index, attempt_no, id
+        ''', list(attempt_ids)).fetchall()
+    grouped = {}
+    for row in rows:
+        grouped.setdefault(row['checkpoint_attempt_id'], []).append(dict(row))
+    return grouped
+
+
+def set_checkpoint_teacher_review(attempt_id, teacher_score, teacher_note, admin_id):
+    """Record the teacher's verdict on one checkpoint session (migrate_048).
+
+    teacher_score None clears the override and hands the grade back to the computed
+    score -- a teacher must be able to undo a correction, not only make one.
+    """
+    with db_session() as conn:
+        conn.execute('''
+            UPDATE checkpoint_attempt
+            SET teacher_score = ?, teacher_note = ?,
+                reviewed_at = CASE WHEN ? IS NULL AND ? IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END,
+                reviewed_by = CASE WHEN ? IS NULL AND ? IS NULL THEN NULL ELSE ? END
+            WHERE id = ?
+        ''', (teacher_score, teacher_note or None,
+              teacher_score, teacher_note or None,
+              teacher_score, teacher_note or None, admin_id,
+              attempt_id))
+
+
+def set_checkpoint_answer_verdict(answer_id, teacher_verdict, teacher_note):
+    """Record what the teacher says one answer actually was (migrate_048).
+
+    Calibration only: this never changes any score. Its whole purpose is that
+    `teacher_verdict != correct` can be counted in the export to show where the
+    grading prompt disagrees with the teacher.
+    """
+    with db_session() as conn:
+        conn.execute('''
+            UPDATE checkpoint_answer SET teacher_verdict = ?, teacher_note = ?
+            WHERE id = ?
+        ''', (teacher_verdict, teacher_note or None, answer_id))
+
+
 def get_text_quiz_answers(klasse_id=None, only_fallback=False):
     """Get all text-based quiz answers (fill_blank, short_answer) for admin review.
 

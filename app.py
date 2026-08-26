@@ -10,6 +10,7 @@ import shutil
 import zipfile
 import ipaddress
 import sqlite3
+import difflib
 import traceback
 import urllib.request
 import urllib.error
@@ -2568,6 +2569,448 @@ def admin_quiz_antworten():
                          klassen=klassen,
                          filter_mode=filter_mode,
                          klasse_id=klasse_id)
+
+
+# ============ Admin: Checkpoint Review (Chemie Punktekonto) ============
+#
+# Reads what checkpoint_answer/checkpoint_attempt logged (migrate_047) and lets a
+# teacher act on it (migrate_048). Two separate acts, deliberately not merged:
+#   - override the session score  -> that IS the grade (checkpoint_attempt)
+#   - judge a single answer       -> calibration data only (checkpoint_answer),
+#                                    never touches any score
+# See docs/shared/lernmanager/chemie-checkpoint-status.md and chemie's two schema
+# gaps in todo.md.
+
+
+# Double-click detection thresholds (see _is_duplicate_submission).
+DUPLICATE_SUBMISSION_WINDOW_SECONDS = 15
+DUPLICATE_SUBMISSION_SIMILARITY = 0.95
+
+
+def _parse_log_timestamp(value):
+    """SQLite CURRENT_TIMESTAMP -> datetime, or None if it is not the expected
+    'YYYY-MM-DD HH:MM:SS' shape (rows written by an older path may differ)."""
+    if not value:
+        return None
+    try:
+        return datetime.strptime(str(value)[:19], '%Y-%m-%d %H:%M:%S')
+    except ValueError:
+        return None
+
+
+def _answer_seconds_between(previous, current):
+    """Seconds between two logged answers, or None if either timestamp is
+    unreadable. Provided so duplicate detection can reason about time without
+    re-doing timestamp parsing."""
+    a = _parse_log_timestamp(previous.get('timestamp'))
+    b = _parse_log_timestamp(current.get('timestamp'))
+    if a is None or b is None:
+        return None
+    return abs((b - a).total_seconds())
+
+
+def _normalized_answer_text(answer):
+    """Answer text reduced for comparison: lowercased, collapsed whitespace.
+    None for a give-up row (no text at all)."""
+    text = answer.get('answer_text')
+    if text is None:
+        return None
+    return ' '.join(str(text).lower().split())
+
+
+def _is_duplicate_submission(previous, current):
+    """True if `current` is an accidental re-submission of `previous` -- the same
+    answer sent twice because the student clicked "Prüfen" again while the first
+    request was still in flight -- rather than a genuine second attempt.
+
+    Why this matters: a checkpoint question scores 3 only when attempts == 1
+    (_checkpoint_question_scores). Before the busy-state guard existed
+    (static/js/llm_button.js) the button stayed enabled during the LLM call, so a
+    second click silently turned a 3 into a 2. Everything this flags is offered to
+    the teacher as a suggested correction -- never applied automatically.
+
+    Both arguments are checkpoint_answer rows (dicts), `previous` graded first.
+
+    Rule (Patrick's call 2026-08-26):
+      - within 15s of each other -- the server LLM budget is 5s, but a full class
+        submitting at once can queue a response past 10s, and it is exactly those
+        slow calls that make a student click again. A 5s window would miss them.
+      - same verdict on both rows. A near-identical answer that *flips* wrong->correct
+        ("Neutron" -> "Neutronen") is a genuine typo fix, not a resend -- this guard
+        is what makes the fuzzy matching below safe.
+        Note on how reliable that is: grading runs at temperature 0 (llm_grading.
+        _call_llm), but greedy sampling is not a determinism guarantee -- on a
+        batched fp8 endpoint the same input can occasionally be judged differently
+        because batch composition changes floating-point reduction order. When that
+        happens to a real double-click, the pair goes unflagged and the student
+        simply keeps the score they already had. The failure mode is a missed
+        repair, never a wrongly suggested grade change, which is the right way round
+        for something a teacher has to confirm anyway.
+      - text ~identical (>= 0.95 similarity after normalising). Exact equality would
+        be enough for a true double-click; fuzzy is Patrick's call, on the reasoning
+        that a second submission already caps the question at 2 points, so a
+        generous flag costs at most one rejected suggestion.
+
+    Deliberately NOT required: that the earlier answer was correct. Only correct-
+    previous pairs move a score, but flagging the rest keeps the export honest about
+    how often double-clicking happened at all (which is how we will tell whether the
+    button fix worked).
+
+    An unreadable timestamp means the time test cannot be made, so nothing is
+    flagged -- a missing signal must not become a suggestion to change a grade.
+
+    Returns: bool
+    """
+    if previous.get('gave_up') or current.get('gave_up'):
+        return False
+
+    seconds = _answer_seconds_between(previous, current)
+    if seconds is None or seconds > DUPLICATE_SUBMISSION_WINDOW_SECONDS:
+        return False
+
+    if previous.get('correct') is None or current.get('correct') is None:
+        return False
+    if bool(previous['correct']) != bool(current['correct']):
+        return False
+
+    previous_text = _normalized_answer_text(previous)
+    current_text = _normalized_answer_text(current)
+    if not previous_text or not current_text:
+        return False
+    if previous_text == current_text:
+        return True
+    return difflib.SequenceMatcher(None, previous_text, current_text).ratio() >= \
+        DUPLICATE_SUBMISSION_SIMILARITY
+
+
+def _checkpoint_question_review(answers):
+    """Group one session's logged answers by question and work out, per question:
+    what was submitted, which submissions look like accidental duplicates, and what
+    the score would be without them.
+
+    Returns list of dicts (one per question_index, ascending):
+        {'question_index', 'answers', 'duplicate_ids', 'scored', 'scored_without_duplicates'}
+    where 'scored'/'scored_without_duplicates' are the 0/2/3 values from
+    _checkpoint_question_scores, so the two numbers are always derived by the same
+    rule the student was graded under -- never a second copy of it.
+    """
+    by_question = {}
+    for answer in answers:
+        by_question.setdefault(answer['question_index'], []).append(answer)
+
+    review = []
+    for question_index in sorted(by_question):
+        rows = sorted(by_question[question_index], key=lambda r: (r['attempt_no'], r['id']))
+
+        duplicate_ids = set()
+        # Compare each graded submission against the last one that wasn't itself
+        # flagged -- otherwise a triple-click would only ever flag the second row.
+        previous = None
+        for row in rows:
+            if row.get('gave_up'):
+                continue
+            if previous is not None and _is_duplicate_submission(previous, row):
+                duplicate_ids.add(row['id'])
+                continue
+            previous = row
+
+        def summarize(skip_ids):
+            counted = [r for r in rows if r['id'] not in skip_ids and not r.get('gave_up')
+                       and r.get('correct') is not None]
+            return {
+                # `solved` is read from ALL rows, never the filtered set: a duplicate
+                # is by definition the same answer as one that is still counted, so
+                # it can never be the only evidence the question was solved. Deriving
+                # it from `counted` would mean a false-positive flag on a correct
+                # attempt suggests 0 points instead of raising the score -- the one
+                # direction in which a wrong flag could actually harm a student.
+                'solved': any(r.get('correct') for r in rows if not r.get('gave_up')),
+                'gave_up': any(r.get('gave_up') for r in rows),
+                'attempts': len(counted),
+                'hints_used': max([r.get('hints_used_before') or 0 for r in rows], default=0),
+            }
+
+        scored = _checkpoint_question_scores([summarize(set())])[0]
+        scored_clean = _checkpoint_question_scores([summarize(duplicate_ids)])[0]
+        review.append({
+            'question_index': question_index,
+            'answers': rows,
+            'duplicate_ids': duplicate_ids,
+            'scored': scored,
+            'scored_without_duplicates': scored_clean,
+        })
+    return review
+
+
+def _checkpoint_snapshot_questions(attempt):
+    """Question list as it was when the checkpoint was answered.
+
+    quiz_snapshot_json is the point of the snapshot (migrate_047): content can be
+    edited afterwards, so reading today's quiz_json could show a different question
+    than the student answered. Returns [] when there is no snapshot (rows written
+    before migrate_047) -- the UI then shows the answers without question text.
+    """
+    raw = attempt.get('quiz_snapshot_json')
+    if not raw:
+        return []
+    try:
+        return json.loads(raw).get('questions', [])
+    except (json.JSONDecodeError, TypeError, AttributeError):
+        return []
+
+
+def _build_checkpoint_sessions(attempts):
+    """Assemble the review UI's display model: each checkpoint session with its
+    per-question answer log, duplicate flags and a suggested score."""
+    answers_by_attempt = models.get_checkpoint_answers_for_attempts(
+        [a['id'] for a in attempts]
+    )
+
+    sessions = []
+    for attempt in attempts:
+        answers = answers_by_attempt.get(attempt['id'], [])
+        questions = _checkpoint_snapshot_questions(attempt)
+        review = _checkpoint_question_review(answers)
+
+        for entry in review:
+            question = (questions[entry['question_index']]
+                        if entry['question_index'] < len(questions) else None)
+            entry['question_text'] = question.get('text') if question else None
+            entry['question_type'] = question.get('type', 'multiple_choice') if question else None
+            entry['rubric'] = question.get('rubric') if question else None
+
+        has_duplicates = any(entry['duplicate_ids'] for entry in review)
+        # The score the session would have had if no duplicate had been counted.
+        # min() across questions, exactly as the live scoring does.
+        suggested = (min(entry['scored_without_duplicates'] for entry in review)
+                     if review else attempt['score'])
+
+        sessions.append({
+            'attempt': attempt,
+            'questions': review,
+            'has_duplicates': has_duplicates,
+            # Only offer a correction when it would actually change something and
+            # the teacher has not already decided -- a suggestion that repeats the
+            # current score is noise.
+            'suggested_score': (suggested
+                                if has_duplicates
+                                and suggested != attempt['score']
+                                and attempt.get('teacher_score') is None
+                                else None),
+            'answer_count': len(answers),
+        })
+    return sessions
+
+
+@app.route('/admin/checkpoint-pruefung')
+@admin_required
+def admin_checkpoint_pruefung():
+    """Review checkpoint quiz answers, LLM verdicts and scores."""
+    klasse_id = request.args.get('klasse_id', type=int)
+    student_id = request.args.get('student_id', type=int)
+    date_from = request.args.get('von') or None
+    date_to = request.args.get('bis') or None
+    unreviewed_only = request.args.get('offen') == '1'
+
+    attempts = models.get_checkpoint_reviews(
+        klasse_id=klasse_id, student_id=student_id,
+        date_from=date_from, date_to=date_to, unreviewed_only=unreviewed_only
+    )
+    sessions = _build_checkpoint_sessions(attempts)
+
+    return render_template('admin/checkpoint_pruefung.html',
+                           sessions=sessions,
+                           klassen=models.get_all_klassen(),
+                           students=models.get_checkpoint_students(),
+                           klasse_id=klasse_id, student_id=student_id,
+                           date_from=date_from, date_to=date_to,
+                           unreviewed_only=unreviewed_only,
+                           duplicate_count=sum(1 for s in sessions if s['has_duplicates']))
+
+
+@app.route('/admin/checkpoint-pruefung/<int:attempt_id>/bewerten', methods=['POST'])
+@admin_required
+def admin_checkpoint_review_save(attempt_id):
+    """Save the teacher's score override + note for one checkpoint session."""
+    raw_score = request.form.get('teacher_score', '')
+    note = (request.form.get('teacher_note') or '').strip()
+
+    if raw_score == '':
+        teacher_score = None          # clears the override, back to the computed score
+    else:
+        try:
+            teacher_score = int(raw_score)
+        except ValueError:
+            flash('Ungültige Punktzahl.', 'danger')
+            return redirect(request.referrer or url_for('admin_checkpoint_pruefung'))
+        if teacher_score not in (0, 2, 3):
+            # The scale is a strict three-value category (chemie-data-contract.md
+            # §3a), not a range -- a 1 here would silently break the Kern-Sperre.
+            flash('Punktzahl muss 0, 2 oder 3 sein.', 'danger')
+            return redirect(request.referrer or url_for('admin_checkpoint_pruefung'))
+
+    models.set_checkpoint_teacher_review(attempt_id, teacher_score, note, session['admin_id'])
+    flash('Bewertung gespeichert.' if teacher_score is not None else 'Bewertung zurückgesetzt.',
+          'success')
+    return redirect(request.referrer or url_for('admin_checkpoint_pruefung'))
+
+
+@app.route('/admin/checkpoint-pruefung/antwort/<int:answer_id>/urteil', methods=['POST'])
+@admin_required
+def admin_checkpoint_answer_verdict(answer_id):
+    """Save the teacher's own verdict on one answer (calibration only, no score change)."""
+    raw_verdict = request.form.get('teacher_verdict', '')
+    note = (request.form.get('teacher_note') or '').strip()
+    verdict = None if raw_verdict == '' else (1 if raw_verdict == '1' else 0)
+
+    models.set_checkpoint_answer_verdict(answer_id, verdict, note)
+    return jsonify({'ok': True, 'teacher_verdict': verdict})
+
+
+def _checkpoint_export_rows(sessions):
+    """Flatten the review model to one row per logged answer -- the shape both
+    exports share, so CSV and JSON can never drift apart in what they contain."""
+    rows = []
+    for entry in sessions:
+        attempt = entry['attempt']
+        for question in entry['questions']:
+            for answer in question['answers']:
+                rows.append({
+                    'zeitpunkt': answer['timestamp'],
+                    'schueler': attempt['student_name'],
+                    'schueler_id': attempt['student_id'],
+                    'thema': attempt['task_name'],
+                    'checkpoint': attempt['subtask_name'],
+                    'kern_standard': attempt['kern_standard_tag'],
+                    'frage_nr': question['question_index'] + 1,
+                    'frage_typ': question['question_type'],
+                    'frage': question['question_text'],
+                    'bewertungskriterien': question['rubric'],
+                    'versuch_nr': answer['attempt_no'],
+                    'antwort': answer['answer_text'],
+                    'ki_urteil': answer['correct'],
+                    'ki_feedback': answer['feedback'],
+                    'grader': answer['grader'],
+                    'modell': answer['llm_model'],
+                    'prompt_version': answer.get('prompt_version'),
+                    'tipps_vorher': answer['hints_used_before'],
+                    'aufgegeben': answer['gave_up'],
+                    'lehrer_urteil': answer.get('teacher_verdict'),
+                    'lehrer_notiz_antwort': answer.get('teacher_note'),
+                    # Disagreement is the signal the whole export exists for: it is
+                    # computed here rather than left to the reader, so a spreadsheet
+                    # filter finds it without a formula.
+                    'ki_weicht_ab': (1 if (answer.get('teacher_verdict') is not None
+                                           and answer.get('correct') is not None
+                                           and int(answer['teacher_verdict']) != int(answer['correct']))
+                                     else 0),
+                    'doppelklick_verdacht': 1 if answer['id'] in question['duplicate_ids'] else 0,
+                    'session_score': attempt['score'],
+                    'lehrer_score': attempt.get('teacher_score'),
+                    'score_gueltig': attempt['effective_score'],
+                    'lehrer_notiz_session': attempt.get('teacher_note'),
+                })
+    return rows
+
+
+def _checkpoint_export_sessions(**filters):
+    """Run the review query with the page's filters and build the display model --
+    shared by both export routes so an export always matches what is on screen."""
+    attempts = models.get_checkpoint_reviews(**filters)
+    return _build_checkpoint_sessions(attempts)
+
+
+def _checkpoint_export_filters():
+    """Read the same filter arguments the review page uses."""
+    return {
+        'klasse_id': request.args.get('klasse_id', type=int),
+        'student_id': request.args.get('student_id', type=int),
+        'date_from': request.args.get('von') or None,
+        'date_to': request.args.get('bis') or None,
+        'unreviewed_only': request.args.get('offen') == '1',
+        'limit': 5000,
+    }
+
+
+@app.route('/admin/checkpoint-pruefung/export.csv')
+@admin_required
+def admin_checkpoint_export_csv():
+    """One row per logged answer, for scanning in a spreadsheet."""
+    import csv
+    import io
+
+    rows = _checkpoint_export_rows(_checkpoint_export_sessions(**_checkpoint_export_filters()))
+    buffer = io.StringIO()
+    fieldnames = list(rows[0].keys()) if rows else ['zeitpunkt', 'schueler', 'frage', 'antwort']
+    writer = csv.DictWriter(buffer, fieldnames=fieldnames, delimiter=';')
+    writer.writeheader()
+    for row in rows:
+        writer.writerow(row)
+
+    # utf-8-sig: Excel opens a plain UTF-8 CSV as Latin-1 and mangles every umlaut.
+    return Response(
+        buffer.getvalue().encode('utf-8-sig'),
+        mimetype='text/csv; charset=utf-8',
+        headers={'Content-Disposition':
+                 f'attachment; filename=checkpoints_{datetime.now().strftime("%Y-%m-%d")}.csv'}
+    )
+
+
+@app.route('/admin/checkpoint-pruefung/export.json')
+@admin_required
+def admin_checkpoint_export_json():
+    """Nested per session, with full question, rubric and feedback text -- the shape
+    to hand to an LLM when looking for weaknesses in the grading prompt."""
+    sessions = _checkpoint_export_sessions(**_checkpoint_export_filters())
+
+    export = {
+        'exported_at': datetime.now().isoformat(),
+        'prompt_version': llm_grading.prompt_version_for(llm_grading.CHECKPOINT_SYSTEM_PROMPT),
+        'llm_model': config.LLM_MODEL,
+        'sessions': [{
+            'student': entry['attempt']['student_name'],
+            'student_id': entry['attempt']['student_id'],
+            'thema': entry['attempt']['task_name'],
+            'checkpoint': entry['attempt']['subtask_name'],
+            'kern_standard': entry['attempt']['kern_standard_tag'],
+            'zeitpunkt': entry['attempt']['timestamp'],
+            'score_berechnet': entry['attempt']['score'],
+            'score_lehrer': entry['attempt'].get('teacher_score'),
+            'score_gueltig': entry['attempt']['effective_score'],
+            'lehrer_notiz': entry['attempt'].get('teacher_note'),
+            'doppelklick_verdacht': entry['has_duplicates'],
+            'fragen': [{
+                'nr': question['question_index'] + 1,
+                'typ': question['question_type'],
+                'frage': question['question_text'],
+                'bewertungskriterien': question['rubric'],
+                'punkte': question['scored'],
+                'punkte_ohne_doppelklicks': question['scored_without_duplicates'],
+                'versuche': [{
+                    'nr': answer['attempt_no'],
+                    'zeitpunkt': answer['timestamp'],
+                    'antwort': answer['answer_text'],
+                    'ki_urteil': answer['correct'],
+                    'ki_feedback': answer['feedback'],
+                    'grader': answer['grader'],
+                    'modell': answer['llm_model'],
+                    'prompt_version': answer.get('prompt_version'),
+                    'tipps_vorher': answer['hints_used_before'],
+                    'aufgegeben': bool(answer['gave_up']),
+                    'lehrer_urteil': answer.get('teacher_verdict'),
+                    'lehrer_notiz': answer.get('teacher_note'),
+                    'doppelklick_verdacht': answer['id'] in question['duplicate_ids'],
+                } for answer in question['answers']],
+            } for question in entry['questions']],
+        } for entry in sessions],
+    }
+
+    return Response(
+        json.dumps(export, ensure_ascii=False, indent=2),
+        mimetype='application/json; charset=utf-8',
+        headers={'Content-Disposition':
+                 f'attachment; filename=checkpoints_{datetime.now().strftime("%Y-%m-%d")}.json'}
+    )
 
 
 @app.route('/admin/quiz-statistik')

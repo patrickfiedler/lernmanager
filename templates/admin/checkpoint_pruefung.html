@@ -1,0 +1,252 @@
+{% extends 'base.html' %}
+
+{% block title %}Checkpoint-Prüfung - Lernmanager{% endblock %}
+
+{% block content %}
+<div class="flex flex-between flex-center mb-2">
+    <h1>Checkpoint-Prüfung</h1>
+    <div class="flex gap-1">
+        <a href="{{ url_for('admin_checkpoint_export_csv', **request.args) }}" class="btn btn-secondary btn-sm">CSV</a>
+        <a href="{{ url_for('admin_checkpoint_export_json', **request.args) }}" class="btn btn-secondary btn-sm">JSON</a>
+    </div>
+</div>
+
+<div class="card mb-2">
+    <form method="GET" class="flex gap-1 flex-center" style="flex-wrap: wrap;">
+        <label for="klasse_id"><strong>Klasse:</strong></label>
+        <select name="klasse_id" id="klasse_id">
+            <option value="">Alle</option>
+            {% for k in klassen %}
+            <option value="{{ k.id }}" {{ 'selected' if klasse_id == k.id }}>{{ k.name }}</option>
+            {% endfor %}
+        </select>
+
+        <label for="student_id"><strong>Schüler:</strong></label>
+        <select name="student_id" id="student_id">
+            <option value="">Alle</option>
+            {% for s in students %}
+            <option value="{{ s.id }}" {{ 'selected' if student_id == s.id }}>{{ s.nachname }}, {{ s.vorname }}</option>
+            {% endfor %}
+        </select>
+
+        <label for="von"><strong>Von:</strong></label>
+        <input type="date" name="von" id="von" value="{{ date_from or '' }}">
+        <label for="bis"><strong>Bis:</strong></label>
+        <input type="date" name="bis" id="bis" value="{{ date_to or '' }}">
+
+        <label class="flex gap-1 flex-center" style="margin-left: 0.5rem;">
+            <input type="checkbox" name="offen" value="1" {{ 'checked' if unreviewed_only }}>
+            <span>nur ungeprüfte</span>
+        </label>
+
+        <button type="submit" class="btn btn-primary btn-sm">Filtern</button>
+        <a href="{{ url_for('admin_checkpoint_pruefung') }}" class="btn btn-secondary btn-sm">Zurücksetzen</a>
+    </form>
+</div>
+
+<p class="text-muted mb-2">
+    <strong>{{ sessions|length }}</strong> Checkpoint-Sitzung(en)
+    {% if duplicate_count %}
+    · <span class="badge badge-warning">{{ duplicate_count }} mit Doppelklick-Verdacht</span>
+    {% endif %}
+</p>
+
+{% if not sessions %}
+<div class="card">
+    <p class="text-muted">Keine Checkpoint-Ergebnisse für diese Auswahl.</p>
+</div>
+{% endif %}
+
+{% for entry in sessions %}
+{% set attempt = entry.attempt %}
+<details class="card mb-1 checkpoint-session" {{ 'open' if entry.has_duplicates or attempt.needs_review }}>
+    <summary class="checkpoint-session-head">
+        <span class="checkpoint-session-title">
+            <strong>{{ attempt.student_name }}</strong>
+            · {{ attempt.task_name or 'Thema gelöscht' }}
+            {% if attempt.subtask_name %}
+            · {{ attempt.subtask_name|striptags|truncate(60) }}
+            {% endif %}
+        </span>
+        <span class="checkpoint-session-meta">
+            {% if attempt.teacher_score is not none %}
+            <span class="badge badge-info" title="Von der Lehrkraft gesetzt">{{ attempt.effective_score }}/3 ✎</span>
+            {% else %}
+            <span class="badge badge-secondary">{{ attempt.effective_score }}/3</span>
+            {% endif %}
+            {% if entry.has_duplicates %}<span class="badge badge-warning">Doppelklick</span>{% endif %}
+            {% if attempt.needs_review %}<span class="badge badge-danger">KI-Fehler</span>{% endif %}
+            <span class="text-muted">{{ attempt.timestamp[:16] }}</span>
+        </span>
+    </summary>
+
+    <div class="checkpoint-session-body">
+        <p class="text-muted" style="font-size: 0.85rem;">
+            {{ attempt.attempt_count }} Versuch(e) · {{ attempt.hint_count }} Tipp(s)
+            · {{ attempt.kern_standard_tag }}
+            {% if entry.questions and entry.questions[0].answers %}
+            · {{ entry.questions[0].answers[0].llm_model or 'ohne KI' }}
+            {% if entry.questions[0].answers[0].prompt_version %}
+            · Prompt {{ entry.questions[0].answers[0].prompt_version }}
+            {% endif %}
+            {% endif %}
+        </p>
+
+        {% if not entry.questions %}
+        <p class="text-muted">Keine Einzelantworten protokolliert (Sitzung vor Einführung des Antwort-Logs).</p>
+        {% endif %}
+
+        {% for question in entry.questions %}
+        <div class="checkpoint-question">
+            <div class="checkpoint-question-head">
+                <strong>Frage {{ question.question_index + 1 }}</strong>
+                {% if question.question_type %}<span class="text-muted">({{ question.question_type }})</span>{% endif %}
+                <span class="badge {{ 'badge-success' if question.scored == 3 else ('badge-warning' if question.scored == 2 else 'badge-danger') }}">
+                    {{ question.scored }} P.
+                </span>
+                {% if question.scored_without_duplicates != question.scored %}
+                <span class="badge badge-warning" title="Punktzahl ohne die als Doppelklick erkannten Versuche">
+                    ohne Doppelklick: {{ question.scored_without_duplicates }} P.
+                </span>
+                {% endif %}
+            </div>
+            {% if question.question_text %}
+            <p class="checkpoint-question-text">{{ question.question_text }}</p>
+            {% endif %}
+            {% if question.rubric %}
+            <details class="checkpoint-rubric">
+                <summary>Bewertungskriterien</summary>
+                <p>{{ question.rubric }}</p>
+            </details>
+            {% endif %}
+
+            {% for answer in question.answers %}
+            <div class="checkpoint-answer {{ 'is-duplicate' if answer.id in question.duplicate_ids }}">
+                <div class="checkpoint-answer-head">
+                    <span class="text-muted">{{ answer.timestamp[11:19] }}</span>
+                    <span>Versuch {{ answer.attempt_no }}</span>
+                    {% if answer.gave_up %}
+                    <span class="badge badge-secondary">aufgegeben</span>
+                    {% elif answer.correct is none %}
+                    <span class="badge badge-danger" title="LLM-Bewertung fehlgeschlagen — nicht als falsch gewertet">nicht bewertet</span>
+                    {% elif answer.correct %}
+                    <span title="Von der KI als richtig bewertet">✅</span>
+                    {% else %}
+                    <span title="Von der KI als falsch bewertet">❌</span>
+                    {% endif %}
+                    <span class="badge badge-secondary">{{ answer.grader }}</span>
+                    {% if answer.id in question.duplicate_ids %}
+                    <span class="badge badge-warning">Doppelklick-Verdacht</span>
+                    {% endif %}
+                </div>
+                {% if answer.answer_text %}
+                <div class="checkpoint-answer-text">{{ answer.answer_text }}</div>
+                {% endif %}
+                {% if answer.feedback %}
+                <div class="checkpoint-answer-feedback">💬 {{ answer.feedback }}</div>
+                {% endif %}
+
+                {% if not answer.gave_up %}
+                <div class="checkpoint-verdict" data-answer-id="{{ answer.id }}">
+                    <span class="text-muted">Dein Urteil:</span>
+                    <button type="button" class="btn btn-sm {{ 'btn-primary' if answer.teacher_verdict == 1 else 'btn-secondary' }}"
+                            data-verdict="1">richtig</button>
+                    <button type="button" class="btn btn-sm {{ 'btn-primary' if answer.teacher_verdict == 0 else 'btn-secondary' }}"
+                            data-verdict="0">falsch</button>
+                    <button type="button" class="btn btn-sm btn-secondary" data-verdict="">–</button>
+                    <input type="text" class="form-control checkpoint-verdict-note" placeholder="Notiz (optional)"
+                           value="{{ answer.teacher_note or '' }}">
+                    <span class="checkpoint-verdict-status text-muted"></span>
+                </div>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        {% endfor %}
+
+        <form method="POST" action="{{ url_for('admin_checkpoint_review_save', attempt_id=attempt.id) }}"
+              class="checkpoint-review-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <strong>Lehrer-Wertung:</strong>
+            {% set current = attempt.teacher_score if attempt.teacher_score is not none else entry.suggested_score %}
+            {% for value in [0, 2, 3] %}
+            <label class="checkpoint-score-option">
+                <input type="radio" name="teacher_score" value="{{ value }}"
+                       {{ 'checked' if current == value }}>
+                <span>{{ value }}</span>
+            </label>
+            {% endfor %}
+            <label class="checkpoint-score-option">
+                <input type="radio" name="teacher_score" value="" {{ 'checked' if current is none }}>
+                <span title="Keine Korrektur — es gilt die berechnete Punktzahl">automatisch ({{ attempt.score }})</span>
+            </label>
+            <input type="text" name="teacher_note" class="form-control" placeholder="Kurze Begründung"
+                   value="{{ attempt.teacher_note or '' }}">
+            <button type="submit" class="btn btn-primary btn-sm">Speichern</button>
+            {% if entry.suggested_score is not none %}
+            <span class="checkpoint-suggestion">
+                Vorschlag: {{ entry.suggested_score }} statt {{ attempt.score }} — ein Versuch sieht nach
+                Doppelklick aus. Nicht gespeichert, bis du auf Speichern klickst.
+            </span>
+            {% endif %}
+        </form>
+    </div>
+</details>
+{% endfor %}
+
+<style>
+.checkpoint-session-head { cursor: pointer; display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.checkpoint-session-meta { display: flex; gap: 0.4rem; align-items: center; font-size: 0.85rem; }
+.checkpoint-session-body { margin-top: 0.75rem; }
+.checkpoint-question { border-left: 3px solid #e5e7eb; padding-left: 0.75rem; margin: 0.75rem 0; }
+.checkpoint-question-head { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+.checkpoint-question-text { margin: 0.25rem 0; font-size: 0.9rem; }
+.checkpoint-rubric { font-size: 0.8rem; color: #6b7280; margin-bottom: 0.5rem; }
+.checkpoint-answer { background: #f9fafb; border-radius: 4px; padding: 0.5rem 0.75rem; margin: 0.4rem 0; }
+/* A suspected double-click is tinted, not hidden: the teacher decides, and the
+   raw log stays fully visible either way. */
+.checkpoint-answer.is-duplicate { background: #fff8e1; border-left: 3px solid #ffc107; }
+.checkpoint-answer-head { display: flex; gap: 0.5rem; align-items: center; font-size: 0.85rem; flex-wrap: wrap; }
+.checkpoint-answer-text { margin-top: 0.25rem; white-space: pre-wrap; }
+.checkpoint-answer-feedback { margin-top: 0.25rem; font-size: 0.85rem; color: #4b5563; }
+.checkpoint-verdict { display: flex; gap: 0.4rem; align-items: center; margin-top: 0.4rem; font-size: 0.8rem; flex-wrap: wrap; }
+.checkpoint-verdict .form-control { max-width: 260px; display: inline-block; }
+.checkpoint-review-form { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-top: 0.75rem;
+                          padding-top: 0.75rem; border-top: 1px solid #e5e7eb; }
+.checkpoint-review-form .form-control { max-width: 320px; }
+.checkpoint-score-option { display: flex; gap: 0.25rem; align-items: center; }
+.checkpoint-suggestion { font-size: 0.8rem; color: #92400e; }
+</style>
+{% endblock %}
+
+{% block scripts %}
+// Per-answer verdicts save individually via AJAX: a teacher scanning a class
+// clicks a lot of these, and a full page reload per click would lose their place
+// in a long list. The session score below stays a normal form POST -- it is the
+// grade, so it gets an explicit Speichern.
+document.querySelectorAll('.checkpoint-verdict').forEach(function(row) {
+    var answerId = row.dataset.answerId;
+    var status = row.querySelector('.checkpoint-verdict-status');
+    var note = row.querySelector('.checkpoint-verdict-note');
+
+    row.querySelectorAll('button[data-verdict]').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var formData = new FormData();
+            formData.append('teacher_verdict', btn.dataset.verdict);
+            formData.append('teacher_note', note.value);
+            formData.append('csrf_token', document.querySelector('meta[name="csrf-token"]').content);
+
+            LLMButton.postForm('/admin/checkpoint-pruefung/antwort/' + answerId + '/urteil', formData)
+                .then(function(data) {
+                    if (!data.ok) { status.textContent = '⚠️ ' + data.message; return; }
+                    row.querySelectorAll('button[data-verdict]').forEach(function(other) {
+                        other.classList.toggle('btn-primary', other === btn && btn.dataset.verdict !== '');
+                        other.classList.toggle('btn-secondary', !(other === btn && btn.dataset.verdict !== ''));
+                    });
+                    status.textContent = '✓ gespeichert';
+                    setTimeout(function() { status.textContent = ''; }, 2000);
+                });
+        });
+    });
+});
+{% endblock %}
