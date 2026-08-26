@@ -3982,7 +3982,7 @@ def student_quiz_subtask(slug, position):
         if not _school_gate_ok(subtask):
             flash('Dieser Checkpoint ist nur im Schulnetzwerk verfügbar.', 'warning')
             return redirect(url_for('student_klasse', slug=slug))
-        return _handle_checkpoint_quiz(student, task, slug, subtask, position)
+        return _handle_checkpoint_quiz(student, task, slug, subtask, position, klasse)
 
     return _handle_quiz(student_id, student, task, slug, subtask_row['quiz_json'],
                         subtask_id=subtask['id'], position=position)
@@ -4075,7 +4075,7 @@ def _score_checkpoint_session(question_results):
     return min(question_score(result) for result in question_results)
 
 
-def _handle_checkpoint_quiz(student, task, slug, subtask, position):
+def _handle_checkpoint_quiz(student, task, slug, subtask, position, klasse):
     """GET: render a Chemie Quiz-checkpoint as an immediate-retry session."""
     quiz = json.loads(subtask['quiz_json'])
     llm_available = models.check_llm_rate_limit(student['id'], usage_tag='checkpoint_quiz')
@@ -4087,11 +4087,12 @@ def _handle_checkpoint_quiz(student, task, slug, subtask, position):
 
     hints = json.loads(subtask['checkpoint_hints_json']) if subtask.get('checkpoint_hints_json') else []
     questions_json = json.dumps([_serialize_checkpoint_question(q) for q in questions])
+    transparency_mode = models.get_effective_transparency_mode(student['id'], klasse['id'] if klasse else None)
 
     return render_template('student/checkpoint_quiz.html',
                            student=student, task=task, slug=slug, position=position,
                            subtask_id=subtask['id'], questions_json=questions_json,
-                           has_hints=bool(hints))
+                           has_hints=bool(hints), transparency_mode=transparency_mode)
 
 
 @app.route('/schueler/checkpoint/antwort', methods=['POST'])

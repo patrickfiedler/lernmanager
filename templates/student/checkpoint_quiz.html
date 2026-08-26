@@ -18,6 +18,7 @@
         <h4 id="question-text"></h4>
         <div id="question-image-container"></div>
         <div id="answer-area"></div>
+        <div id="transparency-area" style="display: none;"></div>
         <div id="feedback-area" style="display: none;"></div>
         <div id="hint-area" style="display: none;"></div>
         <div class="mt-2 flex gap-1">
@@ -44,6 +45,7 @@
     const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
     const slug = {{ slug|tojson }};
     const subtaskId = {{ subtask_id }};
+    const transparencyMode = {{ transparency_mode|tojson }};
     let questions = {{ questions_json|safe }};
     let currentIdx = 0;
     let answered = false;   // true once the current question is solved or given up
@@ -94,7 +96,7 @@
             input.id = 'fill-input';
             input.placeholder = 'Antwort eingeben...';
             input.autocomplete = 'off';
-            input.addEventListener('input', updateCheckBtnState);
+            input.addEventListener('input', function() { updateCheckBtnState(); updateTransparencyBlock(); });
             input.addEventListener('keydown', function(e) {
                 if (e.key === 'Enter' && !answered && !document.getElementById('check-btn').disabled) {
                     e.preventDefault();
@@ -109,7 +111,7 @@
             textarea.id = 'short-answer-input';
             textarea.rows = 4;
             textarea.placeholder = 'Antwort eingeben...';
-            textarea.addEventListener('input', updateCheckBtnState);
+            textarea.addEventListener('input', function() { updateCheckBtnState(); updateTransparencyBlock(); });
             area.appendChild(textarea);
             setTimeout(() => textarea.focus(), 50);
         } else {
@@ -149,6 +151,48 @@
         if (hintBtn) hintBtn.style.display = 'none';
         document.querySelectorAll('#answer-area input, #answer-area textarea').forEach(function(el) { el.disabled = false; });
         updateCheckBtnState();
+        updateTransparencyBlock();
+    }
+
+    // Proactive AI transparency: shows what would be sent to the LLM (question +
+    // current draft) before the student ever hits "Prüfen", live as they type.
+    // Never shows the rubric/expected answer -- that would hand over the answer
+    // and break the retry-until-correct mechanic (see _serialize_checkpoint_question).
+    function updateTransparencyBlock() {
+        var box = document.getElementById('transparency-area');
+        if (!transparencyMode) {
+            box.style.display = 'none';
+            return;
+        }
+        var q = questions[currentIdx];
+        if (q.type !== 'fill_blank' && q.type !== 'short_answer') {
+            box.style.display = 'none';
+            return;
+        }
+        var answer = getAnswer();
+        box.innerHTML = '';
+        var details = document.createElement('details');
+        details.style.cssText = 'margin-top:0.5rem;font-size:0.85rem;';
+        var summary = document.createElement('summary');
+        summary.style.cssText = 'color:#6b7280;cursor:pointer;';
+        summary.textContent = '✨ Was an die KI geschickt wird';
+        details.appendChild(summary);
+
+        var content = document.createElement('div');
+        content.style.cssText = 'background:#f8f9fa;border:1px solid #e5e7eb;border-radius:4px;padding:0.75rem;margin-top:0.25rem;font-family:monospace;white-space:pre-wrap;font-size:0.8rem;color:#374151;';
+        var frageLine = document.createElement('div');
+        frageLine.textContent = 'Frage: ' + q.text;
+        var antwortLine = document.createElement('div');
+        antwortLine.textContent = 'Deine Antwort: ' + (answer || '(noch leer)');
+        content.appendChild(frageLine);
+        content.appendChild(antwortLine);
+        var note = document.createElement('div');
+        note.style.cssText = 'margin-top:0.5rem;color:#6b7280;font-family:inherit;';
+        note.textContent = 'Die Bewertungskriterien siehst du hier bewusst nicht — sonst könntest du die Antwort ablesen, statt die Aufgabe selbst zu lösen.';
+        content.appendChild(note);
+        details.appendChild(content);
+        box.appendChild(details);
+        box.style.display = 'block';
     }
 
     // Prüfen stays disabled until there's actually an answer to grade -- an
