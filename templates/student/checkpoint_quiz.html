@@ -346,10 +346,19 @@
             var summary = document.getElementById('summary-card');
             summary.style.display = '';
             document.getElementById('summary-title').textContent = '✅ Checkpoint abgeschlossen';
+            var scoreLine = document.createElement('p');
+            scoreLine.className = 'text-center';
+            scoreLine.style.fontSize = '1.25rem';
+            scoreLine.textContent = 'Deine Punktzahl: ' + data.score + ' von 3';
+            document.getElementById('summary-title').insertAdjacentElement('afterend', scoreLine);
+            var reasonLine = document.createElement('p');
+            reasonLine.className = 'text-muted text-center';
+            reasonLine.textContent = data.score_reason;
+            scoreLine.insertAdjacentElement('afterend', reasonLine);
             var gradingNote = document.createElement('p');
             gradingNote.className = 'text-muted text-center';
-            gradingNote.textContent = 'Deine Lehrkraft sieht sich das Ergebnis an und vergibt dafür die Note.';
-            document.getElementById('summary-title').insertAdjacentElement('afterend', gradingNote);
+            gradingNote.textContent = 'Unverbindliche KI-Rückmeldung. Die Bewertung erfolgt durch den Lehrer.';
+            reasonLine.insertAdjacentElement('afterend', gradingNote);
             if (data.needs_review) {
                 var note = document.createElement('p');
                 note.className = 'text-muted text-center';

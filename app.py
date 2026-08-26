@@ -4060,6 +4060,14 @@ def _score_checkpoint_session(question_results):
     question_results: list of dicts, one per question in this checkpoint's
     quiz: {'solved': bool, 'gave_up': bool, 'attempts': int, 'hints_used': int}
     """
+    return min(_checkpoint_question_scores(question_results))
+
+
+def _checkpoint_question_scores(question_results):
+    """Per-question 0/2/3 score list, same classification `_score_checkpoint_session`
+    consolidates via min() -- factored out so the completion-screen reason text
+    (`_checkpoint_score_reason`) can break the session score down by question
+    without re-deriving the 0/2/3 rule a second time."""
     def question_score(result):
         if not result['solved']:
             return 0
@@ -4067,7 +4075,25 @@ def _score_checkpoint_session(question_results):
             return 2
         return 3
 
-    return min(question_score(result) for result in question_results)
+    return [question_score(result) for result in question_results]
+
+
+def _checkpoint_score_reason(question_results):
+    """Short German reason line for the completion screen, per chemie's agreed
+    Option 1 (`chemie-checkpoint-status.md` §1: show score + short reason, nothing
+    live during the session)."""
+    scores = _checkpoint_question_scores(question_results)
+    total = len(scores)
+    unsolved = sum(1 for s in scores if s == 0)
+    first_try = sum(1 for s in scores if s == 3)
+
+    if unsolved:
+        return f'{unsolved} von {total} Fragen wurden nicht gelöst.'
+    if first_try == total:
+        return 'Alle Fragen im ersten Versuch ohne Tipp richtig beantwortet.'
+    if first_try == 0:
+        return 'Alle Fragen gelöst, aber mit Tipp oder mehreren Versuchen.'
+    return f'{first_try} von {total} Fragen im ersten Versuch richtig, der Rest mit Tipp oder mehreren Versuchen.'
 
 
 def _handle_checkpoint_quiz(student, task, slug, subtask, position, klasse):
@@ -4268,6 +4294,7 @@ def student_checkpoint_finish():
         })
 
     score = _score_checkpoint_session(question_results)
+    score_reason = _checkpoint_score_reason(question_results)
     total_attempts = sum(r['attempts'] for r in question_results) or 1
     total_hints = sum(r['hints_used'] for r in question_results)
 
@@ -4302,7 +4329,10 @@ def student_checkpoint_finish():
     all_progress.pop(str(subtask_id), None)
     session['checkpoint_progress'] = all_progress
 
-    return jsonify({'score': score, 'needs_review': needs_review, 'redirect_url': url_for('student_klasse', slug=slug)})
+    return jsonify({
+        'score': score, 'score_reason': score_reason, 'needs_review': needs_review,
+        'redirect_url': url_for('student_klasse', slug=slug)
+    })
 
 
 @app.route('/schueler/thema/<slug>/quiz-ergebnis')
