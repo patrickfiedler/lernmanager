@@ -312,9 +312,6 @@
                 note.textContent = 'Eine Antwort konnte nicht automatisch bewertet werden — deine Lehrkraft schaut sie sich noch an.';
                 gradingNote.insertAdjacentElement('afterend', note);
             }
-            if (data.redirect_url) {
-                setTimeout(function() { window.location.href = data.redirect_url; }, 1200);
-            }
         });
     }
 
