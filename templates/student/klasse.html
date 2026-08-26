@@ -771,20 +771,25 @@ function requestArtifactFeedback(position) {
     const btn = document.getElementById('artifact-feedback-btn');
     const statusEl = document.getElementById('artifact-status');
     btn.disabled = true;
-    btn.textContent = '⏳ KI prüft …';
+    btn.innerHTML = '<span class="llm-spinner" aria-hidden="true"></span>' +
+                    '<span class="llm-busy-label">🤖 KI prüft dein Dokument …</span>';
     statusEl.textContent = '';
 
-    const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
-    fetch(`/schueler/thema/${topicSlug}/aufgabe-${position}/artefakt/feedback`, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
-        body: JSON.stringify({text: artifactPreviewText, filename: artifactPreviewFilename}),
-    })
-    .then(r => r.json())
+    // Server budget for a full checklist is 60s (config.LLM_ARTIFACT_TIMEOUT), so
+    // the client window sits above it -- but it must exist: without one, a hung
+    // request fires neither .then nor .catch and the button stays disabled forever.
+    LLMButton.postJSON(`/schueler/thema/${topicSlug}/aufgabe-${position}/artefakt/feedback`,
+        {text: artifactPreviewText, filename: artifactPreviewFilename},
+        {timeoutMs: 90000})
     .then(data => {
         statusEl.textContent = '';
         btn.textContent = 'Erneut prüfen →';
         btn.disabled = false;
+        if (!data.ok) {
+            btn.textContent = 'KI-Check starten →';
+            statusEl.textContent = '⚠️ ' + data.message;
+            return;
+        }
         if (data.error) {
             statusEl.textContent = '⚠️ ' + data.error;
             return;
@@ -803,11 +808,6 @@ function requestArtifactFeedback(position) {
         } else {
             document.getElementById('artifact-checklist').style.display = 'none';
         }
-    })
-    .catch(() => {
-        btn.textContent = 'KI-Check starten →';
-        btn.disabled = false;
-        statusEl.textContent = '⚠️ Verbindungsfehler. Bitte nochmal versuchen.';
     });
 }
 
@@ -1018,16 +1018,26 @@ function adjustZoom(delta) {
                 : { text: `Dateiname sollte „${capstoneGateKeyword}" enthalten.`, type: 'warn' })
             : null;
         submitBtn.disabled = true;
-        submitBtn.textContent = 'Wird geprüft…';
+        submitBtn.innerHTML = '<span class="llm-spinner" aria-hidden="true"></span>' +
+                              '<span class="llm-busy-label">Datei wird geprüft …</span>';
         resultDiv.style.display = 'none';
 
         const formData = new FormData();
         formData.append('file', fileInput.files[0]);
         formData.append('csrf_token', document.querySelector('meta[name="csrf-token"]').content);
 
-        fetch(submitBtn.dataset.url, { method: 'POST', body: formData })
-            .then(r => r.json())
+        // 90s window: the gate may run a full LLM checklist server-side (60s budget).
+        // Without a timeout a hung upload fires neither .then nor .catch, leaving the
+        // button disabled with no way to retry.
+        LLMButton.postForm(submitBtn.dataset.url, formData, { timeoutMs: 90000 })
             .then(data => {
+                if (!data.ok) {
+                    resultDiv.innerHTML = `<p class="gate-error">⚠️ ${data.message}</p>`;
+                    resultDiv.style.display = 'block';
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Datei prüfen';
+                    return;
+                }
                 if (data.error) {
                     resultDiv.innerHTML = `<p class="gate-error">⚠️ ${data.error}</p>`;
                     resultDiv.style.display = 'block';
@@ -1065,12 +1075,6 @@ function adjustZoom(delta) {
                     submitBtn.disabled = false;
                     submitBtn.textContent = 'Datei prüfen';
                 }
-            })
-            .catch(() => {
-                resultDiv.innerHTML = '<p class="gate-error">⚠️ Verbindungsfehler. Bitte nochmal versuchen.</p>';
-                resultDiv.style.display = 'block';
-                submitBtn.disabled = false;
-                submitBtn.textContent = 'Datei prüfen';
             });
     });
 })();
@@ -1106,16 +1110,26 @@ function adjustZoom(delta) {
                 : { text: `Dateiname sollte „${inlineGateKeyword}" enthalten.`, type: 'warn' })
             : null;
         submitBtn.disabled = true;
-        submitBtn.textContent = 'Wird geprüft…';
+        submitBtn.innerHTML = '<span class="llm-spinner" aria-hidden="true"></span>' +
+                              '<span class="llm-busy-label">Datei wird geprüft …</span>';
         resultDiv.style.display = 'none';
 
         const formData = new FormData();
         formData.append('file', fileInput.files[0]);
         formData.append('csrf_token', document.querySelector('meta[name="csrf-token"]').content);
 
-        fetch(submitBtn.dataset.url, { method: 'POST', body: formData })
-            .then(r => r.json())
+        // 90s window: the gate may run a full LLM checklist server-side (60s budget).
+        // Without a timeout a hung upload fires neither .then nor .catch, leaving the
+        // button disabled with no way to retry.
+        LLMButton.postForm(submitBtn.dataset.url, formData, { timeoutMs: 90000 })
             .then(data => {
+                if (!data.ok) {
+                    resultDiv.innerHTML = `<p class="gate-error">⚠️ ${data.message}</p>`;
+                    resultDiv.style.display = 'block';
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Datei prüfen';
+                    return;
+                }
                 if (data.error) {
                     resultDiv.innerHTML = `<p class="gate-error">⚠️ ${data.error}</p>`;
                     resultDiv.style.display = 'block';
@@ -1158,12 +1172,6 @@ function adjustZoom(delta) {
                     submitBtn.disabled = false;
                     submitBtn.textContent = 'Datei prüfen';
                 }
-            })
-            .catch(() => {
-                resultDiv.innerHTML = '<p class="gate-error">⚠️ Verbindungsfehler. Bitte nochmal versuchen.</p>';
-                resultDiv.style.display = 'block';
-                submitBtn.disabled = false;
-                submitBtn.textContent = 'Datei prüfen';
             });
     });
 })();

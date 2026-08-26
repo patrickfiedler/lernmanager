@@ -8,6 +8,7 @@
     <title>{% block title %}Lernmanager{% endblock %}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <script src="{{ url_for('static', filename='js/marked.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/llm_button.js') }}"></script>
 </head>
 <body{% if student and student.easy_reading_mode and session.student_id %} class="easy-reading-mode"{% endif %}>
     {% if session.admin_id or session.student_id %}

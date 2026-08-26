@@ -42,10 +42,12 @@
 
 {% block scripts %}
 (function() {
-    const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+    // CSRF is handled inside LLMButton.postJSON -- it reads the meta tag itself.
     const slug = {{ slug|tojson }};
     const subtaskId = {{ subtask_id }};
     const transparencyMode = {{ transparency_mode|tojson }};
+    // Drives the wait label: only a real LLM call may be announced as "KI prüft".
+    const llmEnabled = {{ llm_enabled|tojson }};
     let questions = {{ questions_json|safe }};
     let currentIdx = 0;
     let answered = false;   // true once the current question is solved or given up
@@ -60,12 +62,22 @@
         return indices;
     }
 
+    // Every request on this page goes through LLMButton: one click = one call,
+    // the button says what it is waiting for, and no failure can end in silence.
     function post(url, body) {
-        return fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
-            body: JSON.stringify(body)
-        }).then(r => r.json());
+        return LLMButton.postJSON(url, body);
+    }
+
+    // Runs `handler` with the button locked and a wait label shown, then renders
+    // whatever came back -- including every failure kind, via showError.
+    function guarded(button, waitLabel, url, body, onSuccess) {
+        return LLMButton.withBusy(button, waitLabel, function () {
+            return post(url, body);
+        }).then(function (data) {
+            if (!data) return;              // re-entry blocked: a call is already running
+            if (!data.ok) { showError(data.message); return; }
+            onSuccess(data);
+        });
     }
 
     function renderQuestion() {
@@ -254,17 +266,18 @@
     }
 
     window.checkAnswer = function() {
-        if (answered || isAnswerEmpty()) return;
+        const btn = document.getElementById('check-btn');
+        // `answered` and the busy flag are separate guards on purpose: the first
+        // stops a solved question being re-submitted, the second stops the same
+        // question being submitted twice while the first call is still in flight.
+        // The second one is what used to cost a point per stray double-click.
+        if (answered || isAnswerEmpty() || LLMButton.isBusy(btn)) return;
         const answer = getAnswer();
+        const waitLabel = LLMButton.labelFor(questions[currentIdx].type, llmEnabled);
 
-        post('{{ url_for("student_checkpoint_answer") }}', {
+        guarded(btn, waitLabel, '{{ url_for("student_checkpoint_answer") }}', {
             slug: slug, subtask_id: subtaskId, question_index: currentIdx, answer: answer
-        }).then(data => {
-            if (data.error === 'llm_unavailable') {
-                showError(data.message);
-                return;
-            }
-            if (data.error) return;
+        }, function(data) {
             showFeedback(data.correct);
             var hintBtn = document.getElementById('hint-btn');
             if (hintBtn) hintBtn.style.display = '';
@@ -290,10 +303,11 @@
     }
 
     window.requestHint = function() {
-        post('{{ url_for("student_checkpoint_hint") }}', {
+        var btn = document.getElementById('hint-btn');
+        if (LLMButton.isBusy(btn)) return;
+        guarded(btn, LLMButton.WAITING_LABELS.generic, '{{ url_for("student_checkpoint_hint") }}', {
             slug: slug, subtask_id: subtaskId, question_index: currentIdx
-        }).then(data => {
-            if (data.error) return;
+        }, function(data) {
             var hintArea = document.getElementById('hint-area');
             if (data.hint === null) {
                 document.getElementById('hint-btn').style.display = 'none';
@@ -311,11 +325,11 @@
     };
 
     window.giveUp = function() {
-        if (answered) return;
-        post('{{ url_for("student_checkpoint_give_up") }}', {
+        var btn = document.getElementById('giveup-btn');
+        if (answered || LLMButton.isBusy(btn)) return;
+        guarded(btn, LLMButton.WAITING_LABELS.generic, '{{ url_for("student_checkpoint_give_up") }}', {
             slug: slug, subtask_id: subtaskId, question_index: currentIdx
-        }).then(data => {
-            if (data.error) return;
+        }, function(data) {
             answered = true;
             lockQuestion('Richtige Antwort: ' + data.correct_answer);
         });
@@ -340,7 +354,15 @@
     function finishCheckpoint() {
         post('{{ url_for("student_checkpoint_finish") }}', { slug: slug, subtask_id: subtaskId })
         .then(data => {
-            if (data.error) return;
+            if (!data.ok) {
+                // Previously `if (data.error) return;` -- which meant a student who
+                // hit this (e.g. a question the server still expects an answer for)
+                // saw a blank, frozen page with no way forward and no explanation.
+                showError(data.message);
+                document.getElementById('next-btn').style.display = '';
+                document.getElementById('next-btn').textContent = 'Nochmal versuchen';
+                return;
+            }
             document.getElementById('question-card').style.display = 'none';
             document.getElementById('progress-text').style.display = 'none';
             var summary = document.getElementById('summary-card');

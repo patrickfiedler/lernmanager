@@ -41,6 +41,8 @@
 {% block scripts %}
 (function() {
     const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+    // Only a real LLM call may be announced as "KI prüft" (see LLMButton.labelFor).
+    const llmEnabled = {{ llm_enabled|tojson }};
     let questions = {{ questions_json|safe }};
     let currentIdx = 0;
     let totalCorrect = 0;
@@ -250,24 +252,24 @@
         }
 
         const checkBtn = document.getElementById('check-btn');
-        checkBtn.disabled = true;
-        checkBtn.textContent = '⏳ Prüfe …';
-
-        fetch('{{ url_for("student_warmup_answer") }}', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRFToken': csrfToken
-            },
-            body: JSON.stringify({
+        // Shared busy contract: one click = one call, an honest wait label, and a
+        // visible message on every failure (static/js/llm_button.js). The old code
+        // reset the button on error without saying anything, so a repeated failure
+        // looked like a button that simply did nothing.
+        LLMButton.withBusy(checkBtn, LLMButton.labelFor(q.type, llmEnabled), function() {
+            return LLMButton.postJSON('{{ url_for("student_warmup_answer") }}', {
                 task_id: q.task_id,
                 subtask_id: q.subtask_id,
                 question_index: q.question_index,
                 answer: answer
-            })
-        })
-        .then(r => r.json())
-        .then(data => {
+            });
+        }).then(function(data) {
+            if (!data) return;
+            if (!data.ok) {
+                answered = false;
+                showWarmupError(data.message);
+                return;
+            }
             totalShown++;
             if (data.correct) totalCorrect++;
 
@@ -275,13 +277,21 @@
 
             checkBtn.style.display = 'none';
             document.getElementById('next-btn').style.display = '';
-        })
-        .catch(function() {
-            answered = false;
-            checkBtn.disabled = false;
-            checkBtn.textContent = 'Prüfen';
         });
     };
+
+    // Warmup is ungraded, so a failure here costs nothing but confusion -- say what
+    // happened and let the student retry the same question.
+    function showWarmupError(message) {
+        var fb = document.getElementById('feedback-area');
+        fb.innerHTML = '';
+        var line = document.createElement('div');
+        line.className = 'quiz-option';
+        line.style.cssText = 'border-left: 4px solid var(--warning-color, #ffc107); padding-left: 1rem; background: #fff8e1;';
+        line.textContent = '⚠️ ' + message;
+        fb.appendChild(line);
+        fb.style.display = 'block';
+    }
 
     window.nextQuestion = function() {
         currentIdx++;

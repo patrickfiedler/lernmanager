@@ -2356,3 +2356,44 @@ body.split-pane-active .container {
         font-size: 0.85rem;
     }
 }
+
+/* ===== LLM/AI waiting state (static/js/llm_button.js) =====
+   Any button that fires a graded or AI-backed request wears this while the
+   request is in flight. fetch() shows no browser-level progress indicator, so
+   without it a slow LLM call is indistinguishable from a dead button. */
+.btn.is-busy {
+    cursor: wait;
+    opacity: 0.85;
+}
+
+.btn.is-busy .llm-busy-label {
+    vertical-align: middle;
+}
+
+.llm-spinner {
+    display: inline-block;
+    width: 0.85em;
+    height: 0.85em;
+    margin-right: 0.5em;
+    vertical-align: middle;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: llm-spin 0.7s linear infinite;
+}
+
+@keyframes llm-spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Respect a reduced-motion preference: keep a visible "something is happening"
+   cue, drop the rotation. */
+@media (prefers-reduced-motion: reduce) {
+    .llm-spinner {
+        animation: llm-pulse 1.2s ease-in-out infinite;
+    }
+    @keyframes llm-pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.3; }
+    }
+}

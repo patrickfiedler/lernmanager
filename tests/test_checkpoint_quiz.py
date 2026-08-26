@@ -253,3 +253,31 @@ def test_deleting_subtask_does_not_cascade_delete_checkpoint_history(app, client
     assert len(attempts) == 1
     assert attempts[0]["quiz_snapshot_json"] is not None
     assert len(models.get_checkpoint_answers_for_attempt(attempt_id)) == 1
+
+
+def test_resubmitting_a_solved_question_does_not_burn_an_attempt(app, client):
+    """The double-click damage case: a second submission of an already-solved
+    question must not count as a second attempt.
+
+    3 points requires attempts == 1 (_checkpoint_question_scores), so before the
+    guard in student_checkpoint_answer a stray second click silently turned a 3
+    into a 2 -- and spent an LLM call doing it.
+    """
+    student_id, subtask_id = _checkpoint_student(app)
+    _login(client, student_id)
+
+    payload = {"slug": "redoxreaktionen", "subtask_id": subtask_id,
+               "question_index": 0, "answer": [0]}
+    first = client.post("/schueler/checkpoint/antwort", json=payload).get_json()
+    second = client.post("/schueler/checkpoint/antwort", json=payload).get_json()
+
+    assert first["correct"] is True
+    assert first["attempts"] == 1
+    assert second["correct"] is True
+    assert second["attempts"] == 1          # unchanged
+    assert second["duplicate"] is True
+
+    client.post("/schueler/checkpoint/fertig",
+                json={"slug": "redoxreaktionen", "subtask_id": subtask_id})
+    attempt = models.get_checkpoint_attempts_for_student(student_id)[0]
+    assert attempt["score"] == 3

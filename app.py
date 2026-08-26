@@ -4113,7 +4113,8 @@ def _handle_checkpoint_quiz(student, task, slug, subtask, position, klasse):
     return render_template('student/checkpoint_quiz.html',
                            student=student, task=task, slug=slug, position=position,
                            subtask_id=subtask['id'], questions_json=questions_json,
-                           has_hints=bool(hints), transparency_mode=transparency_mode)
+                           has_hints=bool(hints), transparency_mode=transparency_mode,
+                           llm_enabled=config.LLM_ENABLED)
 
 
 @app.route('/schueler/checkpoint/antwort', methods=['POST'])
@@ -4144,6 +4145,24 @@ def student_checkpoint_answer():
 
     subtask_id = subtask['id']
     qidx = str(question_index)
+    progress = _checkpoint_progress(subtask_id)
+
+    # Already solved -> answer idempotently, without grading again and without
+    # touching attempts. A second graded call on a solved question costs the student
+    # a point (3 requires attempts == 1, see _checkpoint_question_scores) and spends
+    # LLM budget for nothing.
+    #
+    # Scope, honestly: this catches every *sequential* duplicate -- a stale tab, a
+    # browser-back resubmit, a retry fired after the first response arrived. It does
+    # NOT catch two genuinely simultaneous in-flight requests: checkpoint progress
+    # lives in the (cookie-based) Flask session, so both would carry the same
+    # pre-click state and neither can see the other. The real guard against the
+    # double-click race is client-side (llm_button.js disables the button for the
+    # whole round trip); this is the backstop for when that guard is bypassed, and
+    # the review UI repairs whatever slipped through historically.
+    if progress['solved'].get(qidx):
+        return jsonify({'correct': True, 'attempts': progress['attempts'].get(qidx, 1),
+                        'duplicate': True})
 
     # Checkpoint grading is graded (feeds a real school grade), so it must never
     # silently fall back to "assume correct" like warmup does on an LLM outage --
@@ -4152,7 +4171,6 @@ def student_checkpoint_answer():
         question, answer, usage_tag='checkpoint_quiz', strict=True
     )
 
-    progress = _checkpoint_progress(subtask_id)
     # MC answers arrive as a list of indices, not text -- store as JSON so the
     # log is unambiguous either way (see get_checkpoint_answers_for_attempt).
     answer_text = json.dumps(answer) if isinstance(answer, list) else str(answer)
@@ -4644,7 +4662,8 @@ def student_warmup():
 
     questions_json = json.dumps([_serialize_question_for_js(q) for q in questions])
     return render_template('student/warmup.html', student=student,
-                           questions_json=questions_json)
+                           questions_json=questions_json,
+                           llm_enabled=config.LLM_ENABLED)
 
 
 @app.route('/schueler/aufwaermen/antwort', methods=['POST'])
@@ -4758,7 +4777,8 @@ def student_practice():
                            questions_json=questions_json, mode=mode,
                            topic_names=topic_names, selected_topic=topic_slug,
                            pool_size=len(pool), shown_count=len(questions),
-                           practice_sessions_today=practice_sessions_today)
+                           practice_sessions_today=practice_sessions_today,
+                           llm_enabled=config.LLM_ENABLED)
 
 
 # ============ Error Handlers ============
