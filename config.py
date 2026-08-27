@@ -42,6 +42,27 @@ SUBJECTS = ['Englisch', 'Chemie', 'MBI', 'Geographie']
 LEVELS = ['5', '6', '7', '8', '9', '10', '11s', '11/12']
 LEGACY_LEVELS = ['5/6', '7/8', '9/10']
 
+def _env_int(name, default, minimum=1):
+    """Read a positive int from the environment, falling back to `default`.
+
+    A typo in .env must not take the app down -- students losing access to the
+    whole platform is a worse outcome than one mistuned limit -- so a bad value
+    warns on stderr and uses the default rather than raising at import time.
+    """
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        print(f"WARNING: {name}={raw!r} is not an integer -- using {default}.", file=sys.stderr)
+        return default
+    if value < minimum:
+        print(f"WARNING: {name}={value} is below {minimum} -- using {default}.", file=sys.stderr)
+        return default
+    return value
+
+
 # LLM grading (for free-text quiz questions and artifact completeness checks)
 # Uses any OpenAI-compatible API endpoint (e.g. OVHcloud AI Endpoints).
 # Set LLM_API_KEY to the provider access token.
@@ -50,16 +71,32 @@ LLM_PROVIDER = os.environ.get('LLM_PROVIDER', 'ovhcloud')
 LLM_API_KEY = os.environ.get('LLM_API_KEY', '')
 LLM_BASE_URL = os.environ.get('LLM_BASE_URL', None)
 LLM_MODEL = os.environ.get('LLM_MODEL', 'Qwen/Qwen3-32B-FP8')
-LLM_TIMEOUT = 5  # seconds (quiz grading — short answers)
-LLM_ARTIFACT_TIMEOUT = 60  # seconds (artifact checklist — up to 20 criteria)
-LLM_MAX_CALLS_PER_STUDENT_PER_HOUR = 20          # quiz/warmup answers
-LLM_MAX_ARTIFACT_CHECKS_PER_STUDENT_PER_HOUR = 10  # artifact KI-Check uploads
+LLM_TIMEOUT = _env_int('LLM_TIMEOUT', 5)  # seconds (quiz grading — short answers)
+LLM_ARTIFACT_TIMEOUT = _env_int('LLM_ARTIFACT_TIMEOUT', 60)  # seconds (artifact checklist — up to 20 criteria)
+# The artifact check must finish inside nginx's proxy_read_timeout, or nginx
+# hands the student a raw 504 instead of the app's own "KI-Feedback nicht
+# verfügbar" page. nginx is NOT configured from here -- it is edited by hand on
+# the server (deploy/lernmanager.nginx.conf is only a template, and certbot
+# rewrites that server block) -- so raising this knob alone silently reintroduces
+# the timeout. Warn rather than clamp: the ceiling is a deployment fact this
+# process cannot read.
+NGINX_PROXY_READ_TIMEOUT = _env_int('NGINX_PROXY_READ_TIMEOUT', 90)
+if LLM_ARTIFACT_TIMEOUT >= NGINX_PROXY_READ_TIMEOUT:
+    print(
+        f"WARNING: LLM_ARTIFACT_TIMEOUT={LLM_ARTIFACT_TIMEOUT}s is not below "
+        f"nginx proxy_read_timeout ({NGINX_PROXY_READ_TIMEOUT}s). Slow artifact "
+        f"checks will fail as 504 Gateway Timeout instead of a readable message. "
+        f"Raise proxy_read_timeout/proxy_send_timeout on the server too.",
+        file=sys.stderr,
+    )
+LLM_MAX_CALLS_PER_STUDENT_PER_HOUR = _env_int('LLM_MAX_CALLS_PER_STUDENT_PER_HOUR', 20)          # quiz/warmup answers
+LLM_MAX_ARTIFACT_CHECKS_PER_STUDENT_PER_HOUR = _env_int('LLM_MAX_ARTIFACT_CHECKS_PER_STUDENT_PER_HOUR', 10)  # artifact KI-Check uploads
 # Chemie Checkpoint-Punktekonto: graded checkpoint quizzes must not run out of
 # budget mid-session just because the same student also did warmup/practice
 # earlier that hour -- own pool, own (higher) ceiling. A module has up to ~8
 # quiz-checkpoints, majority short_answer, plus retries -- 60 gives headroom
 # for a full lesson without being effectively unlimited.
-LLM_MAX_CHECKPOINT_CALLS_PER_STUDENT_PER_HOUR = 60
+LLM_MAX_CHECKPOINT_CALLS_PER_STUDENT_PER_HOUR = _env_int('LLM_MAX_CHECKPOINT_CALLS_PER_STUDENT_PER_HOUR', 60)
 LLM_ENABLED = bool(LLM_API_KEY)
 # OVHcloud Qwen3-32B fp8 pricing (per 1M tokens, as of 2026-03):
 #   input: €0.09 | output: €0.27
