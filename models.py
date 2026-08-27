@@ -292,6 +292,7 @@ def init_db():
                 superseded_at TEXT,  -- set instead of deleting on a "Fortschritte zurücksetzen" re-import -- see reset_student_progress_for_task
                 teacher_score INTEGER,  -- migrate_048: teacher's override, NULL = not reviewed. Read via effective_checkpoint_score(), never `score` directly
                 teacher_note TEXT,  -- short reason for the override, shown to nobody but the teacher
+                student_feedback TEXT,  -- migrate_049: the ONE field on this table the student reads. teacher_note stays private -- rows were written under that promise
                 reviewed_at TEXT,
                 reviewed_by INTEGER,  -- admin.id, no FK (an admin row going away must not erase the review record)
                 FOREIGN KEY (student_id) REFERENCES student(id) ON DELETE CASCADE,
@@ -3371,6 +3372,22 @@ def get_checkpoint_attempts_for_student(student_id, module_id=None, include_supe
         return [dict(r) for r in rows]
 
 
+def get_latest_checkpoint_attempt(student_id, checkpoint_id):
+    """The student's most recent live session for one checkpoint, or None.
+
+    Powers the review banner a student sees when they reopen a checkpoint they
+    have already completed. Superseded rows are excluded: after a progress reset
+    they are history, and showing a stale grade as current would be wrong.
+    """
+    with db_session() as conn:
+        row = conn.execute("""
+            SELECT * FROM checkpoint_attempt
+            WHERE student_id = ? AND checkpoint_id = ? AND superseded_at IS NULL
+            ORDER BY timestamp DESC LIMIT 1
+        """, (student_id, checkpoint_id)).fetchone()
+        return dict(row) if row else None
+
+
 def get_checkpoint_answers_for_attempt(checkpoint_attempt_id):
     """All logged answer attempts for one completed checkpoint session, in the order
     they were submitted -- the per-question detail behind a checkpoint_attempt's
@@ -3393,6 +3410,23 @@ def effective_checkpoint_score(attempt):
     """
     teacher_score = attempt.get('teacher_score')
     return attempt['score'] if teacher_score is None else teacher_score
+
+
+def checkpoint_review_status(attempt):
+    """What a STUDENT is told about a teacher's review of one session.
+
+    Returns 'unreviewed' | 'confirmed' | 'changed'.
+
+    'changed' is keyed on the score actually moving, not on teacher_score merely
+    being set: a teacher who explicitly picks the same number the LLM computed has
+    confirmed it, and telling the student it was "changed" would be a lie.
+
+    Deliberately carries no timestamp -- students see THAT a session was checked,
+    never when, so nobody can read a teacher's working hours off the page.
+    """
+    if not attempt.get('reviewed_at'):
+        return 'unreviewed'
+    return 'changed' if effective_checkpoint_score(attempt) != attempt['score'] else 'confirmed'
 
 
 def get_checkpoint_reviews(klasse_id=None, student_id=None, date_from=None,
@@ -3489,22 +3523,30 @@ def get_checkpoint_answers_for_attempts(attempt_ids):
     return grouped
 
 
-def set_checkpoint_teacher_review(attempt_id, teacher_score, teacher_note, admin_id):
-    """Record the teacher's verdict on one checkpoint session (migrate_048).
+def set_checkpoint_teacher_review(attempt_id, teacher_score, teacher_note,
+                                  student_feedback, admin_id, reviewed=True):
+    """Record the teacher's verdict on one checkpoint session (migrate_048/049).
 
     teacher_score None clears the override and hands the grade back to the computed
     score -- a teacher must be able to undo a correction, not only make one.
+
+    `reviewed` is explicit rather than inferred from "did the teacher type
+    anything". It used to be inferred, which made the most common review outcome
+    impossible to express: reading a session, agreeing with the LLM and changing
+    nothing left it indistinguishable from never having been opened. Students are
+    now shown whether a session was checked (migrate_049), so "I looked and the
+    machine was right" has to be a storable state.
     """
     with db_session() as conn:
         conn.execute('''
             UPDATE checkpoint_attempt
-            SET teacher_score = ?, teacher_note = ?,
-                reviewed_at = CASE WHEN ? IS NULL AND ? IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END,
-                reviewed_by = CASE WHEN ? IS NULL AND ? IS NULL THEN NULL ELSE ? END
+            SET teacher_score = ?, teacher_note = ?, student_feedback = ?,
+                reviewed_at = CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE NULL END,
+                reviewed_by = CASE WHEN ? THEN ? ELSE NULL END
             WHERE id = ?
-        ''', (teacher_score, teacher_note or None,
-              teacher_score, teacher_note or None,
-              teacher_score, teacher_note or None, admin_id,
+        ''', (teacher_score, teacher_note or None, student_feedback or None,
+              1 if reviewed else 0,
+              1 if reviewed else 0, admin_id,
               attempt_id))
 
 

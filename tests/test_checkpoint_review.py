@@ -127,7 +127,7 @@ def test_student_in_two_classes_is_not_listed_twice(checkpoint_data):
 def test_teacher_score_overrides_computed_score(checkpoint_data):
     attempt_id = _log_session(checkpoint_data, [{"question_index": 0}], score=2)
 
-    models.set_checkpoint_teacher_review(attempt_id, 3, "Doppelklick, nicht der Schüler.", 1)
+    models.set_checkpoint_teacher_review(attempt_id, 3, "Doppelklick, nicht der Schüler.", "", 1)
 
     row = models.get_checkpoint_reviews()[0]
     assert row["score"] == 2                 # the computed score is preserved
@@ -137,15 +137,76 @@ def test_teacher_score_overrides_computed_score(checkpoint_data):
 
 
 def test_clearing_the_override_returns_to_the_computed_score(checkpoint_data):
-    attempt_id = _log_session(checkpoint_data, [{"question_index": 0}], score=2)
-    models.set_checkpoint_teacher_review(attempt_id, 3, "versehentlich", 1)
+    """Dropping the override hands the grade back -- but the session stays REVIEWED.
 
-    models.set_checkpoint_teacher_review(attempt_id, None, "", 1)
+    Agreeing with the LLM is the most common review outcome, and since migrate_049
+    the student is shown that a teacher looked. "Checked, machine was right" must
+    therefore be storable; before, it was indistinguishable from "never opened".
+    """
+    attempt_id = _log_session(checkpoint_data, [{"question_index": 0}], score=2)
+    models.set_checkpoint_teacher_review(attempt_id, 3, "versehentlich", "", 1)
+
+    models.set_checkpoint_teacher_review(attempt_id, None, "", "", 1)
 
     row = models.get_checkpoint_reviews()[0]
     assert row["teacher_score"] is None
     assert row["effective_score"] == 2
+    assert row["reviewed_at"] is not None
+    assert models.checkpoint_review_status(row) == "confirmed"
+
+
+def test_unreviewing_clears_the_review_mark(checkpoint_data):
+    attempt_id = _log_session(checkpoint_data, [{"question_index": 0}], score=2)
+    models.set_checkpoint_teacher_review(attempt_id, 3, "note", "feedback", 1)
+
+    models.set_checkpoint_teacher_review(attempt_id, None, "", "", 1, reviewed=False)
+
+    row = models.get_checkpoint_reviews()[0]
     assert row["reviewed_at"] is None
+    assert row["reviewed_by"] is None
+    assert models.checkpoint_review_status(row) == "unreviewed"
+
+
+# ------------------------------------------- what the student is told (migrate_049)
+
+def test_status_is_unreviewed_before_a_teacher_looks(checkpoint_data):
+    _log_session(checkpoint_data, [{"question_index": 0}], score=2)
+    row = models.get_checkpoint_reviews()[0]
+    assert models.checkpoint_review_status(row) == "unreviewed"
+
+
+def test_same_score_chosen_explicitly_counts_as_confirmed_not_changed(checkpoint_data):
+    """Picking the number the LLM already computed is agreement, not a correction --
+    telling the student it was 'geändert' would be false."""
+    attempt_id = _log_session(checkpoint_data, [{"question_index": 0}], score=2)
+
+    models.set_checkpoint_teacher_review(attempt_id, 2, "", "", 1)
+
+    row = models.get_checkpoint_reviews()[0]
+    assert row["teacher_score"] == 2
+    assert models.checkpoint_review_status(row) == "confirmed"
+
+
+def test_a_real_override_reads_as_changed(checkpoint_data):
+    attempt_id = _log_session(checkpoint_data, [{"question_index": 0}], score=2)
+
+    models.set_checkpoint_teacher_review(attempt_id, 3, "", "", 1)
+
+    row = models.get_checkpoint_reviews()[0]
+    assert models.checkpoint_review_status(row) == "changed"
+
+
+def test_student_feedback_is_stored_separately_from_the_private_note(checkpoint_data):
+    """The two note fields must never collapse into one: teacher_note was written
+    under a documented promise that only the teacher reads it."""
+    attempt_id = _log_session(checkpoint_data, [{"question_index": 0}], score=2)
+
+    models.set_checkpoint_teacher_review(
+        attempt_id, 3, "Doppelklick — intern", "Gut gelöst, ich habe den Punkt ergänzt.", 1)
+
+    row = models.get_checkpoint_reviews()[0]
+    assert row["teacher_note"] == "Doppelklick — intern"
+    assert row["student_feedback"] == "Gut gelöst, ich habe den Punkt ergänzt."
 
 
 def test_route_rejects_a_score_outside_the_scale(as_admin, checkpoint_data):

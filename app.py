@@ -2831,9 +2831,21 @@ def admin_checkpoint_pruefung():
 @app.route('/admin/checkpoint-pruefung/<int:attempt_id>/bewerten', methods=['POST'])
 @admin_required
 def admin_checkpoint_review_save(attempt_id):
-    """Save the teacher's score override + note for one checkpoint session."""
+    """Save one checkpoint review: the grade, the private reason, the student note.
+
+    Three separate things land here, and only the first two are the teacher's own
+    record -- `student_feedback` is published to the student (migrate_049), so it is
+    kept apart from `teacher_note` all the way down rather than merged into one
+    "notes" concept in the route.
+
+    `reviewed` comes from which submit button was pressed: "Speichern" marks the
+    session checked (that is the point -- a student is shown that it happened),
+    "Prüfung zurücknehmen" clears it back to unreviewed.
+    """
     raw_score = request.form.get('teacher_score', '')
     note = (request.form.get('teacher_note') or '').strip()
+    student_feedback = (request.form.get('student_feedback') or '').strip()
+    reviewed = request.form.get('reviewed', '1') != '0'
 
     if raw_score == '':
         teacher_score = None          # clears the override, back to the computed score
@@ -2849,9 +2861,13 @@ def admin_checkpoint_review_save(attempt_id):
             flash('Punktzahl muss 0, 2 oder 3 sein.', 'danger')
             return redirect(request.referrer or url_for('admin_checkpoint_pruefung'))
 
-    models.set_checkpoint_teacher_review(attempt_id, teacher_score, note, session['admin_id'])
-    flash('Bewertung gespeichert.' if teacher_score is not None else 'Bewertung zurückgesetzt.',
-          'success')
+    if not reviewed:
+        teacher_score, note, student_feedback = None, '', ''
+
+    models.set_checkpoint_teacher_review(attempt_id, teacher_score, note,
+                                         student_feedback, session['admin_id'],
+                                         reviewed=reviewed)
+    flash('Prüfung zurückgenommen.' if not reviewed else 'Bewertung gespeichert.', 'success')
     return redirect(request.referrer or url_for('admin_checkpoint_pruefung'))
 
 
@@ -4553,11 +4569,25 @@ def _handle_checkpoint_quiz(student, task, slug, subtask, position, klasse):
     questions_json = json.dumps([_serialize_checkpoint_question(q) for q in questions])
     transparency_mode = models.get_effective_transparency_mode(student['id'], klasse['id'] if klasse else None)
 
+    # A student who already finished this checkpoint sees the standing result and
+    # whether a teacher has checked it (migrate_049). Without this the review was
+    # invisible to them: the score appeared once on the completion screen and there
+    # was nowhere to look afterwards.
+    last_attempt = models.get_latest_checkpoint_attempt(student['id'], subtask['id'])
+    review = None
+    if last_attempt:
+        review = {
+            'status': models.checkpoint_review_status(last_attempt),
+            'score': models.effective_checkpoint_score(last_attempt),
+            'llm_score': last_attempt['score'],
+            'feedback': last_attempt.get('student_feedback'),
+        }
+
     return render_template('student/checkpoint_quiz.html',
                            student=student, task=task, slug=slug, position=position,
                            subtask_id=subtask['id'], questions_json=questions_json,
                            has_hints=bool(hints), transparency_mode=transparency_mode,
-                           llm_enabled=config.LLM_ENABLED)
+                           review=review, llm_enabled=config.LLM_ENABLED)
 
 
 @app.route('/schueler/checkpoint/antwort', methods=['POST'])

@@ -11,6 +11,31 @@
 <p class="text-muted mb-2">Du hast so viele Versuche wie du brauchst — nimm dir Zeit.</p>
 <p class="text-muted mb-2">Die KI prüft hier live, ob deine Antwort passt, damit du direkt weitermachen kannst. Die Note für diesen Checkpoint vergibt deine Lehrkraft danach.</p>
 
+{% if review %}
+{# The standing result of the last completed session, plus whether a teacher has
+   looked at it. Deliberately says THAT it was checked, never when. #}
+<div class="checkpoint-review-banner checkpoint-review-{{ review.status }}">
+    <p class="checkpoint-review-score">
+        Dein letztes Ergebnis: <strong>{{ review.score }} von 3 Punkten</strong>
+        {% if review.status == 'changed' %}
+        <span class="checkpoint-review-was">(die KI hatte {{ review.llm_score }} gezählt)</span>
+        {% endif %}
+    </p>
+    <p class="checkpoint-review-status">
+        {% if review.status == 'unreviewed' %}
+        ⏳ Deine Lehrkraft hat das noch nicht geprüft. Die Punktzahl kann sich noch ändern.
+        {% elif review.status == 'confirmed' %}
+        ✅ Von deiner Lehrkraft geprüft und bestätigt.
+        {% else %}
+        ✏️ Von deiner Lehrkraft geprüft und geändert.
+        {% endif %}
+    </p>
+    {% if review.feedback %}
+    <p class="checkpoint-review-feedback">💬 {{ review.feedback }}</p>
+    {% endif %}
+</div>
+{% endif %}
+
 <div id="checkpoint-container">
     <div class="mb-1 text-muted" id="progress-text"></div>
 
@@ -38,6 +63,20 @@
         </div>
     </div>
 </div>
+<style>
+/* Reuses the quiz_result.html vocabulary (coloured left border + emoji) so the
+   states read the same way students already know from their quiz feedback. */
+.checkpoint-review-banner { border-left: 4px solid #9ca3af; background: #f9fafb;
+                            border-radius: 4px; padding: 0.6rem 0.9rem; margin-bottom: 1rem; }
+.checkpoint-review-banner p { margin: 0.15rem 0; }
+.checkpoint-review-score { font-size: 1.05rem; }
+.checkpoint-review-was { color: #6b7280; font-size: 0.85rem; }
+.checkpoint-review-status { font-size: 0.9rem; }
+.checkpoint-review-feedback { margin-top: 0.4rem !important; font-size: 0.9rem; }
+.checkpoint-review-unreviewed { border-left-color: #9ca3af; }
+.checkpoint-review-confirmed { border-left-color: #16a34a; background: #f0fdf4; }
+.checkpoint-review-changed   { border-left-color: #2563eb; background: #eff6ff; }
+</style>
 {% endblock %}
 
 {% block scripts %}

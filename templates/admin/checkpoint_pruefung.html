@@ -96,6 +96,13 @@
         <p class="text-muted">Keine Einzelantworten protokolliert (Sitzung vor Einführung des Antwort-Logs).</p>
         {% endif %}
 
+        <div class="checkpoint-split">
+        <div class="checkpoint-col-calib">
+        <p class="checkpoint-zone-head checkpoint-zone-head-calib">
+            🔧 Antworten &amp; Kalibrierung
+            <span>zählt <strong>nicht</strong> für die Note — nur zum Nachschärfen der KI-Prompts</span>
+        </p>
+
         {% for question in entry.questions %}
         <div class="checkpoint-question">
             <div class="checkpoint-question-head">
@@ -148,13 +155,13 @@
 
                 {% if not answer.gave_up %}
                 <div class="checkpoint-verdict" data-answer-id="{{ answer.id }}">
-                    <span class="text-muted">Dein Urteil:</span>
+                    <span class="checkpoint-verdict-label" title="Ändert die Note nicht — misst nur, wie gut die KI bewertet hat">War die KI-Bewertung richtig?</span>
                     <button type="button" class="btn btn-sm {{ 'btn-primary' if answer.teacher_verdict == 1 else 'btn-secondary' }}"
-                            data-verdict="1">richtig</button>
+                            data-verdict="1">ja</button>
                     <button type="button" class="btn btn-sm {{ 'btn-primary' if answer.teacher_verdict == 0 else 'btn-secondary' }}"
-                            data-verdict="0">falsch</button>
+                            data-verdict="0">nein</button>
                     <button type="button" class="btn btn-sm btn-secondary" data-verdict="">–</button>
-                    <input type="text" class="form-control checkpoint-verdict-note" placeholder="Notiz (optional)"
+                    <input type="text" class="form-control checkpoint-verdict-note" placeholder="Notiz fürs Prompt-Tuning (optional)"
                            value="{{ answer.teacher_note or '' }}">
                     <span class="checkpoint-verdict-status text-muted"></span>
                 </div>
@@ -164,32 +171,73 @@
         </div>
         {% endfor %}
 
+        </div>{# /checkpoint-col-calib #}
+
         <form method="POST" action="{{ url_for('admin_checkpoint_review_save', attempt_id=attempt.id) }}"
-              class="checkpoint-review-form">
+              class="checkpoint-col-grade">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <strong>Lehrer-Wertung:</strong>
+
+            <p class="checkpoint-zone-head checkpoint-zone-head-grade">
+                ⭐ Note
+                <span>zählt für das Punktekonto</span>
+            </p>
+
             {% set current = attempt.teacher_score if attempt.teacher_score is not none else entry.suggested_score %}
-            {% for value in [0, 2, 3] %}
-            <label class="checkpoint-score-option">
-                <input type="radio" name="teacher_score" value="{{ value }}"
-                       {{ 'checked' if current == value }}>
-                <span>{{ value }}</span>
+            <div class="checkpoint-score-options">
+                {% for value in [0, 2, 3] %}
+                <label class="checkpoint-score-option">
+                    <input type="radio" name="teacher_score" value="{{ value }}"
+                           {{ 'checked' if current == value }}>
+                    <span>{{ value }} Punkte</span>
+                </label>
+                {% endfor %}
+                <label class="checkpoint-score-option">
+                    <input type="radio" name="teacher_score" value="" {{ 'checked' if current is none }}>
+                    <span title="Keine Korrektur — es gilt die berechnete Punktzahl">automatisch ({{ attempt.score }})</span>
+                </label>
+            </div>
+
+            <label class="checkpoint-field">
+                <span>Begründung <em>(nur für dich)</em></span>
+                <input type="text" name="teacher_note" class="form-control"
+                       placeholder="Warum diese Korrektur?"
+                       value="{{ attempt.teacher_note or '' }}">
             </label>
-            {% endfor %}
-            <label class="checkpoint-score-option">
-                <input type="radio" name="teacher_score" value="" {{ 'checked' if current is none }}>
-                <span title="Keine Korrektur — es gilt die berechnete Punktzahl">automatisch ({{ attempt.score }})</span>
-            </label>
-            <input type="text" name="teacher_note" class="form-control" placeholder="Kurze Begründung"
-                   value="{{ attempt.teacher_note or '' }}">
-            <button type="submit" class="btn btn-primary btn-sm">Speichern</button>
+
             {% if entry.suggested_score is not none %}
-            <span class="checkpoint-suggestion">
+            <p class="checkpoint-suggestion">
                 Vorschlag: {{ entry.suggested_score }} statt {{ attempt.score }} — ein Versuch sieht nach
                 Doppelklick aus. Nicht gespeichert, bis du auf Speichern klickst.
-            </span>
+            </p>
             {% endif %}
+
+            <p class="checkpoint-zone-head checkpoint-zone-head-student">
+                💬 Rückmeldung an {{ attempt.vorname }}
+                <span>die/der Schüler:in liest das</span>
+            </p>
+            <label class="checkpoint-field">
+                <textarea name="student_feedback" class="form-control" rows="3"
+                          placeholder="Was soll {{ attempt.vorname }} dazu lesen?">{{ attempt.student_feedback or '' }}</textarea>
+            </label>
+
+            <div class="checkpoint-save-row">
+                <button type="submit" name="reviewed" value="1" class="btn btn-primary btn-sm">Speichern</button>
+                {% if attempt.reviewed_at %}
+                <button type="submit" name="reviewed" value="0" class="btn btn-secondary btn-sm"
+                        title="Setzt diese Sitzung wieder auf ungeprüft — die Schüler:in sieht dann keinen Prüfvermerk mehr">
+                    Prüfung zurücknehmen
+                </button>
+                {% endif %}
+            </div>
+            <p class="checkpoint-review-hint">
+                {% if attempt.reviewed_at %}
+                ✅ Geprüft — {{ attempt.vorname }} sieht das.
+                {% else %}
+                Noch nicht geprüft. Speichern setzt den Prüfvermerk, auch wenn du nichts änderst.
+                {% endif %}
+            </p>
         </form>
+        </div>{# /checkpoint-split #}
     </div>
 </details>
 {% endfor %}
@@ -211,11 +259,46 @@
 .checkpoint-answer-feedback { margin-top: 0.25rem; font-size: 0.85rem; color: #4b5563; }
 .checkpoint-verdict { display: flex; gap: 0.4rem; align-items: center; margin-top: 0.4rem; font-size: 0.8rem; flex-wrap: wrap; }
 .checkpoint-verdict .form-control { max-width: 260px; display: inline-block; }
-.checkpoint-review-form { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-top: 0.75rem;
-                          padding-top: 0.75rem; border-top: 1px solid #e5e7eb; }
-.checkpoint-review-form .form-control { max-width: 320px; }
-.checkpoint-score-option { display: flex; gap: 0.25rem; align-items: center; }
-.checkpoint-suggestion { font-size: 0.8rem; color: #92400e; }
+.checkpoint-verdict-label { font-weight: 600; color: #6b7280; }
+
+/* Two zones, split left/right because they differ in CONSEQUENCE, not in topic:
+   everything on the left is advisory and changes no grade, everything on the
+   right is the grade itself. The split is carried by three redundant signals --
+   position, colour and an explicit "zählt / zählt nicht" heading -- so it still
+   reads correctly for a colourblind teacher and when the columns stack on a
+   narrow screen and the left/right cue disappears. */
+.checkpoint-split { display: grid; grid-template-columns: minmax(0, 1fr) 22rem; gap: 1.25rem;
+                    align-items: start; margin-top: 0.75rem; }
+.checkpoint-col-calib { min-width: 0; border-right: 1px solid #e5e7eb; padding-right: 1.25rem; }
+
+.checkpoint-zone-head { display: flex; flex-direction: column; gap: 0.1rem; margin: 0 0 0.6rem;
+                        font-weight: 700; font-size: 0.9rem; padding: 0.4rem 0.6rem; border-radius: 4px; }
+.checkpoint-zone-head span { font-weight: 400; font-size: 0.78rem; }
+.checkpoint-zone-head-calib { background: #f3f4f6; color: #4b5563; border-left: 4px solid #9ca3af; }
+.checkpoint-zone-head-grade { background: #eff6ff; color: #1e40af; border-left: 4px solid #2563eb; }
+.checkpoint-zone-head-student { background: #f0fdf4; color: #166534; border-left: 4px solid #16a34a;
+                                margin-top: 1rem; }
+
+/* The grade panel follows the answers: on a long session the teacher is reading
+   the last question while the score radios would otherwise be scrolled away. */
+.checkpoint-col-grade { position: sticky; top: 1rem; border: 2px solid #2563eb; border-radius: 6px;
+                        padding: 0.75rem; background: #fff; }
+.checkpoint-score-options { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 0.75rem; }
+.checkpoint-score-option { display: flex; gap: 0.4rem; align-items: center; }
+.checkpoint-field { display: block; margin-bottom: 0.5rem; font-size: 0.82rem; }
+.checkpoint-field > span { display: block; margin-bottom: 0.2rem; color: #4b5563; }
+.checkpoint-field em { color: #6b7280; font-style: normal; }
+.checkpoint-field .form-control { width: 100%; max-width: none; }
+.checkpoint-save-row { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.6rem; }
+.checkpoint-review-hint { font-size: 0.78rem; color: #6b7280; margin: 0.4rem 0 0; }
+.checkpoint-suggestion { font-size: 0.8rem; color: #92400e; margin: 0 0 0.5rem; }
+
+@media (max-width: 900px) {
+    .checkpoint-split { grid-template-columns: minmax(0, 1fr); }
+    .checkpoint-col-calib { border-right: none; padding-right: 0;
+                            border-bottom: 1px solid #e5e7eb; padding-bottom: 1rem; }
+    .checkpoint-col-grade { position: static; }
+}
 </style>
 {% endblock %}
 
