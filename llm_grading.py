@@ -6,6 +6,7 @@ Only question text, rubric, and student answer are sent to the API — never any
 
 import json
 import sys
+import threading
 import time
 import config
 import models
@@ -109,12 +110,40 @@ def _reasoning_kwargs():
     return {}
 
 
+# Cached OpenAI client. Building one per call meant a fresh httpx connection pool
+# every time -- a new TCP + TLS handshake to the provider on every grading request,
+# paid out of the same 5s LLM_TIMEOUT budget the model itself has to answer in.
+# Reusing the client keeps the connection alive between calls.
+#
+# Safe to share across waitress threads: httpx.Client (which OpenAI wraps) is
+# thread-safe, and every call site passes its own timeout= to chat.completions
+# .create() rather than to the constructor, so the 5s quiz / 60s artifact split
+# still holds with one shared client.
+#
+# Keyed on (base_url, api_key) rather than stored in a bare global: LLM_* are
+# swappable .env knobs that tests monkeypatch at runtime, and a plain singleton
+# would silently keep serving the old endpoint after such a change (same bug
+# family as the reasoning_effort regression -- see test_llm_reasoning_kwargs.py).
+_client_cache = {}
+_client_lock = threading.Lock()
+
+
 def _get_client():
-    """Create OpenAI-compatible client."""
+    """Return a cached OpenAI-compatible client for the configured endpoint."""
     from openai import OpenAI
     if not config.LLM_BASE_URL:
         raise ValueError("LLM_BASE_URL must be set")
-    return OpenAI(base_url=config.LLM_BASE_URL, api_key=config.LLM_API_KEY)
+    key = (config.LLM_BASE_URL, config.LLM_API_KEY)
+    client = _client_cache.get(key)
+    if client is None:
+        with _client_lock:
+            # Re-check inside the lock: another thread may have built it while
+            # this one waited.
+            client = _client_cache.get(key)
+            if client is None:
+                client = OpenAI(base_url=config.LLM_BASE_URL, api_key=config.LLM_API_KEY)
+                _client_cache[key] = client
+    return client
 
 
 def _message_text(response):
