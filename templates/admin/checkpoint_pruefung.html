@@ -29,6 +29,16 @@
             {% endfor %}
         </select>
 
+        <label for="checkpoint_id"><strong>Checkpoint:</strong></label>
+        <select name="checkpoint_id" id="checkpoint_id">
+            <option value="">Alle</option>
+            {% for c in checkpoints %}
+            <option value="{{ c.id }}" {{ 'selected' if checkpoint_id == c.id }}>
+                {{ c.task_name or 'Thema gelöscht' }} · {{ (c.subtask_name|aufgabe_titel|striptags|truncate(40)) if c.subtask_name else 'Aufgabe gelöscht' }}
+            </option>
+            {% endfor %}
+        </select>
+
         <label for="von"><strong>Von:</strong></label>
         <input type="date" name="von" id="von" value="{{ date_from or '' }}">
         <label for="bis"><strong>Bis:</strong></label>
@@ -39,17 +49,42 @@
             <span>nur ungeprüfte</span>
         </label>
 
+        <label class="flex gap-1 flex-center">
+            <input type="checkbox" name="verlauf" value="1" {{ 'checked' if show_superseded }}>
+            <span title="Zurückgesetzte Sitzungen bleiben gespeichert und werden hier wieder sichtbar">zurückgesetzte anzeigen</span>
+        </label>
+
         <button type="submit" class="btn btn-primary btn-sm">Filtern</button>
         <a href="{{ url_for('admin_checkpoint_pruefung') }}" class="btn btn-secondary btn-sm">Zurücksetzen</a>
     </form>
 </div>
 
-<p class="text-muted mb-2">
-    <strong>{{ sessions|length }}</strong> Checkpoint-Sitzung(en)
-    {% if duplicate_count %}
-    · <span class="badge badge-warning">{{ duplicate_count }} mit Doppelklick-Verdacht</span>
+<div class="flex flex-between flex-center mb-2" style="gap: 1rem; flex-wrap: wrap;">
+    <p class="text-muted" style="margin: 0;">
+        <strong>{{ sessions|length }}</strong> Checkpoint-Sitzung(en)
+        {% if duplicate_count %}
+        · <span class="badge badge-warning">{{ duplicate_count }} mit Doppelklick-Verdacht</span>
+        {% endif %}
+    </p>
+
+    {# Bulk reset acts on the current filter, so it only appears once the filter
+       actually narrows things down -- the route refuses an unfiltered reset. #}
+    {% if resettable_count and (klasse_id or student_id or checkpoint_id) %}
+    <form method="POST" action="{{ url_for('admin_checkpoint_reset_bulk') }}"
+          onsubmit="return confirm('{{ resettable_count }} Checkpoint-Sitzung(en) zurücksetzen?\n\nDie Schüler:innen können diese Checkpoints danach erneut bearbeiten. Die bisherigen Ergebnisse gehen nicht verloren — sie bleiben über \'zurückgesetzte anzeigen\' sichtbar.');">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="klasse_id" value="{{ klasse_id or '' }}">
+        <input type="hidden" name="student_id" value="{{ student_id or '' }}">
+        <input type="hidden" name="checkpoint_id" value="{{ checkpoint_id or '' }}">
+        <input type="hidden" name="von" value="{{ date_from or '' }}">
+        <input type="hidden" name="bis" value="{{ date_to or '' }}">
+        <input type="hidden" name="offen" value="{{ '1' if unreviewed_only else '' }}">
+        <button type="submit" class="btn btn-secondary btn-sm">
+            ↻ Alle {{ resettable_count }} angezeigten zurücksetzen
+        </button>
+    </form>
     {% endif %}
-</p>
+</div>
 
 {% if not sessions %}
 <div class="card">
@@ -59,7 +94,8 @@
 
 {% for entry in sessions %}
 {% set attempt = entry.attempt %}
-<details class="card mb-1 checkpoint-session" {{ 'open' if entry.has_duplicates or attempt.needs_review }}>
+{% set is_reset = attempt.superseded_at %}
+<details class="card mb-1 checkpoint-session{{ ' checkpoint-session-reset' if is_reset }}" {{ 'open' if not is_reset and (entry.has_duplicates or attempt.needs_review) }}>
     <summary class="checkpoint-session-head">
         <span class="checkpoint-session-title">
             <strong>{{ attempt.student_name }}</strong>
@@ -76,6 +112,7 @@
             {% endif %}
             {% if entry.has_duplicates %}<span class="badge badge-warning">Doppelklick</span>{% endif %}
             {% if attempt.needs_review %}<span class="badge badge-danger">KI-Fehler</span>{% endif %}
+            {% if is_reset %}<span class="badge badge-secondary" title="Am {{ attempt.superseded_at[:16] }} zurückgesetzt — zählt nicht mehr">zurückgesetzt</span>{% endif %}
             <span class="text-muted">{{ attempt.timestamp[:16] }}</span>
         </span>
     </summary>
@@ -174,6 +211,17 @@
 
         </div>{# /checkpoint-col-calib #}
 
+        {% if is_reset %}
+        <div class="checkpoint-col-grade">
+            <p class="checkpoint-zone-head">↻ Zurückgesetzt</p>
+            <p class="text-muted" style="font-size: 0.9rem;">
+                Diese Sitzung wurde am {{ attempt.superseded_at[:16] }} zurückgesetzt und zählt
+                nicht mehr. Sie bleibt als Verlauf gespeichert; bewertet wird die neue Sitzung.
+                Berechnet waren {{ attempt.score }}/3{% if attempt.teacher_score is not none %},
+                korrigiert auf {{ attempt.teacher_score }}/3{% endif %}.
+            </p>
+        </div>
+        {% else %}
         <form method="POST" action="{{ url_for('admin_checkpoint_review_save', attempt_id=attempt.id) }}"
               class="checkpoint-col-grade">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -238,6 +286,18 @@
                 {% endif %}
             </p>
         </form>
+        {# Own form, not a second button inside the grade form: a reset must not
+           silently carry the unsaved score edits above along with it. #}
+        <form method="POST" action="{{ url_for('admin_checkpoint_reset', attempt_id=attempt.id) }}"
+              class="checkpoint-reset-row"
+              onsubmit="return confirm('Checkpoint für ' + {{ attempt.student_name|tojson }} + ' zurücksetzen?\n\nDie Sitzung bleibt als Verlauf gespeichert, zählt aber nicht mehr. ' + {{ attempt.vorname|tojson }} + ' kann den Checkpoint danach erneut bearbeiten.');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-secondary btn-sm"
+                    title="Öffnet den Checkpoint für einen neuen Versuch — nichts wird gelöscht">
+                ↻ Checkpoint zurücksetzen
+            </button>
+        </form>
+        {% endif %}
         </div>{# /checkpoint-split #}
     </div>
 </details>
@@ -245,6 +305,11 @@
 
 <style>
 .checkpoint-session-head { cursor: pointer; display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+/* A reset session is history, not work in progress -- it reads back, it doesn't
+   compete for attention with the sessions still waiting to be graded. */
+.checkpoint-session-reset { opacity: 0.65; }
+.checkpoint-session-reset:hover, .checkpoint-session-reset[open] { opacity: 1; }
+.checkpoint-reset-row { margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #e5e7eb; }
 .checkpoint-session-meta { display: flex; gap: 0.4rem; align-items: center; font-size: 0.85rem; }
 .checkpoint-session-body { margin-top: 0.75rem; }
 .checkpoint-question { border-left: 3px solid #e5e7eb; padding-left: 0.75rem; margin: 0.75rem 0; }

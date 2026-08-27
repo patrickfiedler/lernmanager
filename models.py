@@ -3463,12 +3463,16 @@ def checkpoint_review_status(attempt):
 
 
 def get_checkpoint_reviews(klasse_id=None, student_id=None, date_from=None,
-                           date_to=None, unreviewed_only=False, limit=300):
+                           date_to=None, unreviewed_only=False, checkpoint_id=None,
+                           include_superseded=False, limit=300):
     """Checkpoint sessions for the teacher-review UI, newest first.
 
     One row per completed checkpoint (checkpoint_attempt), enriched with the
-    student/class/topic names needed to display and filter it. Superseded rows are
-    excluded -- they are the pre-reset grade record, not the current one.
+    student/class/topic names needed to display and filter it.
+
+    include_superseded: reset sessions (see supersede_checkpoint_attempts) are
+    excluded by default -- they are the pre-reset grade record, not the current
+    one. Pass True to show them as read-only history.
 
     date_from/date_to: 'YYYY-MM-DD' (inclusive). date_to is compared against the
     end of that day so a same-day filter is not empty.
@@ -3487,9 +3491,14 @@ def get_checkpoint_reviews(klasse_id=None, student_id=None, date_from=None,
         JOIN student s ON ca.student_id = s.id
         LEFT JOIN task t ON ca.module_id = t.id
         LEFT JOIN subtask sub ON ca.checkpoint_id = sub.id
-        WHERE ca.superseded_at IS NULL
+        WHERE 1 = 1
     '''
     params = []
+    if not include_superseded:
+        sql += ' AND ca.superseded_at IS NULL'
+    if checkpoint_id:
+        sql += ' AND ca.checkpoint_id = ?'
+        params.append(checkpoint_id)
     if klasse_id:
         # Class membership is many-to-many and lives outside checkpoint_attempt,
         # so it is an EXISTS rather than a join -- a student in two classes must
@@ -3534,6 +3543,60 @@ def get_checkpoint_students():
             ORDER BY s.nachname, s.vorname
         ''').fetchall()
     return [dict(r) for r in rows]
+
+
+def get_checkpoint_checkpoints():
+    """Checkpoints that actually have results, for the review page's filter.
+
+    Same reasoning as get_checkpoint_students: offer the handful of checkpoints
+    there is something to look at, not every Aufgabe in the database. Superseded
+    rows count too -- a checkpoint whose only sessions were reset must stay
+    selectable, otherwise its history becomes unreachable from the UI.
+    """
+    with db_session() as conn:
+        rows = conn.execute('''
+            SELECT ca.checkpoint_id AS id,
+                   t.name AS task_name,
+                   sub.beschreibung AS subtask_name,
+                   sub.reihenfolge AS subtask_position,
+                   COUNT(*) AS session_count
+            FROM checkpoint_attempt ca
+            LEFT JOIN task t ON ca.module_id = t.id
+            LEFT JOIN subtask sub ON ca.checkpoint_id = sub.id
+            GROUP BY ca.checkpoint_id
+            ORDER BY t.name, sub.reihenfolge
+        ''').fetchall()
+    return [dict(r) for r in rows]
+
+
+def supersede_checkpoint_attempts(attempt_ids):
+    """Reopen checkpoint sessions for another try, without destroying the record.
+
+    Sets superseded_at instead of deleting: the row, its teacher review and all
+    its checkpoint_answer detail stay in the database as history. Every gate and
+    listing filters superseded_at IS NULL, so the progression lock lifts and the
+    student can take the checkpoint again -- their new session is written as a
+    fresh row alongside the old one, not on top of it.
+
+    Deliberately does NOT touch student_subtask: the Aufgabe was still done, only
+    its checkpoint reopens. And deliberately does not un-complete the Thema -- a
+    student may have moved on to the next topic in the queue, and forcing a second
+    active topic would violate idx_one_active_primary. check_task_completion marks
+    it complete again once the retake lands.
+
+    Already-superseded rows are skipped, so the first reset's timestamp survives a
+    double click. Returns the number of sessions actually reopened.
+    """
+    ids = [int(i) for i in attempt_ids]
+    if not ids:
+        return 0
+    placeholders = ','.join('?' * len(ids))
+    with db_session() as conn:
+        cursor = conn.execute(f'''
+            UPDATE checkpoint_attempt SET superseded_at = ?
+            WHERE id IN ({placeholders}) AND superseded_at IS NULL
+        ''', [now_local()] + ids)
+        return cursor.rowcount
 
 
 def get_checkpoint_answers_for_attempts(attempt_ids):

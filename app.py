@@ -2830,25 +2830,23 @@ def _build_checkpoint_sessions(attempts):
 @admin_required
 def admin_checkpoint_pruefung():
     """Review checkpoint quiz answers, LLM verdicts and scores."""
-    klasse_id = request.args.get('klasse_id', type=int)
-    student_id = request.args.get('student_id', type=int)
-    date_from = request.args.get('von') or None
-    date_to = request.args.get('bis') or None
-    unreviewed_only = request.args.get('offen') == '1'
-
-    attempts = models.get_checkpoint_reviews(
-        klasse_id=klasse_id, student_id=student_id,
-        date_from=date_from, date_to=date_to, unreviewed_only=unreviewed_only
-    )
-    sessions = _build_checkpoint_sessions(attempts)
+    filters = _checkpoint_filters()
+    sessions = _build_checkpoint_sessions(models.get_checkpoint_reviews(**filters))
 
     return render_template('admin/checkpoint_pruefung.html',
                            sessions=sessions,
                            klassen=models.get_all_klassen(),
                            students=models.get_checkpoint_students(),
-                           klasse_id=klasse_id, student_id=student_id,
-                           date_from=date_from, date_to=date_to,
-                           unreviewed_only=unreviewed_only,
+                           checkpoints=models.get_checkpoint_checkpoints(),
+                           klasse_id=filters['klasse_id'],
+                           student_id=filters['student_id'],
+                           checkpoint_id=filters['checkpoint_id'],
+                           date_from=filters['date_from'],
+                           date_to=filters['date_to'],
+                           unreviewed_only=filters['unreviewed_only'],
+                           show_superseded=filters['include_superseded'],
+                           resettable_count=sum(1 for s in sessions
+                                                if not s['attempt'].get('superseded_at')),
                            duplicate_count=sum(1 for s in sessions if s['has_duplicates']))
 
 
@@ -2892,6 +2890,53 @@ def admin_checkpoint_review_save(attempt_id):
                                          student_feedback, session['admin_id'],
                                          reviewed=reviewed)
     flash('Prüfung zurückgenommen.' if not reviewed else 'Bewertung gespeichert.', 'success')
+    return redirect(request.referrer or url_for('admin_checkpoint_pruefung'))
+
+
+@app.route('/admin/checkpoint-pruefung/<int:attempt_id>/zuruecksetzen', methods=['POST'])
+@admin_required
+def admin_checkpoint_reset(attempt_id):
+    """Reopen one checkpoint session so the student can take it again.
+
+    Soft reset (models.supersede_checkpoint_attempts): nothing is deleted, the
+    session and its answers stay as history. This is the per-student escape hatch
+    -- one student hit a bug, one session reopens.
+    """
+    count = models.supersede_checkpoint_attempts([attempt_id])
+    flash('Checkpoint wurde zurückgesetzt — der Schüler kann ihn erneut bearbeiten.'
+          if count else 'Diese Sitzung war bereits zurückgesetzt.',
+          'success' if count else 'warning')
+    return redirect(request.referrer or url_for('admin_checkpoint_pruefung'))
+
+
+@app.route('/admin/checkpoint-pruefung/zuruecksetzen', methods=['POST'])
+@admin_required
+def admin_checkpoint_reset_bulk():
+    """Reopen every checkpoint session currently listed by the page's filters.
+
+    The selection is re-derived from the posted filters rather than from a list of
+    ids in the form: what gets reset is then by construction what the teacher saw,
+    and a stale or tampered form cannot name a session outside it.
+
+    Refuses an unfiltered reset. Without a Klasse, a Schüler or a Checkpoint this
+    would reopen every checkpoint in the database from one click -- the one
+    mistake here that is tedious to undo (each row's superseded_at would have to
+    be cleared by hand).
+    """
+    filters = _checkpoint_filters(source=request.form, limit=5000)
+    if not (filters['klasse_id'] or filters['student_id'] or filters['checkpoint_id']):
+        flash('Bitte zuerst nach Klasse, Schüler oder Checkpoint filtern — '
+              'ein ungefiltertes Zurücksetzen ist nicht möglich.', 'danger')
+        return redirect(request.referrer or url_for('admin_checkpoint_pruefung'))
+
+    # Superseded rows are never re-reset, so the listing this acts on is the live
+    # one regardless of whether the history toggle was on when the form was sent.
+    filters['include_superseded'] = False
+    attempts = models.get_checkpoint_reviews(**filters)
+    count = models.supersede_checkpoint_attempts([a['id'] for a in attempts])
+    flash(f'{count} Checkpoint-Sitzung(en) zurückgesetzt.' if count
+          else 'Keine offenen Sitzungen zum Zurücksetzen.',
+          'success' if count else 'warning')
     return redirect(request.referrer or url_for('admin_checkpoint_pruefung'))
 
 
@@ -2960,16 +3005,29 @@ def _checkpoint_export_sessions(**filters):
     return _build_checkpoint_sessions(attempts)
 
 
+def _checkpoint_filters(source=None, limit=300):
+    """Read the review page's filter arguments.
+
+    `source` defaults to request.args (the page and both exports); the bulk-reset
+    route passes request.form so a reset acts on exactly the selection the teacher
+    was looking at, resolved server-side rather than from a client-supplied id list.
+    """
+    args = request.args if source is None else source
+    return {
+        'klasse_id': args.get('klasse_id', type=int),
+        'student_id': args.get('student_id', type=int),
+        'checkpoint_id': args.get('checkpoint_id', type=int),
+        'date_from': args.get('von') or None,
+        'date_to': args.get('bis') or None,
+        'unreviewed_only': args.get('offen') == '1',
+        'include_superseded': args.get('verlauf') == '1',
+        'limit': limit,
+    }
+
+
 def _checkpoint_export_filters():
     """Read the same filter arguments the review page uses."""
-    return {
-        'klasse_id': request.args.get('klasse_id', type=int),
-        'student_id': request.args.get('student_id', type=int),
-        'date_from': request.args.get('von') or None,
-        'date_to': request.args.get('bis') or None,
-        'unreviewed_only': request.args.get('offen') == '1',
-        'limit': 5000,
-    }
+    return _checkpoint_filters(limit=5000)
 
 
 @app.route('/admin/checkpoint-pruefung/export.csv')
