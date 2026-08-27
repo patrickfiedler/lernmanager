@@ -63,6 +63,13 @@ def _env_int(name, default, minimum=1):
     return value
 
 
+# Local timezone for every timestamp written to the DB.
+# SQLite's CURRENT_TIMESTAMP is UTC, always, regardless of the server clock -- which
+# is why some rows read two hours early in summer while the VPS itself showed the
+# right time. Timestamps are now generated in Python against this zone (see
+# models.now_local) so the value does not depend on the server's TZ env var either.
+TIMEZONE = os.environ.get('TIMEZONE', 'Europe/Berlin')
+
 # LLM grading (for free-text quiz questions and artifact completeness checks)
 # Uses any OpenAI-compatible API endpoint (e.g. OVHcloud AI Endpoints).
 # Set LLM_API_KEY to the provider access token.

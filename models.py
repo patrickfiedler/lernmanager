@@ -46,6 +46,40 @@ def verify_password(stored_hash, password):
     return False, False
 
 
+def now_local(fmt='%Y-%m-%d %H:%M:%S'):
+    """Current wall-clock time in config.TIMEZONE, as a string for the DB.
+
+    Every timestamp this app stores goes through here. SQLite's CURRENT_TIMESTAMP
+    is UTC unconditionally, so mixing it with Python's local-time writes left the
+    DB holding two different time bases and the UI showing rows two hours early.
+
+    Deliberately not datetime.now(): that reads the server's TZ env var, and a VPS
+    rebuilt without one silently reintroduces the bug. ZoneInfo also gets DST right,
+    which a fixed offset would not.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo(config.TIMEZONE)).strftime(fmt)
+    except Exception:
+        # Unknown zone name or missing tzdata -- a wrong-by-an-hour timestamp beats
+        # a 500 on every write path that logs anything.
+        return datetime.now().strftime(fmt)
+
+
+def local_cutoff(**delta):
+    """A past instant on the same basis as now_local(), for time-window queries.
+
+    Comparisons must use the same clock the rows were written with; SQL-side
+    datetime('now') is UTC and would silently drift against local-time rows.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+        base = datetime.now(ZoneInfo(config.TIMEZONE))
+    except Exception:
+        base = datetime.now()
+    return (base - timedelta(**delta)).strftime('%Y-%m-%d %H:%M:%S')
+
+
 def get_db():
     """Get database connection with optimized performance settings."""
     conn = sqlite3.connect(config.DATABASE)
@@ -264,7 +298,7 @@ def init_db():
                 bestanden INTEGER NOT NULL,
                 antworten_json TEXT,
                 quiz_snapshot_json TEXT,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                timestamp DATETIME DEFAULT (datetime('now','localtime')),
                 FOREIGN KEY (student_task_id) REFERENCES student_task(id) ON DELETE CASCADE
             );
 
@@ -352,7 +386,7 @@ def init_db():
                 student_id INTEGER,
                 enabled INTEGER DEFAULT 1,
                 set_by_admin_id INTEGER,
-                set_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                set_at TIMESTAMP DEFAULT (datetime('now','localtime')),
                 FOREIGN KEY (subtask_id) REFERENCES subtask(id) ON DELETE CASCADE,
                 FOREIGN KEY (klasse_id) REFERENCES klasse(id) ON DELETE CASCADE,
                 FOREIGN KEY (student_id) REFERENCES student(id) ON DELETE CASCADE,
@@ -434,7 +468,7 @@ def init_db():
             -- Error log for tracking application errors
             CREATE TABLE IF NOT EXISTS error_log (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                timestamp DATETIME DEFAULT (datetime('now','localtime')),
                 level TEXT NOT NULL,  -- ERROR, WARNING, CRITICAL
                 message TEXT NOT NULL,
                 traceback TEXT,
@@ -454,7 +488,7 @@ def init_db():
             -- Analytics events for both usage statistics and student activity logs
             CREATE TABLE IF NOT EXISTS analytics_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                timestamp DATETIME DEFAULT (datetime('now','localtime')),
                 event_type TEXT NOT NULL,  -- 'login', 'page_view', 'file_download', 'task_start', 'subtask_complete', 'task_complete', 'quiz_attempt', 'self_eval'
                 user_id INTEGER,
                 user_type TEXT,  -- 'admin' or 'student'
@@ -477,7 +511,7 @@ def init_db():
             CREATE TABLE IF NOT EXISTS app_settings (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL,
-                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                updated_at DATETIME DEFAULT (datetime('now','localtime'))
             );
 
             -- ============ Saved Reports ============
@@ -488,7 +522,7 @@ def init_db():
                 report_type TEXT NOT NULL,  -- 'class_simple', 'student_summary', 'student_complete'
                 klasse_id INTEGER,
                 student_id INTEGER,
-                date_generated DATETIME DEFAULT CURRENT_TIMESTAMP,
+                date_generated DATETIME DEFAULT (datetime('now','localtime')),
                 date_from DATE,
                 date_to DATE,
                 filename TEXT NOT NULL
@@ -507,7 +541,7 @@ def init_db():
             CREATE TABLE IF NOT EXISTS llm_usage (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 student_id INTEGER NOT NULL,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                timestamp DATETIME DEFAULT (datetime('now','localtime')),
                 question_type TEXT NOT NULL,
                 tokens_used INTEGER DEFAULT 0,
                 FOREIGN KEY (student_id) REFERENCES student(id) ON DELETE CASCADE
@@ -666,7 +700,7 @@ def init_db():
             CREATE TABLE IF NOT EXISTS warmup_session (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 student_id INTEGER NOT NULL,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                timestamp DATETIME DEFAULT (datetime('now','localtime')),
                 questions_shown INTEGER NOT NULL DEFAULT 0,
                 questions_correct INTEGER NOT NULL DEFAULT 0,
                 skipped INTEGER NOT NULL DEFAULT 0,
@@ -1888,9 +1922,9 @@ def reset_student_progress_for_task(task_id):
         # rows, so the progression gate still resets correctly (the original reason
         # this was a DELETE, commit f9d6a24) while the grade record survives.
         conn.execute(
-            "UPDATE checkpoint_attempt SET superseded_at = CURRENT_TIMESTAMP "
+            "UPDATE checkpoint_attempt SET superseded_at = ? "
             "WHERE module_id = ? AND superseded_at IS NULL",
-            (task_id,)
+            (now_local(), task_id)
         )
 
 
@@ -3122,13 +3156,9 @@ def save_artifact_gate_result(student_task_id: int, subtask_id: int, passed: boo
 def log_artifact_gate_attempt(student_id: int, subtask_id: int, passed: bool, details: list, timezone: str = 'Europe/Berlin'):
     """Append one gate check attempt with its failed criteria list."""
     import json as _json
-    from datetime import datetime
-    try:
-        import pytz
-        ts = datetime.now(pytz.timezone(timezone)).strftime('%Y-%m-%d %H:%M:%S')
-    except Exception:
-        ts = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
-        timezone = 'UTC'
+    # Was the only place doing its own pytz dance, with a utcnow() fallback that
+    # silently relabelled the row 'UTC'. now_local() is the single time basis now.
+    ts = now_local()
     with db_session() as conn:
         conn.execute(
             'INSERT INTO artifact_gate_attempt (student_id, subtask_id, timestamp_local, timezone, passed, details_json) VALUES (?, ?, ?, ?, ?, ?)',
@@ -3238,9 +3268,10 @@ def save_quiz_attempt(student_task_id, punkte, max_punkte, antworten_json, subta
     bestanden = punkte >= min_punkte if max_punkte > 0 else False
     with db_session() as conn:
         cursor = conn.execute('''
-            INSERT INTO quiz_attempt (student_task_id, subtask_id, punkte, max_punkte, bestanden, antworten_json, quiz_snapshot_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (student_task_id, subtask_id, punkte, max_punkte, 1 if bestanden else 0, antworten_json, quiz_snapshot))
+            INSERT INTO quiz_attempt (student_task_id, subtask_id, punkte, max_punkte, bestanden, antworten_json, quiz_snapshot_json, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (student_task_id, subtask_id, punkte, max_punkte, 1 if bestanden else 0, antworten_json,
+              quiz_snapshot, now_local()))
         return cursor.lastrowid, bestanden
 
 
@@ -3309,9 +3340,9 @@ def create_checkpoint_attempt(student_id, checkpoint_id, module_id, checkpoint_t
             (student_id, checkpoint_id, module_id, checkpoint_type, kern_standard_tag,
              score, attempt_count, hint_count, timestamp, needs_review, review_notes,
              quiz_snapshot_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, ?), ?, ?, ?)
         ''', (student_id, checkpoint_id, module_id, checkpoint_type, kern_standard_tag,
-              score, attempt_count, hint_count, timestamp, 1 if needs_review else 0, review_notes,
+              score, attempt_count, hint_count, timestamp, now_local(), 1 if needs_review else 0, review_notes,
               quiz_snapshot_json))
         attempt_id = cursor.lastrowid
         if session_uid:
@@ -3344,10 +3375,10 @@ def create_checkpoint_answer(student_id, checkpoint_id, session_uid, question_in
             (student_id, checkpoint_id, session_uid, question_index, attempt_no,
              answer_text, correct, feedback, grader, llm_model, hints_used_before,
              gave_up, timestamp, prompt_version)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (student_id, checkpoint_id, session_uid, question_index, attempt_no,
               answer_text, correct, feedback, grader, llm_model, hints_used_before,
-              1 if gave_up else 0, prompt_version))
+              1 if gave_up else 0, now_local(), prompt_version))
 
 
 def get_checkpoint_attempts_for_student(student_id, module_id=None, include_superseded=False):
@@ -3541,11 +3572,11 @@ def set_checkpoint_teacher_review(attempt_id, teacher_score, teacher_note,
         conn.execute('''
             UPDATE checkpoint_attempt
             SET teacher_score = ?, teacher_note = ?, student_feedback = ?,
-                reviewed_at = CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE NULL END,
+                reviewed_at = CASE WHEN ? THEN ? ELSE NULL END,
                 reviewed_by = CASE WHEN ? THEN ? ELSE NULL END
             WHERE id = ?
         ''', (teacher_score, teacher_note or None, student_feedback or None,
-              1 if reviewed else 0,
+              1 if reviewed else 0, now_local(),
               1 if reviewed else 0, admin_id,
               attempt_id))
 
@@ -4047,9 +4078,9 @@ def log_error(level, message, traceback=None, user_id=None, user_type=None, rout
     try:
         with db_session() as conn:
             conn.execute('''
-                INSERT INTO error_log (level, message, traceback, user_id, user_type, route, method, url)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (level, message, traceback, user_id, user_type, route, method, url))
+                INSERT INTO error_log (level, message, traceback, user_id, user_type, route, method, url, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (level, message, traceback, user_id, user_type, route, method, url, now_local()))
     except Exception as e:
         # If logging fails, print to stderr but don't crash
         print(f"ERROR: Failed to log error to database: {e}", file=sys.stderr)
@@ -4695,11 +4726,11 @@ def set_setting(key, value):
     with db_session() as conn:
         conn.execute(
             """INSERT INTO app_settings (key, value, updated_at)
-               VALUES (?, ?, CURRENT_TIMESTAMP)
+               VALUES (?, ?, ?)
                ON CONFLICT(key) DO UPDATE SET
                    value = excluded.value,
-                   updated_at = CURRENT_TIMESTAMP""",
-            (key, str(value))
+                   updated_at = excluded.updated_at""",
+            (key, str(value), now_local())
         )
 
 
@@ -4744,8 +4775,8 @@ def check_llm_rate_limit(student_id, usage_tag='llm_grading'):
         row = conn.execute(
             "SELECT COUNT(*) as cnt FROM llm_usage "
             "WHERE student_id = ? AND question_type = ? "
-            "AND timestamp > datetime('now', '-1 hour')",
-            (student_id, usage_tag)
+            "AND timestamp > ?",
+            (student_id, usage_tag, local_cutoff(hours=1))
         ).fetchone()
         return row['cnt'] < limit
 
@@ -4756,8 +4787,8 @@ def get_artifact_checks_remaining(student_id):
         row = conn.execute(
             "SELECT COUNT(*) as cnt FROM llm_usage "
             "WHERE student_id = ? AND question_type = 'artifact_feedback' "
-            "AND timestamp > datetime('now', '-1 hour')",
-            (student_id,)
+            "AND timestamp > ?",
+            (student_id, local_cutoff(hours=1))
         ).fetchone()
         return max(0, config.LLM_MAX_ARTIFACT_CHECKS_PER_STUDENT_PER_HOUR - row['cnt'])
 
@@ -4766,7 +4797,7 @@ def get_artifact_checks_remaining(student_id):
 
 def save_artifact_feedback(student_id, subtask_id, feedback_list, timezone='Europe/Berlin'):
     """Store one LLM checklist result. Each upload creates a new row (history preserved)."""
-    timestamp_local = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
+    timestamp_local = now_local('%Y-%m-%dT%H:%M:%S')
     with db_session() as conn:
         conn.execute(
             "INSERT INTO artifact_feedback (student_id, subtask_id, timestamp_local, timezone, feedback_json) "
@@ -4926,8 +4957,8 @@ def record_llm_usage(student_id, question_type, tokens_used=0):
     """Record an LLM API call for rate limiting and monitoring."""
     with db_session() as conn:
         conn.execute(
-            "INSERT INTO llm_usage (student_id, question_type, tokens_used) VALUES (?, ?, ?)",
-            (student_id, question_type, tokens_used)
+            "INSERT INTO llm_usage (student_id, question_type, tokens_used, timestamp) VALUES (?, ?, ?, ?)",
+            (student_id, question_type, tokens_used, now_local())
         )
 
 
@@ -5812,9 +5843,10 @@ def save_warmup_session(student_id, questions_shown, questions_correct, skipped=
     """Log a warmup/practice session. session_type: 'warmup' or 'practice'."""
     with db_session() as conn:
         conn.execute(
-            'INSERT INTO warmup_session (student_id, questions_shown, questions_correct, skipped, session_type) '
-            'VALUES (?, ?, ?, ?, ?)',
-            (student_id, questions_shown, questions_correct, 1 if skipped else 0, session_type)
+            'INSERT INTO warmup_session (student_id, questions_shown, questions_correct, skipped, session_type, timestamp) '
+            'VALUES (?, ?, ?, ?, ?, ?)',
+            (student_id, questions_shown, questions_correct, 1 if skipped else 0, session_type,
+             now_local())
         )
 
 
