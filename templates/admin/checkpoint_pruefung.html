@@ -65,7 +65,7 @@
             <strong>{{ attempt.student_name }}</strong>
             · {{ attempt.task_name or 'Thema gelöscht' }}
             {% if attempt.subtask_name %}
-            · {{ attempt.subtask_name|striptags|truncate(60) }}
+            · {{ attempt.subtask_name|aufgabe_titel|striptags|truncate(60) }}
             {% endif %}
         </span>
         <span class="checkpoint-session-meta">
@@ -100,7 +100,8 @@
         <div class="checkpoint-col-calib">
         <p class="checkpoint-zone-head checkpoint-zone-head-calib">
             🔧 Antworten &amp; Kalibrierung
-            <span>zählt <strong>nicht</strong> für die Note — nur zum Nachschärfen der KI-Prompts</span>
+            <span>zählt <strong>nicht</strong> für die Note — nur zum Nachschärfen der KI-Prompts.
+                  Urteil und Notiz speichern sich selbst, kein Speichern nötig.</span>
         </p>
 
         {% for question in entry.questions %}
@@ -303,33 +304,65 @@
 {% endblock %}
 
 {% block scripts %}
-// Per-answer verdicts save individually via AJAX: a teacher scanning a class
-// clicks a lot of these, and a full page reload per click would lose their place
-// in a long list. The session score below stays a normal form POST -- it is the
-// grade, so it gets an explicit Speichern.
+// Per-answer verdicts and notes save individually via AJAX: a teacher scanning a
+// class clicks a lot of these, and a full page reload per click would lose their
+// place in a long list. The session score below stays a normal form POST -- it is
+// the grade, so it gets an explicit Speichern.
+//
+// The note field autosaves on `change` (i.e. on blur, and only when the text
+// actually changed). Before this it was only ever read during a verdict click, so
+// typing a note and scrolling on lost it silently -- and the nearest Speichern
+// button belongs to the other column and never touched it.
 document.querySelectorAll('.checkpoint-verdict').forEach(function(row) {
     var answerId = row.dataset.answerId;
     var status = row.querySelector('.checkpoint-verdict-status');
     var note = row.querySelector('.checkpoint-verdict-note');
+    // Tracks what the server already has, so tabbing out of an untouched field
+    // posts nothing, and typing then immediately clicking a verdict posts once
+    // rather than racing two identical writes.
+    var savedNote = note.value;
+
+    function activeVerdict() {
+        var active = row.querySelector('button[data-verdict].btn-primary');
+        return active ? active.dataset.verdict : '';
+    }
+
+    function save(verdict, doneLabel, onSaved) {
+        var formData = new FormData();
+        formData.append('teacher_verdict', verdict);
+        formData.append('teacher_note', note.value);
+        formData.append('csrf_token', document.querySelector('meta[name="csrf-token"]').content);
+
+        // LLMButton.postForm never rejects -- it resolves {ok:false, message} for
+        // HTTP errors, timeouts and network failures alike -- so there is no .catch
+        // here and the "speichert …" label always gets replaced. The done label is
+        // set before onSaved() for the same reason: a throw in the button
+        // restyling must not strand the row reading "speichert …" forever.
+        status.textContent = 'speichert …';
+        return LLMButton.postForm('/admin/checkpoint-pruefung/antwort/' + answerId + '/urteil', formData)
+            .then(function(data) {
+                if (!data.ok) { status.textContent = '⚠️ ' + data.message; return; }
+                savedNote = note.value;
+                status.textContent = doneLabel;
+                setTimeout(function() { status.textContent = ''; }, 2000);
+                if (onSaved) { onSaved(); }
+            });
+    }
 
     row.querySelectorAll('button[data-verdict]').forEach(function(btn) {
         btn.addEventListener('click', function() {
-            var formData = new FormData();
-            formData.append('teacher_verdict', btn.dataset.verdict);
-            formData.append('teacher_note', note.value);
-            formData.append('csrf_token', document.querySelector('meta[name="csrf-token"]').content);
-
-            LLMButton.postForm('/admin/checkpoint-pruefung/antwort/' + answerId + '/urteil', formData)
-                .then(function(data) {
-                    if (!data.ok) { status.textContent = '⚠️ ' + data.message; return; }
-                    row.querySelectorAll('button[data-verdict]').forEach(function(other) {
-                        other.classList.toggle('btn-primary', other === btn && btn.dataset.verdict !== '');
-                        other.classList.toggle('btn-secondary', !(other === btn && btn.dataset.verdict !== ''));
-                    });
-                    status.textContent = '✓ gespeichert';
-                    setTimeout(function() { status.textContent = ''; }, 2000);
+            save(btn.dataset.verdict, '✓ gespeichert', function() {
+                row.querySelectorAll('button[data-verdict]').forEach(function(other) {
+                    other.classList.toggle('btn-primary', other === btn && btn.dataset.verdict !== '');
+                    other.classList.toggle('btn-secondary', !(other === btn && btn.dataset.verdict !== ''));
                 });
+            });
         });
+    });
+
+    note.addEventListener('change', function() {
+        if (note.value === savedNote) { return; }
+        save(activeVerdict(), '✓ Notiz gespeichert');
     });
 });
 {% endblock %}
