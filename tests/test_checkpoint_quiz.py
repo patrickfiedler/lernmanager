@@ -281,3 +281,71 @@ def test_resubmitting_a_solved_question_does_not_burn_an_attempt(app, client):
                 json={"slug": "redoxreaktionen", "subtask_id": subtask_id})
     attempt = models.get_checkpoint_attempts_for_student(student_id)[0]
     assert attempt["score"] == 3
+
+
+QUIZ_SHORT = {
+    "questions": [
+        {"type": "short_answer", "text": "Erklaere, warum Cl2 die Oxidationszahl 0 hat.",
+         "rubric": "Gleiche Atome, gleiche Elektronegativitaet, Bindungselektronen werden geteilt."},
+    ]
+}
+
+# What a lenient grader writes back: a sentence naming exactly what the answer was
+# missing. Fine for practice, a giveaway in a graded checkpoint.
+LEAKY_FEEDBACK = "Fast richtig -- es fehlt der Hinweis auf die gleiche Elektronegativitaet."
+
+
+def test_checkpoint_answer_response_carries_no_llm_feedback(app, client, monkeypatch):
+    """The LLM's feedback sentence is written for the teacher, never for the student.
+
+    Checkpoint grading deliberately uses a stricter prompt, but that prompt still
+    produces a one-sentence explanation -- and in a retry-until-correct session
+    "here is what your answer was missing" hands over the answer. The sentence is
+    logged to checkpoint_answer (the teacher review page reads it) and dropped from
+    the HTTP response. This test pins the drop: student_checkpoint_answer must
+    return the verdict and the attempt count, nothing else.
+    """
+    import llm_grading
+
+    monkeypatch.setattr(llm_grading, "grade_answer", lambda *a, **kw: {
+        "correct": False, "feedback": LEAKY_FEEDBACK,
+        "source": "llm", "prompt_version": "checkpoint:testhash",
+    })
+
+    student_id, subtask_id = _checkpoint_student(app, quiz=QUIZ_SHORT)
+    _login(client, student_id)
+
+    resp = client.post("/schueler/checkpoint/antwort", json={
+        "slug": "redoxreaktionen", "subtask_id": subtask_id,
+        "question_index": 0, "answer": "Weil es ein Element ist.",
+    })
+
+    assert set(resp.get_json()) == {"correct", "attempts"}
+    assert "Elektronegativitaet" not in resp.get_data(as_text=True)
+
+    # ... but it was produced and kept -- this is a transport-level rule, not the
+    # absence of feedback. If this half fails the test above passes for the wrong
+    # reason (nothing was graded at all).
+    with models.db_session() as conn:
+        logged = conn.execute(
+            "SELECT feedback FROM checkpoint_answer WHERE checkpoint_id = ?", (subtask_id,)
+        ).fetchone()
+    assert logged["feedback"] == LEAKY_FEEDBACK
+
+
+def test_wrong_multiple_choice_response_carries_no_option_text(app, client):
+    """The MC branch of _grade_warmup_answer builds "Richtig war: ..." feedback for
+    warmup, where revealing the answer is the point. Same helper, same checkpoint
+    route -- so the option text must not ride along in the response either.
+    """
+    student_id, subtask_id = _checkpoint_student(app)
+    _login(client, student_id)
+
+    resp = client.post("/schueler/checkpoint/antwort", json={
+        "slug": "redoxreaktionen", "subtask_id": subtask_id,
+        "question_index": 0, "answer": [2],
+    })
+
+    body = resp.get_data(as_text=True)
+    assert set(resp.get_json()) == {"correct", "attempts"}
+    assert "Richtig war" not in body
