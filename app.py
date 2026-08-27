@@ -92,6 +92,30 @@ def aufgabe_label_filter(position, subtasks):
     return str(sum(1 for s in (subtasks or [])[:position] if not s.get('is_intro')))
 
 
+def aufgabe_titel(beschreibung, fallback_length=80):
+    """The human title of an Aufgabe, taken from its leading Markdown heading.
+
+    Aufgabe descriptions follow the project's structured format and open with
+    '### Titel' (see docs/shared/lernmanager/task_json_format.md). Anywhere that
+    text is shown as a plain label the hashes have to come off first -- striptags
+    only removes HTML, so '### Checkpoint Kernladung' rendered verbatim.
+
+    Falls back to the first line for a description that has no heading.
+    """
+    if not beschreibung:
+        return ''
+    heading = re.match(r'^#{1,4}\s+(.+)', beschreibung)
+    if heading:
+        return heading.group(1).strip()
+    return beschreibung.split('\n')[0][:fallback_length]
+
+
+@app.template_filter('aufgabe_titel')
+def aufgabe_titel_filter(beschreibung, fallback_length=80):
+    """Template-side aufgabe_titel(); see there."""
+    return aufgabe_titel(beschreibung, fallback_length)
+
+
 @app.template_filter('json_lines')
 def json_lines_filter(json_str):
     """Render a JSON array of strings as newline-joined text for a textarea."""
@@ -3459,14 +3483,10 @@ def student_dashboard():
             task['completed_subtasks'] = sum(1 for s in required_subtasks if s['erledigt'])
 
             # Find first incomplete subtask name for preview
-            import re as _re
             next_subtask = next((s for s in visible_with_progress if not s['erledigt']), None)
-            if next_subtask and next_subtask.get('beschreibung'):
-                # Extract ### heading as task name, fall back to first line
-                heading = _re.match(r'^#{1,4}\s+(.+)', next_subtask['beschreibung'])
-                task['next_task_preview'] = heading.group(1).strip() if heading else next_subtask['beschreibung'].split('\n')[0][:80]
-            else:
-                task['next_task_preview'] = None
+            task['next_task_preview'] = (
+                aufgabe_titel(next_subtask['beschreibung'])
+                if next_subtask and next_subtask.get('beschreibung') else None)
         tasks_by_klasse[klasse['id']] = task
 
     # Compute next queued topic per class
