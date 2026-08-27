@@ -163,8 +163,12 @@ def _message_text(response):
     return content.strip()
 
 
-def _call_llm(question_text, expected_or_rubric, student_answer, system_prompt=SYSTEM_PROMPT):
+def _call_llm(question_text, expected_or_rubric, student_answer, system_prompt=SYSTEM_PROMPT,
+              timeout=None):
     """Send grading request to LLM and parse JSON response.
+
+    timeout defaults to config.LLM_TIMEOUT; callers grading something slower than a
+    short practice answer pass their own (see grade_answer).
 
     Returns parsed dict {"correct": bool, "feedback": str} or None on failure.
     """
@@ -184,7 +188,7 @@ def _call_llm(question_text, expected_or_rubric, student_answer, system_prompt=S
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
-        timeout=config.LLM_TIMEOUT,
+        timeout=config.LLM_TIMEOUT if timeout is None else timeout,
         **_reasoning_kwargs(),
     )
     text = _message_text(response)
@@ -371,11 +375,17 @@ def grade_answer(question_text, expected_or_rubric, student_answer, student_id=N
 
     # checkpoint_quiz feeds a real grade (Chemie Kern-Sperre/Punktekonto, or an
     # equivalent for another subject reusing this tag) -- grade it against the
-    # stricter, less-lenient prompt rather than the formative-practice default.
-    system_prompt = CHECKPOINT_SYSTEM_PROMPT if usage_tag == 'checkpoint_quiz' else SYSTEM_PROMPT
+    # stricter, less-lenient prompt rather than the formative-practice default,
+    # and give it the longer timeout: the answers are full explanations, and a
+    # timeout here burns an attempt instead of just delaying a practice retry.
+    if usage_tag == 'checkpoint_quiz':
+        system_prompt, timeout = CHECKPOINT_SYSTEM_PROMPT, config.LLM_CHECKPOINT_TIMEOUT
+    else:
+        system_prompt, timeout = SYSTEM_PROMPT, config.LLM_TIMEOUT
 
     try:
-        llm_response = _call_llm(question_text, expected_or_rubric, student_answer, system_prompt)
+        llm_response = _call_llm(question_text, expected_or_rubric, student_answer,
+                                 system_prompt, timeout)
         if llm_response is None:
             print(f"LLM grading ({usage_tag}): response was not valid JSON", file=sys.stderr)
             return fallback

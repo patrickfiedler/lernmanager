@@ -72,6 +72,12 @@ LLM_API_KEY = os.environ.get('LLM_API_KEY', '')
 LLM_BASE_URL = os.environ.get('LLM_BASE_URL', None)
 LLM_MODEL = os.environ.get('LLM_MODEL', 'Qwen/Qwen3-32B-FP8')
 LLM_TIMEOUT = _env_int('LLM_TIMEOUT', 5)  # seconds (quiz grading — short answers)
+# Checkpoint answers are longer, multi-sentence explanations graded against the
+# stricter CHECKPOINT_SYSTEM_PROMPT, and they feed a real grade -- a timeout there
+# costs an attempt rather than a practice retry, so they get more room than the 5s
+# formative-quiz budget. Checkpoints are answered one at a time over AJAX behind a
+# visible wait state, so a slower ceiling costs one spinner, not a stalled page.
+LLM_CHECKPOINT_TIMEOUT = _env_int('LLM_CHECKPOINT_TIMEOUT', 15)
 LLM_ARTIFACT_TIMEOUT = _env_int('LLM_ARTIFACT_TIMEOUT', 60)  # seconds (artifact checklist — up to 20 criteria)
 # The artifact check must finish inside nginx's proxy_read_timeout, or nginx
 # hands the student a raw 504 instead of the app's own "KI-Feedback nicht
