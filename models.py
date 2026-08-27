@@ -3111,7 +3111,8 @@ def _advance_to_next_subtask_internal(conn, student_task_id, current_subtask_id)
                 WHERE student_task_id = ? AND subtask_id = ? AND bestanden = 1
                 UNION
                 SELECT 1 FROM checkpoint_attempt
-                WHERE checkpoint_id = ? AND student_id = (SELECT student_id FROM student_task WHERE id = ?)
+                WHERE checkpoint_id = ? AND superseded_at IS NULL
+                AND student_id = (SELECT student_id FROM student_task WHERE id = ?)
                 LIMIT 1
             ''', (student_task_id, subtask_id, subtask_id, student_task_id)).fetchone()
             if not quiz_passed:
@@ -3237,7 +3238,8 @@ def check_task_completion(student_task_id):
                         WHERE student_task_id = ? AND subtask_id = ? AND bestanden = 1
                         UNION
                         SELECT 1 FROM checkpoint_attempt
-                        WHERE checkpoint_id = ? AND student_id = (SELECT student_id FROM student_task WHERE id = ?)
+                        WHERE checkpoint_id = ? AND superseded_at IS NULL
+                        AND student_id = (SELECT student_id FROM student_task WHERE id = ?)
                         LIMIT 1
                     ''', (student_task_id, sub['id'], sub['id'], student_task_id)).fetchone()
                     if not quiz_passed:
