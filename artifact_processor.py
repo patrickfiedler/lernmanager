@@ -100,6 +100,22 @@ def render_text(blocks: list) -> str:
 
 # --- .pptx extraction ---
 
+def _ooxml_alt_texts(elem) -> list:
+    """Alt text on OOXML drawings.
+
+    Word puts it on <wp:docPr descr="...">, PowerPoint on <p:cNvPr descr="...">.
+    Both are the accessibility description a student is asked to write, and both
+    were invisible to every check.
+    """
+    out = []
+    for e in elem.iter():
+        if e.tag.split('}')[-1] in ('docPr', 'cNvPr'):
+            descr = (e.get('descr') or '').strip()
+            if descr:
+                out.append(descr)
+    return out
+
+
 def _pptx_is_picture(shape) -> bool:
     """A shape that carries actual image bytes -- Picture, or a placeholder
     filled with one. Asking for .image is the reliable test; shape_type does not
@@ -142,6 +158,8 @@ def _pptx_shape_blocks(shapes, blocks: list, index: int, title_elem):
     `.//text:p` sweep caught them, which is how the two formats disagreed.
     """
     for shape in shapes:
+        for descr in _ooxml_alt_texts(shape._element):
+            blocks.append(block(descr, 'slide', 'alt-text', index=index))
         if _pptx_is_picture(shape):
             blocks.append(block('', 'slide', 'image', index=index))
             continue
@@ -229,6 +247,11 @@ def _odp_collect_blocks(elem, blocks, index, region, kind):
             # ZIP entries under Pictures/ instead counts orphans: this very
             # template ships a 128 KB JPEG referenced only from manifest.xml.
             blocks.append(block('', region, 'image', index=index))
+        elif tag == 'desc':
+            # ODF writes alt text as <svg:desc> inside the frame.
+            text = (child.text or '').strip()
+            if text:
+                blocks.append(block(text, region, 'alt-text', index=index))
         elif tag == 'p':
             text = _odf_line_text(child).strip()
             if text:
@@ -408,8 +431,10 @@ _V_IMAGEDATA = '{urn:schemas-microsoft-com:vml}imagedata'
 
 
 def _docx_image_blocks(root) -> list:
-    return [block('', 'body', 'image')
-            for e in root.iter() if e.tag in (_A_BLIP, _V_IMAGEDATA)]
+    blocks = [block('', 'body', 'image')
+              for e in root.iter() if e.tag in (_A_BLIP, _V_IMAGEDATA)]
+    blocks.extend(block(descr, 'body', 'alt-text') for descr in _ooxml_alt_texts(root))
+    return blocks
 
 
 def _docx_kind(para, parents) -> str:
@@ -514,6 +539,9 @@ def extract_odt_blocks(file_bytes: bytes) -> list:
         # for a document, only the count does.
         blocks.extend(block('', 'body', 'image')
                       for e in body.iter() if e.tag.split('}')[-1] == 'image')
+        blocks.extend(block(e.text.strip(), 'body', 'alt-text')
+                      for e in body.iter()
+                      if e.tag.split('}')[-1] == 'desc' and (e.text or '').strip())
     # ODF keeps headers and footers in styles.xml, under the master page --
     # not in content.xml with the rest of the document.
     if styles is not None:
