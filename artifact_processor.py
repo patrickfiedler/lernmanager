@@ -12,24 +12,102 @@ import zipfile
 import xml.etree.ElementTree as ET
 
 
+
+# --- Block contract ---
+#
+# Extractors report *blocks* -- one line of text plus where it came from -- so a
+# check can ask "does this string appear in a heading" instead of only "does it
+# appear somewhere". Everything the old flat-string extraction knew and threw
+# away (list item, speaker note, slide number) survives here.
+#
+#   region: body | slide | notes | header | footer | alt-text | comment
+#   kind:   heading | paragraph | list-item | table-cell | title | caption
+#           | alt-text | image
+#   index:  slide/page number, where the format has one
+#   level:  1-6, on kind='heading' only
+#
+# Deliberately not modelled: nesting depth, style names, geometry, formatting.
+# Nothing needs them, and each would be a surface to maintain.
+
+REGIONS = ('body', 'slide', 'notes', 'header', 'footer', 'alt-text', 'comment')
+KINDS = ('heading', 'paragraph', 'list-item', 'table-cell', 'title', 'caption',
+         'alt-text', 'image')
+
+
+def block(text: str, region: str = 'body', kind: str = 'paragraph',
+          index: int = None, level: int = None) -> dict:
+    """Build one block. Optional keys stay absent rather than None."""
+    b = {'text': text, 'region': region, 'kind': kind}
+    if index is not None:
+        b['index'] = index
+    if level is not None:
+        b['level'] = level
+    return b
+
+
+def _render_line(b: dict) -> str:
+    """One block as one line of the flat string: headings keep their # markers."""
+    if b['kind'] == 'heading':
+        return f"{'#' * min(b.get('level', 1), 6)} {b['text']}"
+    return b['text']
+
+
+def render_text(blocks: list) -> str:
+    """Render blocks back into the flat string the LLM prompt and the student's
+    transparency view have always seen.
+
+    This is the migration seam: every artifact grade so far was calibrated
+    against this exact string, so it must not drift.
+
+    Documents are one line per block. Presentations open each slide with a
+    [Folie N] marker and are separated by a blank line; a slide that produced no
+    blocks gets no marker, because the old extractor skipped it too.
+    """
+    sections = []
+    lines = []
+    current = None  # slide number of the section being built, None for body text
+    for b in blocks:
+        index = b.get('index')
+        if index != current:
+            if lines:
+                sections.append('\n'.join(lines))
+            lines = [f"[Folie {index}]"] if index is not None else []
+            current = index
+        lines.append(_render_line(b))
+    if lines:
+        sections.append('\n'.join(lines))
+    return '\n\n'.join(sections)
+
+
 # --- .pptx extraction ---
+
+def extract_pptx_blocks(file_bytes: bytes) -> list:
+    """Blocks for a .pptx file, one per non-empty paragraph, in slide order."""
+    from pptx import Presentation
+    prs = Presentation(io.BytesIO(file_bytes))
+    blocks = []
+    for i, slide in enumerate(prs.slides, start=1):
+        # python-pptx hands out a fresh proxy object on every .title access, so
+        # compare the underlying XML element, not the wrapper.
+        title = slide.shapes.title
+        title_elem = title._element if title is not None else None
+        for shape in slide.shapes:
+            if not shape.has_text_frame:
+                continue
+            # kind says where the text came from, not what it means: every
+            # paragraph of the title placeholder is a title block, even when the
+            # author typed a whole slide's worth of lines into it.
+            kind = 'title' if shape._element is title_elem else 'paragraph'
+            for para in shape.text_frame.paragraphs:
+                line = para.text.strip()
+                if line:
+                    blocks.append(block(line, 'slide', kind, index=i))
+    return blocks
+
 
 def extract_pptx(file_bytes: bytes) -> str:
     """Extract slide text from a .pptx file. Returns one section per slide."""
-    from pptx import Presentation
-    prs = Presentation(io.BytesIO(file_bytes))
-    sections = []
-    for i, slide in enumerate(prs.slides, start=1):
-        texts = []
-        for shape in slide.shapes:
-            if shape.has_text_frame:
-                for para in shape.text_frame.paragraphs:
-                    line = para.text.strip()
-                    if line:
-                        texts.append(line)
-        if texts:
-            sections.append(f"[Folie {i}]\n" + "\n".join(texts))
-    return "\n\n".join(sections)
+    return render_text(extract_pptx_blocks(file_bytes))
 
 
 def strip_pptx_metadata(file_bytes: bytes) -> bytes:
@@ -59,35 +137,56 @@ def strip_pptx_metadata(file_bytes: bytes) -> bytes:
 
 # --- .odp extraction ---
 
-def extract_odp(file_bytes: bytes) -> str:
-    """Extract slide text from an .odp file (ODF Presentation).
+_ODP_NS = {
+    'text':         'urn:oasis:names:tc:opendocument:xmlns:text:1.0',
+    'draw':         'urn:oasis:names:tc:opendocument:xmlns:drawing:1.0',
+    'presentation': 'urn:oasis:names:tc:opendocument:xmlns:presentation:1.0',
+    'office':       'urn:oasis:names:tc:opendocument:xmlns:office:1.0',
+}
 
-    .odp is a ZIP archive. Text lives in content.xml under
-    <presentation:page> → <draw:frame> → <draw:text-box> → <text:p> elements.
+
+def _odp_collect_blocks(elem, blocks, index, region, kind):
+    """Walk one <draw:page>, carrying region/kind context down the tree.
+
+    A <presentation:notes> child switches the region -- everything inside it is
+    speaker notes, not slide text. A <draw:frame presentation:class="title">
+    switches the kind. The nearest enclosing container wins.
     """
-    _NS = {
-        'text': 'urn:oasis:names:tc:opendocument:xmlns:text:1.0',
-        'draw': 'urn:oasis:names:tc:opendocument:xmlns:drawing:1.0',
-        'presentation': 'urn:oasis:names:tc:opendocument:xmlns:presentation:2.0',
-        'office': 'urn:oasis:names:tc:opendocument:xmlns:office:1.0',
-    }
-    with zipfile.ZipFile(io.BytesIO(file_bytes)) as z:
-        content_xml = z.read('content.xml')
+    for child in elem:
+        tag = child.tag.split('}')[-1]
+        if tag == 'notes':
+            _odp_collect_blocks(child, blocks, index, 'notes', 'paragraph')
+        elif tag == 'frame':
+            cls = child.get('{%(presentation)s}class' % _ODP_NS)
+            _odp_collect_blocks(child, blocks, index, region,
+                                'title' if cls == 'title' else kind)
+        elif tag == 'list-item':
+            _odp_collect_blocks(child, blocks, index, region, 'list-item')
+        elif tag == 'p':
+            text = _odf_line_text(child).strip()
+            if text:
+                blocks.append(block(text, region, kind, index=index))
+        else:
+            _odp_collect_blocks(child, blocks, index, region, kind)
 
-    root = ET.fromstring(content_xml)
-    # Slides are <draw:page> elements inside <office:presentation>
-    pages = root.findall('.//{%s}page' % _NS['draw'])
-    sections = []
-    for i, page in enumerate(pages, start=1):
-        texts = []
-        for para in page.findall('.//{%s}p' % _NS['text']):
-            # Collect all text content (spans, etc.)
-            line = ''.join(para.itertext()).strip()
-            if line:
-                texts.append(line)
-        if texts:
-            sections.append(f"[Folie {i}]\n" + "\n".join(texts))
-    return "\n\n".join(sections)
+
+def extract_odp_blocks(file_bytes: bytes) -> list:
+    """Blocks for an .odp file (ODF Presentation).
+
+    .odp is a ZIP archive. Slides are <draw:page> elements in content.xml;
+    text sits under <draw:frame> → <draw:text-box> → <text:p>.
+    """
+    with zipfile.ZipFile(io.BytesIO(file_bytes)) as z:
+        root = ET.fromstring(z.read('content.xml'))
+    blocks = []
+    for i, page in enumerate(root.findall('.//{%(draw)s}page' % _ODP_NS), start=1):
+        _odp_collect_blocks(page, blocks, i, 'slide', 'paragraph')
+    return blocks
+
+
+def extract_odp(file_bytes: bytes) -> str:
+    """Extract slide text from an .odp file (ODF Presentation)."""
+    return render_text(extract_odp_blocks(file_bytes))
 
 
 # --- Pseudonymization ---
@@ -158,17 +257,25 @@ def _class_name_patterns(class_name: str) -> list[str]:
 
 # --- .docx extraction ---
 
-def extract_docx(file_bytes: bytes) -> str:
-    """Extract text from a .docx file, preserving heading structure with # markers.
+_W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+
+
+def extract_docx_blocks(file_bytes: bytes) -> list:
+    """Blocks for a .docx document.
 
     .docx is a ZIP archive. All body text lives in word/document.xml as <w:p>
-    paragraphs. Headings are identified by <w:pStyle w:val="Heading1"> (English
-    Word) or <w:pStyle w:val="berschrift1"> (German Word, Ü stripped in XML).
+    paragraphs -- including the ones inside table cells, which is why a flat
+    iter() over <w:p> already reaches everything. Headings are identified by
+    <w:pStyle w:val="Heading1"> (English Word) or "berschrift1" (German Word,
+    the Ü is stripped in the XML); 'Title'/'Titel' is what add_heading(level=0)
+    sets and carries no digit, so it falls back to level 1.
     """
-    _W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
     with zipfile.ZipFile(io.BytesIO(file_bytes)) as z:
         root = ET.fromstring(z.read('word/document.xml'))
-    lines = []
+    # A paragraph does not know its ancestors, so build the reverse map once --
+    # needed to tell a table cell's paragraph from a body paragraph.
+    parents = {child: parent for parent in root.iter() for child in parent}
+    blocks = []
     for para in root.iter(f'{{{_W}}}p'):
         pstyle = para.find(f'{{{_W}}}pPr/{{{_W}}}pStyle')
         style_val = pstyle.get(f'{{{_W}}}val', '') if pstyle is not None else ''
@@ -176,33 +283,54 @@ def extract_docx(file_bytes: bytes) -> str:
         if not text:
             continue
         sl = style_val.lower()
-        # 'Title'/'Titel' is what add_heading(level=0) sets -- it carries no
-        # digit, so the level calculation below falls back to 1.
         if sl.startswith('heading') or sl.startswith('berschrift') or sl in ('title', 'titel'):
             level = min(int(''.join(c for c in style_val if c.isdigit()) or '1'), 6)
-            lines.append(f"{'#' * level} {text}")
+            blocks.append(block(text, 'body', 'heading', level=level))
         else:
-            lines.append(text)
-    return '\n'.join(lines)
+            blocks.append(block(text, 'body', _docx_kind(para, parents)))
+    return blocks
+
+
+def _docx_kind(para, parents) -> str:
+    """Nearest enclosing container decides: numbering makes a list item, and a
+    <w:tc> ancestor makes a table cell."""
+    if para.find(f'{{{_W}}}pPr/{{{_W}}}numPr') is not None:
+        return 'list-item'
+    node = parents.get(para)
+    while node is not None:
+        if node.tag == f'{{{_W}}}tc':
+            return 'table-cell'
+        node = parents.get(node)
+    return 'paragraph'
+
+
+def extract_docx(file_bytes: bytes) -> str:
+    """Extract text from a .docx document, preserving heading structure."""
+    return render_text(extract_docx_blocks(file_bytes))
 
 
 # --- .odt extraction ---
 
+_ODF_TEXT_NS = 'urn:oasis:names:tc:opendocument:xmlns:text:1.0'
+_ODF_OFFICE_NS = 'urn:oasis:names:tc:opendocument:xmlns:office:1.0'
+
 # ODF wraps text in containers instead of keeping one flat paragraph stream the
 # way .docx does. Only the leaf text:h / text:p elements carry text, so a walk
 # that stops at the direct children of <office:text> loses every list and table.
-_ODT_CONTAINERS = {
-    'list', 'list-item', 'list-header',
-    'table', 'table-row', 'table-cell', 'table-header-rows',
-    'section',
+# The value is the kind a paragraph inside that container gets.
+_ODF_CONTAINERS = {
+    'list': None, 'list-header': None, 'section': None,
+    'table': None, 'table-row': None, 'table-header-rows': None,
+    'list-item': 'list-item',
+    'table-cell': 'table-cell',
 }
 
-# LibreOffice's "Titel" is a styled paragraph, not a text:h -- same trap as
-# Word's Title style handled in extract_docx() above.
-_ODT_TITLE_STYLES = {'title', 'titel'}
+# LibreOffice's "Titel" is a styled paragraph, not a text:h element -- the same
+# trap as Word's Title style handled in extract_docx_blocks() above.
+_ODF_TITLE_STYLES = {'title', 'titel'}
 
 
-def _odt_line_text(elem, ns) -> str:
+def _odf_line_text(elem) -> str:
     """Text of one ODF paragraph, expanding the elements ODF uses for whitespace.
 
     <text:s text:c="3"/> is a run of three spaces and <text:tab/> a tab.
@@ -213,56 +341,55 @@ def _odt_line_text(elem, ns) -> str:
     for child in elem:
         tag = child.tag.split('}')[-1]
         if tag == 's':
-            parts.append(' ' * int(child.get('{%(text)s}c' % ns, '1') or 1))
+            parts.append(' ' * int(child.get('{%s}c' % _ODF_TEXT_NS, '1') or 1))
         elif tag == 'tab':
             parts.append('\t')
         else:
-            parts.append(_odt_line_text(child, ns))
+            parts.append(_odf_line_text(child))
         parts.append(child.tail or '')
     return ''.join(parts)
 
 
-def _odt_collect_lines(elem, ns, lines):
-    """Walk ODF body content, descending into containers that hold paragraphs."""
+def _odt_collect_blocks(elem, blocks, kind):
+    """Walk ODF body content, descending into the containers that hold paragraphs."""
     for child in elem:
         tag = child.tag.split('}')[-1]
-        if tag in _ODT_CONTAINERS:
-            _odt_collect_lines(child, ns, lines)
+        if tag in _ODF_CONTAINERS:
+            _odt_collect_blocks(child, blocks, _ODF_CONTAINERS[tag] or kind)
             continue
         if tag not in ('h', 'p'):
             continue
-        text = _odt_line_text(child, ns).strip()
+        text = _odf_line_text(child).strip()
         if not text:
             continue
         if tag == 'h':
-            level = min(int(child.get('{%(text)s}outline-level' % ns, '1') or 1), 6)
-            lines.append(f"{'#' * level} {text}")
-        elif (child.get('{%(text)s}style-name' % ns) or '').lower() in _ODT_TITLE_STYLES:
-            lines.append(f"# {text}")
+            level = min(int(child.get('{%s}outline-level' % _ODF_TEXT_NS, '1') or 1), 6)
+            blocks.append(block(text, 'body', 'heading', level=level))
+        elif (child.get('{%s}style-name' % _ODF_TEXT_NS) or '').lower() in _ODF_TITLE_STYLES:
+            blocks.append(block(text, 'body', 'heading', level=1))
         else:
-            lines.append(text)
+            blocks.append(block(text, 'body', kind))
 
 
-def extract_odt(file_bytes: bytes) -> str:
-    """Extract text from an .odt document, preserving heading structure.
+def extract_odt_blocks(file_bytes: bytes) -> list:
+    """Blocks for an .odt document.
 
     .odt is a ZIP archive. Text lives in content.xml under <office:text>.
     Headings use <text:h text:outline-level="N">, paragraphs use <text:p>,
-    and both can sit inside lists or table cells (see _ODT_CONTAINERS).
-    Reference: extract_odp() above uses the same ZIP + content.xml pattern.
-    Reference: extract_docx() above uses # markers for heading levels.
+    and both can sit inside lists or table cells (see _ODF_CONTAINERS).
     """
-    _NS = {
-        'text':   'urn:oasis:names:tc:opendocument:xmlns:text:1.0',
-        'office': 'urn:oasis:names:tc:opendocument:xmlns:office:1.0',
-    }
     with zipfile.ZipFile(io.BytesIO(file_bytes)) as z:
         root = ET.fromstring(z.read('content.xml'))
-    body = root.find('.//{%(office)s}text' % _NS)
-    lines = []
+    body = root.find('.//{%s}text' % _ODF_OFFICE_NS)
+    blocks = []
     if body is not None:
-        _odt_collect_lines(body, _NS, lines)
-    return '\n'.join(lines)
+        _odt_collect_blocks(body, blocks, 'paragraph')
+    return blocks
+
+
+def extract_odt(file_bytes: bytes) -> str:
+    """Extract text from an .odt document, preserving heading structure."""
+    return render_text(extract_odt_blocks(file_bytes))
 
 
 # --- .sb3 (Scratch) extraction ---
@@ -384,12 +511,36 @@ ACCEPTED_FORMATS = {
     '.sb3':  extract_sb3,
 }
 
+_BLOCK_EXTRACTORS = {
+    '.pptx': extract_pptx_blocks,
+    '.odp':  extract_odp_blocks,
+    '.docx': extract_docx_blocks,
+    '.odt':  extract_odt_blocks,
+}
 
-def extract_artifact(file_bytes: bytes, filename: str) -> str:
-    """Extract text from a supported artifact file. Raises ValueError for unknown formats."""
-    ext = '.' + filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
+
+def _artifact_ext(filename: str) -> str:
+    return '.' + filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
+
+
+def extract_artifact_blocks(file_bytes: bytes, filename: str) -> list:
+    """Blocks for a supported artifact file. Raises ValueError for unknown formats.
+
+    .sb3 is the exception: a Scratch project has no text to read, so
+    extract_sb3() writes a prose summary of the project instead. It comes back
+    as a single block so callers never have to special-case the dispatch.
+    """
+    ext = _artifact_ext(filename)
     if ext not in ACCEPTED_FORMATS:
         raise ValueError(f"Unsupported format: {ext!r}. Accepted: {', '.join(ACCEPTED_FORMATS)}")
     if ext == '.sb3':
+        return [block(extract_sb3(file_bytes, filename), 'body', 'paragraph')]
+    return _BLOCK_EXTRACTORS[ext](file_bytes)
+
+
+def extract_artifact(file_bytes: bytes, filename: str) -> str:
+    """Extract text from a supported artifact file. Raises ValueError for unknown formats."""
+    ext = _artifact_ext(filename)
+    if ext == '.sb3':
         return extract_sb3(file_bytes, filename)
-    return ACCEPTED_FORMATS[ext](file_bytes)
+    return render_text(extract_artifact_blocks(file_bytes, filename))

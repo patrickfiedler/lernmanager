@@ -185,7 +185,8 @@ def _check_document(file_bytes: bytes, ext: str, config: dict) -> dict:
     """
     import artifact_processor
     try:
-        extracted = artifact_processor.extract_docx(file_bytes) if ext == '.docx' else artifact_processor.extract_odt(file_bytes)
+        blocks = (artifact_processor.extract_docx_blocks(file_bytes) if ext == '.docx'
+                  else artifact_processor.extract_odt_blocks(file_bytes))
     except Exception:
         return {'passed': False, 'message': 'Datei konnte nicht gelesen werden', 'details': ['Ungültige Datei']}
 
@@ -195,7 +196,11 @@ def _check_document(file_bytes: bytes, ext: str, config: dict) -> dict:
     threshold = config.get('title_match_threshold', 0.6)
     min_words = config.get('min_words', 0)
     if min_words:
-        word_count = len(extracted.split())
+        # Counted on the rendered string, not on the block texts: the '#'
+        # heading markers count as words there, and every min_words value MBI
+        # authored so far was tuned against that. Fixing the wart belongs with
+        # min_added_words, not here.
+        word_count = len(artifact_processor.render_text(blocks).split())
         if word_count < min_words:
             warnings.append("wenig Text vorhanden")
         else:
@@ -218,7 +223,10 @@ def _check_document(file_bytes: bytes, ext: str, config: dict) -> dict:
         else:
             matches.append(f"{image_count} Bild{'er' if image_count != 1 else ''} ✓")
 
-    heading_texts = [l.lstrip('#').strip() for l in extracted.splitlines() if l.startswith('#')]
+    # Headings are now a property of the block, not a '#' prefix parsed back out
+    # of a flat string -- which is what made this check heading-only in the
+    # first place, and what made it blind to a heading inside a list.
+    heading_texts = [b['text'] for b in blocks if b['kind'] == 'heading']
     for req in config.get('required_headings', []):
         if max((_fuzzy_match(req, h) for h in heading_texts), default=0) < threshold:
             issues.append(f'Abschnitt fehlt: „{req}"')
