@@ -94,12 +94,28 @@
             ✓ Alle {{ correctable_count }} Doppelklicks korrigieren
         </button>
     </form>
-    {% elif correctable_count %}
-    {# There is something to correct but no filter to scope it to. Say so instead
-       of rendering nothing: hiding the button made the badge above advertise a
+    {% endif %}
+
+    {# The other half: flagged sessions whose score min() cannot move. They have no
+       correction to apply and used to have no action at all. #}
+    {% if dismissible_count and (klasse_id or student_id or checkpoint_id) %}
+    <form method="POST" action="{{ url_for('admin_checkpoint_correct_double_clicks') }}"
+          onsubmit="return confirm('{{ dismissible_count }} Doppelklick-Sitzung(en) als geprüft abhaken?\n\nKeine Note ändert sich — sie bekommen die Notiz \'Doppelklick, verworfen\' und den Prüfvermerk und verschwinden damit aus \'nur ungeprüfte\'. Pro Sitzung mit \'Prüfung zurücknehmen\' widerrufbar.');">
+        {{ filter_fields() }}
+        <input type="hidden" name="modus" value="abhaken">
+        <button type="submit" class="btn btn-secondary btn-sm"
+                title="Ohne Notenänderung: Notiz setzen und als geprüft markieren">
+            ✓ {{ dismissible_count }} Doppelklicks als geprüft abhaken
+        </button>
+    </form>
+    {% endif %}
+
+    {% if (correctable_count or dismissible_count) and not (klasse_id or student_id or checkpoint_id) %}
+    {# Something to act on but no filter to scope it to. Say so instead of
+       rendering nothing: hiding the buttons made the badge above advertise a
        problem with no visible way to act on it. #}
     <span class="text-muted" style="font-size: 0.85rem; align-self: center;">
-        {{ correctable_count }} Doppelklick-Sitzung(en) wären korrigierbar — dafür
+        {{ correctable_count }} korrigierbar, {{ dismissible_count }} abhakbar — dafür
         zuerst nach Klasse, Schüler oder Checkpoint filtern.
     </span>
     {% endif %}
@@ -338,6 +354,19 @@
            "batch" of one would just be a confusing second way to press it.
            Same route as the top bar with student_id pinned, so the "must be
            filtered" guard is satisfied even on an unfiltered page. #}
+        {% set student_dismissible = dismissible_by_student.get(attempt.student_id, 0) %}
+        {% if student_dismissible > 1 %}
+        <form method="POST" action="{{ url_for('admin_checkpoint_correct_double_clicks') }}"
+              class="checkpoint-reset-row"
+              onsubmit="return confirm('Alle {{ student_dismissible }} Doppelklick-Sitzungen von ' + {{ attempt.student_name|tojson }} + ' als geprüft abhaken?\n\nKeine Note ändert sich.');">
+            {{ filter_fields(attempt.student_id) }}
+            <input type="hidden" name="modus" value="abhaken">
+            <button type="submit" class="btn btn-secondary btn-sm"
+                    title="Ohne Notenänderung: Notiz setzen und als geprüft markieren">
+                ✓ {{ student_dismissible }} Doppelklicks von {{ attempt.vorname }} abhaken
+            </button>
+        </form>
+        {% endif %}
         {% set student_correctable = correctable_by_student.get(attempt.student_id, 0) %}
         {% if student_correctable > 1 %}
         <form method="POST" action="{{ url_for('admin_checkpoint_correct_double_clicks') }}"

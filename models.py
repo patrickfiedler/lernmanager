@@ -3543,7 +3543,13 @@ def get_checkpoint_reviews(klasse_id=None, student_id=None, date_from=None,
         sql += ' AND ca.timestamp <= ?'
         params.append(f'{date_to} 23:59:59')
     if unreviewed_only:
-        sql += ' AND ca.teacher_score IS NULL'
+        # "Dealt with" is either a grade override or an explicit review mark. It
+        # used to be the score alone, which predates reviewed_at (migrate_049) and
+        # left two states stuck in the queue forever: "I looked and the LLM was
+        # right" (the most common review outcome, and the state migrate_049 exists
+        # to make storable), and a session checked off without a grade change.
+        # Widened, not swapped -- anything the old condition hid stays hidden.
+        sql += ' AND ca.teacher_score IS NULL AND ca.reviewed_at IS NULL'
     sql += ' ORDER BY ca.timestamp DESC LIMIT ?'
     params.append(limit)
 
@@ -3708,6 +3714,40 @@ def bulk_correct_double_click_attempts(corrections, note, admin_id):
             """, (score, note, stamp, admin_id, int(attempt_id)))
             changed += cursor.rowcount
         return changed
+
+
+def bulk_mark_double_click_reviewed(attempt_ids, note, admin_id):
+    """Mark flagged sessions checked without touching the grade.
+
+    The other half of bulk_correct_double_click_attempts. A session score is the
+    min() across its questions (see app._score_checkpoint_session), so a
+    double-click that lifts one question from 2 to 3 changes nothing when another
+    question scored 0 or needed a hint -- which is the common case, not the edge
+    one. Those sessions have no correction to apply but still sit in the teacher's
+    open queue with a Doppelklick badge on them.
+
+    So: the note and the review mark, never a score. Reversible per session with
+    "Prüfung zurücknehmen", same as any other review.
+
+    Already-reviewed and superseded rows are skipped -- the first is out of the
+    queue already, the second no longer counts.
+    """
+    ids = [int(i) for i in attempt_ids]
+    if not ids:
+        return 0
+    placeholders = ','.join('?' * len(ids))
+    with db_session() as conn:
+        cursor = conn.execute(f"""
+            UPDATE checkpoint_attempt
+            SET teacher_note = CASE
+                    WHEN teacher_note IS NULL OR TRIM(teacher_note) = '' THEN ?
+                    ELSE teacher_note END,
+                reviewed_at = ?, reviewed_by = ?
+            WHERE id IN ({placeholders})
+              AND superseded_at IS NULL
+              AND reviewed_at IS NULL
+        """, [note, now_local(), admin_id] + ids)
+        return cursor.rowcount
 
 
 def bulk_note_checkpoint_answers(answer_ids, note):

@@ -2924,6 +2924,16 @@ def _build_checkpoint_sessions(attempts):
     return sessions
 
 
+def _count_by_student(sessions, attempt_ids):
+    """How many of `attempt_ids` belong to each student, for the per-student buttons."""
+    counts = {}
+    for entry in sessions:
+        if entry['attempt']['id'] in attempt_ids:
+            key = entry['attempt']['student_id']
+            counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
 @app.route('/admin/checkpoint-pruefung')
 @admin_required
 def admin_checkpoint_pruefung():
@@ -2931,16 +2941,15 @@ def admin_checkpoint_pruefung():
     filters = _checkpoint_filters()
     sessions = _build_checkpoint_sessions(models.get_checkpoint_reviews(**filters))
 
-    # What a batch correction would actually touch, counted here so the buttons can
-    # name a real number instead of the broader "has duplicates" badge -- the two
-    # differ whenever a flagged duplicate would not move the score.
+    # What each batch button would actually touch, counted here so both can name a
+    # real number instead of the broader "has duplicates" badge. The three numbers
+    # differ on purpose: a flagged duplicate that cannot move the score is
+    # abhakbar, not korrigierbar.
     correctable, _ = _double_click_corrections(sessions)
+    dismissible, _ = _double_click_dismissals(sessions)
     correctable_ids = {attempt_id for attempt_id, _score in correctable}
-    correctable_by_student = {}
-    for entry in sessions:
-        if entry['attempt']['id'] in correctable_ids:
-            key = entry['attempt']['student_id']
-            correctable_by_student[key] = correctable_by_student.get(key, 0) + 1
+    correctable_by_student = _count_by_student(sessions, correctable_ids)
+    dismissible_by_student = _count_by_student(sessions, set(dismissible))
 
     return render_template('admin/checkpoint_pruefung.html',
                            sessions=sessions,
@@ -2958,7 +2967,9 @@ def admin_checkpoint_pruefung():
                                                 if not s['attempt'].get('superseded_at')),
                            duplicate_count=sum(1 for s in sessions if s['has_duplicates']),
                            correctable_count=len(correctable),
-                           correctable_by_student=correctable_by_student)
+                           correctable_by_student=correctable_by_student,
+                           dismissible_count=len(dismissible),
+                           dismissible_by_student=dismissible_by_student)
 
 
 @app.route('/admin/checkpoint-pruefung/<int:attempt_id>/bewerten', methods=['POST'])
@@ -3085,6 +3096,46 @@ def _double_click_corrections(sessions):
     return corrections, answer_ids
 
 
+def _double_click_dismissals(sessions):
+    """Flagged sessions the correction button can do nothing for.
+
+    Returns (attempt_ids, answer_ids).
+
+    A session score is min() across its questions, so lifting one question from 2
+    to 3 moves nothing when another question scored 0 or needed a hint. Those
+    sessions are flagged, uncorrectable, and were left with no action at all --
+    they just sat in the open queue wearing a Doppelklick badge (found in
+    production 2026-08-28: the correction button counted 0 while the badge counted
+    many). This is the "abhaken" half: note and review mark, no grade.
+
+    Skips what is already dealt with (reviewed) or no longer counts (superseded),
+    and anything the correction button owns (`suggested_score is not None`).
+    """
+    attempt_ids, answer_ids = [], []
+    for entry in sessions:
+        attempt = entry['attempt']
+        if not entry['has_duplicates'] or attempt.get('superseded_at'):
+            continue
+        if entry['suggested_score'] is not None or attempt.get('reviewed_at'):
+            continue
+        attempt_ids.append(attempt['id'])
+        for question in entry['questions']:
+            answer_ids.extend(question['duplicate_ids'])
+    return attempt_ids, answer_ids
+
+
+def _apply_double_click_dismissals(filters):
+    """Run the abhaken batch over one filter selection. Returns the count."""
+    filters['include_superseded'] = False
+    sessions = _build_checkpoint_sessions(models.get_checkpoint_reviews(**filters))
+    attempt_ids, answer_ids = _double_click_dismissals(sessions)
+
+    count = models.bulk_mark_double_click_reviewed(
+        attempt_ids, DOUBLE_CLICK_NOTE, session['admin_id'])
+    models.bulk_note_checkpoint_answers(answer_ids, DOUBLE_CLICK_NOTE)
+    return count
+
+
 def _apply_double_click_corrections(filters):
     """Run the batch over one filter selection. Returns the number of sessions."""
     filters['include_superseded'] = False
@@ -3117,10 +3168,19 @@ def admin_checkpoint_correct_double_clicks():
               'ein ungefiltertes Korrigieren ist nicht möglich.', 'danger')
         return redirect(request.referrer or url_for('admin_checkpoint_pruefung'))
 
-    count = _apply_double_click_corrections(filters)
-    flash(f'{count} Doppelklick-Sitzung(en) korrigiert und als geprüft markiert.' if count
-          else 'Keine Doppelklick-Sitzung mit Korrekturvorschlag in dieser Auswahl.',
-          'success' if count else 'warning')
+    # Two buttons, one route: the "must be filtered" guard above and the
+    # server-side re-derivation of the selection are identical for both, and only
+    # the write differs.
+    if request.form.get('modus') == 'abhaken':
+        count = _apply_double_click_dismissals(filters)
+        flash(f'{count} Doppelklick-Sitzung(en) als geprüft abgehakt (ohne Notenänderung).'
+              if count else 'Keine offenen Doppelklick-Sitzungen zum Abhaken in dieser Auswahl.',
+              'success' if count else 'warning')
+    else:
+        count = _apply_double_click_corrections(filters)
+        flash(f'{count} Doppelklick-Sitzung(en) korrigiert und als geprüft markiert.' if count
+              else 'Keine Doppelklick-Sitzung mit Korrekturvorschlag in dieser Auswahl.',
+              'success' if count else 'warning')
     return redirect(request.referrer or url_for('admin_checkpoint_pruefung'))
 
 
