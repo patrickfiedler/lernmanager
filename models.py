@@ -5781,9 +5781,11 @@ def get_grading_run_override_rate(run_id):
 
 # ============ Warmup / Spaced Repetition ============
 
-def _quiz_json_to_pool_entries(task_id, subtask_id, quiz_json, topic_name, completed_at=None):
+def _quiz_json_to_pool_entries(task_id, subtask_id, quiz_json, topic_name, completed_at=None,
+                               student_path=None):
     """Parse one quiz_json blob into warmup pool entries, filtering out
-    question types too slow for a quick warm-up (short_answer, long_answer)."""
+    question types too slow for a quick warm-up (short_answer, long_answer)
+    and questions tagged for a path above the student's own."""
     try:
         quiz = json.loads(quiz_json)
     except (json.JSONDecodeError, TypeError):
@@ -5792,6 +5794,8 @@ def _quiz_json_to_pool_entries(task_id, subtask_id, quiz_json, topic_name, compl
     entries = []
     for i, q in enumerate(quiz.get('questions', [])):
         if q.get('type') in ('short_answer', 'long_answer'):
+            continue
+        if not is_question_visible_for_path(q, student_path):
             continue
         entry = {
             'task_id': task_id,
@@ -5808,49 +5812,67 @@ def _quiz_json_to_pool_entries(task_id, subtask_id, quiz_json, topic_name, compl
 
 
 def get_warmup_question_pool(student_id):
-    """Build question pool from completed topics and completed tasks of active topics.
+    """Build the warm-up/practice question pool for one student.
+
+    A question only enters the pool if the student actually sat the quiz it
+    came from -- a quiz_attempt row must exist. Topic completion alone is not
+    enough: a topic marked complete by hand (admin override) has no attempts
+    behind it, and warming up on questions the student never opened is not
+    repetition, it is a first encounter.
+
+    Class-wide practice unlocks (class_practice_unlock) are the deliberate
+    exception -- the teacher opted the whole class in, so no attempt is
+    required there. Those get filtered by learning path and fork branch
+    instead, since there is no attempt to prove the student ever did the task.
 
     Returns list of dicts: [{task_id, subtask_id, question_index, question, topic_name}, ...]
-    Filters out short_answer questions (too slow for quick warm-up).
+    Filters out short_answer/long_answer questions (too slow for quick warm-up)
+    and Einführung subtasks (is_intro -- questions don't work out of context).
     """
     pool = []
     with db_session() as conn:
-        # 1. Completed topics → topic-level quiz questions
-        completed_topics = conn.execute('''
+        row = conn.execute(
+            'SELECT lernpfad FROM student WHERE id = ?', (student_id,)).fetchone()
+        student_path = row['lernpfad'] if row else None
+        fork_choices = {
+            r['fork_group']: r['fork_branch'] for r in conn.execute(
+                'SELECT fork_group, fork_branch FROM student_fork_choice WHERE student_id = ?',
+                (student_id,))
+        }
+
+        # 1. Topic quizzes the student has actually attempted
+        attempted_topics = conn.execute('''
             SELECT DISTINCT t.id as task_id, t.name, t.quiz_json
             FROM student_task st
             JOIN task t ON st.task_id = t.id
-            WHERE st.student_id = ? AND (st.abgeschlossen = 1 OR st.practice_unlocked = 1)
+            JOIN quiz_attempt qa ON qa.student_task_id = st.id AND qa.subtask_id IS NULL
+            WHERE st.student_id = ?
               AND t.quiz_json IS NOT NULL AND t.quiz_json != ''
         ''', (student_id,)).fetchall()
 
-        for topic in completed_topics:
+        for topic in attempted_topics:
             pool.extend(_quiz_json_to_pool_entries(
-                topic['task_id'], None, topic['quiz_json'], topic['name']))
+                topic['task_id'], None, topic['quiz_json'], topic['name'],
+                student_path=student_path))
 
-        # 2. Completed subtasks → per-task quiz questions
-        # Also includes all subtasks from manually-completed topics (no student_subtask rows).
-        # Exclude first subtask per topic (intro tasks have chapter-specific
-        # questions that don't make sense out of context in warm-up)
-        completed_subtasks = conn.execute('''
-            SELECT DISTINCT sub.id as subtask_id, sub.task_id, sub.quiz_json, t.name as topic_name,
-                   ss.completed_at
+        # 2. Aufgabe quizzes the student has actually attempted
+        attempted_subtasks = conn.execute('''
+            SELECT DISTINCT sub.id as subtask_id, sub.task_id, sub.quiz_json,
+                   t.name as topic_name, ss.completed_at
             FROM student_task st
             JOIN task t ON st.task_id = t.id
             JOIN subtask sub ON sub.task_id = t.id
+            JOIN quiz_attempt qa ON qa.student_task_id = st.id AND qa.subtask_id = sub.id
             LEFT JOIN student_subtask ss ON ss.student_task_id = st.id AND ss.subtask_id = sub.id
-            WHERE st.student_id = ? AND (st.abgeschlossen = 1 OR st.practice_unlocked = 1 OR ss.erledigt = 1)
+            WHERE st.student_id = ?
               AND sub.quiz_json IS NOT NULL AND sub.quiz_json != ''
-              AND sub.reihenfolge > (
-                  SELECT MIN(s2.reihenfolge) FROM subtask s2
-                  WHERE s2.task_id = sub.task_id
-              )
+              AND COALESCE(sub.is_intro, 0) = 0
         ''', (student_id,)).fetchall()
 
-        for sub in completed_subtasks:
+        for sub in attempted_subtasks:
             pool.extend(_quiz_json_to_pool_entries(
                 sub['task_id'], sub['subtask_id'], sub['quiz_json'], sub['topic_name'],
-                completed_at=sub['completed_at']))
+                completed_at=sub['completed_at'], student_path=student_path))
 
         # 3. Class-unlocked topics → questions for students in that class,
         #    regardless of whether the topic was ever assigned to the student.
@@ -5869,27 +5891,35 @@ def get_warmup_question_pool(student_id):
             if (topic['task_id'], None) in seen_task_ids:
                 continue
             pool.extend(_quiz_json_to_pool_entries(
-                topic['task_id'], None, topic['quiz_json'], topic['name']))
+                topic['task_id'], None, topic['quiz_json'], topic['name'],
+                student_path=student_path))
 
         unlocked_subtasks = conn.execute('''
-            SELECT DISTINCT sub.id as subtask_id, sub.task_id, sub.quiz_json, t.name as topic_name
+            SELECT DISTINCT sub.id as subtask_id, sub.task_id, sub.quiz_json,
+                   sub.path, sub.path_model, sub.fork_group, sub.fork_branch,
+                   t.name as topic_name
             FROM student_klasse sk
             JOIN class_practice_unlock cpu ON cpu.klasse_id = sk.klasse_id
             JOIN task t ON t.id = cpu.task_id
             JOIN subtask sub ON sub.task_id = t.id
             WHERE sk.student_id = ?
               AND sub.quiz_json IS NOT NULL AND sub.quiz_json != ''
-              AND sub.reihenfolge > (
-                  SELECT MIN(s2.reihenfolge) FROM subtask s2
-                  WHERE s2.task_id = sub.task_id
-              )
+              AND COALESCE(sub.is_intro, 0) = 0
         ''', (student_id,)).fetchall()
 
         for sub in unlocked_subtasks:
             if (sub['task_id'], sub['subtask_id']) in seen_task_ids:
                 continue
+            sub = dict(sub)
+            # No attempt proves the student did this one, so fall back to what
+            # was asked of them: their path, and the fork branch they picked.
+            if not is_subtask_required_for_path(sub, student_path):
+                continue
+            if sub['fork_group'] and fork_choices.get(sub['fork_group']) != sub['fork_branch']:
+                continue
             pool.extend(_quiz_json_to_pool_entries(
-                sub['task_id'], sub['subtask_id'], sub['quiz_json'], sub['topic_name']))
+                sub['task_id'], sub['subtask_id'], sub['quiz_json'], sub['topic_name'],
+                student_path=student_path))
 
     return pool
 
