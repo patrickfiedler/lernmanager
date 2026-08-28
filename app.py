@@ -2833,6 +2833,17 @@ def admin_checkpoint_pruefung():
     filters = _checkpoint_filters()
     sessions = _build_checkpoint_sessions(models.get_checkpoint_reviews(**filters))
 
+    # What a batch correction would actually touch, counted here so the buttons can
+    # name a real number instead of the broader "has duplicates" badge -- the two
+    # differ whenever a flagged duplicate would not move the score.
+    correctable, _ = _double_click_corrections(sessions)
+    correctable_ids = {attempt_id for attempt_id, _score in correctable}
+    correctable_by_student = {}
+    for entry in sessions:
+        if entry['attempt']['id'] in correctable_ids:
+            key = entry['attempt']['student_id']
+            correctable_by_student[key] = correctable_by_student.get(key, 0) + 1
+
     return render_template('admin/checkpoint_pruefung.html',
                            sessions=sessions,
                            klassen=models.get_all_klassen(),
@@ -2847,7 +2858,9 @@ def admin_checkpoint_pruefung():
                            show_superseded=filters['include_superseded'],
                            resettable_count=sum(1 for s in sessions
                                                 if not s['attempt'].get('superseded_at')),
-                           duplicate_count=sum(1 for s in sessions if s['has_duplicates']))
+                           duplicate_count=sum(1 for s in sessions if s['has_duplicates']),
+                           correctable_count=len(correctable),
+                           correctable_by_student=correctable_by_student)
 
 
 @app.route('/admin/checkpoint-pruefung/<int:attempt_id>/bewerten', methods=['POST'])
@@ -2936,6 +2949,74 @@ def admin_checkpoint_reset_bulk():
     count = models.supersede_checkpoint_attempts([a['id'] for a in attempts])
     flash(f'{count} Checkpoint-Sitzung(en) zurückgesetzt.' if count
           else 'Keine offenen Sitzungen zum Zurücksetzen.',
+          'success' if count else 'warning')
+    return redirect(request.referrer or url_for('admin_checkpoint_pruefung'))
+
+
+DOUBLE_CLICK_NOTE = 'Doppelklick, verworfen'
+
+
+def _double_click_corrections(sessions):
+    """Split flagged sessions into what a batch correction would actually write.
+
+    Returns (corrections, answer_ids) where corrections is [(attempt_id, score)].
+
+    Selects on `suggested_score is not None`, which _build_checkpoint_sessions
+    already defines as "has duplicates AND the score would change AND the teacher
+    has not decided yet". That single condition is what keeps the batch from
+    touching a grade a teacher already set by hand, so the check lives in one
+    place rather than being restated here.
+
+    Sessions flagged as double-clicks whose score would not change are left out
+    entirely (Patrick's call 2026-08-28): correcting them writes nothing, and
+    marking them reviewed would clear them out of the queue without anyone having
+    looked at why the duplicate did not cost a point.
+    """
+    corrections, answer_ids = [], []
+    for entry in sessions:
+        if entry['suggested_score'] is None or entry['attempt'].get('superseded_at'):
+            continue
+        corrections.append((entry['attempt']['id'], entry['suggested_score']))
+        for question in entry['questions']:
+            answer_ids.extend(question['duplicate_ids'])
+    return corrections, answer_ids
+
+
+def _apply_double_click_corrections(filters):
+    """Run the batch over one filter selection. Returns the number of sessions."""
+    filters['include_superseded'] = False
+    sessions = _build_checkpoint_sessions(models.get_checkpoint_reviews(**filters))
+    corrections, answer_ids = _double_click_corrections(sessions)
+
+    count = models.bulk_correct_double_click_attempts(
+        corrections, DOUBLE_CLICK_NOTE, session['admin_id'])
+    models.bulk_note_checkpoint_answers(answer_ids, DOUBLE_CLICK_NOTE)
+    return count
+
+
+@app.route('/admin/checkpoint-pruefung/doppelklick-korrigieren', methods=['POST'])
+@admin_required
+def admin_checkpoint_correct_double_clicks():
+    """Correct every double-click session in the current selection in one go.
+
+    Each one gets the score it would have had without the duplicate, the note on
+    both the grade and the flagged answers, and the review mark -- which is what
+    takes it out of the "nur ungeprüfte" queue and off the teacher's pile.
+
+    Same shape as the bulk reset: the selection is re-derived server-side from the
+    posted filters, and an unfiltered run is refused. The per-student button is
+    this same route with student_id pinned, so it satisfies that guard by
+    construction and needs no second code path.
+    """
+    filters = _checkpoint_filters(source=request.form, limit=5000)
+    if not (filters['klasse_id'] or filters['student_id'] or filters['checkpoint_id']):
+        flash('Bitte zuerst nach Klasse, Schüler oder Checkpoint filtern — '
+              'ein ungefiltertes Korrigieren ist nicht möglich.', 'danger')
+        return redirect(request.referrer or url_for('admin_checkpoint_pruefung'))
+
+    count = _apply_double_click_corrections(filters)
+    flash(f'{count} Doppelklick-Sitzung(en) korrigiert und als geprüft markiert.' if count
+          else 'Keine Doppelklick-Sitzung mit Korrekturvorschlag in dieser Auswahl.',
           'success' if count else 'warning')
     return redirect(request.referrer or url_for('admin_checkpoint_pruefung'))
 

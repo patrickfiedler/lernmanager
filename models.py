@@ -3673,6 +3673,68 @@ def set_checkpoint_teacher_review(attempt_id, teacher_score, teacher_note,
               attempt_id))
 
 
+def bulk_correct_double_click_attempts(corrections, note, admin_id):
+    """Apply the "without the double-click" score to many sessions at once.
+
+    `corrections` is a list of (attempt_id, score) worked out by the caller from
+    the same duplicate detection the review page shows -- this function does not
+    re-derive it, so the teacher gets exactly the numbers that were on screen.
+
+    Deliberately NOT set_checkpoint_teacher_review in a loop: that function writes
+    student_feedback too, which would wipe every Rueckmeldung already written on
+    the sessions being cleaned up. Here only the grade, the note and the review
+    mark move.
+
+    An existing teacher_note is never overwritten -- a teacher who already wrote
+    their own reason for this session should keep it, the batch reason is only for
+    the ones that had none.
+
+    Returns the number of sessions changed.
+    """
+    if not corrections:
+        return 0
+    stamp = now_local()
+    with db_session() as conn:
+        changed = 0
+        for attempt_id, score in corrections:
+            cursor = conn.execute("""
+                UPDATE checkpoint_attempt
+                SET teacher_score = ?,
+                    teacher_note = CASE
+                        WHEN teacher_note IS NULL OR TRIM(teacher_note) = '' THEN ?
+                        ELSE teacher_note END,
+                    reviewed_at = ?, reviewed_by = ?
+                WHERE id = ? AND superseded_at IS NULL
+            """, (score, note, stamp, admin_id, int(attempt_id)))
+            changed += cursor.rowcount
+        return changed
+
+
+def bulk_note_checkpoint_answers(answer_ids, note):
+    """Write the prompt-tuning note onto the answers flagged as double-clicks.
+
+    Only the note. teacher_verdict stays untouched on purpose: it answers "was the
+    KI's judgement right?", and a double-click is not a grading error -- the KI
+    usually judged the resend correctly, the damage was the extra attempt. Filling
+    in a verdict here would put non-grading noise into the calibration data the
+    field exists to collect.
+
+    Existing notes are kept, same reasoning as bulk_correct_double_click_attempts.
+    """
+    ids = [int(i) for i in answer_ids]
+    if not ids:
+        return 0
+    placeholders = ','.join('?' * len(ids))
+    with db_session() as conn:
+        cursor = conn.execute(f"""
+            UPDATE checkpoint_answer
+            SET teacher_note = ?
+            WHERE id IN ({placeholders})
+              AND (teacher_note IS NULL OR TRIM(teacher_note) = '')
+        """, [note] + ids)
+        return cursor.rowcount
+
+
 def set_checkpoint_answer_verdict(answer_id, teacher_verdict, teacher_note):
     """Record what the teacher says one answer actually was (migrate_048).
 

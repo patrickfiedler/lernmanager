@@ -63,27 +63,49 @@
     <p class="text-muted" style="margin: 0;">
         <strong>{{ sessions|length }}</strong> Checkpoint-Sitzung(en)
         {% if duplicate_count %}
-        · <span class="badge badge-warning">{{ duplicate_count }} mit Doppelklick-Verdacht</span>
+        · <span class="badge badge-warning"
+                title="Erkannte Doppelklicks. Korrigierbar sind davon {{ correctable_count }} — bei den übrigen ändert der Doppelklick die Punktzahl nicht, oder du hast die Note schon selbst gesetzt.">{{ duplicate_count }} mit Doppelklick-Verdacht</span>
         {% endif %}
     </p>
 
-    {# Bulk reset acts on the current filter, so it only appears once the filter
-       actually narrows things down -- the route refuses an unfiltered reset. #}
-    {% if resettable_count and (klasse_id or student_id or checkpoint_id) %}
-    <form method="POST" action="{{ url_for('admin_checkpoint_reset_bulk') }}"
-          onsubmit="return confirm('{{ resettable_count }} Checkpoint-Sitzung(en) zurücksetzen?\n\nDie Schüler:innen können diese Checkpoints danach erneut bearbeiten. Die bisherigen Ergebnisse gehen nicht verloren — sie bleiben über \'zurückgesetzte anzeigen\' sichtbar.');">
+    {# Both batch actions re-derive their selection from these, server-side, so
+       what runs is by construction what the teacher had on screen. `student`
+       overrides the filter for the per-student buttons further down. #}
+    {% macro filter_fields(student=None) %}
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="klasse_id" value="{{ klasse_id or '' }}">
-        <input type="hidden" name="student_id" value="{{ student_id or '' }}">
+        <input type="hidden" name="student_id" value="{{ student or student_id or '' }}">
         <input type="hidden" name="checkpoint_id" value="{{ checkpoint_id or '' }}">
         <input type="hidden" name="von" value="{{ date_from or '' }}">
         <input type="hidden" name="bis" value="{{ date_to or '' }}">
         <input type="hidden" name="offen" value="{{ '1' if unreviewed_only else '' }}">
+    {% endmacro %}
+
+    <div class="flex gap-1" style="flex-wrap: wrap;">
+    {# Batch correction acts on the current filter, like the bulk reset -- the
+       route refuses an unfiltered run. Counts only sessions that would actually
+       change score, which is why this number can be lower than the badge above. #}
+    {% if correctable_count and (klasse_id or student_id or checkpoint_id) %}
+    <form method="POST" action="{{ url_for('admin_checkpoint_correct_double_clicks') }}"
+          onsubmit="return confirm('{{ correctable_count }} Doppelklick-Sitzung(en) korrigieren?\n\nJede bekommt die Punktzahl ohne den Doppelklick, die Notiz \'Doppelklick, verworfen\' und den Prüfvermerk — damit verschwinden sie aus \'nur ungeprüfte\'. Bereits von dir gesetzte Noten bleiben unangetastet.');">
+        {{ filter_fields() }}
+        <button type="submit" class="btn btn-primary btn-sm"
+                title="Punktzahl ohne Doppelklick übernehmen, Notiz setzen, als geprüft markieren">
+            ✓ Alle {{ correctable_count }} Doppelklicks korrigieren
+        </button>
+    </form>
+    {% endif %}
+
+    {% if resettable_count and (klasse_id or student_id or checkpoint_id) %}
+    <form method="POST" action="{{ url_for('admin_checkpoint_reset_bulk') }}"
+          onsubmit="return confirm('{{ resettable_count }} Checkpoint-Sitzung(en) zurücksetzen?\n\nDie Schüler:innen können diese Checkpoints danach erneut bearbeiten. Die bisherigen Ergebnisse gehen nicht verloren — sie bleiben über \'zurückgesetzte anzeigen\' sichtbar.');">
+        {{ filter_fields() }}
         <button type="submit" class="btn btn-secondary btn-sm">
             ↻ Alle {{ resettable_count }} angezeigten zurücksetzen
         </button>
     </form>
     {% endif %}
+    </div>
 </div>
 
 {% if not sessions %}
@@ -286,6 +308,23 @@
                 {% endif %}
             </p>
         </form>
+        {# The per-student batch, scope (a). Only from 2 upwards -- for a single
+           session the Speichern button right above already does the job, and a
+           "batch" of one would just be a confusing second way to press it.
+           Same route as the top bar with student_id pinned, so the "must be
+           filtered" guard is satisfied even on an unfiltered page. #}
+        {% set student_correctable = correctable_by_student.get(attempt.student_id, 0) %}
+        {% if student_correctable > 1 %}
+        <form method="POST" action="{{ url_for('admin_checkpoint_correct_double_clicks') }}"
+              class="checkpoint-reset-row"
+              onsubmit="return confirm('Alle {{ student_correctable }} Doppelklick-Sitzungen von ' + {{ attempt.student_name|tojson }} + ' korrigieren?\n\nJede bekommt die Punktzahl ohne den Doppelklick, die Notiz \'Doppelklick, verworfen\' und den Prüfvermerk.');">
+            {{ filter_fields(attempt.student_id) }}
+            <button type="submit" class="btn btn-secondary btn-sm"
+                    title="Übernimmt für alle Doppelklick-Sitzungen dieser Schüler:in die Punktzahl ohne Doppelklick">
+                ✓ Alle {{ student_correctable }} Doppelklicks von {{ attempt.vorname }} korrigieren
+            </button>
+        </form>
+        {% endif %}
         {# Own form, not a second button inside the grade form: a reset must not
            silently carry the unsaved score edits above along with it. #}
         <form method="POST" action="{{ url_for('admin_checkpoint_reset', attempt_id=attempt.id) }}"
