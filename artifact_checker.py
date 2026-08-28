@@ -11,13 +11,18 @@ import json
 from difflib import SequenceMatcher
 
 
-def check_gate(file_bytes: bytes, filename: str, gate_config: dict) -> dict:
-    """Dispatch to format-specific check. Passes by default for unknown formats."""
+def check_gate(file_bytes: bytes, filename: str, gate_config: dict, load_template=None) -> dict:
+    """Dispatch to format-specific check. Passes by default for unknown formats.
+
+    load_template(name) -> bytes|None resolves gate_config['template_material']
+    against the topic's registered materials. Optional: without it, a
+    min_added_words check falls back to a warning (see _check_added_words).
+    """
     ext = ('.' + filename.rsplit('.', 1)[-1].lower()) if '.' in filename else ''
     if ext in ('.pptx', '.odp'):
-        return _check_presentation(file_bytes, ext, gate_config)
+        return _check_presentation(file_bytes, ext, gate_config, load_template)
     if ext in ('.docx', '.odt'):
-        return _check_document(file_bytes, ext, gate_config)
+        return _check_document(file_bytes, ext, gate_config, load_template)
     if ext == '.sb3':
         return _check_scratch(file_bytes, gate_config)
     return {'passed': True, 'message': '', 'details': [], 'matches': []}
@@ -178,7 +183,54 @@ def _check_text_rules(blocks: list, config: dict, issues: list, matches: list, w
             warnings.append(f"Der meiste Text steht nicht {_REGION_LABELS[expect]}")
 
 
-def _check_presentation(file_bytes: bytes, ext: str, config: dict) -> dict:
+def _normalized(text: str) -> str:
+    return ' '.join(text.split()).lower()
+
+
+def _check_added_words(blocks: list, config: dict, load_template,
+                       issues: list, matches: list, warnings: list):
+    """min_added_words: how much of this is the student's, not the template's.
+
+    A student can upload the shipped template untouched and pass every other
+    check -- the headings are all there and min_words passes on the template's
+    own 111 words. The baseline needs no new storage: the template is already a
+    material row, named by template_material.
+
+    Compared as a set difference over block texts, not by subtracting word
+    counts, so deleting half the template and adding nothing is caught too.
+
+    Fails soft. A renamed or missing material warns and leaves min_words to do
+    what it can -- a teacher's file rename must never fail a student's gate.
+    """
+    min_added = config.get('min_added_words', 0)
+    if not min_added:
+        return
+
+    name = config.get('template_material')
+    template_blocks = None
+    if name and load_template:
+        try:
+            data = load_template(name)
+            if data:
+                import artifact_processor
+                template_blocks = artifact_processor.extract_artifact_blocks(data, name)
+        except Exception:
+            template_blocks = None
+
+    if template_blocks is None:
+        warnings.append("Vorlage zum Vergleich nicht gefunden")
+        return
+
+    baseline = {_normalized(b['text']) for b in template_blocks if b['text']}
+    added = sum(len(b['text'].split()) for b in blocks
+                if b['text'] and _normalized(b['text']) not in baseline)
+    if added < min_added:
+        issues.append(f"Zu wenig eigener Text ({added} Wörter ergänzt, erwartet: {min_added})")
+    else:
+        matches.append(f"{added} eigene Wörter ergänzt ✓")
+
+
+def _check_presentation(file_bytes: bytes, ext: str, config: dict, load_template=None) -> dict:
     """Check slide count, required titles (fuzzy), min chars per slide, and min images.
 
     config keys:
@@ -249,11 +301,12 @@ def _check_presentation(file_bytes: bytes, ext: str, config: dict) -> dict:
             matches.append(f"{image_count} Bild{'er' if image_count != 1 else ''} ✓")
 
     _check_text_rules(blocks, config, issues, matches, warnings)
+    _check_added_words(blocks, config, load_template, issues, matches, warnings)
 
     return _result(issues, matches, warnings)
 
 
-def _check_document(file_bytes: bytes, ext: str, config: dict) -> dict:
+def _check_document(file_bytes: bytes, ext: str, config: dict, load_template=None) -> dict:
     """Check required headings (fuzzy), minimum word count, and minimum image count.
 
     config keys:
@@ -304,6 +357,7 @@ def _check_document(file_bytes: bytes, ext: str, config: dict) -> dict:
     # flat string. It is now required_text with kind: heading -- one field for
     # one operation, and it reaches body text too.
     _check_text_rules(blocks, config, issues, matches, warnings)
+    _check_added_words(blocks, config, load_template, issues, matches, warnings)
 
     return _result(issues, matches, warnings)
 

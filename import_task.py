@@ -121,6 +121,10 @@ def _validate_artifact_gate(gate, label):
                 return gate, (f"{label}: artifact_gate.{field} braucht Zeichenketten oder "
                               f'Objekte mit „text" — ein Eintrag wird nicht geprüft')
 
+    if gate.get('min_added_words') and not gate.get('template_material'):
+        return gate, (f"{label}: artifact_gate.min_added_words braucht template_material "
+                      f"(Dateiname der Vorlage) — wird nicht geprüft")
+
     return gate, None
 
 

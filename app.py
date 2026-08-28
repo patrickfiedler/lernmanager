@@ -4028,7 +4028,7 @@ def student_klasse(slug):
     # pattern, so every checkpoint in the unit shares the same growing document.
     unit_artifact_file = models.get_student_artifact_file(student_id, task['task_id']) if task else None
     artifact_checkpoint_status, artifact_criteria, artifact_llm_feedback, artifact_last_position = _artifact_file_details(
-        unit_artifact_file, subtasks, student, klasse
+        unit_artifact_file, subtasks, student, klasse, task['task_id'] if task else None
     )
 
     # Clayden-style unit connections (Baut auf / Du erreichst / Führt zu) — plain-text v1
@@ -4176,6 +4176,28 @@ def student_fork_choice(slug, fork_group):
 def _artifact_upload_dir():
     """Computed fresh each call (not a frozen constant) so tests can override config.UPLOAD_FOLDER."""
     return os.path.join(config.UPLOAD_FOLDER, 'artefakte')
+
+
+def _template_loader(task_id):
+    """Resolve a gate's template_material to the file already on disk.
+
+    A gate's min_added_words compares a submission against the template the
+    student started from. That template is registered as a material of the same
+    topic, so nothing new is stored -- this just finds it by name. Returns None
+    on anything unexpected; artifact_checker fails the check soft.
+    """
+    def load(name):
+        if not name or not task_id:
+            return None
+        for mat in models.get_materials(task_id):
+            pfad = mat.get('pfad') or ''
+            if pfad in (name,) or os.path.basename(pfad) == name:
+                path = os.path.join(config.UPLOAD_FOLDER, pfad)
+                if os.path.isfile(path):
+                    with open(path, 'rb') as fh:
+                        return fh.read()
+        return None
+    return load
 
 
 def _save_artifact_file(student_id, task_id, subtask_id, file_bytes, original_filename):
@@ -4355,7 +4377,8 @@ def student_artifact_gate_check(slug, position):
 
     file_bytes = f.read()
     try:
-        result = artifact_checker.check_gate(file_bytes, filename, gate_config)
+        result = artifact_checker.check_gate(file_bytes, filename, gate_config,
+                                             _template_loader(task['task_id']))
     except Exception as e:
         return jsonify({'error': f'Datei konnte nicht gelesen werden: {e}'}), 400
 
@@ -4492,7 +4515,7 @@ def _build_level2_feedback(student_id, klasse, graded, student_path, filename, v
     }
 
 
-def _artifact_file_details(unit_artifact_file, subtasks, student, klasse):
+def _artifact_file_details(unit_artifact_file, subtasks, student, klasse, task_id=None):
     """Re-check the stored artifact against each *earlier* checkpoint's structural gate
     (regression check on the growing document), plus criteria/feedback for the checkpoint
     it was actually last uploaded for.
@@ -4531,7 +4554,8 @@ def _artifact_file_details(unit_artifact_file, subtasks, student, klasse):
             continue
         try:
             gate_config = json.loads(gate_raw)
-            check = artifact_checker.check_gate(stored_bytes, unit_artifact_file['original_filename'], gate_config)
+            check = artifact_checker.check_gate(stored_bytes, unit_artifact_file['original_filename'],
+                                                gate_config, _template_loader(task_id))
             checkpoint_status.append({'position': i + 1, 'passed': check['passed']})
         except (json.JSONDecodeError, TypeError):
             pass
