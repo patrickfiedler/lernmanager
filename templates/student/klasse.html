@@ -200,7 +200,7 @@
             <!-- Completion zone: checkbox (left) + optional KI-Check (right) -->
             {% if active_subtask and not task.abgeschlossen and (not inline_gate or inline_gate_passed or not artifact_gate_required) %}
             {# Einführung is read, not done -- the checkbox means something different there. #}
-            {% set complete_label = 'Ich habe das gelesen und verstanden! ✓' if active_subtask.get('is_intro') else 'Ich habe das geschafft! ✓' %}
+            {% set complete_label = 'Ich habe das gelesen und verstanden! ✓ In der nächsten Aufgabe beginnst du mit der Arbeit.' if active_subtask.get('is_intro') else 'Ich habe das geschafft! ✓' %}
             {% if graded_artifact %}
             <div class="task-complete {% if active_subtask.fertig_wenn %}has-fertig-wenn{% endif %} has-artifact">
                 <!-- Left: completion checkbox -->

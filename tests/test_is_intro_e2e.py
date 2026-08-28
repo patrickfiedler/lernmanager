@@ -76,7 +76,7 @@ def test_intro_checkbox_says_read_and_understood(app, client):
     _login(client, student_id)
 
     intro = client.get("/schueler/thema/testthema?aufgabe=2").get_data(as_text=True)
-    assert "Ich habe das gelesen und verstanden! ✓" in intro
+    assert "Ich habe das gelesen und verstanden! ✓ In der nächsten Aufgabe beginnst du mit der Arbeit." in intro
     assert "Ich habe das geschafft!" not in intro
 
 
