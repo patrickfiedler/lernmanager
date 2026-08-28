@@ -84,6 +84,14 @@ def extract_zip_materials(zip_path, task_data, dry_run=False):
     return extracted
 
 
+# Removed 2026-08-28: required_headings is required_text with kind: heading.
+# An unknown key in artifact_gate is passed through and silently ignored, so a
+# stale config would keep importing and quietly stop being checked. Warn instead.
+_GATE_REMOVED_FIELDS = {
+    'required_headings': 'required_text mit „kind: heading"',
+}
+
+
 def _validate_artifact_gate(gate, label):
     """Check artifact_gate config. Returns (gate_or_none, warning_or_none).
 
@@ -94,6 +102,25 @@ def _validate_artifact_gate(gate, label):
         return None, f"{label}: artifact_gate muss ein Objekt sein — Gate wird ignoriert"
     if not gate.get('format') or not isinstance(gate['format'], list):
         return None, f"{label}: artifact_gate.format fehlt oder ist keine Liste — Gate wird ignoriert"
+
+    for field, replacement in _GATE_REMOVED_FIELDS.items():
+        if gate.get(field):
+            return gate, (f"{label}: artifact_gate.{field} gibt es nicht mehr — "
+                          f"wird nicht geprüft. Ersatz: {replacement}")
+
+    for field in ('required_text', 'forbidden_text'):
+        value = gate.get(field)
+        if value is None:
+            continue
+        if not isinstance(value, list):
+            return gate, f"{label}: artifact_gate.{field} muss eine Liste sein — wird nicht geprüft"
+        for entry in value:
+            ok = (isinstance(entry, str) and entry.strip()) or (
+                isinstance(entry, dict) and isinstance(entry.get('text'), str) and entry['text'].strip())
+            if not ok:
+                return gate, (f"{label}: artifact_gate.{field} braucht Zeichenketten oder "
+                              f'Objekte mit „text" — ein Eintrag wird nicht geprüft')
+
     return gate, None
 
 

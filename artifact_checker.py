@@ -65,6 +65,108 @@ def _result(issues: list, matches: list = None, warnings: list = None) -> dict:
     return {'passed': passed, 'message': message, 'details': issues, 'matches': matches or [], 'warnings': warnings or []}
 
 
+# --- text rules: required_text / forbidden_text / expect_content_in ---
+#
+# These read the blocks extract_*_blocks() returns, so they can ask *where* a
+# string appears, not only whether it appears. Scoping is optional:
+#
+#   required_text: ["Alle fünf Fachraumregeln"]        # anywhere
+#   required_text: [{text: "Fachraumregeln", kind: heading}]
+#   forbidden_text: [{text: "[Dein Name]", in: header}]
+
+# Region names as an author would write them, mapped to block regions.
+_RULE_REGIONS = {
+    'body': 'body', 'slide': 'slide', 'slides': 'slide', 'notes': 'notes',
+    'header': 'header', 'footer': 'footer',
+}
+
+_REGION_LABELS = {
+    'body': 'im Dokument', 'slide': 'auf den Folien', 'notes': 'in den Notizen',
+    'header': 'in der Kopfzeile', 'footer': 'in der Fußzeile',
+}
+
+
+def _text_rule(entry):
+    """Normalize one rule. Accepts a bare string or {text, in, kind}."""
+    if isinstance(entry, str) and entry.strip():
+        return {'text': entry}
+    if isinstance(entry, dict) and isinstance(entry.get('text'), str) and entry['text'].strip():
+        return entry
+    return None
+
+
+def _scoped_blocks(blocks: list, rule: dict) -> list:
+    region = _RULE_REGIONS.get(str(rule.get('in', '')).strip().lower())
+    kind = rule.get('kind')
+    if region:
+        blocks = [b for b in blocks if b['region'] == region]
+    if kind:
+        blocks = [b for b in blocks if b['kind'] == kind]
+    return blocks
+
+
+def _text_present(blocks: list, rule: dict, threshold: float) -> bool:
+    """True when the rule's text is in scope somewhere.
+
+    Substring, case-insensitive. That is what forbidden_text lives on -- a
+    template placeholder like "______" sits inside a longer line ("Name: ______
+    Klasse: ____"), so a whole-line comparison would never see it.
+
+    Fuzzy whole-block matching applies to kind: heading only, where it preserves
+    what required_headings did. It is deliberately not offered for body text:
+    at the default threshold of 0.6, "Kein Essen am PC." scores 0.74 against
+    "Keine Getränke am PC.", so a document holding one Fachraumregel would pass
+    a check for a different one -- exactly the check MBI needs this field for.
+    Headings are few and distinct; body lines are many and similar.
+    """
+    needle = ' '.join(rule['text'].split()).lower()
+    fuzzy = rule.get('kind') == 'heading'
+    for b in _scoped_blocks(blocks, rule):
+        text = ' '.join(b['text'].split()).lower()
+        if needle in text:
+            return True
+        if fuzzy and _fuzzy_match(needle, text) >= threshold:
+            return True
+    return False
+
+
+def _rule_label(rule: dict) -> str:
+    """What to call the thing in student-facing feedback."""
+    return 'Abschnitt' if rule.get('kind') == 'heading' else 'Text'
+
+
+def _check_text_rules(blocks: list, config: dict, issues: list, matches: list, warnings: list):
+    """Apply required_text, forbidden_text and expect_content_in to blocks."""
+    threshold = config.get('title_match_threshold', 0.6)
+
+    for entry in config.get('required_text', []):
+        rule = _text_rule(entry)
+        if rule is None:
+            continue
+        label = _rule_label(rule)
+        if _text_present(blocks, rule, threshold):
+            matches.append(f'{label} gefunden: „{rule["text"]}" ✓')
+        else:
+            issues.append(f'{label} fehlt: „{rule["text"]}"')
+
+    for entry in config.get('forbidden_text', []):
+        rule = _text_rule(entry)
+        if rule is None:
+            continue
+        if _text_present(blocks, rule, threshold):
+            issues.append(f'Noch aus der Vorlage übrig: „{rule["text"]}"')
+        else:
+            matches.append(f'„{rule["text"]}" ist ersetzt ✓')
+
+    # A warning, never a failure -- the "wrote it in the speaker notes" case.
+    expect = _RULE_REGIONS.get(str(config.get('expect_content_in', '')).strip().lower())
+    if expect:
+        total = sum(len(b['text'].split()) for b in blocks)
+        inside = sum(len(b['text'].split()) for b in blocks if b['region'] == expect)
+        if total and inside / total < 0.5:
+            warnings.append(f"Der meiste Text steht nicht {_REGION_LABELS[expect]}")
+
+
 def _check_presentation(file_bytes: bytes, ext: str, config: dict) -> dict:
     """Check slide count, required titles (fuzzy), min chars per slide, and min images.
 
@@ -73,11 +175,13 @@ def _check_presentation(file_bytes: bytes, ext: str, config: dict) -> dict:
       min_slides (int)
       min_images (int)
       required_slide_titles (list[str])
+      required_text / forbidden_text / expect_content_in — see _check_text_rules
       title_match_threshold (float) — fuzzy ratio, default 0.6
       min_chars_per_slide (int)
     """
     issues = []
     matches = []
+    warnings = []
     threshold = config.get('title_match_threshold', 0.6)
 
     if ext == '.odp':
@@ -170,7 +274,17 @@ def _check_presentation(file_bytes: bytes, ext: str, config: dict) -> dict:
         else:
             matches.append(f"{image_count} Bild{'er' if image_count != 1 else ''} ✓")
 
-    return _result(issues, matches)
+    # Text rules read blocks, which carry the slide number and tell slide text
+    # apart from speaker notes -- neither branch above can see that.
+    import artifact_processor
+    try:
+        blocks = (artifact_processor.extract_pptx_blocks(file_bytes) if ext == '.pptx'
+                  else artifact_processor.extract_odp_blocks(file_bytes))
+    except Exception:
+        blocks = []
+    _check_text_rules(blocks, config, issues, matches, warnings)
+
+    return _result(issues, matches, warnings)
 
 
 def _check_document(file_bytes: bytes, ext: str, config: dict) -> dict:
@@ -179,8 +293,9 @@ def _check_document(file_bytes: bytes, ext: str, config: dict) -> dict:
     config keys:
       format (list[str]) — accepted extensions, checked by caller
       min_words (int)
+      min_words_required (bool) — promote min_words from warning to failure
       min_images (int)
-      required_headings (list[str])
+      required_text / forbidden_text / expect_content_in — see _check_text_rules
       title_match_threshold (float) — fuzzy ratio, default 0.6
     """
     import artifact_processor
@@ -193,7 +308,6 @@ def _check_document(file_bytes: bytes, ext: str, config: dict) -> dict:
     issues = []
     matches = []
     warnings = []
-    threshold = config.get('title_match_threshold', 0.6)
     min_words = config.get('min_words', 0)
     if min_words:
         # Counted on the rendered string, not on the block texts: the '#'
@@ -202,7 +316,13 @@ def _check_document(file_bytes: bytes, ext: str, config: dict) -> dict:
         # min_added_words, not here.
         word_count = len(artifact_processor.render_text(blocks).split())
         if word_count < min_words:
-            warnings.append("wenig Text vorhanden")
+            # min_words is a warning by default -- a short but finished artifact
+            # should not be blocked. min_words_required is for the from-scratch
+            # ones, where too little text really does mean unfinished.
+            if config.get('min_words_required'):
+                issues.append(f"Zu wenig Text ({word_count} Wörter, erwartet: {min_words})")
+            else:
+                warnings.append("wenig Text vorhanden")
         else:
             matches.append("Wortanzahl erreicht")
 
@@ -223,15 +343,10 @@ def _check_document(file_bytes: bytes, ext: str, config: dict) -> dict:
         else:
             matches.append(f"{image_count} Bild{'er' if image_count != 1 else ''} ✓")
 
-    # Headings are now a property of the block, not a '#' prefix parsed back out
-    # of a flat string -- which is what made this check heading-only in the
-    # first place, and what made it blind to a heading inside a list.
-    heading_texts = [b['text'] for b in blocks if b['kind'] == 'heading']
-    for req in config.get('required_headings', []):
-        if max((_fuzzy_match(req, h) for h in heading_texts), default=0) < threshold:
-            issues.append(f'Abschnitt fehlt: „{req}"')
-        else:
-            matches.append(f'Abschnitt gefunden: „{req}" ✓')
+    # required_headings used to live here, parsing '#' prefixes back out of the
+    # flat string. It is now required_text with kind: heading -- one field for
+    # one operation, and it reaches body text too.
+    _check_text_rules(blocks, config, issues, matches, warnings)
 
     return _result(issues, matches, warnings)
 
