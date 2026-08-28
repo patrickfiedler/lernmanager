@@ -194,6 +194,9 @@
                 <p>{{ question.rubric }}</p>
             </details>
             {% endif %}
+            {% if question.correct_display %}
+            <p class="checkpoint-question-correct">✅ Richtig: {{ question.correct_display }}</p>
+            {% endif %}
 
             {% for answer in question.answers %}
             <div class="checkpoint-answer {{ 'is-duplicate' if answer.id in question.duplicate_ids }}">
@@ -215,7 +218,7 @@
                     {% endif %}
                 </div>
                 {% if answer.answer_text %}
-                <div class="checkpoint-answer-text">{{ answer.answer_text }}</div>
+                <div class="checkpoint-answer-text">{{ answer.answer_display or answer.answer_text }}</div>
                 {% endif %}
                 {% if answer.feedback %}
                 <div class="checkpoint-answer-feedback">💬 {{ answer.feedback }}</div>
@@ -363,6 +366,8 @@
 .checkpoint-question-head { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
 .checkpoint-question-text { margin: 0.25rem 0; font-size: 0.9rem; }
 .checkpoint-rubric { font-size: 0.8rem; color: #6b7280; margin-bottom: 0.5rem; }
+/* Same role for a MC question that the rubric plays for a short_answer one. */
+.checkpoint-question-correct { font-size: 0.8rem; color: #15803d; margin: 0 0 0.5rem; }
 .checkpoint-answer { background: #f9fafb; border-radius: 4px; padding: 0.5rem 0.75rem; margin: 0.4rem 0; }
 /* A suspected double-click is tinted, not hidden: the teacher decides, and the
    raw log stays fully visible either way. */

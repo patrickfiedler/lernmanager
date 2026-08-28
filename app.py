@@ -2707,6 +2707,54 @@ def _is_duplicate_submission(previous, current):
         DUPLICATE_SUBMISSION_SIMILARITY
 
 
+def _mc_option_label(option):
+    """One multiple-choice option as plain text. Options are strings, or dicts when
+    they carry an image (see CLAUDE.md § Quiz JSON format)."""
+    if isinstance(option, dict):
+        return option.get('text') or '(Bild)'
+    return str(option)
+
+
+def _mc_option_labels(question, indices):
+    """Map stored option indices to their text, or None if that cannot be done.
+
+    None means the caller falls back to showing the raw stored value. The snapshot
+    can be older than the options (sessions predating quiz_snapshot_json) or a later
+    content edit can have removed an option -- and a confidently wrong label is
+    worse for a teacher checking a grade than an honest index.
+    """
+    options = question.get('options') if question else None
+    if not options:
+        return None
+    try:
+        labels = [_mc_option_labels_one(options, int(i)) for i in indices]
+    except (TypeError, ValueError):
+        return None
+    if any(label is None for label in labels):
+        return None
+    return ' · '.join(labels)
+
+
+def _mc_option_labels_one(options, index):
+    return _mc_option_label(options[index]) if 0 <= index < len(options) else None
+
+
+def _resolve_mc_answer(question, answer_text):
+    """The option text a student actually clicked, from the stored "[0]".
+
+    MC answers are logged as a JSON list of indices (student_checkpoint_answer),
+    which made the review UI show a bare "[0]" -- unreadable next to the question it
+    answers. Returns None when unresolvable; the caller keeps the raw value.
+    """
+    try:
+        indices = json.loads(answer_text)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(indices, list):
+        return None
+    return _mc_option_labels(question, indices)
+
+
 def _checkpoint_question_review(answers):
     """Group one session's logged answers by question and work out, per question:
     what was submitted, which submissions look like accidental duplicates, and what
@@ -2802,6 +2850,17 @@ def _build_checkpoint_sessions(attempts):
             entry['question_text'] = question.get('text') if question else None
             entry['question_type'] = question.get('type', 'multiple_choice') if question else None
             entry['rubric'] = question.get('rubric') if question else None
+
+            # Multiple choice is logged as option indices. Resolve them to text
+            # once, here, so the review UI and both exports read the same thing --
+            # a bare "[0]" is unreadable next to the question it answers.
+            entry['correct_display'] = (_mc_option_labels(question, question.get('correct') or [])
+                                        if question and entry['question_type'] == 'multiple_choice'
+                                        else None)
+            for answer in entry['answers']:
+                answer['answer_display'] = (
+                    _resolve_mc_answer(question, answer['answer_text'])
+                    if entry['question_type'] == 'multiple_choice' else None)
 
         has_duplicates = any(entry['duplicate_ids'] for entry in review)
         # The score the session would have had if no duplicate had been counted.
@@ -3053,7 +3112,12 @@ def _checkpoint_export_rows(sessions):
                     'frage': question['question_text'],
                     'bewertungskriterien': question['rubric'],
                     'versuch_nr': answer['attempt_no'],
-                    'antwort': answer['answer_text'],
+                    # Readable option text for multiple choice, raw stored value
+                    # beside it: a spreadsheet reader wants the option, an analysis
+                    # of the log wants the exact index that was clicked.
+                    'antwort': answer.get('answer_display') or answer['answer_text'],
+                    'antwort_roh': answer['answer_text'],
+                    'richtige_antwort': question.get('correct_display'),
                     'ki_urteil': answer['correct'],
                     'ki_feedback': answer['feedback'],
                     'grader': answer['grader'],
@@ -3163,12 +3227,14 @@ def admin_checkpoint_export_json():
                 'typ': question['question_type'],
                 'frage': question['question_text'],
                 'bewertungskriterien': question['rubric'],
+                'richtige_antwort': question.get('correct_display'),
                 'punkte': question['scored'],
                 'punkte_ohne_doppelklicks': question['scored_without_duplicates'],
                 'versuche': [{
                     'nr': answer['attempt_no'],
                     'zeitpunkt': answer['timestamp'],
-                    'antwort': answer['answer_text'],
+                    'antwort': answer.get('answer_display') or answer['answer_text'],
+                    'antwort_roh': answer['answer_text'],
                     'ki_urteil': answer['correct'],
                     'ki_feedback': answer['feedback'],
                     'grader': answer['grader'],
