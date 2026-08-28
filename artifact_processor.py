@@ -45,6 +45,10 @@ def block(text: str, region: str = 'body', kind: str = 'paragraph',
     return b
 
 
+# Reported for checks, never part of the flat string the LLM reads.
+_UNRENDERED_KINDS = ('image', 'alt-text')
+
+
 def _render_line(b: dict) -> str:
     """One block as one line of the flat string: headings keep their # markers."""
     if b['kind'] == 'heading':
@@ -62,11 +66,17 @@ def render_text(blocks: list) -> str:
     Documents are one line per block. Presentations open each slide with a
     [Folie N] marker and are separated by a blank line; a slide that produced no
     blocks gets no marker, because the old extractor skipped it too.
+
+    Blocks that are not lines of text -- a placed image, an alt-text caption --
+    are reported by the extractors for the gate to count, but they were never
+    part of this string and must not join it now.
     """
     sections = []
     lines = []
     current = None  # slide number of the section being built, None for body text
     for b in blocks:
+        if b['kind'] in _UNRENDERED_KINDS or not b['text']:
+            continue
         index = b.get('index')
         if index != current:
             if lines:
@@ -81,6 +91,17 @@ def render_text(blocks: list) -> str:
 
 # --- .pptx extraction ---
 
+def _pptx_is_picture(shape) -> bool:
+    """A shape that carries actual image bytes -- Picture, or a placeholder
+    filled with one. Asking for .image is the reliable test; shape_type does not
+    distinguish a filled picture placeholder from an empty one."""
+    try:
+        shape.image
+        return True
+    except (AttributeError, ValueError, KeyError):
+        return False
+
+
 def extract_pptx_blocks(file_bytes: bytes) -> list:
     """Blocks for a .pptx file, one per non-empty paragraph, in slide order."""
     from pptx import Presentation
@@ -92,6 +113,9 @@ def extract_pptx_blocks(file_bytes: bytes) -> list:
         title = slide.shapes.title
         title_elem = title._element if title is not None else None
         for shape in slide.shapes:
+            if _pptx_is_picture(shape):
+                blocks.append(block('', 'slide', 'image', index=i))
+                continue
             if not shape.has_text_frame:
                 continue
             # kind says where the text came from, not what it means: every
@@ -162,6 +186,11 @@ def _odp_collect_blocks(elem, blocks, index, region, kind):
                                 'title' if cls == 'title' else kind)
         elif tag == 'list-item':
             _odp_collect_blocks(child, blocks, index, region, 'list-item')
+        elif tag == 'image':
+            # A <draw:image> is an image actually placed on the slide. Counting
+            # ZIP entries under Pictures/ instead counts orphans: this very
+            # template ships a 128 KB JPEG referenced only from manifest.xml.
+            blocks.append(block('', region, 'image', index=index))
         elif tag == 'p':
             text = _odf_line_text(child).strip()
             if text:
@@ -288,7 +317,20 @@ def extract_docx_blocks(file_bytes: bytes) -> list:
             blocks.append(block(text, 'body', 'heading', level=level))
         else:
             blocks.append(block(text, 'body', _docx_kind(para, parents)))
+    blocks.extend(_docx_image_blocks(root))
     return blocks
+
+
+# DrawingML puts the picture reference in <a:blip>, the older VML in
+# <v:imagedata>. Both mean an image actually placed in the document, unlike a
+# stray file under word/media/.
+_A_BLIP = '{http://schemas.openxmlformats.org/drawingml/2006/main}blip'
+_V_IMAGEDATA = '{urn:schemas-microsoft-com:vml}imagedata'
+
+
+def _docx_image_blocks(root) -> list:
+    return [block('', 'body', 'image')
+            for e in root.iter() if e.tag in (_A_BLIP, _V_IMAGEDATA)]
 
 
 def _docx_kind(para, parents) -> str:
@@ -384,6 +426,11 @@ def extract_odt_blocks(file_bytes: bytes) -> list:
     blocks = []
     if body is not None:
         _odt_collect_blocks(body, blocks, 'paragraph')
+        # Images hang off <draw:frame> anchored inside a paragraph, so they sit
+        # below the leaves the walk above stops at. Position carries no meaning
+        # for a document, only the count does.
+        blocks.extend(block('', 'body', 'image')
+                      for e in body.iter() if e.tag.split('}')[-1] == 'image')
     return blocks
 
 

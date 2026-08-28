@@ -130,6 +130,17 @@ def _text_present(blocks: list, rule: dict, threshold: float) -> bool:
     return False
 
 
+def _count_images(blocks: list) -> int:
+    """Images actually placed in the artifact.
+
+    Counting ZIP entries under Pictures/ or ppt/media/ instead counted orphans:
+    MBI's 01_Karten_Vorlage.odp carries a 128 KB JPEG referenced only from
+    META-INF/manifest.xml -- on no slide, in no master -- so an untouched
+    template passed min_images: 1 while its .pptx twin failed.
+    """
+    return sum(1 for b in blocks if b['kind'] == 'image')
+
+
 def _rule_label(rule: dict) -> str:
     """What to call the thing in student-facing feedback."""
     return 'Abschnitt' if rule.get('kind') == 'heading' else 'Text'
@@ -257,31 +268,24 @@ def _check_presentation(file_bytes: bytes, ext: str, config: dict) -> dict:
                 if len(text) < min_chars:
                     issues.append(f"Folie {i} hat zu wenig Text ({len(text)} Zeichen, erwartet: {min_chars})")
 
-    min_images = config.get('min_images', 0)
-    if min_images:
-        image_exts = {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.wmf', '.emf', '.svg'}
-        prefix = 'Pictures/' if ext == '.odp' else 'ppt/media/'
-        try:
-            with zipfile.ZipFile(io.BytesIO(file_bytes)) as z:
-                image_count = sum(
-                    1 for name in z.namelist()
-                    if name.startswith(prefix) and ('.' + name.rsplit('.', 1)[-1].lower()) in image_exts
-                )
-        except Exception:
-            image_count = 0
-        if image_count < min_images:
-            issues.append(f"Zu wenig Bilder ({image_count}, erwartet: {min_images})")
-        else:
-            matches.append(f"{image_count} Bild{'er' if image_count != 1 else ''} ✓")
-
-    # Text rules read blocks, which carry the slide number and tell slide text
-    # apart from speaker notes -- neither branch above can see that.
+    # Blocks carry the slide number, tell slide text apart from speaker notes,
+    # and mark images that are actually placed -- none of which the two
+    # format-specific branches above can see.
     import artifact_processor
     try:
         blocks = (artifact_processor.extract_pptx_blocks(file_bytes) if ext == '.pptx'
                   else artifact_processor.extract_odp_blocks(file_bytes))
     except Exception:
         blocks = []
+
+    min_images = config.get('min_images', 0)
+    if min_images:
+        image_count = _count_images(blocks)
+        if image_count < min_images:
+            issues.append(f"Zu wenig Bilder ({image_count}, erwartet: {min_images})")
+        else:
+            matches.append(f"{image_count} Bild{'er' if image_count != 1 else ''} ✓")
+
     _check_text_rules(blocks, config, issues, matches, warnings)
 
     return _result(issues, matches, warnings)
@@ -328,16 +332,7 @@ def _check_document(file_bytes: bytes, ext: str, config: dict) -> dict:
 
     min_images = config.get('min_images', 0)
     if min_images:
-        image_exts = {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.wmf', '.emf', '.svg'}
-        prefix = 'word/media/' if ext == '.docx' else 'Pictures/'
-        try:
-            with zipfile.ZipFile(io.BytesIO(file_bytes)) as z:
-                image_count = sum(
-                    1 for name in z.namelist()
-                    if name.startswith(prefix) and ('.' + name.rsplit('.', 1)[-1].lower()) in image_exts
-                )
-        except Exception:
-            image_count = 0
+        image_count = _count_images(blocks)
         if image_count < min_images:
             issues.append(f"Zu wenig Bilder ({image_count}, erwartet: {min_images})")
         else:
