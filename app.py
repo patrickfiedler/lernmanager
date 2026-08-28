@@ -2831,6 +2831,44 @@ def _checkpoint_snapshot_questions(attempt):
         return []
 
 
+def _mark_calibration_relevance(answer, question_type):
+    """Decide whether this answer is worth asking the teacher to calibrate.
+
+    The verdict widget asks "War die KI-Bewertung richtig?", which is the wrong
+    question for anything a model never touched: an MC answer is an index
+    comparison ('mc'), a fill_blank that matched is a string comparison ('match'),
+    an empty submit is neither ('empty'). No model, no prompt for a note to tune.
+    Asking anyway cost the teacher a decision per answer and put rows with no KI
+    verdict into the very disagreement data the field exists to collect.
+
+    A fill_blank that did NOT match falls through to the LLM (_grade_warmup_answer),
+    so it arrives here as 'llm' and is asked about -- the deterministic path only
+    ever reports a match it is sure of.
+
+    So the widget is offered when, and only when:
+      - a model actually graded it (LLM_GRADERS), or
+      - the deterministic path looks broken -- an MC answer whose stored indices no
+        longer resolve against the options (Patrick's call 2026-08-28: ask only
+        when something is obviously off), or
+      - something is already recorded, so an existing verdict or note stays visible
+        and clearable instead of being hidden by this rule.
+    """
+    answer['llm_graded'] = answer['grader'] in LLM_GRADERS
+    answer['unresolved_choice'] = bool(
+        question_type == 'multiple_choice'
+        and not answer['gave_up']
+        and answer['answer_text']
+        and answer['answer_display'] is None
+    )
+    answer['show_verdict'] = bool(
+        not answer['gave_up']
+        and (answer['llm_graded']
+             or answer['unresolved_choice']
+             or answer.get('teacher_verdict') is not None
+             or answer.get('teacher_note'))
+    )
+
+
 def _build_checkpoint_sessions(attempts):
     """Assemble the review UI's display model: each checkpoint session with its
     per-question answer log, duplicate flags and a suggested score."""
@@ -2861,6 +2899,7 @@ def _build_checkpoint_sessions(attempts):
                 answer['answer_display'] = (
                     _resolve_mc_answer(question, answer['answer_text'])
                     if entry['question_type'] == 'multiple_choice' else None)
+                _mark_calibration_relevance(answer, entry['question_type'])
 
         has_duplicates = any(entry['duplicate_ids'] for entry in review)
         # The score the session would have had if no duplicate had been counted.
@@ -3013,6 +3052,11 @@ def admin_checkpoint_reset_bulk():
 
 
 DOUBLE_CLICK_NOTE = 'Doppelklick, verworfen'
+
+# Graders that actually ran a model. The others ('mc', 'match', 'empty') are
+# deterministic comparisons, and 'error' means grading never happened -- see
+# _grade_warmup_answer's `source`.
+LLM_GRADERS = ('llm', 'fallback')
 
 
 def _double_click_corrections(sessions):

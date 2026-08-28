@@ -208,11 +208,17 @@
                     {% elif answer.correct is none %}
                     <span class="badge badge-danger" title="LLM-Bewertung fehlgeschlagen — nicht als falsch gewertet">nicht bewertet</span>
                     {% elif answer.correct %}
-                    <span title="Von der KI als richtig bewertet">✅</span>
+                    <span title="{{ 'Von der KI als richtig bewertet' if answer.llm_graded else 'Automatisch als richtig erkannt (ohne KI)' }}">✅</span>
                     {% else %}
-                    <span title="Von der KI als falsch bewertet">❌</span>
+                    <span title="{{ 'Von der KI als falsch bewertet' if answer.llm_graded else 'Automatisch als falsch erkannt (ohne KI)' }}">❌</span>
                     {% endif %}
                     <span class="badge badge-secondary">{{ answer.grader }}</span>
+                    {% if answer.unresolved_choice %}
+                    <span class="badge badge-danger"
+                          title="Die gespeicherten Antwort-Indizes passen nicht mehr zu den Optionen — die Frage wurde vermutlich nachträglich geändert. Bitte die Bewertung prüfen.">
+                        nicht zuordenbar
+                    </span>
+                    {% endif %}
                     {% if answer.id in question.duplicate_ids %}
                     <span class="badge badge-warning">Doppelklick-Verdacht</span>
                     {% endif %}
@@ -224,9 +230,17 @@
                 <div class="checkpoint-answer-feedback">💬 {{ answer.feedback }}</div>
                 {% endif %}
 
-                {% if not answer.gave_up %}
+                {# Only where a model graded, where the deterministic path looks
+                   broken, or where a verdict/note is already on file -- see
+                   _mark_calibration_relevance. A multiple-choice answer is an index
+                   comparison; there is no KI judgement to rate and no prompt to tune. #}
+                {% if answer.show_verdict %}
                 <div class="checkpoint-verdict" data-answer-id="{{ answer.id }}">
+                    {% if answer.llm_graded %}
                     <span class="checkpoint-verdict-label" title="Ändert die Note nicht — misst nur, wie gut die KI bewertet hat">War die KI-Bewertung richtig?</span>
+                    {% else %}
+                    <span class="checkpoint-verdict-label" title="Ändert die Note nicht — diese Antwort wurde ohne KI bewertet">Stimmt diese automatische Bewertung?</span>
+                    {% endif %}
                     <button type="button" class="btn btn-sm {{ 'btn-primary' if answer.teacher_verdict == 1 else 'btn-secondary' }}"
                             data-verdict="1">ja</button>
                     <button type="button" class="btn btn-sm {{ 'btn-primary' if answer.teacher_verdict == 0 else 'btn-secondary' }}"
