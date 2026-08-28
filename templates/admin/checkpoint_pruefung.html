@@ -54,6 +54,11 @@
             <span title="Zurückgesetzte Sitzungen bleiben gespeichert und werden hier wieder sichtbar">zurückgesetzte anzeigen</span>
         </label>
 
+        <label class="flex gap-1 flex-center">
+            <input type="checkbox" name="ohne_doppelklick" value="1" {{ 'checked' if hide_duplicates }}>
+            <span title="Blendet Sitzungen mit Doppelklick-Verdacht nur aus der Ansicht aus — es wird nichts gespeichert und nichts geändert">Doppelklicks ausblenden</span>
+        </label>
+
         <button type="submit" class="btn btn-primary btn-sm">Filtern</button>
         <a href="{{ url_for('admin_checkpoint_pruefung') }}" class="btn btn-secondary btn-sm">Zurücksetzen</a>
     </form>
@@ -62,6 +67,10 @@
 <div class="flex flex-between flex-center mb-2" style="gap: 1rem; flex-wrap: wrap;">
     <p class="text-muted" style="margin: 0;">
         <strong>{{ sessions|length }}</strong> Checkpoint-Sitzung(en)
+        {% if hidden_count %}
+        · <span class="badge badge-secondary"
+                title="Nur ausgeblendet — nichts wurde geändert. Häkchen oben entfernen, um sie wieder zu sehen.">{{ hidden_count }} Doppelklick-Sitzung(en) ausgeblendet</span>
+        {% endif %}
         {% if duplicate_count %}
         · <span class="badge badge-warning"
                 title="Erkannte Doppelklicks. Korrigierbar sind davon {{ correctable_count }} — bei den übrigen ändert der Doppelklick die Punktzahl nicht, oder du hast die Note schon selbst gesetzt.">{{ duplicate_count }} mit Doppelklick-Verdacht</span>
@@ -79,6 +88,7 @@
         <input type="hidden" name="von" value="{{ date_from or '' }}">
         <input type="hidden" name="bis" value="{{ date_to or '' }}">
         <input type="hidden" name="offen" value="{{ '1' if unreviewed_only else '' }}">
+        <input type="hidden" name="ohne_doppelklick" value="{{ '1' if hide_duplicates else '' }}">
     {% endmacro %}
 
     <div class="flex gap-1" style="flex-wrap: wrap;">
