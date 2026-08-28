@@ -2939,11 +2939,7 @@ def _count_by_student(sessions, attempt_ids):
 def admin_checkpoint_pruefung():
     """Review checkpoint quiz answers, LLM verdicts and scores."""
     filters = _checkpoint_filters()
-    # Built unhidden, then hidden here: the page is the one caller that wants to
-    # say how many it dropped, and asking twice would mean a second query.
-    all_sessions = _checkpoint_sessions_for({**filters, 'hide_duplicates': False})
-    sessions = _hide_flagged_sessions(all_sessions, filters['hide_duplicates'])
-    hidden_count = len(all_sessions) - len(sessions)
+    sessions = _build_checkpoint_sessions(models.get_checkpoint_reviews(**filters))
 
     # What each batch button would actually touch, counted here so both can name a
     # real number instead of the broader "has duplicates" badge. The three numbers
@@ -2973,9 +2969,7 @@ def admin_checkpoint_pruefung():
                            correctable_count=len(correctable),
                            correctable_by_student=correctable_by_student,
                            dismissible_count=len(dismissible),
-                           dismissible_by_student=dismissible_by_student,
-                           hide_duplicates=filters['hide_duplicates'],
-                           hidden_count=hidden_count)
+                           dismissible_by_student=dismissible_by_student)
 
 
 @app.route('/admin/checkpoint-pruefung/<int:attempt_id>/bewerten', methods=['POST'])
@@ -3060,9 +3054,8 @@ def admin_checkpoint_reset_bulk():
     # Superseded rows are never re-reset, so the listing this acts on is the live
     # one regardless of whether the history toggle was on when the form was sent.
     filters['include_superseded'] = False
-    sessions = _checkpoint_sessions_for(filters)
-    count = models.supersede_checkpoint_attempts(
-        [entry['attempt']['id'] for entry in sessions])
+    attempts = models.get_checkpoint_reviews(**filters)
+    count = models.supersede_checkpoint_attempts([a['id'] for a in attempts])
     flash(f'{count} Checkpoint-Sitzung(en) zurückgesetzt.' if count
           else 'Keine offenen Sitzungen zum Zurücksetzen.',
           'success' if count else 'warning')
@@ -3134,7 +3127,7 @@ def _double_click_dismissals(sessions):
 def _apply_double_click_dismissals(filters):
     """Run the abhaken batch over one filter selection. Returns the count."""
     filters['include_superseded'] = False
-    sessions = _checkpoint_sessions_for(filters)
+    sessions = _build_checkpoint_sessions(models.get_checkpoint_reviews(**filters))
     attempt_ids, answer_ids = _double_click_dismissals(sessions)
 
     count = models.bulk_mark_double_click_reviewed(
@@ -3146,7 +3139,7 @@ def _apply_double_click_dismissals(filters):
 def _apply_double_click_corrections(filters):
     """Run the batch over one filter selection. Returns the number of sessions."""
     filters['include_superseded'] = False
-    sessions = _checkpoint_sessions_for(filters)
+    sessions = _build_checkpoint_sessions(models.get_checkpoint_reviews(**filters))
     corrections, answer_ids = _double_click_corrections(sessions)
 
     count = models.bulk_correct_double_click_attempts(
@@ -3254,31 +3247,11 @@ def _checkpoint_export_rows(sessions):
     return rows
 
 
-def _checkpoint_sessions_for(filters):
-    """The display model for one filter selection, Doppelklick hide included.
-
-    The single entry point on purpose. `has_duplicates` is derived from the answer
-    log (_checkpoint_question_review), not a column, so the hide cannot live in
-    SQL -- and everything that re-derives a selection server-side (both exports,
-    the bulk reset, both batch buttons) has to apply it here or it would act on
-    rows the teacher cannot see.
-
-    Honest limitation: the hide runs after the query's LIMIT, so a hidden session
-    still consumes one of the `limit` rows. It narrows what is shown, never what
-    was fetched.
-    """
-    filters = dict(filters)
-    hide_duplicates = filters.pop('hide_duplicates', False)
-    sessions = _build_checkpoint_sessions(models.get_checkpoint_reviews(**filters))
-    return _hide_flagged_sessions(sessions, hide_duplicates)
-
-
-def _hide_flagged_sessions(sessions, hide):
-    """Drop Doppelklick-flagged sessions from a listing. Shared so the page can
-    count what it hid without running the query a second time."""
-    if not hide:
-        return sessions
-    return [entry for entry in sessions if not entry['has_duplicates']]
+def _checkpoint_export_sessions(**filters):
+    """Run the review query with the page's filters and build the display model --
+    shared by both export routes so an export always matches what is on screen."""
+    attempts = models.get_checkpoint_reviews(**filters)
+    return _build_checkpoint_sessions(attempts)
 
 
 def _checkpoint_filters(source=None, limit=300):
@@ -3296,10 +3269,6 @@ def _checkpoint_filters(source=None, limit=300):
         'date_from': args.get('von') or None,
         'date_to': args.get('bis') or None,
         'unreviewed_only': args.get('offen') == '1',
-        # View-only: drops flagged sessions from the listing without writing
-        # anything, for when the Doppelklicks are noise against what is being
-        # looked for. Applied in _checkpoint_sessions_for, not in SQL.
-        'hide_duplicates': args.get('ohne_doppelklick') == '1',
         'include_superseded': args.get('verlauf') == '1',
         'limit': limit,
     }
@@ -3317,7 +3286,7 @@ def admin_checkpoint_export_csv():
     import csv
     import io
 
-    rows = _checkpoint_export_rows(_checkpoint_sessions_for(_checkpoint_export_filters()))
+    rows = _checkpoint_export_rows(_checkpoint_export_sessions(**_checkpoint_export_filters()))
     buffer = io.StringIO()
     fieldnames = list(rows[0].keys()) if rows else ['zeitpunkt', 'schueler', 'frage', 'antwort']
     writer = csv.DictWriter(buffer, fieldnames=fieldnames, delimiter=';')
@@ -3339,7 +3308,7 @@ def admin_checkpoint_export_csv():
 def admin_checkpoint_export_json():
     """Nested per session, with full question, rubric and feedback text -- the shape
     to hand to an LLM when looking for weaknesses in the grading prompt."""
-    sessions = _checkpoint_sessions_for(_checkpoint_export_filters())
+    sessions = _checkpoint_export_sessions(**_checkpoint_export_filters())
 
     export = {
         'exported_at': datetime.now().isoformat(),
