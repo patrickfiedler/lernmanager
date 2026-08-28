@@ -189,94 +189,56 @@ def _check_presentation(file_bytes: bytes, ext: str, config: dict) -> dict:
       required_text / forbidden_text / expect_content_in — see _check_text_rules
       title_match_threshold (float) — fuzzy ratio, default 0.6
       min_chars_per_slide (int)
+
+    Reads blocks, so .pptx and .odp go through one code path. They used to have
+    a branch each, which is how they drifted: the .odp branch swept speaker
+    notes into the slide text it measured and the .pptx branch did not.
     """
+    import artifact_processor
+    try:
+        blocks = (artifact_processor.extract_pptx_blocks(file_bytes) if ext == '.pptx'
+                  else artifact_processor.extract_odp_blocks(file_bytes))
+        slide_count = artifact_processor.count_slides(file_bytes, ext)
+    except Exception:
+        return {'passed': False, 'message': 'Datei konnte nicht gelesen werden',
+                'details': [f'Ungültige {ext}-Datei'], 'matches': []}
+
     issues = []
     matches = []
     warnings = []
     threshold = config.get('title_match_threshold', 0.6)
 
-    if ext == '.odp':
-        import xml.etree.ElementTree as ET
-        NS = {
-            'draw': 'urn:oasis:names:tc:opendocument:xmlns:drawing:1.0',
-            'text': 'urn:oasis:names:tc:opendocument:xmlns:text:1.0',
-            'presentation': 'urn:oasis:names:tc:opendocument:xmlns:presentation:1.0',
-        }
-        try:
-            with zipfile.ZipFile(io.BytesIO(file_bytes)) as z:
-                root = ET.fromstring(z.read('content.xml'))
-        except Exception:
-            return {'passed': False, 'message': 'Datei konnte nicht gelesen werden', 'details': ['Ungültige .odp-Datei'], 'matches': []}
+    if config.get('min_slides', 0):
+        if slide_count < config['min_slides']:
+            issues.append(f"Zu wenig Folien ({slide_count}, erwartet: {config['min_slides']})")
+        else:
+            matches.append(f"{slide_count} Folien ✓")
 
-        pages = root.findall('.//draw:page', NS)
-        slide_count = len(pages)
-        if config.get('min_slides', 0):
-            if slide_count < config['min_slides']:
-                issues.append(f"Zu wenig Folien ({slide_count}, erwartet: {config['min_slides']})")
-            else:
-                matches.append(f"{slide_count} Folien ✓")
+    # Each title block on its own, not the placeholder's whole text: slide 1 of
+    # MBI's Karten template has the entire slide typed into the title
+    # placeholder, and comparing a required title against all of it scores far
+    # below threshold.
+    titles = [b['text'] for b in blocks if b['kind'] == 'title']
+    for req in config.get('required_slide_titles', []):
+        if max((_fuzzy_match(req, t) for t in titles), default=0) < threshold:
+            issues.append(f'Folie fehlt: „{req}"')
+        else:
+            matches.append(f'Folie gefunden: „{req}" ✓')
 
-        titles = []
-        for page in pages:
-            title_text = ''
-            for frame in page.findall('.//draw:frame', NS):
-                cls = frame.get('{urn:oasis:names:tc:opendocument:xmlns:presentation:1.0}class')
-                if cls == 'title':
-                    title_text = ' '.join(frame.itertext()).strip()
-                    break
-            titles.append(title_text)
-
-        for req in config.get('required_slide_titles', []):
-            if max((_fuzzy_match(req, t) for t in titles), default=0) < threshold:
-                issues.append(f'Folie fehlt: „{req}"')
-            else:
-                matches.append(f'Folie gefunden: „{req}" ✓')
-
-        min_chars = config.get('min_chars_per_slide', 0)
-        if min_chars:
-            for i, page in enumerate(pages, 1):
-                text = ' '.join(page.itertext()).strip()
-                if len(text) < min_chars:
-                    issues.append(f"Folie {i} hat zu wenig Text ({len(text)} Zeichen, erwartet: {min_chars})")
-
-    elif ext == '.pptx':
-        from pptx import Presentation
-        try:
-            prs = Presentation(io.BytesIO(file_bytes))
-        except Exception:
-            return {'passed': False, 'message': 'Datei konnte nicht gelesen werden', 'details': ['Ungültige .pptx-Datei'], 'matches': []}
-
-        slides = prs.slides
-        slide_count = len(slides)
-        if config.get('min_slides', 0):
-            if slide_count < config['min_slides']:
-                issues.append(f"Zu wenig Folien ({slide_count}, erwartet: {config['min_slides']})")
-            else:
-                matches.append(f"{slide_count} Folien ✓")
-
-        titles = [slide.shapes.title.text if slide.shapes.title else '' for slide in slides]
-        for req in config.get('required_slide_titles', []):
-            if max((_fuzzy_match(req, t) for t in titles), default=0) < threshold:
-                issues.append(f'Folie fehlt: „{req}"')
-            else:
-                matches.append(f'Folie gefunden: „{req}" ✓')
-
-        min_chars = config.get('min_chars_per_slide', 0)
-        if min_chars:
-            for i, slide in enumerate(slides, 1):
-                text = ' '.join(s.text for s in slide.shapes if hasattr(s, 'text')).strip()
-                if len(text) < min_chars:
-                    issues.append(f"Folie {i} hat zu wenig Text ({len(text)} Zeichen, erwartet: {min_chars})")
-
-    # Blocks carry the slide number, tell slide text apart from speaker notes,
-    # and mark images that are actually placed -- none of which the two
-    # format-specific branches above can see.
-    import artifact_processor
-    try:
-        blocks = (artifact_processor.extract_pptx_blocks(file_bytes) if ext == '.pptx'
-                  else artifact_processor.extract_odp_blocks(file_bytes))
-    except Exception:
-        blocks = []
+    min_chars = config.get('min_chars_per_slide', 0)
+    if min_chars:
+        # Slide text only. What a student wrote in the speaker notes is not on
+        # the slide, however much of it there is.
+        per_slide = {i: [] for i in range(1, slide_count + 1)}
+        for b in blocks:
+            if b['region'] == 'slide' and b.get('index') in per_slide and b['text']:
+                per_slide[b['index']].append(b['text'])
+        for i in sorted(per_slide):
+            # Joined with a space, the way the old .pptx branch measured it, so
+            # a min_chars_per_slide MBI already tuned does not shift underfoot.
+            length = len(' '.join(per_slide[i]))
+            if length < min_chars:
+                issues.append(f"Folie {i} hat zu wenig Text ({length} Zeichen, erwartet: {min_chars})")
 
     min_images = config.get('min_images', 0)
     if min_images:

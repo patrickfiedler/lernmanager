@@ -47,6 +47,7 @@ def block(text: str, region: str = 'body', kind: str = 'paragraph',
 
 # Reported for checks, never part of the flat string the LLM reads.
 _UNRENDERED_KINDS = ('image', 'alt-text')
+_UNRENDERED_REGIONS = ('notes',)
 
 
 def _render_line(b: dict) -> str:
@@ -69,13 +70,17 @@ def render_text(blocks: list) -> str:
 
     Blocks that are not lines of text -- a placed image, an alt-text caption --
     are reported by the extractors for the gate to count, but they were never
-    part of this string and must not join it now.
+    part of this string and must not join it now. Speaker notes are dropped for
+    a different reason: .pptx never included them and .odp did, so the same deck
+    saved in two formats produced two different texts.
     """
     sections = []
     lines = []
     current = None  # slide number of the section being built, None for body text
     for b in blocks:
-        if b['kind'] in _UNRENDERED_KINDS or not b['text']:
+        if b['kind'] in _UNRENDERED_KINDS or b['region'] in _UNRENDERED_REGIONS:
+            continue
+        if not b['text']:
             continue
         index = b.get('index')
         if index != current:
@@ -568,6 +573,20 @@ _BLOCK_EXTRACTORS = {
 
 def _artifact_ext(filename: str) -> str:
     return '.' + filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
+
+
+def count_slides(file_bytes: bytes, ext: str) -> int:
+    """Number of slides, including ones that hold nothing.
+
+    Not derivable from blocks: an empty slide produces none. The gate needs it
+    for min_slides, so it stays a separate, cheap structural read.
+    """
+    if ext == '.pptx':
+        from pptx import Presentation
+        return len(Presentation(io.BytesIO(file_bytes)).slides)
+    with zipfile.ZipFile(io.BytesIO(file_bytes)) as z:
+        root = ET.fromstring(z.read('content.xml'))
+    return len(root.findall('.//{%(draw)s}page' % _ODP_NS))
 
 
 def extract_artifact_blocks(file_bytes: bytes, filename: str) -> list:
