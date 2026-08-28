@@ -94,6 +94,14 @@
             ✓ Alle {{ correctable_count }} Doppelklicks korrigieren
         </button>
     </form>
+    {% elif correctable_count %}
+    {# There is something to correct but no filter to scope it to. Say so instead
+       of rendering nothing: hiding the button made the badge above advertise a
+       problem with no visible way to act on it. #}
+    <span class="text-muted" style="font-size: 0.85rem; align-self: center;">
+        {{ correctable_count }} Doppelklick-Sitzung(en) wären korrigierbar — dafür
+        zuerst nach Klasse, Schüler oder Checkpoint filtern.
+    </span>
     {% endif %}
 
     {% if resettable_count and (klasse_id or student_id or checkpoint_id) %}

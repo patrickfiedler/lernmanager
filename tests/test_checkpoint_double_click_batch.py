@@ -260,3 +260,22 @@ def test_per_student_button_appears_only_from_two_sessions(data, as_admin):
     _double_click(data, data["students"]["kaya"], "sess-2")
     page = as_admin.get("/admin/checkpoint-pruefung").get_data(as_text=True)
     assert "Alle 2 Doppelklicks von Kaya korrigieren" in page
+
+
+def test_unfiltered_page_says_why_the_button_is_missing(data, as_admin):
+    """The guard is right, hiding it silently was not: the badge advertises the
+    Doppelklicks, so the page has to say how to get at them."""
+    _double_click(data, data["students"]["kaya"], "sess-1")
+
+    page = as_admin.get("/admin/checkpoint-pruefung").get_data(as_text=True)
+
+    assert "wären korrigierbar" in page
+    assert "zuerst nach Klasse, Schüler oder Checkpoint filtern" in page
+
+
+def test_no_hint_when_there_is_nothing_to_correct(data, as_admin):
+    _session(data, data["students"]["kaya"], "sess-1", ["Kern und Hülle"], score=3)
+
+    page = as_admin.get("/admin/checkpoint-pruefung").get_data(as_text=True)
+
+    assert "wären korrigierbar" not in page
