@@ -3421,6 +3421,33 @@ def get_latest_checkpoint_attempt(student_id, checkpoint_id):
         return dict(row) if row else None
 
 
+def get_reopened_checkpoint_notice(student_id, checkpoint_id):
+    """The reset that reopened this checkpoint, so the student can be told why.
+
+    Counterpart to get_latest_checkpoint_attempt: that one hides superseded rows,
+    which left a reset completely silent -- the result and the teacher's
+    student_feedback vanished from the student's view with no explanation. This
+    reads the newest superseded row purely to surface that message.
+
+    Returns the feedback and the reset time only. Deliberately not the old score:
+    it no longer counts, and repeating an annulled grade above a retake gives the
+    student a number to fixate on instead of the note telling them what to fix.
+
+    Call only when there is no live attempt -- once the retake lands, that session
+    carries its own review banner and this notice is stale.
+    """
+    with db_session() as conn:
+        row = conn.execute("""
+            SELECT student_feedback, superseded_at FROM checkpoint_attempt
+            WHERE student_id = ? AND checkpoint_id = ? AND superseded_at IS NOT NULL
+            ORDER BY superseded_at DESC, id DESC LIMIT 1
+        """, (student_id, checkpoint_id)).fetchone()
+        if not row:
+            return None
+        return {'feedback': row['student_feedback'],
+                'superseded_at': row['superseded_at']}
+
+
 def get_checkpoint_answers_for_attempt(checkpoint_attempt_id):
     """All logged answer attempts for one completed checkpoint session, in the order
     they were submitted -- the per-question detail behind a checkpoint_attempt's

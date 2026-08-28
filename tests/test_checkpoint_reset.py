@@ -9,6 +9,7 @@ import json
 
 import pytest
 
+import app
 import models
 
 
@@ -217,3 +218,126 @@ def test_review_page_offers_reset_and_hides_history(data, client, as_admin):
         "/admin/checkpoint-pruefung").get_data(as_text=True)
     assert "Kaya Muster" in client.get(
         "/admin/checkpoint-pruefung?verlauf=1").get_data(as_text=True)
+
+
+# --- What the student is told about the reset -------------------------------
+# The reset used to be silent from the student's side: every student-facing read
+# filters superseded_at IS NULL, so their result and the teacher's Rueckmeldung
+# just vanished. These cover the notice that explains it.
+
+def _review(attempt_id, feedback, admin_id=1):
+    models.set_checkpoint_teacher_review(attempt_id, None, "intern", feedback, admin_id)
+
+
+def test_reopened_notice_carries_the_feedback(data):
+    """The teacher's workflow: write the Rueckmeldung, reset, student reads it."""
+    student = data["students"][0]
+    attempt_id = _log_session(data, student, score=0)
+    _review(attempt_id, "Schau dir die Reaktionsgleichung nochmal an.")
+    models.supersede_checkpoint_attempts([attempt_id])
+
+    notice = models.get_reopened_checkpoint_notice(student["id"], data["subtask_id"])
+    assert notice["feedback"] == "Schau dir die Reaktionsgleichung nochmal an."
+    assert notice["superseded_at"]
+
+
+def test_reopened_notice_survives_without_feedback(data):
+    """A bulk reset writes no per-student note -- the student is still told why."""
+    student = data["students"][0]
+    models.supersede_checkpoint_attempts([_log_session(data, student)])
+
+    notice = models.get_reopened_checkpoint_notice(student["id"], data["subtask_id"])
+    assert notice is not None
+    assert notice["feedback"] is None
+
+
+def test_no_notice_without_a_reset(data):
+    """A plain completed session is not a reopened one."""
+    student = data["students"][0]
+    _log_session(data, student)
+    assert models.get_reopened_checkpoint_notice(student["id"], data["subtask_id"]) is None
+
+
+def test_notice_reports_the_most_recent_reset(data):
+    """Two reset cycles: the student reads the note from the latest one."""
+    student = data["students"][0]
+    first = _log_session(data, student, session_uid="sess-1")
+    _review(first, "Erster Hinweis.")
+    models.supersede_checkpoint_attempts([first])
+
+    second = _log_session(data, student, session_uid="sess-2")
+    _review(second, "Zweiter Hinweis.")
+    models.supersede_checkpoint_attempts([second])
+
+    notice = models.get_reopened_checkpoint_notice(student["id"], data["subtask_id"])
+    assert notice["feedback"] == "Zweiter Hinweis."
+
+
+def test_notice_is_per_student(data):
+    """Resetting one student's session says nothing to their classmate."""
+    reset_student, other = data["students"]
+    attempt_id = _log_session(data, reset_student)
+    _review(attempt_id, "Nur fuer Kaya.")
+    models.supersede_checkpoint_attempts([attempt_id])
+
+    assert models.get_reopened_checkpoint_notice(other["id"], data["subtask_id"]) is None
+
+
+def _as_student(client, student_id):
+    with client.session_transaction() as sess:
+        sess["student_id"] = student_id
+    return client
+
+
+def _checkpoint_url(data, student):
+    """The student-facing checkpoint URL, slug derived the way the app derives it.
+
+    Not hardcoded: the fixture's "11s" Stufe makes this a Seilbahn topic, so the
+    slug is "1s-atommodelle", not slugify() of the name (see app.topic_slug).
+    """
+    task = models.get_all_student_tasks(student["id"], data["klasse_id"])[0]
+    return f"/schueler/thema/{app.topic_slug(task)}/aufgabe-1/quiz"
+
+
+def test_student_reads_the_feedback_on_the_reopened_checkpoint(data, client):
+    """End to end: the Rueckmeldung reaches the page the student retakes on."""
+    student = data["students"][0]
+    attempt_id = _log_session(data, student, score=0)
+    _review(attempt_id, "Schau dir die Reaktionsgleichung nochmal an.")
+    models.supersede_checkpoint_attempts([attempt_id])
+
+    page = _as_student(client, student["id"]).get(
+        _checkpoint_url(data, student)).get_data(as_text=True)
+
+    assert "noch einmal geöffnet" in page
+    assert "Schau dir die Reaktionsgleichung nochmal an." in page
+    # The annulled score stays off the page -- it does not count any more.
+    assert "Dein letztes Ergebnis" not in page
+
+
+def test_notice_gives_way_to_the_retake(data, client):
+    """Once the new session lands, the standing result replaces the notice."""
+    student = data["students"][0]
+    attempt_id = _log_session(data, student, score=0)
+    _review(attempt_id, "Schau dir die Reaktionsgleichung nochmal an.")
+    models.supersede_checkpoint_attempts([attempt_id])
+    _log_session(data, student, score=3, session_uid="sess-new")
+
+    page = _as_student(client, student["id"]).get(
+        _checkpoint_url(data, student)).get_data(as_text=True)
+
+    assert "noch einmal geöffnet" not in page
+    assert "Dein letztes Ergebnis" in page
+
+
+def test_feedback_written_after_the_reset_still_reaches_the_student(data, client):
+    """Order does not matter: the review form saves onto superseded rows too, so a
+    teacher who resets first and writes the note afterwards is not stuck."""
+    student = data["students"][0]
+    attempt_id = _log_session(data, student, score=0)
+    models.supersede_checkpoint_attempts([attempt_id])
+    _review(attempt_id, "Nachtraeglich geschrieben.")
+
+    page = _as_student(client, student["id"]).get(
+        _checkpoint_url(data, student)).get_data(as_text=True)
+    assert "Nachtraeglich geschrieben." in page

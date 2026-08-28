@@ -4653,6 +4653,7 @@ def _handle_checkpoint_quiz(student, task, slug, subtask, position, klasse):
     # was nowhere to look afterwards.
     last_attempt = models.get_latest_checkpoint_attempt(student['id'], subtask['id'])
     review = None
+    reopened = None
     if last_attempt:
         review = {
             'status': models.checkpoint_review_status(last_attempt),
@@ -4660,12 +4661,19 @@ def _handle_checkpoint_quiz(student, task, slug, subtask, position, klasse):
             'llm_score': last_attempt['score'],
             'feedback': last_attempt.get('student_feedback'),
         }
+    else:
+        # No live session, but there may be a superseded one -- a reset. Saying so
+        # is the whole point: the teacher writes the Rueckmeldung, resets, and the
+        # student reads it here on the way into the retake. The else is what keeps
+        # it from lingering: once they retake, `review` above takes over.
+        reopened = models.get_reopened_checkpoint_notice(student['id'], subtask['id'])
 
     return render_template('student/checkpoint_quiz.html',
                            student=student, task=task, slug=slug, position=position,
                            subtask_id=subtask['id'], questions_json=questions_json,
                            has_hints=bool(hints), transparency_mode=transparency_mode,
-                           review=review, llm_enabled=config.LLM_ENABLED)
+                           review=review, reopened=reopened,
+                           llm_enabled=config.LLM_ENABLED)
 
 
 @app.route('/schueler/checkpoint/antwort', methods=['POST'])

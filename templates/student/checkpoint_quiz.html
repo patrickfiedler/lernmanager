@@ -36,6 +36,21 @@
 </div>
 {% endif %}
 
+{% if reopened %}
+{# A teacher reopened this checkpoint. Without this the reset was silent: the
+   result and the Rueckmeldung simply disappeared. Shows no old score -- it does
+   not count any more, and the note is what should be read before the retake. #}
+<div class="checkpoint-reopened-banner">
+    <p class="checkpoint-reopened-lead">
+        🔄 Deine Lehrkraft hat diesen Checkpoint noch einmal geöffnet.
+        Du kannst ihn erneut bearbeiten.
+    </p>
+    {% if reopened.feedback %}
+    <p class="checkpoint-reopened-feedback">💬 {{ reopened.feedback }}</p>
+    {% endif %}
+</div>
+{% endif %}
+
 <div id="checkpoint-container">
     <div class="mb-1 text-muted" id="progress-text"></div>
 
@@ -76,6 +91,11 @@
 .checkpoint-review-unreviewed { border-left-color: #9ca3af; }
 .checkpoint-review-confirmed { border-left-color: #16a34a; background: #f0fdf4; }
 .checkpoint-review-changed   { border-left-color: #2563eb; background: #eff6ff; }
+.checkpoint-reopened-banner { border-left: 4px solid #d97706; background: #fffbeb;
+                              border-radius: 4px; padding: 0.6rem 0.9rem; margin-bottom: 1rem; }
+.checkpoint-reopened-banner p { margin: 0.15rem 0; }
+.checkpoint-reopened-lead { font-size: 1.05rem; }
+.checkpoint-reopened-feedback { margin-top: 0.4rem !important; font-size: 0.9rem; }
 </style>
 {% endblock %}
 
