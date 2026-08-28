@@ -97,6 +97,10 @@ entities.json
 *.csv
 *.docx
 *.odt
+# ...except the blank MBI templates used as extraction test fixtures.
+# No student data -- they are the unfilled originals handed out in class.
+!tests/fixtures/artifacts/*.docx
+!tests/fixtures/artifacts/*.odt
 
 # Screenshots dropped in the repo root for debugging
 Screenshot*

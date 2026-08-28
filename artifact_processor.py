@@ -3,8 +3,7 @@
 All functions operate on bytes in memory — no temp files, no disk storage.
 This satisfies the DSGVO requirement that original files never persist server-side.
 
-Supported formats: .pptx, .odp, .sb3
-Future: .docx, .odt
+Supported formats: .pptx, .odp, .docx, .odt, .sb3
 """
 
 import io
@@ -177,7 +176,9 @@ def extract_docx(file_bytes: bytes) -> str:
         if not text:
             continue
         sl = style_val.lower()
-        if sl.startswith('heading') or sl.startswith('berschrift'):
+        # 'Title'/'Titel' is what add_heading(level=0) sets -- it carries no
+        # digit, so the level calculation below falls back to 1.
+        if sl.startswith('heading') or sl.startswith('berschrift') or sl in ('title', 'titel'):
             level = min(int(''.join(c for c in style_val if c.isdigit()) or '1'), 6)
             lines.append(f"{'#' * level} {text}")
         else:
@@ -187,11 +188,67 @@ def extract_docx(file_bytes: bytes) -> str:
 
 # --- .odt extraction ---
 
+# ODF wraps text in containers instead of keeping one flat paragraph stream the
+# way .docx does. Only the leaf text:h / text:p elements carry text, so a walk
+# that stops at the direct children of <office:text> loses every list and table.
+_ODT_CONTAINERS = {
+    'list', 'list-item', 'list-header',
+    'table', 'table-row', 'table-cell', 'table-header-rows',
+    'section',
+}
+
+# LibreOffice's "Titel" is a styled paragraph, not a text:h -- same trap as
+# Word's Title style handled in extract_docx() above.
+_ODT_TITLE_STYLES = {'title', 'titel'}
+
+
+def _odt_line_text(elem, ns) -> str:
+    """Text of one ODF paragraph, expanding the elements ODF uses for whitespace.
+
+    <text:s text:c="3"/> is a run of three spaces and <text:tab/> a tab.
+    itertext() yields nothing for either, which collapsed the fill-in lines
+    ("Name: ____   Klasse: ____") and made them differ from their .docx twin.
+    """
+    parts = [elem.text or '']
+    for child in elem:
+        tag = child.tag.split('}')[-1]
+        if tag == 's':
+            parts.append(' ' * int(child.get('{%(text)s}c' % ns, '1') or 1))
+        elif tag == 'tab':
+            parts.append('\t')
+        else:
+            parts.append(_odt_line_text(child, ns))
+        parts.append(child.tail or '')
+    return ''.join(parts)
+
+
+def _odt_collect_lines(elem, ns, lines):
+    """Walk ODF body content, descending into containers that hold paragraphs."""
+    for child in elem:
+        tag = child.tag.split('}')[-1]
+        if tag in _ODT_CONTAINERS:
+            _odt_collect_lines(child, ns, lines)
+            continue
+        if tag not in ('h', 'p'):
+            continue
+        text = _odt_line_text(child, ns).strip()
+        if not text:
+            continue
+        if tag == 'h':
+            level = min(int(child.get('{%(text)s}outline-level' % ns, '1') or 1), 6)
+            lines.append(f"{'#' * level} {text}")
+        elif (child.get('{%(text)s}style-name' % ns) or '').lower() in _ODT_TITLE_STYLES:
+            lines.append(f"# {text}")
+        else:
+            lines.append(text)
+
+
 def extract_odt(file_bytes: bytes) -> str:
     """Extract text from an .odt document, preserving heading structure.
 
     .odt is a ZIP archive. Text lives in content.xml under <office:text>.
-    Headings use <text:h text:outline-level="N">, paragraphs use <text:p>.
+    Headings use <text:h text:outline-level="N">, paragraphs use <text:p>,
+    and both can sit inside lists or table cells (see _ODT_CONTAINERS).
     Reference: extract_odp() above uses the same ZIP + content.xml pattern.
     Reference: extract_docx() above uses # markers for heading levels.
     """
@@ -203,16 +260,8 @@ def extract_odt(file_bytes: bytes) -> str:
         root = ET.fromstring(z.read('content.xml'))
     body = root.find('.//{%(office)s}text' % _NS)
     lines = []
-    for elem in (body or []):
-        tag = elem.tag.split('}')[-1]
-        text = ''.join(elem.itertext()).strip()
-        if not text:
-            continue
-        if tag == 'h':
-            level = min(int(elem.get('{%(text)s}outline-level' % _NS, '1')), 6)
-            lines.append(f"{'#' * level} {text}")
-        elif tag == 'p':
-            lines.append(text)
+    if body is not None:
+        _odt_collect_lines(body, _NS, lines)
     return '\n'.join(lines)
 
 
