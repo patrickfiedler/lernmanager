@@ -100,3 +100,6 @@ entities.json
 
 # Screenshots dropped in the repo root for debugging
 Screenshot*
+
+# Claude Code local config (model choice, permission grants, output style)
+.claude/
