@@ -117,21 +117,50 @@ def extract_pptx_blocks(file_bytes: bytes) -> list:
         # compare the underlying XML element, not the wrapper.
         title = slide.shapes.title
         title_elem = title._element if title is not None else None
-        for shape in slide.shapes:
-            if _pptx_is_picture(shape):
-                blocks.append(block('', 'slide', 'image', index=i))
-                continue
-            if not shape.has_text_frame:
-                continue
-            # kind says where the text came from, not what it means: every
-            # paragraph of the title placeholder is a title block, even when the
-            # author typed a whole slide's worth of lines into it.
-            kind = 'title' if shape._element is title_elem else 'paragraph'
-            for para in shape.text_frame.paragraphs:
-                line = para.text.strip()
-                if line:
-                    blocks.append(block(line, 'slide', kind, index=i))
+        _pptx_shape_blocks(slide.shapes, blocks, i, title_elem)
     return blocks
+
+
+def _pptx_is_group(shape) -> bool:
+    """shape_type raises for shape kinds python-pptx does not model."""
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+    try:
+        return shape.shape_type == MSO_SHAPE_TYPE.GROUP
+    except (NotImplementedError, ValueError, AttributeError):
+        return False
+
+
+def _pptx_shape_blocks(shapes, blocks: list, index: int, title_elem):
+    """Collect one slide's shapes, recursing into groups.
+
+    has_text_frame is False for a table (a GraphicFrame) and for a group, so a
+    flat loop over slide.shapes silently skipped both -- while .odp's blind
+    `.//text:p` sweep caught them, which is how the two formats disagreed.
+    """
+    for shape in shapes:
+        if _pptx_is_picture(shape):
+            blocks.append(block('', 'slide', 'image', index=index))
+            continue
+        if _pptx_is_group(shape):
+            _pptx_shape_blocks(shape.shapes, blocks, index, title_elem)
+            continue
+        if getattr(shape, 'has_table', False):
+            for row in shape.table.rows:
+                for cell in row.cells:
+                    text = cell.text.strip()
+                    if text:
+                        blocks.append(block(text, 'slide', 'table-cell', index=index))
+            continue
+        if not shape.has_text_frame:
+            continue
+        # kind says where the text came from, not what it means: every
+        # paragraph of the title placeholder is a title block, even when the
+        # author typed a whole slide's worth of lines into it.
+        kind = 'title' if shape._element is title_elem else 'paragraph'
+        for para in shape.text_frame.paragraphs:
+            line = para.text.strip()
+            if line:
+                blocks.append(block(line, 'slide', kind, index=index))
 
 
 def extract_pptx(file_bytes: bytes) -> str:
