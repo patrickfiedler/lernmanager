@@ -138,10 +138,73 @@
 </div>
 {% endif %}
 
+{# One logged answer. A macro because it is rendered twice: once for the
+   answers that need reading, once inside the collapsed Doppelklick block.
+   Copy-pasting it would let the two renderings drift. #}
+{% macro answer_row(answer, question) %}
+                <div class="checkpoint-answer {{ 'is-duplicate' if answer.id in question.duplicate_ids }}">
+                    <div class="checkpoint-answer-head">
+                        <span class="text-muted">{{ answer.timestamp[11:19] }}</span>
+                        <span>Versuch {{ answer.attempt_no }}</span>
+                        {% if answer.gave_up %}
+                        <span class="badge badge-secondary">aufgegeben</span>
+                        {% elif answer.correct is none %}
+                        <span class="badge badge-danger" title="LLM-Bewertung fehlgeschlagen — nicht als falsch gewertet">nicht bewertet</span>
+                        {% elif answer.correct %}
+                        <span title="{{ 'Von der KI als richtig bewertet' if answer.llm_graded else 'Automatisch als richtig erkannt (ohne KI)' }}">✅</span>
+                        {% else %}
+                        <span title="{{ 'Von der KI als falsch bewertet' if answer.llm_graded else 'Automatisch als falsch erkannt (ohne KI)' }}">❌</span>
+                        {% endif %}
+                        <span class="badge badge-secondary">{{ answer.grader }}</span>
+                        {% if answer.unresolved_choice %}
+                        <span class="badge badge-danger"
+                              title="Die gespeicherten Antwort-Indizes passen nicht mehr zu den Optionen — die Frage wurde vermutlich nachträglich geändert. Bitte die Bewertung prüfen.">
+                            nicht zuordenbar
+                        </span>
+                        {% endif %}
+                        {% if answer.id in question.duplicate_ids %}
+                        <span class="badge badge-warning">Doppelklick-Verdacht</span>
+                        {% endif %}
+                    </div>
+                    {% if answer.answer_text %}
+                    <div class="checkpoint-answer-text">{{ answer.answer_display or answer.answer_text }}</div>
+                    {% endif %}
+                    {% if answer.feedback %}
+                    <div class="checkpoint-answer-feedback">💬 {{ answer.feedback }}</div>
+                    {% endif %}
+
+                    {# Only where a model graded, where the deterministic path looks
+                       broken, or where a verdict/note is already on file -- see
+                       _mark_calibration_relevance. A multiple-choice answer is an index
+                       comparison; there is no KI judgement to rate and no prompt to tune. #}
+                    {% if answer.show_verdict %}
+                    <div class="checkpoint-verdict" data-answer-id="{{ answer.id }}">
+                        {% if answer.llm_graded %}
+                        <span class="checkpoint-verdict-label" title="Ändert die Note nicht — misst nur, wie gut die KI bewertet hat">War die KI-Bewertung richtig?</span>
+                        {% else %}
+                        <span class="checkpoint-verdict-label" title="Ändert die Note nicht — diese Antwort wurde ohne KI bewertet">Stimmt diese automatische Bewertung?</span>
+                        {% endif %}
+                        <button type="button" class="btn btn-sm {{ 'btn-primary' if answer.teacher_verdict == 1 else 'btn-secondary' }}"
+                                data-verdict="1">ja</button>
+                        <button type="button" class="btn btn-sm {{ 'btn-primary' if answer.teacher_verdict == 0 else 'btn-secondary' }}"
+                                data-verdict="0">nein</button>
+                        <button type="button" class="btn btn-sm btn-secondary" data-verdict="">–</button>
+                        <input type="text" class="form-control checkpoint-verdict-note" placeholder="Notiz fürs Prompt-Tuning (optional)"
+                               value="{{ answer.teacher_note or '' }}">
+                        <span class="checkpoint-verdict-status text-muted"></span>
+                    </div>
+                    {% endif %}
+                </div>
+{% endmacro %}
+
 {% for entry in sessions %}
 {% set attempt = entry.attempt %}
 {% set is_reset = attempt.superseded_at %}
-<details class="card mb-1 checkpoint-session{{ ' checkpoint-session-reset' if is_reset }}" {{ 'open' if not is_reset and (entry.has_duplicates or attempt.needs_review) }}>
+{# Only needs_review forces a session open: that one means LLM grading was
+   unavailable and a question was scored as a give-up, so a human has to re-grade.
+   has_duplicates used to open sessions too, which inverted the page -- routine
+   double-clicks expanded themselves while the real review cases stayed collapsed. #}
+<details class="card mb-1 checkpoint-session{{ ' checkpoint-session-reset' if is_reset }}" {{ 'open' if not is_reset and attempt.needs_review }}>
     <summary class="checkpoint-session-head">
         <span class="checkpoint-session-title">
             <strong>{{ attempt.student_name }}</strong>
@@ -214,61 +277,21 @@
             <p class="checkpoint-question-correct">✅ Richtig: {{ question.correct_display }}</p>
             {% endif %}
 
-            {% for answer in question.answers %}
-            <div class="checkpoint-answer {{ 'is-duplicate' if answer.id in question.duplicate_ids }}">
-                <div class="checkpoint-answer-head">
-                    <span class="text-muted">{{ answer.timestamp[11:19] }}</span>
-                    <span>Versuch {{ answer.attempt_no }}</span>
-                    {% if answer.gave_up %}
-                    <span class="badge badge-secondary">aufgegeben</span>
-                    {% elif answer.correct is none %}
-                    <span class="badge badge-danger" title="LLM-Bewertung fehlgeschlagen — nicht als falsch gewertet">nicht bewertet</span>
-                    {% elif answer.correct %}
-                    <span title="{{ 'Von der KI als richtig bewertet' if answer.llm_graded else 'Automatisch als richtig erkannt (ohne KI)' }}">✅</span>
-                    {% else %}
-                    <span title="{{ 'Von der KI als falsch bewertet' if answer.llm_graded else 'Automatisch als falsch erkannt (ohne KI)' }}">❌</span>
-                    {% endif %}
-                    <span class="badge badge-secondary">{{ answer.grader }}</span>
-                    {% if answer.unresolved_choice %}
-                    <span class="badge badge-danger"
-                          title="Die gespeicherten Antwort-Indizes passen nicht mehr zu den Optionen — die Frage wurde vermutlich nachträglich geändert. Bitte die Bewertung prüfen.">
-                        nicht zuordenbar
-                    </span>
-                    {% endif %}
-                    {% if answer.id in question.duplicate_ids %}
-                    <span class="badge badge-warning">Doppelklick-Verdacht</span>
-                    {% endif %}
-                </div>
-                {% if answer.answer_text %}
-                <div class="checkpoint-answer-text">{{ answer.answer_display or answer.answer_text }}</div>
-                {% endif %}
-                {% if answer.feedback %}
-                <div class="checkpoint-answer-feedback">💬 {{ answer.feedback }}</div>
-                {% endif %}
-
-                {# Only where a model graded, where the deterministic path looks
-                   broken, or where a verdict/note is already on file -- see
-                   _mark_calibration_relevance. A multiple-choice answer is an index
-                   comparison; there is no KI judgement to rate and no prompt to tune. #}
-                {% if answer.show_verdict %}
-                <div class="checkpoint-verdict" data-answer-id="{{ answer.id }}">
-                    {% if answer.llm_graded %}
-                    <span class="checkpoint-verdict-label" title="Ändert die Note nicht — misst nur, wie gut die KI bewertet hat">War die KI-Bewertung richtig?</span>
-                    {% else %}
-                    <span class="checkpoint-verdict-label" title="Ändert die Note nicht — diese Antwort wurde ohne KI bewertet">Stimmt diese automatische Bewertung?</span>
-                    {% endif %}
-                    <button type="button" class="btn btn-sm {{ 'btn-primary' if answer.teacher_verdict == 1 else 'btn-secondary' }}"
-                            data-verdict="1">ja</button>
-                    <button type="button" class="btn btn-sm {{ 'btn-primary' if answer.teacher_verdict == 0 else 'btn-secondary' }}"
-                            data-verdict="0">nein</button>
-                    <button type="button" class="btn btn-sm btn-secondary" data-verdict="">–</button>
-                    <input type="text" class="form-control checkpoint-verdict-note" placeholder="Notiz fürs Prompt-Tuning (optional)"
-                           value="{{ answer.teacher_note or '' }}">
-                    <span class="checkpoint-verdict-status text-muted"></span>
-                </div>
-                {% endif %}
-            </div>
+            {# Duplicates are held back below: a flagged row is >=0.95 identical
+               to the one above it, same verdict, within 15s (_is_duplicate_submission).
+               Reviewing it again means writing the same note twice. #}
+            {% for answer in question.answers if answer.id not in question.duplicate_ids %}
+            {{ answer_row(answer, question) }}
             {% endfor %}
+
+            {% if question.duplicate_ids %}
+            <details class="checkpoint-duplicates">
+                <summary>{{ question.duplicate_ids|length }} Doppelklick-Verdacht ausgeblendet <span class="text-muted">(fast identischer Text, gleiche Bewertung)</span></summary>
+                {% for answer in question.answers if answer.id in question.duplicate_ids %}
+                {{ answer_row(answer, question) }}
+                {% endfor %}
+            </details>
+            {% endif %}
         </div>
         {% endfor %}
 
@@ -415,6 +438,9 @@
 /* A suspected double-click is tinted, not hidden: the teacher decides, and the
    raw log stays fully visible either way. */
 .checkpoint-answer.is-duplicate { background: #fff8e1; border-left: 3px solid #ffc107; }
+.checkpoint-duplicates { font-size: 0.8rem; color: #6b7280; margin: 0.25rem 0 0.5rem; }
+.checkpoint-duplicates > summary { cursor: pointer; padding: 0.15rem 0; }
+.checkpoint-duplicates[open] > summary { margin-bottom: 0.35rem; }
 .checkpoint-answer-head { display: flex; gap: 0.5rem; align-items: center; font-size: 0.85rem; flex-wrap: wrap; }
 .checkpoint-answer-text { margin-top: 0.25rem; white-space: pre-wrap; }
 .checkpoint-answer-feedback { margin-top: 0.25rem; font-size: 0.85rem; color: #4b5563; }
