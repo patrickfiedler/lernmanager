@@ -47,7 +47,10 @@ def block(text: str, region: str = 'body', kind: str = 'paragraph',
 
 # Reported for checks, never part of the flat string the LLM reads.
 _UNRENDERED_KINDS = ('image', 'alt-text')
-_UNRENDERED_REGIONS = ('notes',)
+# Headers and footers were never in this string either. They are extracted so a
+# forbidden_text rule can look at the name/class fields that live there, not to
+# be graded as body text.
+_UNRENDERED_REGIONS = ('notes', 'header', 'footer')
 
 
 def _render_line(b: dict) -> str:
@@ -72,7 +75,8 @@ def render_text(blocks: list) -> str:
     are reported by the extractors for the gate to count, but they were never
     part of this string and must not join it now. Speaker notes are dropped for
     a different reason: .pptx never included them and .odp did, so the same deck
-    saved in two formats produced two different texts.
+    saved in two formats produced two different texts. Headers and footers were
+    never here at all and stay out, so no rubric re-calibrates.
     """
     sections = []
     lines = []
@@ -335,6 +339,25 @@ def extract_docx_blocks(file_bytes: bytes) -> list:
     """
     with zipfile.ZipFile(io.BytesIO(file_bytes)) as z:
         root = ET.fromstring(z.read('word/document.xml'))
+        parts = [(n, 'header') for n in z.namelist() if _WORD_HEADER.match(n)]
+        parts += [(n, 'footer') for n in z.namelist() if _WORD_FOOTER.match(n)]
+        side_roots = [(ET.fromstring(z.read(name)), region) for name, region in sorted(parts)]
+    blocks = _docx_part_blocks(root, 'body')
+    blocks.extend(_docx_image_blocks(root))
+    # Name and class fields often live in a header, where a forbidden_text check
+    # on "______" would otherwise never look.
+    for side_root, region in side_roots:
+        blocks.extend(_docx_part_blocks(side_root, region))
+    return blocks
+
+
+_WORD_HEADER = re.compile(r'^word/header\d*\.xml$')
+_WORD_FOOTER = re.compile(r'^word/footer\d*\.xml$')
+_W_TXBX = f'{{{_W}}}txbxContent'
+_W_T = f'{{{_W}}}t'
+
+
+def _docx_part_blocks(root, region: str) -> list:
     # A paragraph does not know its ancestors, so build the reverse map once --
     # needed to tell a table cell's paragraph from a body paragraph.
     parents = {child: parent for parent in root.iter() for child in parent}
@@ -342,17 +365,39 @@ def extract_docx_blocks(file_bytes: bytes) -> list:
     for para in root.iter(f'{{{_W}}}p'):
         pstyle = para.find(f'{{{_W}}}pPr/{{{_W}}}pStyle')
         style_val = pstyle.get(f'{{{_W}}}val', '') if pstyle is not None else ''
-        text = ''.join(t.text or '' for t in para.iter(f'{{{_W}}}t')).strip()
+        text = _docx_para_text(para).strip()
         if not text:
             continue
         sl = style_val.lower()
         if sl.startswith('heading') or sl.startswith('berschrift') or sl in ('title', 'titel'):
             level = min(int(''.join(c for c in style_val if c.isdigit()) or '1'), 6)
-            blocks.append(block(text, 'body', 'heading', level=level))
+            blocks.append(block(text, region, 'heading', level=level))
         else:
-            blocks.append(block(text, 'body', _docx_kind(para, parents)))
-    blocks.extend(_docx_image_blocks(root))
+            blocks.append(block(text, region, _docx_kind(para, parents)))
     return blocks
+
+
+def _docx_para_text(para) -> str:
+    """Text of one paragraph, minus any text box anchored inside it.
+
+    <w:txbxContent> nests whole <w:p> elements inside the outer paragraph and
+    root.iter() yields both, so collecting every <w:t> below the outer one
+    counted a text box's words twice and inflated min_words. The inner
+    paragraphs are emitted on their own pass.
+    """
+    parts = []
+
+    def walk(node):
+        for child in node:
+            if child.tag == _W_TXBX:
+                continue
+            if child.tag == _W_T:
+                parts.append(child.text or '')
+            else:
+                walk(child)
+
+    walk(para)
+    return ''.join(parts)
 
 
 # DrawingML puts the picture reference in <a:blip>, the older VML in
@@ -456,6 +501,10 @@ def extract_odt_blocks(file_bytes: bytes) -> list:
     """
     with zipfile.ZipFile(io.BytesIO(file_bytes)) as z:
         root = ET.fromstring(z.read('content.xml'))
+        try:
+            styles = ET.fromstring(z.read('styles.xml'))
+        except KeyError:
+            styles = None
     body = root.find('.//{%s}text' % _ODF_OFFICE_NS)
     blocks = []
     if body is not None:
@@ -465,6 +514,15 @@ def extract_odt_blocks(file_bytes: bytes) -> list:
         # for a document, only the count does.
         blocks.extend(block('', 'body', 'image')
                       for e in body.iter() if e.tag.split('}')[-1] == 'image')
+    # ODF keeps headers and footers in styles.xml, under the master page --
+    # not in content.xml with the rest of the document.
+    if styles is not None:
+        for elem in styles.iter():
+            region = elem.tag.split('}')[-1]
+            if region in ('header', 'footer'):
+                side = []
+                _odt_collect_blocks(elem, side, 'paragraph')
+                blocks.extend(dict(b, region=region) for b in side)
     return blocks
 
 
