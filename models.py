@@ -129,8 +129,7 @@ def init_db():
                 artifact_gate_required INTEGER NOT NULL DEFAULT 1,
                 klassenstufe INTEGER DEFAULT NULL,
                 kurs_code TEXT DEFAULT NULL,
-                show_completed_topics INTEGER NOT NULL DEFAULT 0,
-                zeichenleiste TEXT DEFAULT NULL  -- migrate_052: preset key from config.CHARACTER_SETS, NULL = no bar
+                show_completed_topics INTEGER NOT NULL DEFAULT 0
             );
 
             -- Students (Schüler)
@@ -5162,36 +5161,25 @@ def set_klasse_show_completed_topics(klasse_id, show: bool):
         )
 
 
-def set_klasse_zeichenleiste(klasse_id, preset):
-    """Set (or clear) this class's character-insert bar.
+def get_faecher_for_student(student_id):
+    """Subjects (task.fach) the student's classes actually work on.
 
-    `preset` is a key of config.CHARACTER_SETS; anything falsy stores NULL and
-    turns the bar off. The key is validated by the caller -- an unknown key
-    stored here would simply render no bar, not break the page.
-    """
-    with db_session() as conn:
-        conn.execute(
-            "UPDATE klasse SET zeichenleiste = ? WHERE id = ?",
-            (preset or None, klasse_id)
-        )
-
-
-def get_zeichenleiste_presets_for_student(student_id):
-    """Preset keys of every class this student is in, in a stable order.
-
-    A student can sit in more than one class (Chemie and MBI), so this returns a
-    list rather than one value; the caller unions the character sets. Classes
-    without a preset contribute nothing.
+    Class-level on purpose: the subject lives on the Thema, not on `klasse`, so a
+    class "is" a subject once any Thema of that subject is assigned in it. One real
+    class runs Chemie and MBI together and correctly gets both. Sorted for a stable
+    order downstream.
     """
     with db_session() as conn:
         rows = conn.execute('''
-            SELECT DISTINCT k.zeichenleiste
-            FROM klasse k
-            JOIN student_klasse sk ON sk.klasse_id = k.id
-            WHERE sk.student_id = ? AND k.zeichenleiste IS NOT NULL AND k.zeichenleiste != ''
-            ORDER BY k.zeichenleiste
+            SELECT DISTINCT t.fach
+            FROM student_klasse sk
+            JOIN student_task st ON st.klasse_id = sk.klasse_id
+            JOIN task t ON t.id = st.task_id
+            WHERE sk.student_id = ?
+            ORDER BY t.fach
         ''', (student_id,)).fetchall()
     return [r[0] for r in rows]
+
 
 
 def get_completed_student_tasks(student_id, klasse_id):

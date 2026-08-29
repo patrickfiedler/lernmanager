@@ -43,23 +43,26 @@ LEVELS = ['5', '6', '7', '8', '9', '10', '11s', '11/12']
 LEGACY_LEVELS = ['5/6', '7/8', '9/10']
 
 # Zeichenleiste: character-insert bars offered above free-text answer fields.
-# A class picks one preset (klasse.zeichenleiste); no preset means no bar, which
-# is the default for every class.
+# Keyed by Fach (task.fach, same spelling as SUBJECTS above). A student sees the
+# bar for every subject their classes actually work on; a subject that is not a
+# key here -- which is all of them but Chemie -- gets no bar and no change.
 #
-# Why a preset key and not a free-text field on the class: the teachers who need
-# this cannot type these characters either -- that inability IS the bug. Asked for
-# by Chemie 2026-08-29 (docs/shared/lernmanager/inbox.md): of thirty answers to the
-# two half-equation questions in the 2026-08-26 run, not one contained a reaction
-# arrow, a subscript digit or a superscript charge. Students on iPads reach for
-# "->" or "wird zu" because the keyboard offers nothing else, and the notation is
-# itself exam content they have to write by hand later.
+# Not a per-class setting: klasse has no `fach` column, the subject lives on the
+# Thema, and one real class ("Klasse x") runs Chemie and MBI side by side. A
+# declared class subject would be plainly wrong for that one, and would need
+# setting on eleven others before anything happened.
+#
+# Why the set exists: asked for by Chemie 2026-08-29
+# (docs/shared/lernmanager/inbox.md). Of thirty answers to the two half-equation
+# questions in the 2026-08-26 run, not one contained a reaction arrow, a subscript
+# digit or a superscript charge. Students on iPads reach for "->" or "wird zu"
+# because the keyboard offers nothing else, and the notation is itself exam
+# content they have to write by hand later.
 CHARACTER_SETS = {
-    'chemie': {
-        'label': 'Chemie (Pfeile, Ladungen, Indizes)',
-        'chars': ['\u2192', '\u21cc', '\u207b', '\u207a', '\u00b2\u207a', '\u00b3\u207a',
-                  '\u2081', '\u2082', '\u2083', '\u2084', '\u0394', '\u00b0'],
-    },
+    'Chemie': ['\u2192', '\u21cc', '\u207b', '\u207a', '\u00b2\u207a', '\u00b3\u207a',
+               '\u2081', '\u2082', '\u2083', '\u2084', '\u0394', '\u00b0'],
 }
+
 
 def _env_int(name, default, minimum=1):
     """Read a positive int from the environment, falling back to `default`.
