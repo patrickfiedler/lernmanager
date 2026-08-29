@@ -1007,6 +1007,12 @@ function adjustZoom(delta) {
         const name = fileInput.files[0] ? fileInput.files[0].name : '';
         filenameSpan.textContent = name;
         submitBtn.disabled = !name;
+        // A passing check hides this button and offers "Weiter →" instead. But a pass
+        // is structural, and the AI feedback shown beside it can still say the work
+        // needs another round -- so students pick a corrected file right here instead
+        // of clicking Weiter. Without this the button stays display:none and the only
+        // way back to it is reloading the page.
+        submitBtn.style.display = '';
     });
 
     submitBtn.addEventListener('click', function() {
@@ -1099,6 +1105,12 @@ function adjustZoom(delta) {
         const name = fileInput.files[0] ? fileInput.files[0].name : '';
         filenameSpan.textContent = name;
         submitBtn.disabled = !name;
+        // A passing check hides this button and offers "Weiter →" instead. But a pass
+        // is structural, and the AI feedback shown beside it can still say the work
+        // needs another round -- so students pick a corrected file right here instead
+        // of clicking Weiter. Without this the button stays display:none and the only
+        // way back to it is reloading the page.
+        submitBtn.style.display = '';
     });
 
     submitBtn.addEventListener('click', function() {
