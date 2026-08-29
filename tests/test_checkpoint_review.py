@@ -228,13 +228,13 @@ def test_answer_verdict_is_saved_and_leaves_the_score_alone(as_admin, checkpoint
 
     response = as_admin.post(
         f"/admin/checkpoint-pruefung/antwort/{answer['id']}/urteil",
-        data={"teacher_verdict": "1", "teacher_note": "war eigentlich richtig"},
+        data={"teacher_verdict": "1", "teacher_note": "KI lag richtig"},
     )
 
     assert response.status_code == 200
     saved = models.get_checkpoint_answers_for_attempts([attempt_id])[attempt_id][0]
     assert saved["teacher_verdict"] == 1
-    assert saved["teacher_note"] == "war eigentlich richtig"
+    assert saved["teacher_note"] == "KI lag richtig"
     # Calibration only: the grade must not move.
     assert models.get_checkpoint_reviews()[0]["effective_score"] == 2
 
@@ -244,7 +244,10 @@ def test_answer_verdict_is_saved_and_leaves_the_score_alone(as_admin, checkpoint
 def test_csv_export_marks_llm_disagreement(as_admin, checkpoint_data):
     attempt_id = _log_session(checkpoint_data, [{"question_index": 0, "correct": False}], score=0)
     answer = models.get_checkpoint_answers_for_attempts([attempt_id])[attempt_id][0]
-    models.set_checkpoint_answer_verdict(answer["id"], 1, "KI zu streng")
+    # 0 = "nein, die KI-Bewertung war nicht richtig". The note says the KI was too
+    # strict, so the coherent click is nein -- this used to pass 1 and still expect a
+    # disagreement, which only worked because the flag was computed backwards.
+    models.set_checkpoint_answer_verdict(answer["id"], 0, "KI zu streng")
 
     response = as_admin.get("/admin/checkpoint-pruefung/export.csv")
     body = response.data.decode("utf-8-sig")

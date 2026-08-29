@@ -3245,10 +3245,23 @@ def _checkpoint_export_rows(sessions):
                     # Disagreement is the signal the whole export exists for: it is
                     # computed here rather than left to the reader, so a spreadsheet
                     # filter finds it without a formula.
-                    'ki_weicht_ab': (1 if (answer.get('teacher_verdict') is not None
-                                           and answer.get('correct') is not None
-                                           and int(answer['teacher_verdict']) != int(answer['correct']))
-                                     else 0),
+                    #
+                    # teacher_verdict answers the admin UI's question "War die
+                    # KI-Bewertung richtig?" (ja/nein) -- it is NOT what the answer
+                    # was. So a 0 IS the disagreement, and nothing needs comparing
+                    # against `correct`. The old `teacher_verdict != correct` test
+                    # reported the exact opposite on every row where the teacher
+                    # confirmed a "falsch" or overruled one (72 of 103 labelled rows
+                    # in the 2026-08-26 export).
+                    'ki_weicht_ab': (1 if answer.get('teacher_verdict') == 0 else 0),
+                    # What the answer actually was, derived rather than left to the
+                    # reader: `correct` when the teacher confirmed the KI, its inverse
+                    # when they overruled it. NULL while the answer is unjudged.
+                    'antwort_war_richtig': (None if answer.get('teacher_verdict') is None
+                                            or answer.get('correct') is None
+                                            else (int(answer['correct'])
+                                                  if answer['teacher_verdict'] == 1
+                                                  else 1 - int(answer['correct']))),
                     'doppelklick_verdacht': 1 if answer['id'] in question['duplicate_ids'] else 0,
                     'session_score': attempt['score'],
                     'lehrer_score': attempt.get('teacher_score'),
@@ -3358,6 +3371,14 @@ def admin_checkpoint_export_json():
                     'tipps_vorher': answer['hints_used_before'],
                     'aufgegeben': bool(answer['gave_up']),
                     'lehrer_urteil': answer.get('teacher_verdict'),
+                    # Whether the KI was right -- not what the answer was. Both are
+                    # exported because reading the first as the second inverts the
+                    # ground truth on every overruled row (see _checkpoint_export_rows).
+                    'antwort_war_richtig': (None if answer.get('teacher_verdict') is None
+                                            or answer.get('correct') is None
+                                            else (int(answer['correct'])
+                                                  if answer['teacher_verdict'] == 1
+                                                  else 1 - int(answer['correct']))),
                     'lehrer_notiz': answer.get('teacher_note'),
                     'doppelklick_verdacht': answer['id'] in question['duplicate_ids'],
                 } for answer in question['answers']],

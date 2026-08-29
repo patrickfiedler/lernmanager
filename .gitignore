@@ -107,3 +107,7 @@ Screenshot*
 
 # Claude Code local config (model choice, permission grants, output style)
 .claude/
+
+# Checkpoint exports contain student answers (and, before anonymization, real names)
+checkpoints_*.json
+checkpoints_*.csv

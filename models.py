@@ -361,7 +361,7 @@ def init_db():
                 hints_used_before INTEGER NOT NULL DEFAULT 0,
                 gave_up INTEGER NOT NULL DEFAULT 0,
                 timestamp TEXT NOT NULL,
-                teacher_verdict INTEGER,  -- migrate_048: what the teacher says the answer actually was (0/1), NULL = not judged. Calibration only -- never feeds the score
+                teacher_verdict INTEGER,  -- migrate_048: whether the KI's verdict was right (1=ja/0=nein), NOT what the answer was -- the admin UI asks "War die KI-Bewertung richtig?". Derive the answer's real correctness as `correct` when 1, `not correct` when 0. NULL = not judged. Calibration only -- never feeds the score
                 teacher_note TEXT,
                 prompt_version TEXT,  -- which system prompt graded this (llm_grading.prompt_version_for) -- without it, a prompt change makes old/new rows incomparable
                 FOREIGN KEY (student_id) REFERENCES student(id) ON DELETE CASCADE
@@ -3780,8 +3780,12 @@ def set_checkpoint_answer_verdict(answer_id, teacher_verdict, teacher_note):
     """Record what the teacher says one answer actually was (migrate_048).
 
     Calibration only: this never changes any score. Its whole purpose is that
-    `teacher_verdict != correct` can be counted in the export to show where the
-    grading prompt disagrees with the teacher.
+    `teacher_verdict == 0` can be counted in the export to show where the grading
+    prompt disagrees with the teacher.
+
+    The value answers the admin UI's question "War die KI-Bewertung richtig?"
+    (ja/nein) -- it does NOT record what the answer was. Anything deriving the
+    answer's real correctness must invert `correct` when this is 0.
     """
     with db_session() as conn:
         conn.execute('''
