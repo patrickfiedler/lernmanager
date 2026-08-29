@@ -51,7 +51,21 @@
         {% set q_idx = loop.index0|string %}
         {% set user_answer = antworten.get(q_idx, []) %}
 
-        {% if question.type in ['fill_blank', 'short_answer'] %}
+        {% if question.type in ['ordering', 'matching'] %}
+        {# Deterministic types: show what was submitted, the tally, and -- only
+           once it is wrong -- the solution. #}
+        <div class="quiz-option selected {% if user_answer.correct %}text-success{% else %}text-danger{% endif %}" style="border-left: 4px solid {% if user_answer.correct %}var(--success-color, #28a745){% else %}var(--danger-color, #dc3545){% endif %}; padding-left: 1rem;">
+            {% if user_answer.correct %}✅{% else %}❌{% endif %} <strong>Deine Antwort:</strong> {{ user_answer.text or '(keine Antwort)' }}
+        </div>
+        <div class="quiz-option" style="border-left: 4px solid var(--info-color, #17a2b8); padding-left: 1rem; background: #e8f4fd;">
+            💬 {{ user_answer.feedback }}{% if user_answer.points is defined and not user_answer.correct %} ({{ user_answer.points }} Punkte){% endif %}
+        </div>
+        {% if not user_answer.correct and question.solution %}
+        <div class="quiz-option" style="border-left: 4px solid var(--success-color, #28a745); padding-left: 1rem; background: #e8f5e9;">
+            ✅ <strong>Richtig wäre:</strong> {{ question.solution }}
+        </div>
+        {% endif %}
+        {% elif question.type in ['fill_blank', 'short_answer'] %}
         {# Free-text answer with LLM feedback #}
         {% if user_answer is mapping %}
         <div class="quiz-option selected {% if user_answer.correct %}text-success{% else %}text-danger{% endif %}" style="border-left: 4px solid {% if user_answer.correct %}var(--success-color, #28a745){% else %}var(--danger-color, #dc3545){% endif %}; padding-left: 1rem;">

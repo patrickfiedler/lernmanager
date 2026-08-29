@@ -3891,7 +3891,9 @@ def _question_hash(q_def):
 
     Two questions are identical iff they have the same type, text, options (in order),
     and correct answers. A change to any of these produces a different hash and a
-    separate stats row — intentional, since the stats genuinely differ.
+    separate stats row — intentional, since the stats genuinely differ. For
+    ordering/matching the authored order and the pairs are what "correct answers"
+    means, so editing either starts a new row.
     """
     qtype = q_def.get('type', 'multiple_choice')
     parts = [qtype, q_def.get('text', '')]
@@ -3900,6 +3902,11 @@ def _question_hash(q_def):
         parts.append(json.dumps(sorted(q_def.get('correct', []))))
     elif qtype == 'fill_blank':
         parts.append(json.dumps(sorted(a.lower() for a in q_def.get('answers', []))))
+    elif qtype == 'ordering':
+        parts.append(json.dumps(q_def.get('items', []), ensure_ascii=False))
+    elif qtype == 'matching':
+        parts.append(json.dumps(q_def.get('pairs', []), ensure_ascii=False))
+        parts.append(json.dumps(sorted(str(d) for d in q_def.get('distractors', [])), ensure_ascii=False))
     else:
         parts.append(q_def.get('rubric', ''))
     return sha256('|'.join(parts).encode()).hexdigest()[:16]
@@ -5858,7 +5865,10 @@ def _quiz_json_to_pool_entries(task_id, subtask_id, quiz_json, topic_name, compl
                                student_path=None, fach=None):
     """Parse one quiz_json blob into warmup pool entries, filtering out
     question types too slow for a quick warm-up (short_answer, long_answer)
-    and questions tagged for a path above the student's own."""
+    and questions tagged for a path above the student's own.
+
+    ordering and matching stay in: both grade deterministically in
+    quiz_grading.py, so neither costs an LLM call or a noticeable wait."""
     try:
         quiz = json.loads(quiz_json)
     except (json.JSONDecodeError, TypeError):

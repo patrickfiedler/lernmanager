@@ -32,6 +32,7 @@
 !/utils.py
 !/run.py
 !/llm_grading.py
+!/quiz_grading.py
 !/artifact_checker.py
 !/artifact_processor.py
 !/analytics_queue.py

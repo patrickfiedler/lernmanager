@@ -26,6 +26,7 @@ import markdown as md
 import config
 import models
 import llm_grading
+import quiz_grading
 import artifact_processor
 import artifact_checker
 from utils import generate_username, generate_password, allowed_file, generate_credentials_pdf, generate_credentials_pdf_grouped, generate_name_username_pdf, generate_student_self_report_pdf, generate_class_report_pdf, generate_student_report_pdf, slugify, format_bytes, is_ip_allowed, is_within_time_window, parse_netzwerk_csv, split_tasks_by_stufe, stufe_sort_key
@@ -316,7 +317,13 @@ def _build_display_quiz(quiz):
                 'image': q.get('image'),
                 'type': q.get('type', 'multiple_choice'),
                 'rubric': q.get('rubric', ''),           # for short_answer transparency
-                'expected_answers': q.get('answers', []) # for fill_blank transparency
+                'expected_answers': q.get('answers', []),  # for fill_blank transparency
+                # Result page only -- this runs after grading, so handing over the
+                # authored order/pairs here reveals nothing the student has not
+                # already earned. The pre-answer payload comes from
+                # quiz_grading.presentation(), which carries no key.
+                'solution': quiz_grading.correct_answer_text(q)
+                            if quiz_grading.is_interactive(q.get('type')) else '',
             }
             for q in quiz['questions']
         ]
@@ -2771,6 +2778,21 @@ def _mc_option_labels_one(options, index):
     return _mc_option_label(options[index]) if 0 <= index < len(options) else None
 
 
+def _resolve_interactive_answer(question, answer_text):
+    """Readable rendering of a logged ordering/matching answer.
+
+    Stored as JSON (an array of item texts, or a {links: rechts} object). The raw
+    JSON is legible in a way "[0]" never was, but "A → B → C" is what the teacher
+    is actually comparing against the question. Returns None when unresolvable;
+    the caller keeps the raw value.
+    """
+    try:
+        submitted = json.loads(answer_text)
+    except (TypeError, ValueError):
+        return None
+    return quiz_grading.answer_text(question, submitted) or None
+
+
 def _resolve_mc_answer(question, answer_text):
     """The option text a student actually clicked, from the stored "[0]".
 
@@ -2924,13 +2946,20 @@ def _build_checkpoint_sessions(attempts):
             # Multiple choice is logged as option indices. Resolve them to text
             # once, here, so the review UI and both exports read the same thing --
             # a bare "[0]" is unreadable next to the question it answers.
-            entry['correct_display'] = (_mc_option_labels(question, question.get('correct') or [])
-                                        if question and entry['question_type'] == 'multiple_choice'
-                                        else None)
+            interactive = bool(question) and quiz_grading.is_interactive(entry['question_type'])
+            if interactive:
+                entry['correct_display'] = quiz_grading.correct_answer_text(question)
+            elif question and entry['question_type'] == 'multiple_choice':
+                entry['correct_display'] = _mc_option_labels(question, question.get('correct') or [])
+            else:
+                entry['correct_display'] = None
             for answer in entry['answers']:
-                answer['answer_display'] = (
-                    _resolve_mc_answer(question, answer['answer_text'])
-                    if entry['question_type'] == 'multiple_choice' else None)
+                if interactive:
+                    answer['answer_display'] = _resolve_interactive_answer(question, answer['answer_text'])
+                elif entry['question_type'] == 'multiple_choice':
+                    answer['answer_display'] = _resolve_mc_answer(question, answer['answer_text'])
+                else:
+                    answer['answer_display'] = None
                 _mark_calibration_relevance(answer, entry['question_type'])
 
         has_duplicates = any(entry['duplicate_ids'] for entry in review)
@@ -4757,6 +4786,28 @@ def _handle_quiz(student_id, student, task, slug, quiz_json_str, subtask_id=None
                         punkte += 1
                     antworten[str(original_q_idx)] = {"text": student_text, **result}
 
+            elif quiz_grading.is_interactive(qtype):
+                # The field carries JSON written by quiz_interactive.js: an array of
+                # item texts for ordering, a {links: rechts} object for matching.
+                # Text, not indices -- see quiz_grading's module docstring.
+                try:
+                    submitted = json.loads(request.form.get(f'q{shuffled_idx}', 'null'))
+                except json.JSONDecodeError:
+                    submitted = None
+                result = quiz_grading.grade(question, submitted)
+                punkte += result['points']
+                antworten[str(original_q_idx)] = {
+                    'type': qtype,
+                    'answer': submitted,
+                    'text': quiz_grading.answer_text(question, submitted),
+                    'correct': result['correct'],
+                    'points': result['points'],
+                    'right': result['right'],
+                    'total': result['total'],
+                    'feedback': result['feedback'],
+                    'source': 'interactive',
+                }
+
             else:
                 # Multiple choice (default)
                 answer_map = json.loads(request.form.get(f'answer_map_{shuffled_idx}', '[]'))
@@ -4770,6 +4821,10 @@ def _handle_quiz(student_id, student, task, slug, quiz_json_str, subtask_id=None
 
         if question_order:
             antworten['_question_order'] = question_order
+        # ordering/matching can score half a point (quiz_grading.points_for), so
+        # punkte is no longer necessarily an integer. Drop the ".0" when it is one
+        # so a quiz without those types stores exactly what it always stored.
+        punkte = int(punkte) if punkte == int(punkte) else punkte
         attempt_id, bestanden = models.save_quiz_attempt(
             student_task_id, punkte, max_punkte, json.dumps(antworten),
             subtask_id=subtask_id, quiz_snapshot=quiz_json_str
@@ -4832,6 +4887,18 @@ def _handle_quiz(student_id, student, task, slug, quiz_json_str, subtask_id=None
                 'correct': [],
                 'image': q.get('image'),
                 'type': qtype
+            }
+        elif quiz_grading.is_interactive(qtype):
+            answer_maps.append([])
+            shuffled_q = {
+                'question': q['text'],
+                'answers': [],
+                'correct': [],
+                'image': q.get('image'),
+                'type': qtype,
+                # Shuffled pieces only, no key -- the template hands this straight
+                # to quiz_interactive.js.
+                'interactive': quiz_grading.presentation(q, quiz_random),
             }
         else:
             options = q['options']
@@ -4933,7 +5000,9 @@ def _serialize_checkpoint_question(q):
     wrong attempt) would break the 3-vs-2 scoring signal."""
     qtype = q.get('type', 'multiple_choice')
     result = {'type': qtype, 'text': q['text']}
-    if qtype not in ('fill_blank', 'short_answer'):
+    if quiz_grading.is_interactive(qtype):
+        result.update(quiz_grading.presentation(q))
+    elif qtype not in ('fill_blank', 'short_answer'):
         result['options'] = q.get('options', [])
     if q.get('image'):
         result['image'] = q['image']
@@ -5095,7 +5164,16 @@ def student_checkpoint_answer():
     question = questions[question_index]
     answer = data.get('answer')
     qtype = question.get('type', 'multiple_choice')
-    is_empty = (not (answer or '').strip()) if qtype in ('fill_blank', 'short_answer') else not answer
+    if qtype in ('fill_blank', 'short_answer'):
+        is_empty = not (answer or '').strip()
+    elif qtype == 'ordering':
+        # An ordering question always carries an order -- the shuffled one counts
+        # as an answer. There is nothing the student could leave blank.
+        is_empty = not isinstance(answer, list) or not answer
+    elif qtype == 'matching':
+        is_empty = not isinstance(answer, dict) or not answer
+    else:
+        is_empty = not answer
     if is_empty:
         # Reject before touching progress -- an accidental empty submit must never
         # burn an attempt against the 3-vs-2 scoring rule (chemie-data-contract.md §3a).
@@ -5129,9 +5207,12 @@ def student_checkpoint_answer():
         question, answer, usage_tag='checkpoint_quiz', strict=True
     )
 
-    # MC answers arrive as a list of indices, not text -- store as JSON so the
-    # log is unambiguous either way (see get_checkpoint_answers_for_attempt).
-    answer_text = json.dumps(answer) if isinstance(answer, list) else str(answer)
+    # MC answers arrive as a list of indices and matching answers as an object,
+    # not as text -- store those as JSON so the log is unambiguous either way
+    # (see get_checkpoint_answers_for_attempt). str() on a dict would write a
+    # Python repr into the review UI and both exports.
+    answer_text = (json.dumps(answer, ensure_ascii=False)
+                   if isinstance(answer, (list, dict)) else str(answer))
     llm_model = config.LLM_MODEL if source in ('llm', 'fallback', 'error') else None
 
     if correct is None:
@@ -5212,7 +5293,9 @@ def student_checkpoint_give_up():
     question = questions[question_index]
 
     qtype = question.get('type', 'multiple_choice')
-    if qtype == 'fill_blank':
+    if quiz_grading.is_interactive(qtype):
+        correct_answer = quiz_grading.correct_answer_text(question)
+    elif qtype == 'fill_blank':
         correct_answer = question['answers'][0] if question.get('answers') else ''
     elif qtype == 'short_answer':
         correct_answer = question.get('rubric', '')
@@ -5522,7 +5605,8 @@ def _grade_warmup_answer(question, answer, usage_tag='llm_grading', strict=False
     MC: compare selected indices to correct set.
     fill_blank: case-insensitive exact match, then LLM fallback.
     short_answer: rubric-graded via LLM (no exact match, free text).
-    source: 'match' | 'llm' | 'fallback' | 'empty' | 'mc' | 'error'
+    ordering/matching: deterministic, via quiz_grading (never an LLM call).
+    source: 'match' | 'llm' | 'fallback' | 'empty' | 'mc' | 'interactive' | 'error'
 
     prompt_version identifies which system prompt graded the answer
     (llm_grading.prompt_version_for) and is None whenever no LLM was involved --
@@ -5536,6 +5620,14 @@ def _grade_warmup_answer(question, answer, usage_tag='llm_grading', strict=False
     callers must not treat that as a wrong answer (see student_checkpoint_answer).
     """
     qtype = question.get('type', 'multiple_choice')
+
+    if quiz_grading.is_interactive(qtype):
+        # Deterministic: no LLM call, so strict= and usage_tag= have nothing to
+        # act on and this can never return None. `correct` stays all-or-nothing --
+        # a partly right answer must not clear a checkpoint gate or a warm-up
+        # streak; the fraction lives in the feedback line instead.
+        result = quiz_grading.grade(question, answer)
+        return result['correct'], result['feedback'], 'interactive', None
 
     if qtype == 'fill_blank':
         student_text = (answer or '').strip()
@@ -5599,6 +5691,10 @@ def _serialize_question_for_js(item):
     if result['type'] == 'fill_blank':
         # Don't send answers to client
         pass
+    elif quiz_grading.is_interactive(result['type']):
+        # Shuffled pieces only. For ordering the authored order *is* the answer,
+        # so sending `items` unshuffled would hand it over outright.
+        result.update(quiz_grading.presentation(q))
     else:
         # MC: send options + correct_count (single- vs multi-select rendering)
         # only -- never the correct indices themselves before grading. Grading
@@ -5677,6 +5773,9 @@ def student_warmup_answer():
     if qtype == 'fill_blank':
         if not correct:
             correct_answer = question['answers'][0] if question.get('answers') else None
+    elif quiz_grading.is_interactive(qtype):
+        if not correct:
+            correct_answer = quiz_grading.correct_answer_text(question)
     else:
         correct_answer = question.get('correct', [])
 

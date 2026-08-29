@@ -190,6 +190,12 @@
             area.appendChild(textarea);
             if (window.Zeichenleiste) window.Zeichenleiste.attach(textarea, ZEICHENLEISTE_FACH);
             setTimeout(() => textarea.focus(), 50);
+        } else if (QuizInteractive.supports(q.type)) {
+            // Drag-or-tap renderer, shared with the quiz form and warm-up
+            // (static/js/quiz_interactive.js). Every rearrangement re-checks the
+            // Prüfen button, so an empty matching question cannot be submitted
+            // and burn a scored attempt.
+            QuizInteractive.render(area, q, updateCheckBtnState);
         } else {
             const order = shuffleIndices(q.options.length);
             order.forEach(function(origIdx) {
@@ -279,12 +285,19 @@
     }
 
     function isAnswerEmpty() {
+        const q = questions[currentIdx];
+        if (QuizInteractive.supports(q.type)) {
+            return QuizInteractive.isEmpty(document.getElementById('answer-area'), q);
+        }
         const answer = getAnswer();
         return Array.isArray(answer) ? answer.length === 0 : !answer.trim();
     }
 
     function getAnswer() {
         const q = questions[currentIdx];
+        if (QuizInteractive.supports(q.type)) {
+            return QuizInteractive.getAnswer(document.getElementById('answer-area'), q);
+        }
         if (q.type === 'fill_blank') {
             return document.getElementById('fill-input').value;
         }
@@ -313,6 +326,9 @@
 
     function lockQuestion(resolutionText) {
         document.querySelectorAll('#answer-area input, #answer-area textarea').forEach(function(el) { el.disabled = true; });
+        if (QuizInteractive.supports(questions[currentIdx].type)) {
+            QuizInteractive.lock(document.getElementById('answer-area'));
+        }
         document.getElementById('check-btn').style.display = 'none';
         document.getElementById('giveup-btn').style.display = 'none';
         var hintBtn = document.getElementById('hint-btn');

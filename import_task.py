@@ -202,6 +202,26 @@ def _validate_connections(connections, warnings=None):
     return errors
 
 
+def _duplicate_errors(values, what):
+    """Reject duplicate entries in an ordering/matching column.
+
+    Both types grade by comparing the *text* the student submitted, not an index
+    into the authored list -- an index-based protocol would have to hand the
+    client the authored order, which is the answer key. Two identical entries
+    are therefore indistinguishable at grading time, so they are an import
+    error rather than a silent mis-score.
+    """
+    seen, duplicates = set(), []
+    for value in values:
+        text = str(value).strip()
+        if text in seen and text not in duplicates:
+            duplicates.append(text)
+        seen.add(text)
+    if duplicates:
+        return [f"{what} has duplicate entries: {', '.join(duplicates)}"]
+    return []
+
+
 def _validate_quiz(quiz, prefix="Quiz"):
     """Validate quiz JSON structure. Returns list of error strings."""
     errors = []
@@ -225,6 +245,27 @@ def _validate_quiz(quiz, prefix="Quiz"):
             elif qtype == 'short_answer':
                 if 'rubric' not in q or not q['rubric']:
                     errors.append(f"{label} (short_answer) missing 'rubric'")
+            elif qtype == 'ordering':
+                items = q.get('items')
+                if not isinstance(items, list) or len(items) < 2:
+                    errors.append(f"{label} (ordering) needs an 'items' list with at least 2 entries")
+                else:
+                    errors.extend(_duplicate_errors(items, f"{label} (ordering) 'items'"))
+            elif qtype == 'matching':
+                pairs = q.get('pairs')
+                if not isinstance(pairs, list) or not pairs:
+                    errors.append(f"{label} (matching) missing or empty 'pairs' list")
+                elif any(not isinstance(p, list) or len(p) != 2 for p in pairs):
+                    errors.append(f"{label} (matching) every entry in 'pairs' must be a [links, rechts] list")
+                else:
+                    errors.extend(_duplicate_errors([p[0] for p in pairs], f"{label} (matching) left column"))
+                    distractors = q.get('distractors', [])
+                    if not isinstance(distractors, list):
+                        errors.append(f"{label} (matching) 'distractors' must be a list")
+                        distractors = []
+                    errors.extend(_duplicate_errors(
+                        [p[1] for p in pairs] + list(distractors),
+                        f"{label} (matching) right column (incl. distractors)"))
             elif qtype == 'multiple_choice':
                 if 'options' not in q or not isinstance(q['options'], list):
                     errors.append(f"{label} missing or invalid 'options'")

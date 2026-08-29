@@ -36,6 +36,7 @@
      * fill_blank    -> exact match is tried server-side first and usually wins, so
      *                  promising "KI" here would be wrong most of the time.
      * multiple_choice -> compared locally, no LLM involved, ever.
+     * ordering/matching -> graded deterministically in quiz_grading.py, same as MC.
      *
      * llmEnabled reflects config.LLM_ENABLED (and, for artifact checks, the
      * per-class klasse.llm_artifact_feedback_enabled gate): with no LLM configured
@@ -43,7 +44,8 @@
      */
     function labelFor(questionType, llmEnabled) {
         if (llmEnabled && questionType === 'short_answer') return WAITING_LABELS.llm;
-        if (questionType === 'fill_blank' || questionType === 'multiple_choice') return WAITING_LABELS.local;
+        if (questionType === 'fill_blank' || questionType === 'multiple_choice' ||
+            questionType === 'ordering' || questionType === 'matching') return WAITING_LABELS.local;
         return llmEnabled ? WAITING_LABELS.llm : WAITING_LABELS.local;
     }
 

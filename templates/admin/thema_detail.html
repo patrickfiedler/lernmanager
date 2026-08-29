@@ -361,7 +361,9 @@
     }
   ]
 }'>{{ task.quiz_json or '' }}</textarea>
-            <small class="text-muted">Format: JSON mit "questions" Array. Jede Frage hat "question", "answers" (4 Optionen) und "correct" (Array mit Indizes der richtigen Antworten).</small>
+            <small class="text-muted">Format: JSON mit "questions" Array. Jede Frage hat "question", "answers" (4 Optionen) und "correct" (Array mit Indizes der richtigen Antworten).
+            Weitere Typen: <code>"type": "fill_blank"</code> mit <code>answers</code>, <code>"type": "short_answer"</code> mit <code>rubric</code>,
+            <code>"type": "ordering"</code> mit <code>items</code> (in der richtigen Reihenfolge) und <code>"type": "matching"</code> mit <code>pairs</code> (und optional <code>distractors</code>).</small>
         </div>
         <button type="submit" class="btn btn-primary">Quiz speichern</button>
     </form>

@@ -2427,3 +2427,222 @@ body.split-pane-active .container {
         50% { opacity: 0.3; }
     }
 }
+
+/* Ordering / Matching question types (static/js/quiz_interactive.js).
+   touch-action: none on every draggable piece is load-bearing -- without it a
+   drag on a tablet scrolls the page instead of moving the item. */
+.qi-list,
+.qi-matching {
+    margin: 0.5rem 0;
+}
+
+.qi-item,
+.qi-chip {
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.qi-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.625rem 0.5rem;
+    background: white;
+    border: 1px solid var(--gray-200);
+    border-radius: 0.375rem;
+    margin-bottom: 0.5rem;
+    cursor: grab;
+}
+
+.qi-item.qi-dragging {
+    cursor: grabbing;
+    border-color: var(--primary);
+    background: #e0f2fe;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.12);
+}
+
+.qi-handle {
+    color: var(--gray-400, #9ca3af);
+    font-size: 1.1rem;
+    line-height: 1;
+}
+
+.qi-pos {
+    min-width: 1.5rem;
+    color: var(--gray-500, #6b7280);
+    font-variant-numeric: tabular-nums;
+}
+
+.qi-item .qi-text {
+    flex: 1;
+}
+
+.qi-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+}
+
+/* 44px is the smallest reliably tappable target on a tablet; the arrows are
+   the accessible route through these questions, so they get the full size. */
+.qi-move {
+    min-width: 2.75rem;
+    min-height: 1.375rem;
+    padding: 0;
+    font-size: 0.7rem;
+    line-height: 1;
+    color: var(--gray-600, #4b5563);
+    background: var(--gray-50, #f9fafb);
+    border: 1px solid var(--gray-200);
+    border-radius: 0.25rem;
+    cursor: pointer;
+}
+
+.qi-move:disabled {
+    opacity: 0.35;
+    cursor: default;
+}
+
+.qi-move:not(:disabled):hover {
+    border-color: var(--primary);
+}
+
+.qi-match-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.qi-left {
+    flex: 1 1 12rem;
+    min-width: 0;
+    padding: 0.5rem;
+    background: var(--gray-50, #f9fafb);
+    border: 1px solid var(--gray-200);
+    border-radius: 0.375rem;
+}
+
+.qi-arrow {
+    color: var(--gray-400, #9ca3af);
+}
+
+.qi-slot {
+    flex: 1 1 12rem;
+    min-height: 2.75rem;
+    display: flex;
+    align-items: center;
+    padding: 0.25rem;
+    border: 2px dashed var(--gray-300, #d1d5db);
+    border-radius: 0.375rem;
+    cursor: pointer;
+}
+
+.qi-slot.qi-filled {
+    border-style: solid;
+    border-color: var(--gray-200);
+}
+
+.qi-slot.qi-over,
+.qi-pool.qi-over {
+    border-color: var(--primary);
+    background: #e0f2fe;
+}
+
+.qi-slot-empty {
+    color: var(--gray-400, #9ca3af);
+    font-size: 0.85rem;
+    padding-left: 0.5rem;
+}
+
+.qi-slot.qi-filled .qi-slot-empty {
+    display: none;
+}
+
+.qi-pool-label {
+    margin-top: 0.75rem;
+    color: var(--gray-500, #6b7280);
+    font-size: 0.85rem;
+}
+
+.qi-pool {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    min-height: 3rem;
+    padding: 0.5rem;
+    border: 2px dashed var(--gray-200);
+    border-radius: 0.375rem;
+}
+
+.qi-chip {
+    padding: 0.5rem 0.75rem;
+    background: white;
+    border: 1px solid var(--gray-300, #d1d5db);
+    border-radius: 999px;
+    cursor: grab;
+}
+
+.qi-chip.qi-dragging {
+    cursor: grabbing;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.12);
+}
+
+/* The armed state of tap-to-place: tap a chip, then tap its row. */
+.qi-chip.qi-selected {
+    border-color: #0284c7;
+    background: #e0f2fe;
+    font-weight: 500;
+}
+
+.qi-hint {
+    font-size: 0.85rem;
+    margin-top: 0.5rem;
+}
+
+.qi-locked .qi-item,
+.qi-locked .qi-chip,
+.qi-locked .qi-slot {
+    cursor: default;
+}
+
+.qi-locked .qi-handle,
+.qi-locked .qi-controls,
+.qi-locked .qi-hint {
+    display: none;
+}
+
+.qi-item.qi-right,
+.qi-chip.qi-right {
+    background: #dcfce7;
+    border-color: #22c55e;
+}
+
+.qi-item.qi-wrong,
+.qi-chip.qi-wrong {
+    background: #fee2e2;
+    border-color: #ef4444;
+}
+
+@keyframes qi-flash {
+    from { background: #e0f2fe; }
+}
+
+.qi-flash {
+    animation: qi-flash 0.4s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .qi-flash { animation: none; }
+}
+
+/* Chips and slots are divs with role="button" (a chip is moved *into* a slot,
+   and nested <button>s are invalid), so the focus ring has to be asked for. */
+.qi-chip:focus-visible,
+.qi-slot:focus-visible,
+.qi-pool:focus-visible {
+    outline: 2px solid var(--primary, #3b82f6);
+    outline-offset: 2px;
+}

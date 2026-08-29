@@ -37,6 +37,12 @@
         <input type="text" name="q{{ loop.index0 }}" class="form-control" placeholder="Antwort eingeben..." autocomplete="off" data-zeichenleiste-fach="{{ task.fach }}">
         {% elif question.type == 'short_answer' %}
         <textarea name="q{{ loop.index0 }}" class="form-control" rows="3" placeholder="Antwort in eigenen Worten..." data-zeichenleiste-fach="{{ task.fach }}"></textarea>
+        {% elif question.type in ['ordering', 'matching'] %}
+        {# Rendered by static/js/quiz_interactive.js; the hidden field carries the
+           answer as JSON so this stays an ordinary form submit. #}
+        <div class="qi-container" data-question="{{ question.interactive|tojson|forceescape }}" data-qtype="{{ question.type }}"></div>
+        <input type="hidden" name="q{{ loop.index0 }}" class="qi-value">
+        <noscript><p class="text-muted">Für diese Frage wird JavaScript gebraucht.</p></noscript>
         {% else %}
         {# Multiple choice (default) #}
         {% for answer in question.answers %}
@@ -68,6 +74,19 @@ document.querySelectorAll('.quiz-question').forEach((q, idx) => {
     q.querySelectorAll('input[type="checkbox"]').forEach(input => {
         input.name = 'q' + idx;
     });
+});
+
+// ordering/matching: render into the container, and mirror the current answer
+// into the hidden field on every change so a plain form submit carries it.
+document.querySelectorAll('.qi-container').forEach(function (container) {
+    var question = JSON.parse(container.dataset.question);
+    question.type = container.dataset.qtype;
+    var field = container.parentElement.querySelector('.qi-value');
+    function sync() {
+        field.value = JSON.stringify(QuizInteractive.getAnswer(container, question));
+    }
+    QuizInteractive.render(container, question, sync);
+    sync();   // an untouched ordering question still has an order to submit
 });
 
 function uncheckOthers(checkbox) {

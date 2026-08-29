@@ -99,6 +99,10 @@
             area.appendChild(input);
             if (window.Zeichenleiste) window.Zeichenleiste.attach(input, q.fach);
             setTimeout(() => input.focus(), 50);
+        } else if (QuizInteractive.supports(q.type)) {
+            // Drag-or-tap renderer, shared with the quiz form and the checkpoint
+            // (static/js/quiz_interactive.js).
+            QuizInteractive.render(area, q);
         } else {
             // Multiple choice — shuffled order
             const singleCorrect = q.correct_count === 1;
@@ -148,7 +152,30 @@
             el.disabled = true;
         });
 
-        if (q.type === 'fill_blank') {
+        if (QuizInteractive.supports(q.type)) {
+            // Freeze the arrangement the student submitted, then say how it went.
+            // data.correct_answer is the readable solution and arrives only when
+            // the answer was wrong (see student_warmup_answer).
+            QuizInteractive.lock(document.getElementById('answer-area'));
+            var fbBox = document.getElementById('feedback-area');
+            fbBox.innerHTML = '';
+            var resultLine = document.createElement('div');
+            resultLine.className = 'quiz-option';
+            resultLine.style.cssText = 'border-left: 4px solid ' +
+                (data.correct ? 'var(--success-color, #28a745)' : 'var(--danger-color, #dc3545)') +
+                '; padding-left: 1rem; background: ' + (data.correct ? '#e8f5e9' : '#fde8e8') + ';';
+            resultLine.textContent = (data.correct ? '✅ ' : '❌ ') +
+                (data.feedback || (data.correct ? 'Richtig!' : 'Leider falsch.'));
+            fbBox.appendChild(resultLine);
+            if (!data.correct && data.correct_answer) {
+                var solutionLine = document.createElement('div');
+                solutionLine.className = 'quiz-option';
+                solutionLine.style.cssText = 'border-left: 4px solid var(--success-color, #28a745); padding-left: 1rem; background: #e8f5e9;';
+                solutionLine.textContent = '✅ Richtig wäre: ' + data.correct_answer;
+                fbBox.appendChild(solutionLine);
+            }
+            fbBox.style.display = 'block';
+        } else if (q.type === 'fill_blank') {
             // Fill-blank: show answer with colored left border + emoji (matches quiz_result.html)
             var inputEl = document.getElementById('fill-input');
             var studentText = inputEl ? inputEl.value : '';
@@ -247,6 +274,8 @@
 
         if (q.type === 'fill_blank') {
             answer = document.getElementById('fill-input').value;
+        } else if (QuizInteractive.supports(q.type)) {
+            answer = QuizInteractive.getAnswer(document.getElementById('answer-area'), q);
         } else {
             const checked = document.querySelectorAll('input[name="mc-answer"]:checked');
             answer = Array.from(checked).map(cb => parseInt(cb.value));

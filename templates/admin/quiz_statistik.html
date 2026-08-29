@@ -64,6 +64,8 @@
                         <span class="badge badge-secondary" style="font-size: 0.75rem; margin-right: 0.4rem;">
                             {% if q.type == 'fill_blank' %}Lückentext
                             {% elif q.type == 'short_answer' %}Kurzantwort
+                            {% elif q.type == 'ordering' %}Reihenfolge
+                            {% elif q.type == 'matching' %}Zuordnung
                             {% else %}Multiple Choice
                             {% endif %}
                         </span>
