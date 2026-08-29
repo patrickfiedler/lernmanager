@@ -142,6 +142,7 @@
                 }
             });
             area.appendChild(input);
+            if (window.Zeichenleiste) window.Zeichenleiste.attach(input);
             setTimeout(() => input.focus(), 50);
         } else {
             const singleCorrect = q.correct_count === 1;

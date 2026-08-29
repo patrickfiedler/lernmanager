@@ -42,6 +42,25 @@ SUBJECTS = ['Englisch', 'Chemie', 'MBI', 'Geographie']
 LEVELS = ['5', '6', '7', '8', '9', '10', '11s', '11/12']
 LEGACY_LEVELS = ['5/6', '7/8', '9/10']
 
+# Zeichenleiste: character-insert bars offered above free-text answer fields.
+# A class picks one preset (klasse.zeichenleiste); no preset means no bar, which
+# is the default for every class.
+#
+# Why a preset key and not a free-text field on the class: the teachers who need
+# this cannot type these characters either -- that inability IS the bug. Asked for
+# by Chemie 2026-08-29 (docs/shared/lernmanager/inbox.md): of thirty answers to the
+# two half-equation questions in the 2026-08-26 run, not one contained a reaction
+# arrow, a subscript digit or a superscript charge. Students on iPads reach for
+# "->" or "wird zu" because the keyboard offers nothing else, and the notation is
+# itself exam content they have to write by hand later.
+CHARACTER_SETS = {
+    'chemie': {
+        'label': 'Chemie (Pfeile, Ladungen, Indizes)',
+        'chars': ['\u2192', '\u21cc', '\u207b', '\u207a', '\u00b2\u207a', '\u00b3\u207a',
+                  '\u2081', '\u2082', '\u2083', '\u2084', '\u0394', '\u00b0'],
+    },
+}
+
 def _env_int(name, default, minimum=1):
     """Read a positive int from the environment, falling back to `default`.
 

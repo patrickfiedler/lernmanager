@@ -157,6 +157,28 @@ def inject_student_display_name():
     return {}
 
 
+@app.context_processor
+def inject_zeichenleiste():
+    """Character-insert bar for the logged-in student, as a flat char list.
+
+    A context processor rather than a per-route argument on purpose: the bar hangs
+    off base.html, and every quiz route would otherwise have to remember to pass it
+    (see CLAUDE.md, "Template Context Requirements"). Admins get no bar -- they do
+    not answer quizzes, and an admin previewing a student page should see the page,
+    not a teacher-only affordance.
+
+    Students in two configured classes get the union, deduped, in config order.
+    """
+    if 'student_id' not in session:
+        return {'zeichenleiste': []}
+    chars = []
+    for preset in models.get_zeichenleiste_presets_for_student(session['student_id']):
+        for char in config.CHARACTER_SETS.get(preset, {}).get('chars', []):
+            if char not in chars:
+                chars.append(char)
+    return {'zeichenleiste': chars}
+
+
 def validate_quiz_json(raw):
     """Validate and return quiz JSON string, or None if empty. Raises ValueError on invalid JSON."""
     if not raw or not raw.strip():
@@ -697,7 +719,8 @@ def admin_klasse_detail(klasse_id):
                            unterricht=unterricht, schedule=schedule,
                            has_queue=bool(queue), sidequests=sidequests,
                            practice_unlocked_ids=practice_unlocked_ids,
-                           andere_klassen=andere_klassen)
+                           andere_klassen=andere_klassen,
+                           character_sets=config.CHARACTER_SETS)
 
 
 @app.route('/admin/klasse/<int:klasse_id>/namen-benutzernamen-pdf')
@@ -1365,6 +1388,22 @@ def admin_klasse_show_completed_topics(klasse_id):
     models.set_klasse_show_completed_topics(klasse_id, show)
     state = 'sichtbar' if show else 'ausgeblendet'
     flash(f'Abgeschlossene Themen jetzt {state}.', 'success')
+    return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id))
+
+
+@app.route('/admin/klasse/<int:klasse_id>/zeichenleiste', methods=['POST'])
+@admin_required
+def admin_klasse_zeichenleiste(klasse_id):
+    """Pick (or clear) the character-insert bar for this class's answer fields."""
+    preset = (request.form.get('preset') or '').strip()
+    if preset and preset not in config.CHARACTER_SETS:
+        flash('Unbekannter Zeichensatz.', 'error')
+        return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id))
+    models.set_klasse_zeichenleiste(klasse_id, preset)
+    if preset:
+        flash(f"Zeichenleiste \"{config.CHARACTER_SETS[preset]['label']}\" aktiviert.", 'success')
+    else:
+        flash('Zeichenleiste ausgeschaltet.', 'success')
     return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id))
 
 

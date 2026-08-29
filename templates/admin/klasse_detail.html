@@ -219,6 +219,31 @@
     </div>
 </div>
 
+<div class="card">
+    <div class="card-header">⌨️ Zeichenleiste</div>
+    <div style="padding: 0.75rem;">
+        <p style="margin-bottom: 0.75rem; font-size: 0.9rem; color: #4b5563;">
+            Blendet über jedem Freitext-Antwortfeld eine Leiste ein, mit der Schüler Sonderzeichen
+            an der Cursorposition einfügen. Gedacht für Zeichen, die auf der Tablet-Tastatur nicht
+            erreichbar sind (Reaktionspfeil, Ladungen, tiefgestellte Ziffern). Ohne Auswahl
+            erscheint keine Leiste.
+        </p>
+        <form method="POST" action="{{ url_for('admin_klasse_zeichenleiste', klasse_id=klasse.id) }}" class="flex gap-1 flex-center">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <select name="preset" class="form-control" style="max-width: 22rem;">
+                <option value="">Keine</option>
+                {% for key, cset in character_sets.items() %}
+                <option value="{{ key }}" {% if klasse.zeichenleiste == key %}selected{% endif %}>{{ cset.label }}</option>
+                {% endfor %}
+            </select>
+            <button type="submit" class="btn btn-secondary">Speichern</button>
+            {% if klasse.zeichenleiste and klasse.zeichenleiste in character_sets %}
+            <span style="color: #10b981; font-weight: 500;">{{ character_sets[klasse.zeichenleiste].chars|join(' ') }}</span>
+            {% endif %}
+        </form>
+    </div>
+</div>
+
 <!-- Students List -->
 
 <div class="card">

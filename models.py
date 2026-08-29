@@ -129,7 +129,8 @@ def init_db():
                 artifact_gate_required INTEGER NOT NULL DEFAULT 1,
                 klassenstufe INTEGER DEFAULT NULL,
                 kurs_code TEXT DEFAULT NULL,
-                show_completed_topics INTEGER NOT NULL DEFAULT 0
+                show_completed_topics INTEGER NOT NULL DEFAULT 0,
+                zeichenleiste TEXT DEFAULT NULL  -- migrate_052: preset key from config.CHARACTER_SETS, NULL = no bar
             );
 
             -- Students (Schüler)
@@ -5159,6 +5160,38 @@ def set_klasse_show_completed_topics(klasse_id, show: bool):
             "UPDATE klasse SET show_completed_topics = ? WHERE id = ?",
             (1 if show else 0, klasse_id)
         )
+
+
+def set_klasse_zeichenleiste(klasse_id, preset):
+    """Set (or clear) this class's character-insert bar.
+
+    `preset` is a key of config.CHARACTER_SETS; anything falsy stores NULL and
+    turns the bar off. The key is validated by the caller -- an unknown key
+    stored here would simply render no bar, not break the page.
+    """
+    with db_session() as conn:
+        conn.execute(
+            "UPDATE klasse SET zeichenleiste = ? WHERE id = ?",
+            (preset or None, klasse_id)
+        )
+
+
+def get_zeichenleiste_presets_for_student(student_id):
+    """Preset keys of every class this student is in, in a stable order.
+
+    A student can sit in more than one class (Chemie and MBI), so this returns a
+    list rather than one value; the caller unions the character sets. Classes
+    without a preset contribute nothing.
+    """
+    with db_session() as conn:
+        rows = conn.execute('''
+            SELECT DISTINCT k.zeichenleiste
+            FROM klasse k
+            JOIN student_klasse sk ON sk.klasse_id = k.id
+            WHERE sk.student_id = ? AND k.zeichenleiste IS NOT NULL AND k.zeichenleiste != ''
+            ORDER BY k.zeichenleiste
+        ''', (student_id,)).fetchall()
+    return [r[0] for r in rows]
 
 
 def get_completed_student_tasks(student_id, klasse_id):

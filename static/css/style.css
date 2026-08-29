@@ -766,6 +766,36 @@ tr.unsaved-row td {
     margin-bottom: 0.75rem;
 }
 
+/* Zeichenleiste: character-insert bar above a free-text answer field.
+   Sits directly above the field so the tap target and the caret stay close on a
+   tablet; wraps rather than scrolls, because a hidden character is the same
+   problem the bar exists to solve. */
+.zeichenleiste {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    margin-bottom: 0.4rem;
+}
+
+.zeichenleiste-btn {
+    min-width: 2.5rem;
+    min-height: 2.5rem;   /* thumb-sized: these are used on iPads */
+    padding: 0 0.4rem;
+    font-size: 1.05rem;
+    line-height: 1;
+    background: white;
+    border: 1px solid var(--gray-200);
+    border-radius: 0.375rem;
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+}
+
+.zeichenleiste-btn:hover,
+.zeichenleiste-btn:focus-visible {
+    border-color: var(--primary, #3b82f6);
+    background: var(--gray-50, #f9fafb);
+}
+
 .quiz-option {
     display: flex;
     align-items: center;
