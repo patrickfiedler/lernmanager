@@ -1357,6 +1357,17 @@ def admin_klasse_artifact_gate_required(klasse_id):
     return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id))
 
 
+@app.route('/admin/klasse/<int:klasse_id>/abgeschlossene-themen', methods=['POST'])
+@admin_required
+def admin_klasse_show_completed_topics(klasse_id):
+    """Toggle the 'Abgeschlossene Themen' list on this class's student dashboards."""
+    show = request.form.get('show') == '1'
+    models.set_klasse_show_completed_topics(klasse_id, show)
+    state = 'sichtbar' if show else 'ausgeblendet'
+    flash(f'Abgeschlossene Themen jetzt {state}.', 'success')
+    return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id))
+
+
 @app.route('/admin/klasse/<int:klasse_id>/loeschen', methods=['POST'])
 @admin_required
 def admin_klasse_loeschen(klasse_id):
@@ -3825,6 +3836,20 @@ def student_dashboard():
     for klasse in klassen:
         sidequests_by_klasse[klasse['id']] = models.get_student_sidequests(student_id, klasse['id'])
 
+    # Completed topics per class, plus reopened-checkpoint attention items.
+    # The archive is opt-in per class; the reopened notice is not -- it is
+    # actionable rather than archival (see migrate_051).
+    reopened_by_module = {r['module_id']: r
+                          for r in models.get_reopened_checkpoint_topics(student_id)}
+    completed_by_klasse = {}
+    for klasse in klassen:
+        completed_by_klasse[klasse['id']] = _build_completed_topic_list(
+            models.get_completed_student_tasks(student_id, klasse['id']),
+            reopened_by_module,
+            bool(klasse.get('show_completed_topics')),
+            klasse.get('klassenstufe'),
+        )
+
     # Check if practice mode has questions available
     has_warmup_pool = bool(models.get_warmup_question_pool(student_id))
 
@@ -3832,8 +3857,65 @@ def student_dashboard():
                            tasks_by_klasse=tasks_by_klasse,
                            next_topics=next_topics,
                            sidequests_by_klasse=sidequests_by_klasse,
+                           completed_by_klasse=completed_by_klasse,
                            student_path=student.get('lernpfad'),
                            has_warmup_pool=has_warmup_pool)
+
+
+def _stufe_matches_klassenstufe(stufe, klassenstufe):
+    """Does a topic's Stufe cover a class's Klassenstufe?
+
+    Not an equality test: task.stufe is free text and routinely a range --
+    '5/6', '11/12' -- for topics deliberately written for two years at once,
+    while klasse.klassenstufe is a single int. '11/12' must match both 11 and
+    12. Legacy and Seilbahn spellings ('11s') reduce to their digits.
+
+    Fails open on purpose. Most classes still carry klassenstufe = NULL, and a
+    strict test would silently blank the feature for them; an unreadable or
+    missing value on either side means "show it", not "hide it".
+    """
+    if klassenstufe is None or not stufe:
+        return True
+    levels = {int(n) for n in re.findall(r'\d+', str(stufe))}
+    if not levels:
+        return True
+    return int(klassenstufe) in levels
+
+
+def _build_completed_topic_list(completed, reopened_by_module, show_archive, klassenstufe):
+    """Decide what a class's 'Abgeschlossene Themen' section shows.
+
+    `completed` is newest-first from models.get_completed_student_tasks.
+    `reopened_by_module` maps task_id -> the reset row (student_feedback,
+    superseded_at) for checkpoints the student has not retaken.
+    `show_archive` is the per-class opt-in (klasse.show_completed_topics).
+    `klassenstufe` is the class's year, or None if it was never set.
+
+    Off by default means the latest finished Thema only -- enough to get back to
+    it, not a wall of history. Opting in shows all of them. Either way the list
+    is filtered to the class's own year, so last year's topics stop following a
+    student around.
+
+    A reopened checkpoint changes how an entry is *drawn*, never whether it is
+    in the list (Patrick's call): a student who is being asked to redo something
+    should meet it in the same place as everything else they have finished.
+    """
+    entries = [c for c in completed
+               if _stufe_matches_klassenstufe(c.get('stufe'), klassenstufe)]
+    if not show_archive:
+        entries = entries[:1]
+
+    result = []
+    for c in entries:
+        reopened = reopened_by_module.get(c['task_id'])
+        result.append({
+            'task_id': c['task_id'],
+            'name': c['name'],
+            'is_seilbahn': c.get('is_seilbahn'),
+            'reopened': bool(reopened),
+            'feedback': reopened.get('student_feedback') if reopened else None,
+        })
+    return result
 
 
 @app.route('/schueler/bericht')

@@ -197,7 +197,30 @@
     </div>
 </div>
 
+<div class="card">
+    <div class="card-header">📚 Abgeschlossene Themen</div>
+    <div style="padding: 0.75rem;">
+        <p style="margin-bottom: 0.75rem; font-size: 0.9rem; color: #4b5563;">
+            Legt fest, ob Schüler auf ihrer Startseite eine Liste ihrer bereits abgeschlossenen Themen sehen.
+            Sinnvoll für Klassen mit einer längeren Themen-Reihenfolge; bei einem einzelnen Thema nur unnötig.
+            Hinweise zu <em>neu geöffneten</em> Checkpoints erscheinen unabhängig davon immer.
+        </p>
+        <form method="POST" action="{{ url_for('admin_klasse_show_completed_topics', klasse_id=klasse.id) }}" class="flex gap-1 flex-center">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="show" value="{{ '0' if klasse.show_completed_topics else '1' }}">
+            {% if klasse.show_completed_topics %}
+            <button type="submit" class="btn btn-secondary">Ausblenden</button>
+            <span style="color: #10b981; font-weight: 500;">✅ Sichtbar</span>
+            {% else %}
+            <button type="submit" class="btn btn-secondary">Einblenden</button>
+            <span style="color: #6b7280;">⬜ Ausgeblendet</span>
+            {% endif %}
+        </form>
+    </div>
+</div>
+
 <!-- Students List -->
+
 <div class="card">
     <div class="card-header">👥 Schüler ({{ students|length }})</div>
     {% if students %}

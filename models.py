@@ -128,7 +128,8 @@ def init_db():
                 llm_transparency_mode INTEGER DEFAULT NULL,
                 artifact_gate_required INTEGER NOT NULL DEFAULT 1,
                 klassenstufe INTEGER DEFAULT NULL,
-                kurs_code TEXT DEFAULT NULL
+                kurs_code TEXT DEFAULT NULL,
+                show_completed_topics INTEGER NOT NULL DEFAULT 0
             );
 
             -- Students (Schüler)
@@ -5145,6 +5146,73 @@ def set_klasse_artifact_gate_required(klasse_id, required: bool):
             "UPDATE klasse SET artifact_gate_required = ? WHERE id = ?",
             (1 if required else 0, klasse_id)
         )
+
+
+def set_klasse_show_completed_topics(klasse_id, show: bool):
+    """Set whether the student dashboard lists this class's finished Themen."""
+    with db_session() as conn:
+        conn.execute(
+            "UPDATE klasse SET show_completed_topics = ? WHERE id = ?",
+            (1 if show else 0, klasse_id)
+        )
+
+
+def get_completed_student_tasks(student_id, klasse_id):
+    """Finished Themen for one student in one class, newest first.
+
+    The dashboard's own get_student_task returns the *active* topic only, which
+    is why a student who advanced through the queue had no route back to
+    anything they had finished. Ordered by student_task.id descending as a
+    stand-in for completion time: student_task carries no completed_at column,
+    and rows are created in the order topics get assigned.
+    """
+    with db_session() as conn:
+        rows = conn.execute(f"""
+            SELECT st.id, st.task_id, st.abgeschlossen, st.manuell_abgeschlossen,
+                   t.name, t.fach, t.stufe,
+                   {_IS_SEILBAHN_SQL}
+            FROM student_task st
+            JOIN task t ON st.task_id = t.id
+            WHERE st.student_id = ? AND st.klasse_id = ?
+              AND st.abgeschlossen = 1 AND st.rolle != 'sidequest'
+            ORDER BY st.id DESC
+        """, (student_id, klasse_id)).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_reopened_checkpoint_topics(student_id):
+    """Themen where a checkpoint was reset and the student has not retaken it.
+
+    Counterpart to get_reopened_checkpoint_notice, which answers the same
+    question for one checkpoint the caller already knows about. This one has to
+    *find* them: the student has usually moved on and will never open the page
+    that carries that notice.
+
+    "Not retaken" is the NOT EXISTS clause -- once a live (non-superseded)
+    attempt lands for the same checkpoint, the retake carries its own review
+    banner and this entry is stale.
+
+    Returns one row per checkpoint (the newest reset), keyed by module_id so the
+    caller can match it against a Thema. Not class-scoped: checkpoint_attempt
+    carries no klasse_id, so the caller filters by the topics of the class.
+    """
+    with db_session() as conn:
+        rows = conn.execute("""
+            SELECT ca.module_id, ca.checkpoint_id, ca.student_feedback,
+                   MAX(ca.superseded_at) AS superseded_at
+            FROM checkpoint_attempt ca
+            WHERE ca.student_id = ?
+              AND ca.superseded_at IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1 FROM checkpoint_attempt live
+                  WHERE live.student_id = ca.student_id
+                    AND live.checkpoint_id = ca.checkpoint_id
+                    AND live.superseded_at IS NULL
+              )
+            GROUP BY ca.checkpoint_id
+            ORDER BY superseded_at DESC
+        """, (student_id,)).fetchall()
+        return [dict(r) for r in rows]
 
 
 def record_llm_usage(student_id, question_type, tokens_used=0):

@@ -112,6 +112,35 @@
 </div>
 {% endfor %}
 
+{% set completed = completed_by_klasse.get(klasse.id, []) if completed_by_klasse else [] %}
+{% if completed %}
+<div class="card">
+    <div class="card-header">📚 Abgeschlossene Themen ({{ completed|length }})</div>
+    <div style="padding: 0.5rem 0.75rem;">
+        {% for ct in completed %}
+        <div class="flex flex-between" style="padding: 0.4rem 0; {% if not loop.last %}border-bottom: 1px solid #f3f4f6;{% endif %}">
+            <div>
+                <a href="{{ url_for('student_klasse', slug=ct|topic_slug) }}"
+                   style="text-decoration: none; color: #374151;">
+                    {% if ct.reopened %}🔄{% else %}✅{% endif %} {{ ct.name }}
+                </a>
+                {% if ct.reopened %}
+                <span class="badge" style="background: #fef3c7; color: #92400e; margin-left: 0.4rem;">Checkpoint neu geöffnet</span>
+                {% if ct.feedback %}
+                <div style="font-size: 0.85rem; color: #6b7280; margin-top: 0.2rem;">💬 {{ ct.feedback }}</div>
+                {% endif %}
+                {% endif %}
+            </div>
+            <a href="{{ url_for('student_klasse', slug=ct|topic_slug) }}"
+               class="btn btn-secondary" style="padding: 0.2rem 0.6rem; font-size: 0.85rem;">
+                {% if ct.reopened %}Zum Checkpoint →{% else %}Ansehen →{% endif %}
+            </a>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
 {% endfor %}
 
 {% if has_warmup_pool %}
