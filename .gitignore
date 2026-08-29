@@ -1,113 +1,64 @@
-# Data and uploads
-data/
-static/uploads/*
-!static/uploads/.gitkeep
-task_definitions/
+# THIS REPO IS PUBLIC: github.com/patrickfiedler/lernmanager
+#
+# Whitelist, not blacklist. Everything is ignored unless named below.
+#
+# Why: real student data routinely sits in this working tree -- database copies,
+# checkpoint exports, generated PDFs with names and plaintext passwords, uploaded
+# artifacts, anonymization mappings. A blacklist has to anticipate every format
+# those arrive in, and gets it wrong once. A whitelist only has to name what the
+# application actually consists of, which changes slowly and visibly.
+#
+# Adding a new top-level file to the repo means adding a `!` line for it here.
+# Files inside the whitelisted directories below need no new rule.
+# `git status --ignored` shows what is being held back.
 
-# Internal scripts (kept locally, not public)
-scripts/
-anonymize_db.py
+# Ignore every top-level entry ...
+/*
+
+# ... then re-include the project itself.
+
+# Repo metadata
+!/.gitignore
+!/.env.example
+!/LICENSE
+!/README.md
+!/requirements.txt
+!/pytest.ini
+
+# Application code
+!/app.py
+!/models.py
+!/config.py
+!/utils.py
+!/run.py
+!/llm_grading.py
+!/artifact_checker.py
+!/artifact_processor.py
+!/analytics_queue.py
+!/import_task.py
+!/list_students.py
+!/generate_weekly_reports.py
+
+# Directories: re-including the directory un-ignores its contents, because the
+# `/*` above only matches top-level entries.
+!/deploy/
+!/migrate/
+!/static/
+!/templates/
+!/tests/
+
+# --- exclusions inside the whitelisted directories ---
+
+# Server-side only: crypto helper, the live nginx config (certbot rewrites it),
+# and internal runbooks.
 deploy/db_crypto.py
 deploy/lernmanager.nginx.conf
-run-local.sh
-crontab_weekly_reports.txt
-*.tar.gz
-benchmark_app.py
-benchmark_logging.py
-benchmark.sh
-run_benchmark.sh
-migrate_to_sqlcipher.py
-
-# Internal docs (kept locally, not public)
-docs/
-archive/
-CLAUDE.md
 deploy/*.md
-go_on_from_here.md
-session_log.md
-todo.md
-current_state.md
-TESTING_CHECKLIST.md
-PROJECT_HISTORY.md
-BENCHMARKING.md
-benchmark_analysis_2026-01-28.md
-UX_TIER1_SUMMARY.md
-query_optimization_analysis.md
-aes_ni_investigation.md
-caching_investigation.md
-font_*.md
-frontend_patterns.md
-redirect_loop_*.md
-task_plan.md
-notes.md
 
-# Flask instance folder
-instance/
+# Teacher and student uploads: Lehrbuch PDFs, handed-in artifacts.
+static/uploads/*
+!static/uploads/.gitkeep
 
-# Test scripts (root-level only — tests/ directory is tracked)
-test_*.py
-!tests/test_*.py
-check_*.py
-diagnose_*.py
-profile_*.py
-benchmark_*.py
-
-# Mockups and temporary HTML
-mockup_*.html
-
-# Local databases (testing)
-*.db
-!data/.gitkeep
-
-# Python
+# Python bytecode, anywhere.
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
-venv/
-.venv/
-
-# Environment
-.env
-.env.local
-
-# IDE
-.idea/
-.vscode/
-*.swp
-
-# MemPalace per-project files (issue #185)
-mempalace.yaml
-entities.json
-
-# THIS REPO IS PUBLIC. Nothing the app hands a teacher for download may be
-# committed. Blanket-ignore the formats those downloads use -- none has ever
-# been tracked, so nothing legitimate is lost. Use `git add -f` if you ever
-# genuinely need one.
-#   zugangsdaten_*.pdf            student names + PLAINTEXT passwords
-#   namen_benutzernamen_*.pdf     student names + usernames
-#   fortschrittsbericht_*.pdf     per-student progress reports
-#   thema_*.zip / thema_*.json    topic exports, bundle school-only Lehrbuch PDFs
-#   themen_export.json            full topic library export
-#   *.csv                         student_mapping rosters (real names, network IDs)
-#   *.docx / *.odt                student artifact uploads
-*.pdf
-*.zip
-*.csv
-*.docx
-*.odt
-# ...except the blank MBI templates used as extraction test fixtures.
-# No student data -- they are the unfilled originals handed out in class.
-!tests/fixtures/artifacts/*.docx
-!tests/fixtures/artifacts/*.odt
-
-# Screenshots dropped in the repo root for debugging
-Screenshot*
-
-# Claude Code local config (model choice, permission grants, output style)
-.claude/
-
-# Checkpoint exports contain student answers (and, before anonymization, real names)
-checkpoints_*.json
-checkpoints_*.csv
+*.py[cod]
