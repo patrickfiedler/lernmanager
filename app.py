@@ -3288,6 +3288,11 @@ def _checkpoint_export_rows(sessions):
                     'grader': answer['grader'],
                     'modell': answer['llm_model'],
                     'prompt_version': answer.get('prompt_version'),
+                    # How sure the model was of its own verdict (migrate_052). NULL
+                    # for every row no LLM graded. Nothing gates on it -- it exists so
+                    # a threshold can be set on real answers to the questions actually
+                    # in use, rather than replayed against a retired question set.
+                    'ki_konfidenz': answer.get('judgment_confidence'),
                     'tipps_vorher': answer['hints_used_before'],
                     'aufgegeben': answer['gave_up'],
                     'lehrer_urteil': answer.get('teacher_verdict'),
@@ -3418,6 +3423,7 @@ def admin_checkpoint_export_json():
                     'grader': answer['grader'],
                     'modell': answer['llm_model'],
                     'prompt_version': answer.get('prompt_version'),
+                    'ki_konfidenz': answer.get('judgment_confidence'),
                     'tipps_vorher': answer['hints_used_before'],
                     'aufgegeben': bool(answer['gave_up']),
                     'lehrer_urteil': answer.get('teacher_verdict'),
@@ -5203,7 +5209,7 @@ def student_checkpoint_answer():
     # Checkpoint grading is graded (feeds a real school grade), so it must never
     # silently fall back to "assume correct" like warmup does on an LLM outage --
     # strict=True surfaces failure as correct=None instead.
-    correct, feedback, source, prompt_version = _grade_warmup_answer(
+    correct, feedback, source, prompt_version, confidence = _grade_warmup_answer(
         question, answer, usage_tag='checkpoint_quiz', strict=True
     )
 
@@ -5224,7 +5230,7 @@ def student_checkpoint_answer():
             attempt_no=progress['attempts'].get(qidx, 0) + 1, answer_text=answer_text,
             correct=None, feedback=feedback, grader=source, llm_model=llm_model,
             hints_used_before=progress['hints_used'].get(qidx, 0),
-            prompt_version=prompt_version
+            prompt_version=prompt_version, judgment_confidence=confidence
         )
         return jsonify({
             'error': 'llm_unavailable',
@@ -5242,7 +5248,7 @@ def student_checkpoint_answer():
         attempt_no=progress['attempts'][qidx], answer_text=answer_text,
         correct=correct, feedback=feedback, grader=source, llm_model=llm_model,
         hints_used_before=progress['hints_used'].get(qidx, 0),
-        prompt_version=prompt_version
+        prompt_version=prompt_version, judgment_confidence=confidence
     )
 
     return jsonify({'correct': correct, 'attempts': progress['attempts'][qidx]})
@@ -5600,7 +5606,8 @@ def student_settings():
 def _grade_warmup_answer(question, answer, usage_tag='llm_grading', strict=False):
     """Grade a single warmup answer.
 
-    Returns (correct: bool|None, feedback: str, source: str, prompt_version: str|None).
+    Returns (correct: bool|None, feedback: str, source: str, prompt_version: str|None,
+    confidence: float|None).
 
     MC: compare selected indices to correct set.
     fill_blank: case-insensitive exact match, then LLM fallback.
@@ -5613,7 +5620,9 @@ def _grade_warmup_answer(question, answer, usage_tag='llm_grading', strict=False
     an exact match, an MC comparison or an empty submit must not be stamped with a
     prompt that never saw them (migrate_048). It is threaded through here rather
     than re-derived by the caller because only grade_answer knows which prompt its
-    usage_tag actually selected.
+    usage_tag actually selected. confidence follows the same rule for the same reason
+    (migrate_052): None for every path no LLM graded, and only ever populated for
+    checkpoints, which are the only calls that ask for logprobs.
 
     usage_tag/strict: passed through to llm_grading.grade_answer (see there). When
     strict=True and grading could not happen at all, correct is None, not False --
@@ -5627,36 +5636,36 @@ def _grade_warmup_answer(question, answer, usage_tag='llm_grading', strict=False
         # a partly right answer must not clear a checkpoint gate or a warm-up
         # streak; the fraction lives in the feedback line instead.
         result = quiz_grading.grade(question, answer)
-        return result['correct'], result['feedback'], 'interactive', None
+        return result['correct'], result['feedback'], 'interactive', None, None
 
     if qtype == 'fill_blank':
         student_text = (answer or '').strip()
         if not student_text:
-            return False, 'Keine Antwort.', 'empty', None
+            return False, 'Keine Antwort.', 'empty', None, None
         # Exact match (case-insensitive)
         if student_text.lower() in [a.lower() for a in question['answers']]:
-            return True, 'Richtig!', 'match', None
+            return True, 'Richtig!', 'match', None, None
         # LLM fallback
         result = llm_grading.grade_answer(
             question['text'], ', '.join(question['answers']),
             student_text, session.get('student_id'), usage_tag=usage_tag, strict=strict
         )
         if result is None:
-            return None, '', 'error', None
+            return None, '', 'error', None, None
         return (result['correct'], result.get('feedback', ''), result.get('source', 'llm'),
-                result.get('prompt_version'))
+                result.get('prompt_version'), result.get('confidence'))
     elif qtype == 'short_answer':
         student_text = (answer or '').strip()
         if not student_text:
-            return False, 'Keine Antwort.', 'empty', None
+            return False, 'Keine Antwort.', 'empty', None, None
         result = llm_grading.grade_answer(
             question['text'], question['rubric'],
             student_text, session.get('student_id'), usage_tag=usage_tag, strict=strict
         )
         if result is None:
-            return None, '', 'error', None
+            return None, '', 'error', None, None
         return (result['correct'], result.get('feedback', ''), result.get('source', 'llm'),
-                result.get('prompt_version'))
+                result.get('prompt_version'), result.get('confidence'))
     else:
         # Multiple choice
         try:
@@ -5665,7 +5674,7 @@ def _grade_warmup_answer(question, answer, usage_tag='llm_grading', strict=False
             submitted = set()
         correct_set = set(question.get('correct', []))
         if submitted == correct_set:
-            return True, 'Richtig!', 'mc', None
+            return True, 'Richtig!', 'mc', None, None
         # Build feedback showing correct answer(s)
         options = question.get('options', [])
         correct_texts = []
@@ -5673,7 +5682,7 @@ def _grade_warmup_answer(question, answer, usage_tag='llm_grading', strict=False
             if idx < len(options):
                 opt = options[idx]
                 correct_texts.append(opt['text'] if isinstance(opt, dict) else str(opt))
-        return False, f'Richtige Antwort: {", ".join(correct_texts)}', 'mc', None
+        return False, f'Richtige Antwort: {", ".join(correct_texts)}', 'mc', None, None
 
 
 def _serialize_question_for_js(item):
@@ -5762,7 +5771,7 @@ def student_warmup_answer():
         return jsonify({'error': 'Question not found'}), 404
     question = matched['question']
 
-    correct, feedback, source, _prompt_version = _grade_warmup_answer(question, answer)
+    correct, feedback, source, _prompt_version, _confidence = _grade_warmup_answer(question, answer)
     models.record_warmup_answer(student_id, task_id, subtask_id, matched['question_hash'], correct)
 
     # Build correct_answer for feedback display

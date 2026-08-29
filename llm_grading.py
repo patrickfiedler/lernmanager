@@ -5,6 +5,8 @@ Only question text, rubric, and student answer are sent to the API — never any
 """
 
 import json
+import math
+import re
 import sys
 import threading
 import time
@@ -163,14 +165,83 @@ def _message_text(response):
     return content.strip()
 
 
+def _judgment_confidence(response):
+    """Probability the model assigned to its own verdict, or None if unavailable.
+
+    The grader answers with {"correct": true|false, "feedback": "..."}. The verdict
+    therefore rides on a single token, and the model's probability for that one token
+    is a usable confidence signal: measured over 66 replayed answers, the median was
+    0.997 where the verdict matched the teacher and 0.731 where it did not.
+
+    `response` is an OpenAI-style completion. When logprobs were requested,
+    response.choices[0].logprobs.content is a list of per-token entries, each with
+    .token (the raw text, which may carry leading whitespace) and .logprob (natural
+    log, so probability is math.exp(logprob)).
+
+    Must return None rather than raise for any provider that omits logprobs, returns
+    an empty list, or shapes them differently -- this is instrumentation, and it may
+    never cost a student their grade.
+    """
+    entries = getattr(getattr(getattr(response, 'choices', [None])[0], 'logprobs', None),
+                      'content', None) if getattr(response, 'choices', None) else None
+    if not entries:
+        return None
+
+    # Anchor on the key, not on the first true/false in the stream: "true" and "false"
+    # occur in the German feedback text often enough ("das ist true" is rare, but JSON
+    # escapes and quoted rubric text are not), and the first match anywhere would then
+    # report the confidence of a word in the explanation as if it were the verdict.
+    #
+    # Anchoring on a character offset rather than a token index is what makes this
+    # survive tokenisation: `"correct":` may arrive as one token, or as `"`, `correct`,
+    # `":`, and any fixed index assumption breaks the moment the model or provider
+    # changes. Rebuilding the string and mapping back is indifferent to all of that.
+    spans, cursor = [], 0
+    for entry in entries:
+        token = getattr(entry, 'token', None)
+        if token is None:
+            return None
+        spans.append((cursor, cursor + len(token), entry))
+        cursor += len(token)
+
+    full = ''.join(getattr(e, 'token', '') for e in entries)
+    match = re.search(r'"correct"\s*:\s*', full)
+    if not match:
+        return None
+
+    verdict_at = match.end()
+    for start, end, entry in spans:
+        if start <= verdict_at < end:
+            # The token holding the value must actually be the value. A provider that
+            # emits the key and nothing after it (truncation, a refusal) would
+            # otherwise hand back the confidence of a colon.
+            if not re.search(r'true|false', getattr(entry, 'token', ''), re.I):
+                return None
+            logprob = getattr(entry, 'logprob', None)
+            if logprob is None:
+                return None
+            # Clamped because a logprob of exactly 0.0 can float just past 1.0, and a
+            # probability outside [0, 1] would poison any threshold read off it later.
+            return min(1.0, max(0.0, math.exp(logprob)))
+    return None
+
+
 def _call_llm(question_text, expected_or_rubric, student_answer, system_prompt=SYSTEM_PROMPT,
-              timeout=None):
+              timeout=None, want_confidence=False):
     """Send grading request to LLM and parse JSON response.
 
     timeout defaults to config.LLM_TIMEOUT; callers grading something slower than a
     short practice answer pass their own (see grade_answer).
 
-    Returns parsed dict {"correct": bool, "feedback": str} or None on failure.
+    want_confidence asks the provider for logprobs so the verdict token's probability
+    can be recorded (migrate_052). OVH accepts logprobs only with top_logprobs <= 1.
+    A provider that rejects the parameter outright gets one retry without it: the
+    endpoint answers an unknown argument with HTTP 400, and LLM_MODEL is a swappable
+    .env knob, so binding grading to an optional parameter would repeat the
+    reasoning_effort failure -- "dead on every call" instead of "slightly less data".
+
+    Returns parsed dict {"correct": bool, "feedback": str, "confidence": float|None}
+    or None on failure.
     """
     user_prompt = (
         f"Frage: {question_text}\n"
@@ -179,18 +250,32 @@ def _call_llm(question_text, expected_or_rubric, student_answer, system_prompt=S
     )
 
     client = _get_client()
-    response = client.chat.completions.create(
-        model=config.LLM_MODEL,
-        max_tokens=150,
-        temperature=0,
-        response_format={"type": "json_object"},
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        timeout=config.LLM_TIMEOUT if timeout is None else timeout,
-        **_reasoning_kwargs(),
-    )
+
+    def _create(**extra):
+        return client.chat.completions.create(
+            model=config.LLM_MODEL,
+            max_tokens=150,
+            temperature=0,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            timeout=config.LLM_TIMEOUT if timeout is None else timeout,
+            **_reasoning_kwargs(),
+            **extra,
+        )
+
+    if want_confidence:
+        try:
+            response = _create(logprobs=True, top_logprobs=1)
+        except Exception as e:
+            print(f"LLM grading: logprobs rejected ({type(e).__name__}), "
+                  f"regrading without confidence", file=sys.stderr)
+            response = _create()
+    else:
+        response = _create()
+
     text = _message_text(response)
     if not text:
         print("LLM grading: empty response", file=sys.stderr)
@@ -200,7 +285,16 @@ def _call_llm(question_text, expected_or_rubric, student_answer, system_prompt=S
     result = json.loads(text)
     if "correct" not in result or "feedback" not in result:
         return None
-    return {"correct": bool(result["correct"]), "feedback": str(result["feedback"])}
+    confidence = None
+    if want_confidence:
+        try:
+            confidence = _judgment_confidence(response)
+        except Exception as e:
+            # Instrumentation must never cost a grade that was otherwise fine.
+            print(f"LLM grading: confidence extraction failed "
+                  f"({type(e).__name__}: {e})", file=sys.stderr)
+    return {"correct": bool(result["correct"]), "feedback": str(result["feedback"]),
+            "confidence": confidence}
 
 
 NOISE_SYSTEM_PROMPT = (
@@ -364,6 +458,8 @@ def grade_answer(question_text, expected_or_rubric, student_answer, student_id=N
 
     Returns: {"correct": bool, "feedback": str, "source": "llm"|"fallback"} normally,
         or None if strict=True and grading could not happen (disabled/rate-limited/error).
+        Checkpoint calls additionally carry "confidence" (float|None, migrate_052) --
+        recorded for later calibration, read by nothing that decides anything.
     """
     fallback = None if strict else FALLBACK_RESULT
 
@@ -378,14 +474,20 @@ def grade_answer(question_text, expected_or_rubric, student_answer, student_id=N
     # stricter, less-lenient prompt rather than the formative-practice default,
     # and give it the longer timeout: the answers are full explanations, and a
     # timeout here burns an attempt instead of just delaying a practice retry.
+    #
+    # Confidence is captured for checkpoints only: they are the graded path, the one
+    # whose threshold anyone would ever want to set. Warm-up and practice would pay
+    # the same logprobs overhead for a number nothing will read.
     if usage_tag == 'checkpoint_quiz':
         system_prompt, timeout = CHECKPOINT_SYSTEM_PROMPT, config.LLM_CHECKPOINT_TIMEOUT
+        want_confidence = True
     else:
         system_prompt, timeout = SYSTEM_PROMPT, config.LLM_TIMEOUT
+        want_confidence = False
 
     try:
         llm_response = _call_llm(question_text, expected_or_rubric, student_answer,
-                                 system_prompt, timeout)
+                                 system_prompt, timeout, want_confidence=want_confidence)
         if llm_response is None:
             print(f"LLM grading ({usage_tag}): response was not valid JSON", file=sys.stderr)
             return fallback
@@ -409,7 +511,7 @@ def diagnostic_call(kind, **fields):
 
     Args:
         kind: "quiz" | "noise" | "artifact"
-        fields: kind-specific input fields (see TODO(human) below for the mapping)
+        fields: kind-specific input fields (see the per-kind branches below)
 
     Returns: dict with keys: elapsed, model, finish_reason, completion_tokens,
         content, parsed (dict or None), error (str or None)

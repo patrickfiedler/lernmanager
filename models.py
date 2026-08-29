@@ -364,6 +364,7 @@ def init_db():
                 teacher_verdict INTEGER,  -- migrate_048: whether the KI's verdict was right (1=ja/0=nein), NOT what the answer was -- the admin UI asks "War die KI-Bewertung richtig?". Derive the answer's real correctness as `correct` when 1, `not correct` when 0. NULL = not judged. Calibration only -- never feeds the score
                 teacher_note TEXT,
                 prompt_version TEXT,  -- which system prompt graded this (llm_grading.prompt_version_for) -- without it, a prompt change makes old/new rows incomparable
+                judgment_confidence REAL,  -- migrate_052: model probability of the judgment token. Recorded only; nothing gates on it yet (threshold unvalidated, and acting on it changes the Kern-Sperre contract). NULL whenever no LLM graded the row or the provider returns no logprobs -- never 0.0, "not measured" must not read as "certainly wrong"
                 FOREIGN KEY (student_id) REFERENCES student(id) ON DELETE CASCADE
             );
 
@@ -3359,7 +3360,7 @@ def create_checkpoint_attempt(student_id, checkpoint_id, module_id, checkpoint_t
 def create_checkpoint_answer(student_id, checkpoint_id, session_uid, question_index,
                               attempt_no, answer_text, correct, feedback, grader,
                               llm_model=None, hints_used_before=0, gave_up=False,
-                              prompt_version=None):
+                              prompt_version=None, judgment_confidence=None):
     """Log one graded attempt at one checkpoint question -- the per-question detail
     checkpoint_attempt never captured (see migrate_047). Written as answers happen,
     before checkpoint_attempt exists (checkpoint_attempt_id starts NULL and is
@@ -3371,17 +3372,21 @@ def create_checkpoint_answer(student_id, checkpoint_id, session_uid, question_in
 
     prompt_version: which system prompt graded this (migrate_048), None when no LLM
     was involved (exact match / MC / give-up).
+
+    judgment_confidence: how sure the model was of its verdict (migrate_052), None
+    when no LLM graded it or the provider returned no logprobs. Recorded only --
+    nothing reads it to decide anything yet, on purpose. See the migration.
     """
     with db_session() as conn:
         conn.execute('''
             INSERT INTO checkpoint_answer
             (student_id, checkpoint_id, session_uid, question_index, attempt_no,
              answer_text, correct, feedback, grader, llm_model, hints_used_before,
-             gave_up, timestamp, prompt_version)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             gave_up, timestamp, prompt_version, judgment_confidence)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (student_id, checkpoint_id, session_uid, question_index, attempt_no,
               answer_text, correct, feedback, grader, llm_model, hints_used_before,
-              1 if gave_up else 0, now_local(), prompt_version))
+              1 if gave_up else 0, now_local(), prompt_version, judgment_confidence))
 
 
 def get_checkpoint_attempts_for_student(student_id, module_id=None, include_superseded=False):
