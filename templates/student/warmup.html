@@ -97,7 +97,7 @@
                 }
             });
             area.appendChild(input);
-            if (window.Zeichenleiste) window.Zeichenleiste.attach(input);
+            if (window.Zeichenleiste) window.Zeichenleiste.attach(input, q.fach);
             setTimeout(() => input.focus(), 50);
         } else {
             // Multiple choice — shuffled order

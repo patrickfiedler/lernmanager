@@ -107,6 +107,9 @@
     const transparencyMode = {{ transparency_mode|tojson }};
     // Drives the wait label: only a real LLM call may be announced as "KI prüft".
     const llmEnabled = {{ llm_enabled|tojson }};
+    // Every question here belongs to this one Thema, so its Fach decides the
+    // character bar for the whole page.
+    const ZEICHENLEISTE_FACH = {{ task.fach|tojson }};
     let questions = {{ questions_json|safe }};
     let currentIdx = 0;
     let answered = false;   // true once the current question is solved or given up
@@ -175,7 +178,7 @@
                 }
             });
             area.appendChild(input);
-            if (window.Zeichenleiste) window.Zeichenleiste.attach(input);
+            if (window.Zeichenleiste) window.Zeichenleiste.attach(input, ZEICHENLEISTE_FACH);
             setTimeout(() => input.focus(), 50);
         } else if (q.type === 'short_answer') {
             const textarea = document.createElement('textarea');
@@ -185,7 +188,7 @@
             textarea.placeholder = 'Antwort eingeben...';
             textarea.addEventListener('input', function() { updateCheckBtnState(); updateTransparencyBlock(); });
             area.appendChild(textarea);
-            if (window.Zeichenleiste) window.Zeichenleiste.attach(textarea);
+            if (window.Zeichenleiste) window.Zeichenleiste.attach(textarea, ZEICHENLEISTE_FACH);
             setTimeout(() => textarea.focus(), 50);
         } else {
             const order = shuffleIndices(q.options.length);

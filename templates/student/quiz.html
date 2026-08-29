@@ -34,9 +34,9 @@
         {% endif %}
 
         {% if question.type == 'fill_blank' %}
-        <input type="text" name="q{{ loop.index0 }}" class="form-control" placeholder="Antwort eingeben..." autocomplete="off" data-zeichenleiste-auto>
+        <input type="text" name="q{{ loop.index0 }}" class="form-control" placeholder="Antwort eingeben..." autocomplete="off" data-zeichenleiste-fach="{{ task.fach }}">
         {% elif question.type == 'short_answer' %}
-        <textarea name="q{{ loop.index0 }}" class="form-control" rows="3" placeholder="Antwort in eigenen Worten..." data-zeichenleiste-auto></textarea>
+        <textarea name="q{{ loop.index0 }}" class="form-control" rows="3" placeholder="Antwort in eigenen Worten..." data-zeichenleiste-fach="{{ task.fach }}"></textarea>
         {% else %}
         {# Multiple choice (default) #}
         {% for answer in question.answers %}

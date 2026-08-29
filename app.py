@@ -159,27 +159,23 @@ def inject_student_display_name():
 
 @app.context_processor
 def inject_zeichenleiste():
-    """Character-insert bar for the logged-in student, as a flat char list.
+    """Ship the whole subject-to-characters map to a logged-in student's pages.
 
-    A context processor rather than a per-route argument on purpose: the bar hangs
-    off base.html, and every quiz route would otherwise have to remember to pass it
-    (see CLAUDE.md, "Template Context Requirements"). The subject comes from the
-    Themen the student's classes work on, so a Chemie class gets the bar without
-    anyone configuring anything. Admins get no bar -- they do
+    The map is static config and tiny; what decides whether a bar actually appears
+    is the Thema in scope, looked up against this map at the moment a field is
+    built. That keeps the decision at the finest grain available -- a practice run
+    mixes Themen from several classes, so the bar has to come and go question by
+    question, which a page-level flag could not express.
+
+    A context processor rather than a per-route argument: the map hangs off
+    base.html, and every quiz route would otherwise have to remember to pass it
+    (see CLAUDE.md, "Template Context Requirements"). Admins get nothing -- they do
     not answer quizzes, and an admin previewing a student page should see the page,
-    not a teacher-only affordance.
-
-    A student in a Chemie class and an MBI class gets the union of whatever those
-    subjects define, deduped -- today that is the Chemie set and nothing else.
+    not a student-only affordance.
     """
     if 'student_id' not in session:
-        return {'zeichenleiste': []}
-    chars = []
-    for fach in models.get_faecher_for_student(session['student_id']):
-        for char in config.CHARACTER_SETS.get(fach, []):
-            if char not in chars:
-                chars.append(char)
-    return {'zeichenleiste': chars}
+        return {'zeichenleiste': {}}
+    return {'zeichenleiste': config.CHARACTER_SETS}
 
 
 def validate_quiz_json(raw):
@@ -5596,6 +5592,7 @@ def _serialize_question_for_js(item):
         'subtask_id': item['subtask_id'],
         'question_index': item['question_index'],
         'topic_name': item['topic_name'],
+        'fach': item.get('fach'),
         'type': q.get('type', 'multiple_choice'),
         'text': q['text'],
     }

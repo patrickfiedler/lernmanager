@@ -5161,26 +5161,6 @@ def set_klasse_show_completed_topics(klasse_id, show: bool):
         )
 
 
-def get_faecher_for_student(student_id):
-    """Subjects (task.fach) the student's classes actually work on.
-
-    Class-level on purpose: the subject lives on the Thema, not on `klasse`, so a
-    class "is" a subject once any Thema of that subject is assigned in it. One real
-    class runs Chemie and MBI together and correctly gets both. Sorted for a stable
-    order downstream.
-    """
-    with db_session() as conn:
-        rows = conn.execute('''
-            SELECT DISTINCT t.fach
-            FROM student_klasse sk
-            JOIN student_task st ON st.klasse_id = sk.klasse_id
-            JOIN task t ON t.id = st.task_id
-            WHERE sk.student_id = ?
-            ORDER BY t.fach
-        ''', (student_id,)).fetchall()
-    return [r[0] for r in rows]
-
-
 
 def get_completed_student_tasks(student_id, klasse_id):
     """Finished Themen for one student in one class, newest first.
@@ -5875,7 +5855,7 @@ def get_grading_run_override_rate(run_id):
 # ============ Warmup / Spaced Repetition ============
 
 def _quiz_json_to_pool_entries(task_id, subtask_id, quiz_json, topic_name, completed_at=None,
-                               student_path=None):
+                               student_path=None, fach=None):
     """Parse one quiz_json blob into warmup pool entries, filtering out
     question types too slow for a quick warm-up (short_answer, long_answer)
     and questions tagged for a path above the student's own."""
@@ -5897,6 +5877,10 @@ def _quiz_json_to_pool_entries(task_id, subtask_id, quiz_json, topic_name, compl
             'question_hash': _question_hash(q),
             'question': q,
             'topic_name': topic_name,
+            # Carried per entry, not per session: a practice run mixes Themen from
+            # every class the student is in, so the Chemie character bar has to
+            # appear and disappear question by question.
+            'fach': fach,
         }
         if completed_at is not None:
             entry['completed_at'] = completed_at
@@ -5935,7 +5919,7 @@ def get_warmup_question_pool(student_id):
 
         # 1. Topic quizzes the student has actually attempted
         attempted_topics = conn.execute('''
-            SELECT DISTINCT t.id as task_id, t.name, t.quiz_json
+            SELECT DISTINCT t.id as task_id, t.name, t.quiz_json, t.fach
             FROM student_task st
             JOIN task t ON st.task_id = t.id
             JOIN quiz_attempt qa ON qa.student_task_id = st.id AND qa.subtask_id IS NULL
@@ -5946,12 +5930,12 @@ def get_warmup_question_pool(student_id):
         for topic in attempted_topics:
             pool.extend(_quiz_json_to_pool_entries(
                 topic['task_id'], None, topic['quiz_json'], topic['name'],
-                student_path=student_path))
+                student_path=student_path, fach=topic['fach']))
 
         # 2. Aufgabe quizzes the student has actually attempted
         attempted_subtasks = conn.execute('''
             SELECT DISTINCT sub.id as subtask_id, sub.task_id, sub.quiz_json,
-                   t.name as topic_name, ss.completed_at
+                   t.name as topic_name, t.fach, ss.completed_at
             FROM student_task st
             JOIN task t ON st.task_id = t.id
             JOIN subtask sub ON sub.task_id = t.id
@@ -5965,14 +5949,15 @@ def get_warmup_question_pool(student_id):
         for sub in attempted_subtasks:
             pool.extend(_quiz_json_to_pool_entries(
                 sub['task_id'], sub['subtask_id'], sub['quiz_json'], sub['topic_name'],
-                completed_at=sub['completed_at'], student_path=student_path))
+                completed_at=sub['completed_at'], student_path=student_path,
+                fach=sub['fach']))
 
         # 3. Class-unlocked topics → questions for students in that class,
         #    regardless of whether the topic was ever assigned to the student.
         seen_task_ids = {(e['task_id'], e['subtask_id']) for e in pool}
 
         unlocked_topics = conn.execute('''
-            SELECT DISTINCT t.id as task_id, t.name, t.quiz_json
+            SELECT DISTINCT t.id as task_id, t.name, t.quiz_json, t.fach
             FROM student_klasse sk
             JOIN class_practice_unlock cpu ON cpu.klasse_id = sk.klasse_id
             JOIN task t ON t.id = cpu.task_id
@@ -5985,12 +5970,12 @@ def get_warmup_question_pool(student_id):
                 continue
             pool.extend(_quiz_json_to_pool_entries(
                 topic['task_id'], None, topic['quiz_json'], topic['name'],
-                student_path=student_path))
+                student_path=student_path, fach=topic['fach']))
 
         unlocked_subtasks = conn.execute('''
             SELECT DISTINCT sub.id as subtask_id, sub.task_id, sub.quiz_json,
                    sub.path, sub.path_model, sub.fork_group, sub.fork_branch,
-                   t.name as topic_name
+                   t.name as topic_name, t.fach
             FROM student_klasse sk
             JOIN class_practice_unlock cpu ON cpu.klasse_id = sk.klasse_id
             JOIN task t ON t.id = cpu.task_id
@@ -6012,7 +5997,7 @@ def get_warmup_question_pool(student_id):
                 continue
             pool.extend(_quiz_json_to_pool_entries(
                 sub['task_id'], sub['subtask_id'], sub['quiz_json'], sub['topic_name'],
-                student_path=student_path))
+                student_path=student_path, fach=sub['fach']))
 
     return pool
 

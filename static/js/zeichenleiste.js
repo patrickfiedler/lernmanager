@@ -2,12 +2,13 @@
  *
  * Students on iPads cannot reach the characters their subject needs -- in the
  * 2026-08-26 chemistry run, not one of thirty half-equation answers contained a
- * reaction arrow. window.ZEICHENLEISTE holds the characters for the logged-in
- * student's classes (empty for everyone else), set by base.html.
+ * reaction arrow. window.ZEICHENLEISTE maps a Fach to its characters, set by
+ * base.html from config.CHARACTER_SETS.
  *
- * Zeichenleiste.attach(field) puts a bar directly above `field`. Safe to call on
- * a field that already has one, and a no-op when the student has no character set,
- * so callers never have to check first.
+ * Zeichenleiste.attach(field, fach) puts a bar above `field` if that Fach defines
+ * one. A subject with no entry -- which is every subject but Chemie -- is a no-op,
+ * as is a missing or empty fach, so callers never have to check first. Safe to call
+ * twice on the same field.
  */
 (function () {
     'use strict';
@@ -28,8 +29,8 @@
         field.dispatchEvent(new Event('input', { bubbles: true }));
     }
 
-    function attach(field) {
-        var chars = window.ZEICHENLEISTE || [];
+    function attach(field, fach) {
+        var chars = (window.ZEICHENLEISTE || {})[fach] || [];
         if (!field || !chars.length || field.dataset.zeichenleiste === 'on') return;
         field.dataset.zeichenleiste = 'on';
 
@@ -59,9 +60,11 @@
 
     window.Zeichenleiste = { attach: attach };
 
-    // Server-rendered fields (student/quiz.html). JS-built fields call attach()
-    // themselves once they exist.
+    // Server-rendered fields (student/quiz.html) name their Thema's Fach in the
+    // attribute. JS-built fields call attach() themselves once they exist.
     document.addEventListener('DOMContentLoaded', function () {
-        document.querySelectorAll('[data-zeichenleiste-auto]').forEach(attach);
+        document.querySelectorAll('[data-zeichenleiste-fach]').forEach(function (field) {
+            attach(field, field.dataset.zeichenleisteFach);
+        });
     });
 }());
