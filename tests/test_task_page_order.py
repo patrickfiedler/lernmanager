@@ -52,7 +52,7 @@ def _order(page, markers):
 def test_working_sequence_on_a_passed_gate(app, client, tmp_path):
     page = _page(app, client, tmp_path, gate_passed=True)
     at = _order(page, ['class="task-content', 'materials-toggle', 'tipps-toggle',
-                       'gate-card', 'fertig-wenn-callout', 'Ich habe das geschafft'])
+                       'gate-card', 'fertig-wenn-callout', 'id="completion-zone"'])
 
     assert at['class="task-content'] < at['materials-toggle'], \
         "Materialien is the input to the work -- it belongs above, not below the checkbox"
@@ -61,7 +61,7 @@ def test_working_sequence_on_a_passed_gate(app, client, tmp_path):
     assert at['tipps-toggle'] < at['gate-card']
     assert at['gate-card'] < at['fertig-wenn-callout'], \
         "machine check first, then the self-check it feeds"
-    assert at['fertig-wenn-callout'] < at['Ich habe das geschafft'], \
+    assert at['fertig-wenn-callout'] < at['id="completion-zone"'], \
         "the criterion must sit directly on the checkbox that commits to it"
 
 
@@ -69,7 +69,7 @@ def test_criterion_closes_its_own_box_when_no_checkbox_follows(app, client, tmp_
     """A withheld completion zone leaves the callout as the last element -- it has to
     close its bottom edge instead of running into nothing."""
     page = _page(app, client, tmp_path, gate_passed=False)
-    assert "Ich habe das geschafft" not in page
+    assert '<div id="completion-zone" hidden' in page
     assert "fertig-wenn-callout--standalone" in page
 
 

@@ -72,7 +72,8 @@ def test_failing_capstone_gate_withholds_the_checkbox(app, client, tmp_path):
 
     assert _upload(client, FAIL_BODY).get_json()["passed"] is False
     page = client.get("/schueler/thema/testthema").get_data(as_text=True)
-    assert "Ich habe das geschafft" not in page, \
+    # Rendered but hidden, so a passing re-check can reveal it without a reload.
+    assert '<div id="completion-zone" hidden' in page, \
         "a failing capstone gate must not leave a live completion checkbox on the page"
 
 
@@ -83,7 +84,8 @@ def test_passing_capstone_gate_releases_the_checkbox(app, client, tmp_path):
 
     assert _upload(client, PASS_BODY).get_json()["passed"] is True
     page = client.get("/schueler/thema/testthema").get_data(as_text=True)
-    assert "Ich habe das geschafft" in page
+    assert 'id="completion-zone"' in page
+    assert '<div id="completion-zone" hidden' not in page
 
 
 def test_checkbox_stays_when_the_class_does_not_require_the_gate(app, client, tmp_path):
@@ -93,7 +95,8 @@ def test_checkbox_stays_when_the_class_does_not_require_the_gate(app, client, tm
 
     assert _upload(client, FAIL_BODY).get_json()["passed"] is False
     page = client.get("/schueler/thema/testthema").get_data(as_text=True)
-    assert "Ich habe das geschafft" in page
+    assert 'id="completion-zone"' in page
+    assert '<div id="completion-zone" hidden' not in page
 
 
 # --- 2. the verdict follows the stored file ---
@@ -106,13 +109,13 @@ def test_failing_reupload_takes_the_pass_back(app, client, tmp_path):
 
     assert _upload(client, PASS_BODY).get_json()["passed"] is True
     page = client.get("/schueler/thema/testthema").get_data(as_text=True)
-    assert "Abgabe geprüft ✓" in page
+    assert 'class="gate-card mt-2 gate-passed"' in page
 
     assert _upload(client, FAIL_BODY).get_json()["passed"] is False
     page = client.get("/schueler/thema/testthema").get_data(as_text=True)
-    assert "Abgabe geprüft ✓" not in page, \
+    assert 'class="gate-card mt-2 gate-passed"' not in page, \
         "the card kept a stale green header above a fresh list of errors"
-    assert "Datei prüfen" in page
+    assert 'class="gate-card mt-2 gate-ready"' in page
 
 
 # --- 3. an unpassed required gate blocks Thema completion ---

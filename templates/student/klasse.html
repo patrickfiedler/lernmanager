@@ -315,11 +315,11 @@
             {% endif %}
 
             <!-- Completion zone: checkbox (left) + optional KI-Check (right) -->
-            {% if active_subtask and not task.abgeschlossen and not gate_withholds_completion %}
+            {% if active_subtask and not task.abgeschlossen %}
             {# Einführung is read, not done -- the checkbox means something different there. #}
             {% set complete_label = 'Ich habe das gelesen und verstanden! ✓ In der nächsten Aufgabe beginnst du mit der Arbeit.' if active_subtask.get('is_intro') else 'Ich habe das geschafft! ✓' %}
             {% if graded_artifact %}
-            <div class="task-complete {% if active_subtask.fertig_wenn %}has-fertig-wenn{% endif %} has-artifact">
+            <div id="completion-zone" {% if gate_withholds_completion %}hidden{% endif %} class="task-complete {% if active_subtask.fertig_wenn %}has-fertig-wenn{% endif %} has-artifact">
                 <!-- Left: completion checkbox -->
                 <div class="task-complete-left" onclick="document.getElementById('subtask-checkbox-{{ active_subtask.id }}').click()">
                     <input type="checkbox"
@@ -364,7 +364,7 @@
                 </div>
             </div>
             {% else %}
-            <div class="task-complete {% if active_subtask.fertig_wenn %}has-fertig-wenn{% endif %}" onclick="document.getElementById('subtask-checkbox-{{ active_subtask.id }}').click()">
+            <div id="completion-zone" {% if gate_withholds_completion %}hidden{% endif %} class="task-complete {% if active_subtask.fertig_wenn %}has-fertig-wenn{% endif %}" onclick="document.getElementById('subtask-checkbox-{{ active_subtask.id }}').click()">
                 <input type="checkbox"
                        id="subtask-checkbox-{{ active_subtask.id }}"
                        class="subtask-checkbox"
@@ -557,6 +557,7 @@ const gatePassed = {{ 'true' if capstone_gate_passed else 'false' }};
 const artifactKeyword = {{ (graded_artifact.keyword if graded_artifact and graded_artifact.keyword else None) | tojson }};
 const inlineGateKeyword = {{ inline_gate_keyword | tojson }};
 const capstoneGateKeyword = {{ capstone_gate_keyword | tojson }};
+const artifactGateRequired = {{ artifact_gate_required | tojson }};
 
 function toggleSubtask(position, checked) {
     const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
@@ -883,6 +884,55 @@ function gateFeedbackItems(matches, details, warnings, filenameItem) {
 // The client's keyword check is only a fallback: when the server ran the exact
 // expected_filename check, drop it, or the card shows two filename lines that can
 // contradict each other (keyword present, exact name wrong).
+// A failing re-check retracts the pass server-side (app.py), but the card header and
+// the completion zone are both server-rendered from the state at page load. Without this
+// the student keeps the green passed-header above a fresh list of errors, and a live
+// completion checkbox one click from the quiz. Persisting the retraction only fixes the
+// NEXT page load; this fixes the page in front of them.
+// (Deliberately no UI strings in this comment -- several tests assert on those by
+// substring, and a comment quoting them makes the page match when it should not.)
+// The card is found from the button rather than by id, so one pair of helpers serves
+// both the inline and the capstone gate.
+function markGateFailed(card) {
+    if (!card) return;
+    card.classList.remove('gate-passed');
+    card.classList.add('gate-ready');
+    const header = card.querySelector('.gate-header');
+    if (header) header.textContent = '📎 Datei prüfen';
+    const success = card.querySelector('.gate-success-msg');
+    if (success) success.remove();
+    // .gate-desc is deliberately left alone: the two gates word it differently, and
+    // "Neue Version einreichen:" stays true after a failure anyway.
+}
+
+// The same staleness in the other direction: a card that loaded unpassed kept its amber
+// header after a passing check, so the student read "Datei prüfen" above their own
+// success. The result panel already carries the message, so no success line is re-added.
+function markGatePassed(card) {
+    if (!card) return;
+    card.classList.remove('gate-ready');
+    card.classList.add('gate-passed');
+    const header = card.querySelector('.gate-header');
+    if (header) header.textContent = '📎 Abgabe geprüft ✓';
+    const desc = card.querySelector('.gate-desc');
+    if (desc) desc.textContent = 'Neue Version einreichen:';
+}
+
+// Only when the class requires the gate -- artifact_gate_required is the teacher's
+// switch, and with it off the checkbox was never gated in the first place.
+// Hidden rather than removed, so a passing re-check can hand it straight back: the
+// student who corrects their file gets the checkbox inline, next to the feedback they
+// are still reading, instead of having to reload and lose it.
+function setCompletionZoneVisible(visible) {
+    if (!artifactGateRequired) return;
+    const zone = document.getElementById('completion-zone');
+    if (zone) zone.hidden = !visible;
+    // With nothing beneath it the criterion callout closes its own bottom edge --
+    // the same rule the server applies through gate_withholds_completion.
+    const callout = document.querySelector('.fertig-wenn-callout');
+    if (callout) callout.classList.toggle('fertig-wenn-callout--standalone', !visible);
+}
+
 function allFeedbackItems(data, filenameItem) {
     return gateFeedbackItems(data.matches, data.details, data.warnings,
                              data.filename_checked ? null : filenameItem)
@@ -1084,6 +1134,8 @@ function adjustZoom(delta) {
                 if (data.passed) {
                     const rateNote = (data.checks_remaining !== undefined && data.checks_remaining <= 3 && data.checks_remaining > 0)
                         ? `<p style="font-size:0.8rem;color:#6b7280;">Noch ${data.checks_remaining} KI-Check${data.checks_remaining === 1 ? '' : 's'} übrig.</p>` : '';
+                    markGatePassed(submitBtn.closest('.gate-card'));
+                    setCompletionZoneVisible(true);
                     let html = `<p class="gate-success-msg" style="margin-bottom:0.5rem;">✓ Abgabe geprüft!</p>`;
                     html += renderFeedbackSplit(allFeedbackItems(data, filenameItem)) + rateNote;
                     html += `<button class="btn btn-primary mt-1" onclick="location.reload()">Weiter →</button>`;
@@ -1091,6 +1143,8 @@ function adjustZoom(delta) {
                     resultDiv.style.display = 'block';
                     submitBtn.style.display = 'none';
                 } else {
+                    markGateFailed(submitBtn.closest('.gate-card'));
+                    setCompletionZoneVisible(false);
                     let html = `<p class="gate-fail-msg">${data.message}</p>`;
                     html += renderFeedbackSplit(allFeedbackItems(data, filenameItem));
                     resultDiv.innerHTML = html;
@@ -1177,6 +1231,8 @@ function adjustZoom(delta) {
                 if (data.passed) {
                     const rateNote = (data.checks_remaining !== undefined && data.checks_remaining <= 3 && data.checks_remaining > 0)
                         ? `<p style="font-size:0.8rem;color:#6b7280;">Noch ${data.checks_remaining} KI-Check${data.checks_remaining === 1 ? '' : 's'} übrig.</p>` : '';
+                    markGatePassed(submitBtn.closest('.gate-card'));
+                    setCompletionZoneVisible(true);
                     let html = `<p class="gate-success-msg" style="margin-bottom:0.5rem;">✓ Abgabe geprüft!</p>`;
                     html += renderFeedbackSplit(allFeedbackItems(data, filenameItem)) + rateNote;
                     html += `<button class="btn btn-primary mt-1" onclick="location.reload()">Weiter →</button>`;
@@ -1184,6 +1240,8 @@ function adjustZoom(delta) {
                     resultDiv.style.display = 'block';
                     submitBtn.style.display = 'none';
                 } else {
+                    markGateFailed(submitBtn.closest('.gate-card'));
+                    setCompletionZoneVisible(false);
                     let html = `<p class="gate-fail-msg">${data.message}</p>`;
                     html += renderFeedbackSplit(allFeedbackItems(data, filenameItem));
                     {% if artifact_gate_required %}
