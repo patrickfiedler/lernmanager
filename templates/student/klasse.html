@@ -159,24 +159,127 @@
                 {% endif %}
             </div>
 
+
+            <!-- Materials Section (collapsible, default open) -->
+            {% if materials %}
+            <details class="materials-toggle mt-2" open>
+                <summary>📎 Materialien</summary>
+                <div class="materials-content">
+                    <ul class="material-list">
+                        {% for mat in materials %}
+                        {% set ext = mat.pfad.rsplit('.', 1)[-1].lower() if '.' in mat.pfad else '' %}
+                        {% set is_image = ext in ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'] %}
+                        {% set is_pdf = ext == 'pdf' %}
+                        {% set is_youtube = 'youtube.com' in mat.pfad or 'youtu.be/' in mat.pfad %}
+                        {% set label = mat.beschreibung or mat.pfad %}
+                        {% set mat_locked = mat.school_only and not client_school_ok %}
+                        {# Icon by type/extension #}
+                        {% if mat.typ == 'link' %}
+                          {% set mat_icon = '▶️' if is_youtube else '🔗' %}{% set mat_icon_svg = '' %}
+                        {% elif is_pdf %}
+                          {% set mat_icon = '' %}{% set mat_icon_svg = 'file-pdf.svg' %}
+                        {% elif ext in ['doc', 'docx', 'odt', 'ott'] %}
+                          {% set mat_icon = '' %}{% set mat_icon_svg = 'file-word.svg' %}
+                        {% elif ext in ['xls', 'xlsx', 'ods'] %}
+                          {% set mat_icon = '' %}{% set mat_icon_svg = 'file-excel.svg' %}
+                        {% elif ext in ['ppt', 'pptx', 'odp'] %}
+                          {% set mat_icon = '' %}{% set mat_icon_svg = 'file-powerpoint.svg' %}
+                        {% elif is_image %}
+                          {% set mat_icon = '🖼️' %}{% set mat_icon_svg = '' %}
+                        {% elif ext in ['mp4', 'webm', 'mov', 'avi', 'mkv'] %}
+                          {% set mat_icon = '🎬' %}{% set mat_icon_svg = '' %}
+                        {% elif ext in ['mp3', 'wav', 'ogg', 'm4a'] %}
+                          {% set mat_icon = '🎵' %}{% set mat_icon_svg = '' %}
+                        {% elif ext in ['zip', 'tar', 'gz', '7z', 'rar'] %}
+                          {% set mat_icon = '' %}{% set mat_icon_svg = 'file-zipper.svg' %}
+                        {% else %}
+                          {% set mat_icon = '📄' %}{% set mat_icon_svg = '' %}
+                        {% endif %}
+                        <li class="material-item">
+                            {% if mat_locked %}
+                            <span class="material-icon"><img src="{{ url_for('static', filename='icons/book-locked.svg') }}" alt="" width="20" height="20"></span>
+                            {% elif mat_icon_svg %}
+                            <span class="material-icon"><img src="{{ url_for('static', filename='icons/' + mat_icon_svg) }}" alt="" width="20" height="20"></span>
+                            {% else %}
+                            <span class="material-icon">{{ mat_icon }}</span>
+                            {% endif %}
+                            {% if is_youtube %}
+                            {# YouTube: split pane primary, external link secondary #}
+                            <button class="material-name-btn btn-split js-yt-primary"
+                                    data-type="youtube"
+                                    data-url="{{ mat.pfad }}"
+                                    data-title="{{ label }}"
+                                    onclick="openSplitPane(this)">{{ label }}</button>
+                            <a href="{{ mat.pfad }}" target="_blank" class="btn-newtab" title="In neuem Tab öffnen">↗</a>
+                            {% elif mat.typ == 'link' %}
+                            {# Other links: plain new-tab link only #}
+                            <a href="{{ mat.pfad }}" target="_blank">{{ label }}</a>
+                            {% elif mat_locked %}
+                            <span class="material-name-locked text-muted">{{ label }}</span>
+                            {% elif is_pdf or is_image %}
+                            {# Viewable files: split pane primary, download secondary #}
+                            <button class="material-name-btn btn-split"
+                                    data-type="{{ 'image' if is_image else 'pdf' }}"
+                                    data-url="{{ url_for('download_material', material_id=mat.id) }}"
+                                    data-title="{{ label }}"
+                                    onclick="openSplitPane(this)">{{ label }}</button>
+                            <a href="{{ url_for('download_material', material_id=mat.id) }}" target="_blank" class="btn-newtab" title="In neuem Tab öffnen">↗</a>
+                            {% else %}
+                            {# Non-viewable files: download/new tab only #}
+                            <a href="{{ url_for('download_material', material_id=mat.id) }}" target="_blank">{{ label }}</a>
+                            {% endif %}
+                            {% if mat.attribution %}
+                            <span class="material-attribution text-muted">© {{ mat.attribution }}</span>
+                            {% endif %}
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </details>
+            {% endif %}
             {% if active_subtask and active_subtask.tipps %}
-            <details class="tipps-toggle">
+            <details class="tipps-toggle" open>
                 <summary>💡 Hilfe</summary>
                 <div class="tipps-content markdown-content">{{ active_subtask.tipps | markdown }}</div>
             </details>
             {% endif %}
 
-            {% if active_subtask and active_subtask.fertig_wenn %}
-            <div class="fertig-wenn-callout {% if inline_gate and (not inline_gate_passed or not artifact_gate_required) %}fertig-wenn-callout--standalone{% endif %}">
-                {{ active_subtask.fertig_wenn | markdown }}
+
+            <!-- Capstone Gate Checkpoint — shown when on the last subtask or already passed -->
+            {% if capstone_gate and (capstone_gate_passed or (active_subtask and active_subtask.id == capstone_gate.id)) %}
+            {% set gate_formats = capstone_gate.artifact_gate.get('format', []) %}
+            <div id="gate-card" class="gate-card mt-2 {% if capstone_gate_passed %}gate-passed{% else %}gate-ready{% endif %}">
+                {% if capstone_gate_passed %}
+                <div class="gate-header">📎 Abgabe geprüft ✓</div>
+                <p class="gate-success-msg">Deine Datei wurde erfolgreich geprüft.</p>
+                {% if capstone_gate_llm_feedback %}
+                <div id="capstone-gate-feedback" class="mt-2"></div>
+                <script type="application/json" id="capstone-gate-feedback-data">{{ capstone_gate_llm_feedback|tojson }}</script>
+                {% endif %}
+                <p class="gate-desc" style="margin-top:0.75rem;">Neue Version einreichen:</p>
+                {% else %}
+                <div class="gate-header">📎 Datei prüfen</div>
+                <p class="gate-desc">Lade deine Datei hoch – sie muss geprüft sein, bevor du das Thema abschließen kannst.</p>
+                {% endif %}
+                {% if gate_formats %}<p class="gate-formats">Akzeptiert: {% for f in gate_formats %}<code>{{ f }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</p>{% endif %}
+                {% if unit_artifact_file %}{% include 'student/_artifact_file_details.html' %}{% endif %}
+                <div class="gate-upload-row">
+                    <input type="file" id="gate-file-input" class="artifact-file-input"
+                           {% if gate_formats %}accept="{{ gate_formats|join(',') }}"{% endif %}>
+                    <label for="gate-file-input" class="btn btn-secondary artifact-upload-btn">Datei auswählen</label>
+                    <span id="gate-filename" class="artifact-filename"></span>
+                </div>
+                <button id="gate-submit-btn" class="btn btn-primary mt-1" disabled
+                        data-url="{{ url_for('student_artifact_gate_check', slug=task|topic_slug, position=capstone_gate_position) }}">
+                    Datei prüfen
+                </button>
+                <div id="gate-result" class="gate-result" style="display:none;"></div>
             </div>
             {% endif %}
-
             <!-- Inline gate card (non-capstone subtask gate) -->
             {% if inline_gate and not task.abgeschlossen %}
             {% set inline_gate_formats = inline_gate.get('format', []) %}
-            {% set gate_chained = inline_gate_passed and artifact_gate_required and active_subtask and active_subtask.fertig_wenn %}
-            <div id="inline-gate-card" class="gate-card gate-inline mt-2 {% if inline_gate_passed %}gate-passed{% if gate_chained %} gate-inline--chained{% endif %}{% else %}gate-ready{% endif %}">
+            <div id="inline-gate-card" class="gate-card gate-inline mt-2 {% if inline_gate_passed %}gate-passed{% else %}gate-ready{% endif %}">
                 {% if inline_gate_passed %}
                 <div class="gate-header">📎 Abgabe geprüft ✓</div>
                 <p class="gate-success-msg">Deine Datei wurde erfolgreich geprüft.</p>
@@ -202,6 +305,12 @@
                     Datei prüfen
                 </button>
                 <div id="inline-gate-result" class="gate-result" style="display:none;"></div>
+            </div>
+            {% endif %}
+
+            {% if active_subtask and active_subtask.fertig_wenn %}
+            <div class="fertig-wenn-callout {% if gate_withholds_completion or task.abgeschlossen %}fertig-wenn-callout--standalone{% endif %}">
+                {{ active_subtask.fertig_wenn | markdown }}
             </div>
             {% endif %}
 
@@ -323,116 +432,6 @@
         <div class="empty-state-icon">✨</div>
         <h2 class="empty-state-title">Weitere Themen kommen bald!</h2>
         <p class="empty-state-text">Dein Lehrer bereitet sie vor.</p>
-    </div>
-    {% endif %}
-
-    <!-- Materials Section (collapsible, default open) -->
-    {% if materials %}
-    <details class="materials-toggle mt-2" open>
-        <summary>📎 Materialien</summary>
-        <div class="materials-content">
-            <ul class="material-list">
-                {% for mat in materials %}
-                {% set ext = mat.pfad.rsplit('.', 1)[-1].lower() if '.' in mat.pfad else '' %}
-                {% set is_image = ext in ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'] %}
-                {% set is_pdf = ext == 'pdf' %}
-                {% set is_youtube = 'youtube.com' in mat.pfad or 'youtu.be/' in mat.pfad %}
-                {% set label = mat.beschreibung or mat.pfad %}
-                {% set mat_locked = mat.school_only and not client_school_ok %}
-                {# Icon by type/extension #}
-                {% if mat.typ == 'link' %}
-                  {% set mat_icon = '▶️' if is_youtube else '🔗' %}{% set mat_icon_svg = '' %}
-                {% elif is_pdf %}
-                  {% set mat_icon = '' %}{% set mat_icon_svg = 'file-pdf.svg' %}
-                {% elif ext in ['doc', 'docx', 'odt', 'ott'] %}
-                  {% set mat_icon = '' %}{% set mat_icon_svg = 'file-word.svg' %}
-                {% elif ext in ['xls', 'xlsx', 'ods'] %}
-                  {% set mat_icon = '' %}{% set mat_icon_svg = 'file-excel.svg' %}
-                {% elif ext in ['ppt', 'pptx', 'odp'] %}
-                  {% set mat_icon = '' %}{% set mat_icon_svg = 'file-powerpoint.svg' %}
-                {% elif is_image %}
-                  {% set mat_icon = '🖼️' %}{% set mat_icon_svg = '' %}
-                {% elif ext in ['mp4', 'webm', 'mov', 'avi', 'mkv'] %}
-                  {% set mat_icon = '🎬' %}{% set mat_icon_svg = '' %}
-                {% elif ext in ['mp3', 'wav', 'ogg', 'm4a'] %}
-                  {% set mat_icon = '🎵' %}{% set mat_icon_svg = '' %}
-                {% elif ext in ['zip', 'tar', 'gz', '7z', 'rar'] %}
-                  {% set mat_icon = '' %}{% set mat_icon_svg = 'file-zipper.svg' %}
-                {% else %}
-                  {% set mat_icon = '📄' %}{% set mat_icon_svg = '' %}
-                {% endif %}
-                <li class="material-item">
-                    {% if mat_locked %}
-                    <span class="material-icon"><img src="{{ url_for('static', filename='icons/book-locked.svg') }}" alt="" width="20" height="20"></span>
-                    {% elif mat_icon_svg %}
-                    <span class="material-icon"><img src="{{ url_for('static', filename='icons/' + mat_icon_svg) }}" alt="" width="20" height="20"></span>
-                    {% else %}
-                    <span class="material-icon">{{ mat_icon }}</span>
-                    {% endif %}
-                    {% if is_youtube %}
-                    {# YouTube: split pane primary, external link secondary #}
-                    <button class="material-name-btn btn-split js-yt-primary"
-                            data-type="youtube"
-                            data-url="{{ mat.pfad }}"
-                            data-title="{{ label }}"
-                            onclick="openSplitPane(this)">{{ label }}</button>
-                    <a href="{{ mat.pfad }}" target="_blank" class="btn-newtab" title="In neuem Tab öffnen">↗</a>
-                    {% elif mat.typ == 'link' %}
-                    {# Other links: plain new-tab link only #}
-                    <a href="{{ mat.pfad }}" target="_blank">{{ label }}</a>
-                    {% elif mat_locked %}
-                    <span class="material-name-locked text-muted">{{ label }}</span>
-                    {% elif is_pdf or is_image %}
-                    {# Viewable files: split pane primary, download secondary #}
-                    <button class="material-name-btn btn-split"
-                            data-type="{{ 'image' if is_image else 'pdf' }}"
-                            data-url="{{ url_for('download_material', material_id=mat.id) }}"
-                            data-title="{{ label }}"
-                            onclick="openSplitPane(this)">{{ label }}</button>
-                    <a href="{{ url_for('download_material', material_id=mat.id) }}" target="_blank" class="btn-newtab" title="In neuem Tab öffnen">↗</a>
-                    {% else %}
-                    {# Non-viewable files: download/new tab only #}
-                    <a href="{{ url_for('download_material', material_id=mat.id) }}" target="_blank">{{ label }}</a>
-                    {% endif %}
-                    {% if mat.attribution %}
-                    <span class="material-attribution text-muted">© {{ mat.attribution }}</span>
-                    {% endif %}
-                </li>
-                {% endfor %}
-            </ul>
-        </div>
-    </details>
-    {% endif %}
-
-    <!-- Capstone Gate Checkpoint — shown when on the last subtask or already passed -->
-    {% if capstone_gate and (capstone_gate_passed or (active_subtask and active_subtask.id == capstone_gate.id)) %}
-    {% set gate_formats = capstone_gate.artifact_gate.get('format', []) %}
-    <div id="gate-card" class="gate-card mt-2 {% if capstone_gate_passed %}gate-passed{% else %}gate-ready{% endif %}">
-        {% if capstone_gate_passed %}
-        <div class="gate-header">📎 Abgabe geprüft ✓</div>
-        <p class="gate-success-msg">Deine Datei wurde erfolgreich geprüft.</p>
-        {% if capstone_gate_llm_feedback %}
-        <div id="capstone-gate-feedback" class="mt-2"></div>
-        <script type="application/json" id="capstone-gate-feedback-data">{{ capstone_gate_llm_feedback|tojson }}</script>
-        {% endif %}
-        <p class="gate-desc" style="margin-top:0.75rem;">Neue Version einreichen:</p>
-        {% else %}
-        <div class="gate-header">📎 Datei prüfen</div>
-        <p class="gate-desc">Lade deine Datei hoch – sie muss geprüft sein, bevor du das Thema abschließen kannst.</p>
-        {% endif %}
-        {% if gate_formats %}<p class="gate-formats">Akzeptiert: {% for f in gate_formats %}<code>{{ f }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</p>{% endif %}
-        {% if unit_artifact_file %}{% include 'student/_artifact_file_details.html' %}{% endif %}
-        <div class="gate-upload-row">
-            <input type="file" id="gate-file-input" class="artifact-file-input"
-                   {% if gate_formats %}accept="{{ gate_formats|join(',') }}"{% endif %}>
-            <label for="gate-file-input" class="btn btn-secondary artifact-upload-btn">Datei auswählen</label>
-            <span id="gate-filename" class="artifact-filename"></span>
-        </div>
-        <button id="gate-submit-btn" class="btn btn-primary mt-1" disabled
-                data-url="{{ url_for('student_artifact_gate_check', slug=task|topic_slug, position=capstone_gate_position) }}">
-            Datei prüfen
-        </button>
-        <div id="gate-result" class="gate-result" style="display:none;"></div>
     </div>
     {% endif %}
 
