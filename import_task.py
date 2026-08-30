@@ -88,7 +88,7 @@ def extract_zip_materials(zip_path, task_data, dry_run=False):
 # An unknown key in artifact_gate is passed through and silently ignored, so a
 # stale config would keep importing and quietly stop being checked. Warn instead.
 _GATE_REMOVED_FIELDS = {
-    'required_headings': 'required_text mit „kind: heading"',
+    'required_headings': 'required_text mit „kind: heading“',
 }
 
 
@@ -119,7 +119,7 @@ def _validate_artifact_gate(gate, label):
                 isinstance(entry, dict) and isinstance(entry.get('text'), str) and entry['text'].strip())
             if not ok:
                 return gate, (f"{label}: artifact_gate.{field} braucht Zeichenketten oder "
-                              f'Objekte mit „text" — ein Eintrag wird nicht geprüft')
+                              f'Objekte mit „text“ — ein Eintrag wird nicht geprüft')
 
     if gate.get('min_added_words') and not gate.get('template_material'):
         return gate, (f"{label}: artifact_gate.min_added_words braucht template_material "

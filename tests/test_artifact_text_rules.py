@@ -31,14 +31,14 @@ def test_required_text_finds_a_line_that_is_not_a_heading():
     res = check_doc({'required_text': ["Keine Getränke am PC."]})
 
     assert res['passed'] is True
-    assert 'Text gefunden: „Keine Getränke am PC." ✓' in res['matches']
+    assert 'Text gefunden: „Keine Getränke am PC.“ ✓' in res['matches']
 
 
 def test_required_text_reports_what_is_missing():
     res = check_doc({'required_text': ["Kein Essen am PC."]})
 
     assert res['passed'] is False
-    assert 'Text fehlt: „Kein Essen am PC."' in res['details']
+    assert 'Text fehlt: „Kein Essen am PC.“' in res['details']
 
 
 def test_required_text_ignores_whitespace_differences():
@@ -84,7 +84,7 @@ def test_kind_heading_restricts_the_search_to_headings():
 def test_a_heading_rule_is_reported_as_a_section():
     res = check_doc({'required_text': [{'text': "Klimawandel", 'kind': 'heading'}]})
 
-    assert 'Abschnitt fehlt: „Klimawandel"' in res['details']
+    assert 'Abschnitt fehlt: „Klimawandel“' in res['details']
 
 
 def test_kind_list_item_sees_the_content_odt_used_to_drop():
@@ -118,7 +118,7 @@ def test_forbidden_text_catches_a_placeholder_left_in_the_template():
     res = check_doc({'forbidden_text': ["______________________"]})
 
     assert res['passed'] is False
-    assert 'Noch aus der Vorlage übrig: „______________________"' in res['details']
+    assert 'Noch aus der Vorlage übrig: „______________________“' in res['details']
 
 
 def test_forbidden_text_passes_once_the_student_filled_it_in():
@@ -126,7 +126,7 @@ def test_forbidden_text_passes_once_the_student_filled_it_in():
     res = check_doc({'forbidden_text': ["______________________"]}, body=filled)
 
     assert res['passed'] is True
-    assert '„______________________" ist ersetzt ✓' in res['matches']
+    assert '„______________________“ ist ersetzt ✓' in res['matches']
 
 
 def test_an_untouched_template_fails_its_own_forbidden_text():

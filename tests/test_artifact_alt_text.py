@@ -112,4 +112,4 @@ def test_a_missing_alt_text_is_reported():
                               {'required_text': [{'text': "Bildschirm", 'kind': 'alt-text'}]})
 
     assert res['passed'] is False
-    assert 'Text fehlt: „Bildschirm"' in res['details']
+    assert 'Text fehlt: „Bildschirm“' in res['details']

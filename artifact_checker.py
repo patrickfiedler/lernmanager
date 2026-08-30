@@ -58,9 +58,9 @@ def check_filename(filename: str, expected_filename: str, student_vorname: str =
     note = (
         "Der Dateiname ist korrekt."
         if passed
-        else f'Deine Datei heißt „{filename}".'
+        else f'Deine Datei heißt „{filename}“.'
     )
-    return {'criterion': f'Dateiname ist „{expected_display}"', 'passed': passed,
+    return {'criterion': f'Dateiname ist „{expected_display}“', 'passed': passed,
             'note': note, 'source': 'deterministic'}
 
 
@@ -161,18 +161,18 @@ def _check_text_rules(blocks: list, config: dict, issues: list, matches: list, w
             continue
         label = _rule_label(rule)
         if _text_present(blocks, rule, threshold):
-            matches.append(f'{label} gefunden: „{rule["text"]}" ✓')
+            matches.append(f'{label} gefunden: „{rule["text"]}“ ✓')
         else:
-            issues.append(f'{label} fehlt: „{rule["text"]}"')
+            issues.append(f'{label} fehlt: „{rule["text"]}“')
 
     for entry in config.get('forbidden_text', []):
         rule = _text_rule(entry)
         if rule is None:
             continue
         if _text_present(blocks, rule, threshold):
-            issues.append(f'Noch aus der Vorlage übrig: „{rule["text"]}"')
+            issues.append(f'Noch aus der Vorlage übrig: „{rule["text"]}“')
         else:
-            matches.append(f'„{rule["text"]}" ist ersetzt ✓')
+            matches.append(f'„{rule["text"]}“ ist ersetzt ✓')
 
     # A warning, never a failure -- the "wrote it in the speaker notes" case.
     expect = _RULE_REGIONS.get(str(config.get('expect_content_in', '')).strip().lower())
@@ -273,9 +273,9 @@ def _check_presentation(file_bytes: bytes, ext: str, config: dict, load_template
     titles = [b['text'] for b in blocks if b['kind'] == 'title']
     for req in config.get('required_slide_titles', []):
         if max((_fuzzy_match(req, t) for t in titles), default=0) < threshold:
-            issues.append(f'Folie fehlt: „{req}"')
+            issues.append(f'Folie fehlt: „{req}“')
         else:
-            matches.append(f'Folie gefunden: „{req}" ✓')
+            matches.append(f'Folie gefunden: „{req}“ ✓')
 
     min_chars = config.get('min_chars_per_slide', 0)
     if min_chars:

@@ -718,7 +718,7 @@ function handleArtifactUpload(position) {
     const kwWarning = document.getElementById('artifact-keyword-warning');
     if (kwWarning) {
         if (artifactKeyword && !file.name.toLowerCase().includes(artifactKeyword.toLowerCase())) {
-            kwWarning.textContent = `⚠️ Dateiname sollte „${artifactKeyword}" enthalten.`;
+            kwWarning.textContent = `⚠️ Dateiname sollte „${artifactKeyword}“ enthalten.`;
             kwWarning.style.display = '';
         } else {
             kwWarning.style.display = 'none';
@@ -1033,8 +1033,8 @@ function adjustZoom(delta) {
         const filename = fileInput.files[0].name;
         const filenameItem = capstoneGateKeyword
             ? (filename.toLowerCase().includes(capstoneGateKeyword.toLowerCase())
-                ? { text: `Dateiname enthält „${capstoneGateKeyword}"`, type: 'pass' }
-                : { text: `Dateiname sollte „${capstoneGateKeyword}" enthalten.`, type: 'warn' })
+                ? { text: `Dateiname enthält „${capstoneGateKeyword}“`, type: 'pass' }
+                : { text: `Dateiname sollte „${capstoneGateKeyword}“ enthalten.`, type: 'warn' })
             : null;
         submitBtn.disabled = true;
         submitBtn.innerHTML = '<span class="llm-spinner" aria-hidden="true"></span>' +
@@ -1122,8 +1122,8 @@ function adjustZoom(delta) {
         const filename = fileInput.files[0].name;
         const filenameItem = inlineGateKeyword
             ? (filename.toLowerCase().includes(inlineGateKeyword.toLowerCase())
-                ? { text: `Dateiname enthält „${inlineGateKeyword}"`, type: 'pass' }
-                : { text: `Dateiname sollte „${inlineGateKeyword}" enthalten.`, type: 'warn' })
+                ? { text: `Dateiname enthält „${inlineGateKeyword}“`, type: 'pass' }
+                : { text: `Dateiname sollte „${inlineGateKeyword}“ enthalten.`, type: 'warn' })
             : null;
         submitBtn.disabled = true;
         submitBtn.innerHTML = '<span class="llm-spinner" aria-hidden="true"></span>' +
