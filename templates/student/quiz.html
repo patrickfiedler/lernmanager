@@ -5,7 +5,10 @@
 {% block content %}
 <div class="flex flex-between flex-center mb-2">
     <h1>❓ {% if position %}Aufgaben-Quiz{% else %}Quiz: {{ task.name }}{% endif %}</h1>
-    <a href="{{ url_for('student_klasse', slug=slug) }}" class="btn btn-secondary">← Abbrechen</a>
+    {# Back to the Aufgabe this quiz belongs to. Without the position the topic page
+       falls back to the first UNFINISHED subtask -- which is the Einführung, because an
+       intro nobody ticks stays unfinished forever. #}
+    <a href="{{ url_for('student_klasse', slug=slug, aufgabe=position) if position else url_for('student_klasse', slug=slug) }}" class="btn btn-secondary">← Abbrechen</a>
 </div>
 
 <div class="card mb-2">
