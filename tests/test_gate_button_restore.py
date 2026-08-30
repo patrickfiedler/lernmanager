@@ -43,3 +43,26 @@ def test_restore_sits_in_the_file_change_handler():
     for handler in handlers:
         assert "submitBtn.style.display = ''" in handler
         assert 'submitBtn.disabled = !name' in handler
+
+
+def test_the_restore_also_puts_the_label_back():
+    """Reported 2026-08-30: pass a file, then pick a failing one -- the button came back
+    still showing the spinner and "Datei wird geprüft …". The click handler swaps in that
+    busy label, and only the three FAILURE branches swap it back; the success branch just
+    hides the button, freezing the label inside it. So the change handler has to restore
+    all three properties, not two."""
+    source = _source()
+    handlers = re.findall(
+        r"fileInput\.addEventListener\('change'.*?\}\);", source, re.S)
+    assert len(handlers) == 2
+    for handler in handlers:
+        assert "submitBtn.textContent = 'Datei prüfen'" in handler, \
+            "un-hiding a button that still wears the busy label is not a restore"
+
+    # Every busy-label swap on a GATE button is matched by a restore: 3 failure
+    # branches + 1 change handler per gate. (The KI-Check button carries its own
+    # llm-busy-label and is not affected -- it restores its label on every path.)
+    busy = len(re.findall(r'llm-busy-label">Datei wird geprüft', source))
+    restores = len(re.findall(r"submitBtn\.textContent = 'Datei prüfen'", source))
+    assert busy == 2, f"expected 1 busy swap per gate, found {busy}"
+    assert restores == 8, f"expected 4 label restores per gate, found {restores}"

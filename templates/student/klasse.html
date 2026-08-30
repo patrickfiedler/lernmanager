@@ -1033,6 +1033,12 @@ function adjustZoom(delta) {
         // of clicking Weiter. Without this the button stays display:none and the only
         // way back to it is reloading the page.
         submitBtn.style.display = '';
+        // ...and it comes back wearing the spinner. The click handler swaps the label
+        // for "Datei wird geprüft …", and only the FAILURE branches swap it back --
+        // the success branch just hides the button, freezing the busy label inside it.
+        // Restoring all three properties together is what makes this handler the one
+        // place that undoes a check.
+        submitBtn.textContent = 'Datei prüfen';
     });
 
     submitBtn.addEventListener('click', function() {
@@ -1122,6 +1128,12 @@ function adjustZoom(delta) {
         // of clicking Weiter. Without this the button stays display:none and the only
         // way back to it is reloading the page.
         submitBtn.style.display = '';
+        // ...and it comes back wearing the spinner. The click handler swaps the label
+        // for "Datei wird geprüft …", and only the FAILURE branches swap it back --
+        // the success branch just hides the button, freezing the busy label inside it.
+        // Restoring all three properties together is what makes this handler the one
+        // place that undoes a check.
+        submitBtn.textContent = 'Datei prüfen';
     });
 
     submitBtn.addEventListener('click', function() {
