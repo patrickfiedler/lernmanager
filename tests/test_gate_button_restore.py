@@ -25,11 +25,11 @@ def _source():
 
 
 def test_every_hide_is_matched_by_a_restore():
-    """Two gates (inline + capstone), each hiding on two success branches."""
+    """Two gates (inline + capstone), each hiding on its one success branch."""
     source = _source()
     hides = len(re.findall(r"submitBtn\.style\.display\s*=\s*'none'", source))
     restores = len(re.findall(r"submitBtn\.style\.display\s*=\s*''", source))
-    assert hides == 4, f"expected 4 hides (2 gates x 2 success branches), found {hides}"
+    assert hides == 2, f"expected 2 hides (1 success branch per gate), found {hides}"
     assert restores == 2, f"expected 1 restore per gate change handler, found {restores}"
 
 

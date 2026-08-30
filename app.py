@@ -4600,6 +4600,7 @@ def student_artifact_gate_check(slug, position):
                 models.save_artifact_feedback(student_id, subtask['id'], level2['feedback'])
                 result['llm_feedback'] = level2['feedback']
             result['checks_remaining'] = level2['checks_remaining']
+            result['filename_checked'] = level2['filename_checked']
             if anonymized and models.get_effective_transparency_mode(student_id, klasse['id']):
                 result['extracted_text'] = anonymized
 
@@ -4650,7 +4651,8 @@ def _build_level2_feedback(student_id, klasse, graded, student_path, filename, v
     """
     feedback = []
     expected_filename = graded.get('expected_filename')
-    if expected_filename and filename:
+    filename_checked = bool(expected_filename and filename)
+    if filename_checked:
         feedback.append(artifact_checker.check_filename(filename, expected_filename, vorname, full_name))
 
     llm_enabled = bool(klasse.get('llm_artifact_feedback_enabled'))
@@ -4671,6 +4673,10 @@ def _build_level2_feedback(student_id, klasse, graded, student_path, filename, v
         'llm_disabled': not llm_enabled,
         'rate_limited': rate_limited,
         'checks_remaining': models.get_artifact_checks_remaining(student_id),
+        # The client runs its own loose "filename contains the keyword" check as a
+        # fallback. Tell it when the exact expected_filename check already ran, so the
+        # two do not stack -- they can even disagree (keyword present, exact name wrong).
+        'filename_checked': filename_checked,
     }
 
 

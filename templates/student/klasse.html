@@ -869,6 +869,19 @@ function gateFeedbackItems(matches, details, warnings, filenameItem) {
     return items;
 }
 
+// One list, two sources: deterministic gate hits first, LLM criteria after.
+// These used to be an either/or -- and llm_feedback always won, because the
+// deterministic filename check runs on every passed gate and makes it non-empty.
+// A student who got everything right saw an empty "Gut so" column.
+// The client's keyword check is only a fallback: when the server ran the exact
+// expected_filename check, drop it, or the card shows two filename lines that can
+// contradict each other (keyword present, exact name wrong).
+function allFeedbackItems(data, filenameItem) {
+    return gateFeedbackItems(data.matches, data.details, data.warnings,
+                             data.filename_checked ? null : filenameItem)
+           .concat(data.llm_feedback || []);
+}
+
 // Smooth scroll to element on page load if hash is present
 window.addEventListener('DOMContentLoaded', function() {
     if (window.location.hash) {
@@ -1056,26 +1069,17 @@ function adjustZoom(delta) {
                 // leaving two feedback tables stacked in one card.
                 if (initialFeedbackEl) initialFeedbackEl.innerHTML = '';
                 if (data.passed) {
-                    if (data.llm_feedback && data.llm_feedback.length) {
-                        // Show LLM checklist before continuing
-                        const rateNote = (data.checks_remaining !== undefined && data.checks_remaining <= 3 && data.checks_remaining > 0)
-                            ? `<p style="font-size:0.8rem;color:#6b7280;">Noch ${data.checks_remaining} KI-Check${data.checks_remaining === 1 ? '' : 's'} übrig.</p>` : '';
-                        resultDiv.innerHTML = `<p class="gate-success-msg" style="margin-bottom:0.5rem;">✓ Abgabe geprüft!</p>
-                            ${renderFeedbackSplit(data.llm_feedback)}${rateNote}
-                            <button class="btn btn-primary mt-1" onclick="location.reload()">Weiter →</button>`;
-                        resultDiv.style.display = 'block';
-                        submitBtn.style.display = 'none';
-                    } else {
-                        let html = `<p class="gate-success-msg" style="margin-bottom:0.5rem;">✓ Abgabe geprüft!</p>`;
-                        html += renderFeedbackSplit(gateFeedbackItems(data.matches, data.details, data.warnings, filenameItem));
-                        html += `<button class="btn btn-primary mt-1" onclick="location.reload()">Weiter →</button>`;
-                        resultDiv.innerHTML = html;
-                        resultDiv.style.display = 'block';
-                        submitBtn.style.display = 'none';
-                    }
+                    const rateNote = (data.checks_remaining !== undefined && data.checks_remaining <= 3 && data.checks_remaining > 0)
+                        ? `<p style="font-size:0.8rem;color:#6b7280;">Noch ${data.checks_remaining} KI-Check${data.checks_remaining === 1 ? '' : 's'} übrig.</p>` : '';
+                    let html = `<p class="gate-success-msg" style="margin-bottom:0.5rem;">✓ Abgabe geprüft!</p>`;
+                    html += renderFeedbackSplit(allFeedbackItems(data, filenameItem)) + rateNote;
+                    html += `<button class="btn btn-primary mt-1" onclick="location.reload()">Weiter →</button>`;
+                    resultDiv.innerHTML = html;
+                    resultDiv.style.display = 'block';
+                    submitBtn.style.display = 'none';
                 } else {
                     let html = `<p class="gate-fail-msg">${data.message}</p>`;
-                    html += renderFeedbackSplit(gateFeedbackItems(data.matches, data.details, data.warnings, filenameItem));
+                    html += renderFeedbackSplit(allFeedbackItems(data, filenameItem));
                     resultDiv.innerHTML = html;
                     resultDiv.style.display = 'block';
                     submitBtn.disabled = false;
@@ -1152,26 +1156,17 @@ function adjustZoom(delta) {
                 // Live result supersedes the previous upload's feedback.
                 if (initialFeedbackEl) initialFeedbackEl.innerHTML = '';
                 if (data.passed) {
-                    if (data.llm_feedback && data.llm_feedback.length) {
-                        // Show LLM checklist before continuing
-                        const rateNote = (data.checks_remaining !== undefined && data.checks_remaining <= 3 && data.checks_remaining > 0)
-                            ? `<p style="font-size:0.8rem;color:#6b7280;">Noch ${data.checks_remaining} KI-Check${data.checks_remaining === 1 ? '' : 's'} übrig.</p>` : '';
-                        resultDiv.innerHTML = `<p class="gate-success-msg" style="margin-bottom:0.5rem;">✓ Abgabe geprüft!</p>
-                            ${renderFeedbackSplit(data.llm_feedback)}${rateNote}
-                            <button class="btn btn-primary mt-1" onclick="location.reload()">Weiter →</button>`;
-                        resultDiv.style.display = 'block';
-                        submitBtn.style.display = 'none';
-                    } else {
-                        let html = `<p class="gate-success-msg">✓ Abgabe erfolgreich geprüft!</p>`;
-                        html += renderFeedbackSplit(gateFeedbackItems(data.matches, data.details, data.warnings, filenameItem));
-                        html += `<button class="btn btn-primary mt-1" onclick="location.reload()">Weiter →</button>`;
-                        resultDiv.innerHTML = html;
-                        resultDiv.style.display = 'block';
-                        submitBtn.style.display = 'none';
-                    }
+                    const rateNote = (data.checks_remaining !== undefined && data.checks_remaining <= 3 && data.checks_remaining > 0)
+                        ? `<p style="font-size:0.8rem;color:#6b7280;">Noch ${data.checks_remaining} KI-Check${data.checks_remaining === 1 ? '' : 's'} übrig.</p>` : '';
+                    let html = `<p class="gate-success-msg" style="margin-bottom:0.5rem;">✓ Abgabe geprüft!</p>`;
+                    html += renderFeedbackSplit(allFeedbackItems(data, filenameItem)) + rateNote;
+                    html += `<button class="btn btn-primary mt-1" onclick="location.reload()">Weiter →</button>`;
+                    resultDiv.innerHTML = html;
+                    resultDiv.style.display = 'block';
+                    submitBtn.style.display = 'none';
                 } else {
                     let html = `<p class="gate-fail-msg">${data.message}</p>`;
-                    html += renderFeedbackSplit(gateFeedbackItems(data.matches, data.details, data.warnings, filenameItem));
+                    html += renderFeedbackSplit(allFeedbackItems(data, filenameItem));
                     {% if artifact_gate_required %}
                     html += `<div class="task-complete" style="margin-top:0.75rem;font-size:0.9rem;"
                                   onclick="if(!this.dataset.used){this.dataset.used='1';this.querySelector('input').checked=true;this.style.opacity='0.5';this.style.pointerEvents='none';toggleSubtask({{ current_index + 1 }}, true);}">
