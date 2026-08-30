@@ -4546,9 +4546,11 @@ def student_artifact_gate_check(slug, position):
     result['file_saved'] = True
     result['file_url'] = url_for('download_student_artifact', student_id=student_id, task_id=task['task_id'])
 
-    already_passed = bool(subtask.get('artifact_gate_passed'))
-    if not already_passed or result['passed']:
-        models.save_artifact_gate_result(task['id'], subtask['id'], result['passed'])
+    # The verdict follows the stored file. _save_artifact_file above keeps the latest
+    # upload, not the latest passing one, so a gate that stayed "passed" after a failing
+    # re-upload described a file that is no longer there -- the card kept its green
+    # "Abgabe geprueft" header above a fresh list of seven errors. One file, one verdict.
+    models.save_artifact_gate_result(task['id'], subtask['id'], result['passed'])
     models.log_artifact_gate_attempt(student_id, subtask['id'], result['passed'], result.get('details', []))
 
     # Inline gate (non-capstone): auto-complete the subtask on pass

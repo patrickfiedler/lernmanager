@@ -3222,16 +3222,27 @@ def check_task_completion(student_task_id):
         if required_ids:
             placeholders = ','.join('?' * len(required_ids))
             subtask_rows = conn.execute(f'''
-                SELECT sub.id, sub.quiz_json, COALESCE(ss.erledigt, 0) as erledigt
+                SELECT sub.id, sub.quiz_json, sub.artifact_gate_json,
+                       COALESCE(ss.erledigt, 0) as erledigt,
+                       COALESCE(ss.artifact_gate_passed, 0) as artifact_gate_passed
                 FROM subtask sub
                 LEFT JOIN student_subtask ss ON sub.id = ss.subtask_id AND ss.student_task_id = ?
                 WHERE sub.id IN ({placeholders})
             ''', [student_task_id] + required_ids).fetchall()
 
             quiz_required = task_info and task_info['subtask_quiz_required']
+            # The capstone gate card tells the student the file "muss geprueft sein,
+            # bevor du das Thema abschliessen kannst". Nothing enforced that: a Thema
+            # closed on ticked boxes and passed quizzes alone, failing gate and all.
+            gate_required = conn.execute(
+                "SELECT artifact_gate_required FROM klasse WHERE id = ?", (klasse_id,)
+            ).fetchone()
+            gate_required = bool(gate_required['artifact_gate_required']) if gate_required else True
 
             for sub in subtask_rows:
                 if not sub['erledigt']:
+                    return False
+                if gate_required and sub['artifact_gate_json'] and not sub['artifact_gate_passed']:
                     return False
                 # Check subtask quiz if required
                 if quiz_required and sub['quiz_json']:
