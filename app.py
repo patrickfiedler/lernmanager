@@ -1414,7 +1414,7 @@ def admin_klasse_umbenennen(klasse_id):
         flash('Klassenname darf nicht leer sein.', 'danger')
     else:
         models.update_klasse_name(klasse_id, name)
-        flash(f'Klasse umbenannt zu „{name}". ✅', 'success')
+        flash(f'Klasse umbenannt zu „{name}“. ✅', 'success')
     return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id))
 
 
@@ -1447,7 +1447,7 @@ def admin_klasse_schueler_verschieben_batch(klasse_id):
 
     for student_id in student_ids:
         models.move_student_to_klasse(student_id, klasse_id, to_klasse_id)
-    flash(f'{len(student_ids)} Schüler nach „{to_klasse["name"]}" verschoben. ✅', 'success')
+    flash(f'{len(student_ids)} Schüler nach „{to_klasse["name"]}“ verschoben. ✅', 'success')
     return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id))
 
 
@@ -1463,7 +1463,7 @@ def admin_klasse_alle_schueler_loeschen(klasse_id):
         flash('Bestätigung fehlgeschlagen — Klassenname stimmt nicht überein.', 'danger')
         return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id))
     _unlink_artifact_files(models.delete_all_students_in_klasse(klasse_id))
-    flash(f'Alle Schülerdaten der Klasse „{klasse["name"]}" wurden gelöscht (DSGVO).', 'success')
+    flash(f'Alle Schülerdaten der Klasse „{klasse["name"]}“ wurden gelöscht (DSGVO).', 'success')
     return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id))
 
 
@@ -5241,7 +5241,7 @@ def student_checkpoint_answer():
         return jsonify({
             'error': 'llm_unavailable',
             'message': ('Bewertung aktuell nicht möglich. Versuch es gleich nochmal — '
-                        'falls es weiter nicht klappt, nutze „Ich weiß es nicht", '
+                        'falls es weiter nicht klappt, nutze „Ich weiß es nicht“, '
                         'deine Lehrkraft prüft die Antwort dann von Hand.')
         }), 503
 

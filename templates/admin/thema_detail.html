@@ -71,14 +71,14 @@
             </div>
         </div>
         <div class="form-group">
-            <label>Lernziel (Lehrkraft) <small class="text-muted">(Markdown) — „Die SuS können…"</small></label>
+            <label>Lernziel (Lehrkraft) <small class="text-muted">(Markdown) — „Die SuS können…“</small></label>
             <div class="markdown-editor">
                 <textarea name="lernziel" id="lernziel" class="form-control" rows="3" oninput="updatePreview('lernziel', 'preview-lernziel')">{{ task.lernziel or '' }}</textarea>
                 <div class="markdown-preview markdown-content" id="preview-lernziel"></div>
             </div>
         </div>
         <div class="form-group">
-            <label>Lernziel (Schüler) <small class="text-muted">(Markdown, optional) — „Du lernst…"</small></label>
+            <label>Lernziel (Schüler) <small class="text-muted">(Markdown, optional) — „Du lernst…“</small></label>
             <div class="markdown-editor">
                 <textarea name="lernziel_schueler" id="lernziel_schueler" class="form-control" rows="3" oninput="updatePreview('lernziel_schueler', 'preview-lernziel-schueler')">{{ task.lernziel_schueler or '' }}</textarea>
                 <div class="markdown-preview markdown-content" id="preview-lernziel-schueler"></div>
@@ -102,7 +102,7 @@
             <textarea name="building_on" class="form-control" rows="3" placeholder="Atombau (Sek I) | modul_00 | hard&#10;Reine Sek-I-Vorkenntnisse, kein Lernmanager-Modul">{{ building_on_text }}</textarea>
         </div>
         <div class="form-group">
-            <label>🔗 Du erreichst <small class="text-muted">(arriving_at — ein Satz pro Zeile, „Du kannst…")</small></label>
+            <label>🔗 Du erreichst <small class="text-muted">(arriving_at — ein Satz pro Zeile, „Du kannst…“)</small></label>
             <textarea name="arriving_at" class="form-control" rows="3" placeholder="Du kannst erklären, warum Metalle Strom leiten.">{{ arriving_at_text }}</textarea>
         </div>
         <div class="form-group">

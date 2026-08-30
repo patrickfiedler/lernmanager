@@ -264,7 +264,7 @@ document.getElementById('archive-input').addEventListener('change', async functi
     rows.push(`<strong>${data.matches.length} Schüler zugeordnet</strong>`);
     if (data.unmatched.length) {
         rows.push(`<p style="margin: 0.5rem 0 0; color: #92400e;">⚠️ ${data.unmatched.length} Ordner ohne passende Netzwerk-ID `
-            + `(werden nicht mit hochgeladen — siehe „Netzwerk-IDs abgleichen"): `
+            + `(werden nicht mit hochgeladen — siehe „Netzwerk-IDs abgleichen“): `
             + `${data.unmatched.map(l => `<code>${escapeHtml(l)}</code>`).join(', ')}</p>`);
     }
     rows.push(`</div></div>`);

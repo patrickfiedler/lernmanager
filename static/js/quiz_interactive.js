@@ -224,7 +224,7 @@
      * "button" and has no way to tell which row it is or what is in it. */
     function describeSlot(slot) {
         var occupant = slot.querySelector('.qi-chip');
-        slot.setAttribute('aria-label', 'Zeile „' + slot.dataset.left + '": '
+        slot.setAttribute('aria-label', 'Zeile „' + slot.dataset.left + '“: '
             + (occupant ? 'zugeordnet: ' + occupant.dataset.text : 'noch leer'));
     }
 
