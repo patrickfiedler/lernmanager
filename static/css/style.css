@@ -11,6 +11,36 @@
     --gray-200: #e5e7eb;
     --gray-300: #d1d5db;
     --gray-500: #6b7280;
+
+    /* Box system. Every student-facing box declares a STATE and a LEVEL.
+       Level: a container sits in the page flow; a nested box sits inside another box.
+       Nested takes the lighter border and tighter padding, so depth reads as depth.
+       Before this, one meaning could carry two shades and two widths -- the passed gate
+       card (1.5px #86efac) sat directly on the criterion card (2px #10b981), same fill,
+       different frame. Ten greens, four border widths, five paddings. */
+    --box-radius: 0.5rem;
+    /* 2px, not 1.5px: at standard DPI the browser rounds 1.5px down to 1px, so a
+       "1.5 vs 1" distinction is invisible on the screens students actually use. */
+    --box-border-w: 2px;
+    --box-border-w-nested: 1px;
+    --box-pad: 1rem 1.25rem;
+    --box-pad-nested: 0.75rem 1rem;
+
+    --box-ok-bg: #f0fdf4;
+    --box-ok-border: #10b981;
+    --box-ok-border-nested: #86efac;
+    --box-ok-text: #16a34a;
+
+    --box-todo-bg: #fffbeb;
+    --box-todo-border: #f59e0b;
+    --box-todo-border-nested: #fcd34d;
+
+    --box-problem-bg: #fef2f2;
+    --box-problem-border-nested: #fca5a5;
+    --box-problem-text: #dc2626;
+
+    --box-neutral-bg: var(--gray-50);
+    --box-neutral-border: var(--gray-200);
     --gray-700: #374151;
     --gray-900: #111827;
 }
@@ -1272,11 +1302,11 @@ tr.unsaved-row td {
 
 /* Progress Section */
 .progress-section {
-    background: var(--gray-50);
-    padding: 1.5rem;
-    border-radius: 0.5rem;
+    background: var(--box-neutral-bg);
+    padding: var(--box-pad);
+    border-radius: var(--box-radius);
     margin-bottom: 2rem;
-    border: 1px solid var(--gray-200);
+    border: var(--box-border-w-nested) solid var(--box-neutral-border);
 }
 
 .progress-header {
@@ -1528,10 +1558,10 @@ tr.unsaved-row td {
 
 /* Task Checkbox */
 .task-complete {
-    background: var(--gray-50);
-    border: 2px solid var(--gray-200);
-    border-radius: 0.5rem;
-    padding: 1.25rem;
+    background: var(--box-neutral-bg);
+    border: var(--box-border-w) solid var(--box-neutral-border);
+    border-radius: var(--box-radius);
+    padding: var(--box-pad);
     display: flex;
     align-items: center;
     gap: 1rem;
@@ -1560,19 +1590,19 @@ tr.unsaved-row td {
 
 /* Fertig-wenn callout + merged completion zone */
 .fertig-wenn-callout {
-    background: #f0fdf4;
-    border: 2px solid #10b981;
+    background: var(--box-ok-bg);
+    border: var(--box-border-w) solid var(--box-ok-border);
     border-bottom: none;
-    border-radius: 0.5rem 0.5rem 0 0;
-    padding: 1rem 1.25rem;
+    border-radius: var(--box-radius) var(--box-radius) 0 0;
+    padding: var(--box-pad);
     margin-top: 1.5rem;
 }
 
 .fertig-wenn-callout p { margin-bottom: 0; }
 
 .fertig-wenn-callout--standalone {
-    border-bottom: 2px solid #10b981;
-    border-radius: 0.5rem;
+    border-bottom: var(--box-border-w) solid var(--box-ok-border);
+    border-radius: var(--box-radius);
 }
 
 /* The zone is rendered but hidden while a required gate withholds it, so a passing
@@ -1580,10 +1610,10 @@ tr.unsaved-row td {
 .task-complete[hidden] { display: none !important; }
 
 .task-complete.has-fertig-wenn {
-    background: #f0fdf4;
-    border: 2px solid #10b981;
-    border-top: 1px dashed #a7f3d0;
-    border-radius: 0 0 0.5rem 0.5rem;
+    background: var(--box-ok-bg);
+    border: var(--box-border-w) solid var(--box-ok-border);
+    border-top: var(--box-border-w-nested) dashed var(--box-ok-border-nested);
+    border-radius: 0 0 var(--box-radius) var(--box-radius);
     margin-top: 0;
 }
 
@@ -1628,7 +1658,7 @@ tr.unsaved-row td {
 .task-complete-right {
     flex: 1;
     padding: 1.25rem;
-    border-left: 1px dashed #a7f3d0;
+    border-left: var(--box-border-w-nested) dashed var(--box-ok-border-nested);
     min-width: 0;
 }
 
@@ -1728,7 +1758,7 @@ tr.unsaved-row td {
 
 @media (max-width: 600px) {
     .task-complete.has-artifact { flex-direction: column; }
-    .task-complete-right { border-left: none; border-top: 1px dashed #a7f3d0; }
+    .task-complete-right { border-left: none; border-top: var(--box-border-w-nested) dashed var(--box-ok-border-nested); }
     .task-complete-left { border-radius: 0; min-width: 0; width: 100%; }
 }
 
@@ -1748,16 +1778,15 @@ tr.unsaved-row td {
 
 /* Artifact Gate card */
 .gate-card {
-    background: #fffbeb;
-    border: 1.5px solid #fcd34d;
-    border-radius: 0.5rem;
-    padding: 1rem 1.25rem;
+    background: var(--box-todo-bg);
+    border: var(--box-border-w) solid var(--box-todo-border);
+    border-radius: var(--box-radius);
+    padding: var(--box-pad);
 }
 .gate-card.gate-passed {
-    background: #f0fdf4;
-    border-color: #86efac;
+    background: var(--box-ok-bg);
+    border-color: var(--box-ok-border);
 }
-.gate-card.gate-ready { border-color: #f59e0b; }
 .gate-header {
     font-weight: 600;
     font-size: 1rem;
@@ -1782,14 +1811,14 @@ tr.unsaved-row td {
     margin: 0.5rem 0;
 }
 .feedback-col {
-    border-radius: 0.5rem;
-    padding: 0.75rem 0.75rem 0.5rem;
+    border-radius: var(--box-radius);
+    padding: var(--box-pad-nested);
 }
-.feedback-col.good { background: #f0fdf4; border: 1px solid #86efac; }
-.feedback-col.bad { background: #fef2f2; border: 1px solid #fca5a5; }
+.feedback-col.good { background: var(--box-ok-bg); border: var(--box-border-w-nested) solid var(--box-ok-border-nested); }
+.feedback-col.bad { background: var(--box-problem-bg); border: var(--box-border-w-nested) solid var(--box-problem-border-nested); }
 .feedback-col-title { font-weight: 700; font-size: 0.85rem; margin-bottom: 0.4rem; }
-.feedback-col.good .feedback-col-title { color: #16a34a; }
-.feedback-col.bad .feedback-col-title { color: #dc2626; }
+.feedback-col.good .feedback-col-title { color: var(--box-ok-text); }
+.feedback-col.bad .feedback-col-title { color: var(--box-problem-text); }
 .feedback-row {
     display: flex;
     gap: 0.5rem;
@@ -2001,12 +2030,12 @@ body.split-pane-active .container {
     font-size: 0.9375rem;
     font-weight: 600;
     list-style: none;
-    padding: 0.75rem 1rem;
-    background: var(--gray-50);
-    border-radius: 0.5rem;
+    padding: var(--box-pad-nested);
+    background: var(--box-neutral-bg);
+    border-radius: var(--box-radius);
     user-select: none;
     transition: background 0.2s;
-    border: 1px solid var(--gray-200);
+    border: var(--box-border-w-nested) solid var(--box-neutral-border);
 }
 
 .materials-toggle summary:hover,
@@ -2080,10 +2109,10 @@ body.split-pane-active .container {
 
 /* Quiz Card */
 .quiz-card {
-    background: #fffbeb;
-    border: 2px solid #fcd34d;
-    padding: 1.5rem;
-    border-radius: 0.5rem;
+    background: var(--box-todo-bg);
+    border: var(--box-border-w) solid var(--box-todo-border);
+    padding: var(--box-pad);
+    border-radius: var(--box-radius);
 }
 
 .quiz-header {
