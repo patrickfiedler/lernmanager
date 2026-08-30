@@ -1575,6 +1575,10 @@ tr.unsaved-row td {
     border-radius: 0.5rem;
 }
 
+/* The zone is rendered but hidden while a required gate withholds it, so a passing
+   check can reveal it without a reload. display:flex would otherwise beat [hidden]. */
+.task-complete[hidden] { display: none !important; }
+
 .task-complete.has-fertig-wenn {
     background: #f0fdf4;
     border: 2px solid #10b981;
@@ -1981,6 +1985,7 @@ body.split-pane-active .container {
 /* Materials Toggle */
 .materials-toggle,
 .topic-description-toggle,
+.tipps-toggle,
 .why-learn-toggle {
     margin-top: 2rem;
 }
