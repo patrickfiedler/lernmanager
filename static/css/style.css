@@ -820,6 +820,12 @@ tr.unsaved-row td {
     transition: border-color 0.2s, background 0.2s;
 }
 
+/* The dimmed baseline letter on a super-/subscript key. It has to read as
+   scaffolding, not as part of the character the key inserts. */
+.zeichenleiste-anchor {
+    color: var(--gray-300, #d1d5db);
+}
+
 .zeichenleiste-btn:hover,
 .zeichenleiste-btn:focus-visible {
     border-color: var(--primary, #3b82f6);

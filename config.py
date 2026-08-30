@@ -58,9 +58,31 @@ LEGACY_LEVELS = ['5/6', '7/8', '9/10']
 # digit or a superscript charge. Students on iPads reach for "->" or "wird zu"
 # because the keyboard offers nothing else, and the notation is itself exam
 # content they have to write by hand later.
+# A plain string is a key that shows and inserts the same character. A dict
+# splits the two: `anchor` is a dimmed "x" drawn beside the character, so a key
+# reads as x2-superscript rather than a lone superscript glyph -- on an iPad the
+# raised and the lowered digit differ only by height inside an empty key, which
+# is no difference at all. Only `char` is ever inserted; `name` is what a screen
+# reader says, since "Zeichen 2" would not say which of the two it is.
+#
+# Charges are built from parts (3 then +) rather than offered pre-composed:
+# students need 4+ and 2- as much as 2+, and one key per part covers all of them.
+# There is no key for a raised or lowered 1 -- chemistry never writes either.
 CHARACTER_SETS = {
-    'Chemie': ['\u2192', '\u21cc', '\u207b', '\u207a', '\u00b2\u207a', '\u00b3\u207a',
-               '\u2081', '\u2082', '\u2083', '\u2084', '\u0394', '\u00b0'],
+    'Chemie': [
+        '\u2192',                                                          # ->
+        '\u21cc',                                                          # equilibrium
+        {'char': '\u00b2', 'anchor': 'x', 'name': 'hochgestellte 2'},
+        {'char': '\u00b3', 'anchor': 'x', 'name': 'hochgestellte 3'},
+        {'char': '\u2074', 'anchor': 'x', 'name': 'hochgestellte 4'},
+        {'char': '\u207a', 'anchor': 'x', 'name': 'hochgestelltes Plus'},
+        {'char': '\u207b', 'anchor': 'x', 'name': 'hochgestelltes Minus'},
+        {'char': '\u2082', 'anchor': 'x', 'name': 'tiefgestellte 2'},
+        {'char': '\u2083', 'anchor': 'x', 'name': 'tiefgestellte 3'},
+        {'char': '\u2084', 'anchor': 'x', 'name': 'tiefgestellte 4'},
+        '\u0394',                                                          # Delta
+        '\u00b0',
+    ],
 }
 
 

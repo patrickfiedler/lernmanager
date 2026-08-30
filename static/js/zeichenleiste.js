@@ -9,6 +9,11 @@
  * one. A subject with no entry -- which is every subject but Chemie -- is a no-op,
  * as is a missing or empty fach, so callers never have to check first. Safe to call
  * twice on the same field.
+ *
+ * An entry is either a character, or an object {char, anchor, name}: `anchor` is a
+ * dimmed letter shown next to the character so a raised digit can be told apart
+ * from a lowered one, and `name` is what a screen reader reads. Only `char` is
+ * inserted -- the anchor is decoration and never reaches the answer.
  */
 (function () {
     'use strict';
@@ -39,12 +44,25 @@
         bar.setAttribute('role', 'group');
         bar.setAttribute('aria-label', 'Sonderzeichen einfügen');
 
-        chars.forEach(function (char) {
+        chars.forEach(function (entry) {
+            var spec = typeof entry === 'string' ? { char: entry } : entry;
+            var char = spec.char;
+
             var btn = document.createElement('button');
             btn.type = 'button';           // inside a <form>, the default is submit
             btn.className = 'zeichenleiste-btn';
-            btn.textContent = char;
-            btn.setAttribute('aria-label', 'Zeichen ' + char + ' einfügen');
+            if (spec.anchor) {
+                var anchor = document.createElement('span');
+                anchor.className = 'zeichenleiste-anchor';
+                anchor.textContent = spec.anchor;
+                // The anchor is there to be looked at, not read out: the button
+                // already says "hochgestellte 2", and "x hochgestellte 2" would
+                // announce a letter the student is not inserting.
+                anchor.setAttribute('aria-hidden', 'true');
+                btn.appendChild(anchor);
+            }
+            btn.appendChild(document.createTextNode(char));
+            btn.setAttribute('aria-label', 'Zeichen ' + (spec.name || char) + ' einfügen');
             // mousedown, not click: click fires after the field has already lost
             // focus and dropped its selection, so the character would land at the
             // start of the text instead of at the cursor.

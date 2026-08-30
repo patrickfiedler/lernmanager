@@ -109,10 +109,41 @@ def test_only_chemie_defines_a_character_set(db):
     assert "Chemie" in config.SUBJECTS
 
 
+def _inserted(fach):
+    """What the keys of a set actually type. An entry is either the character
+    itself or a dict whose `char` is inserted and whose `anchor` is decoration."""
+    return [e if isinstance(e, str) else e["char"] for e in config.CHARACTER_SETS[fach]]
+
+
 def test_chemie_set_covers_what_the_students_could_not_type(db):
     """The 2026-08-26 export had no arrow, no subscript and no charge sign in any
     of thirty half-equation answers. Those three are the point of the set."""
-    chars = config.CHARACTER_SETS["Chemie"]
+    chars = _inserted("Chemie")
     assert "→" in chars      # reaction arrow
     assert "₂" in chars      # subscript 2 (I2)
     assert "⁻" in chars      # superscript minus (I-)
+
+
+def test_charges_are_built_from_parts_not_offered_pre_composed(db):
+    """A key per part covers 4+ and 2- as well as 2+; pre-composed keys covered
+    only the two the set happened to list."""
+    chars = _inserted("Chemie")
+    assert "²⁺" not in chars and "³⁺" not in chars
+    for part in ("²", "³", "⁴", "⁺", "⁻"):
+        assert part in chars
+
+
+def test_no_key_types_a_one(db):
+    """Chemistry writes neither H₁ nor a ¹⁺ charge, so a 1 key is only a trap."""
+    assert "¹" not in _inserted("Chemie")
+    assert "₁" not in _inserted("Chemie")
+
+
+def test_every_ambiguous_key_carries_an_anchor_and_a_name(db):
+    """A lone raised 2 and a lone lowered 2 are the same shape at two heights --
+    unreadable on an iPad key, and identical to a screen reader without a name."""
+    for entry in config.CHARACTER_SETS["Chemie"]:
+        if isinstance(entry, str):
+            continue
+        assert entry["anchor"] and entry["name"]
+        assert entry["anchor"] not in entry["char"], "the anchor is never inserted"
