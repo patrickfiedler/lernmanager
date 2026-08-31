@@ -3338,6 +3338,48 @@ def _checkpoint_export_rows(sessions):
     for entry in sessions:
         attempt = entry['attempt']
         for question in entry['questions']:
+            # Newest report on this question, if any. Flat columns rather than a
+            # nested structure: this file is read in a spreadsheet, and a report is
+            # a property of the question the row is about.
+            flag = question['flags'][0] if question.get('flags') else {}
+            flag_columns = {
+                'gemeldet': 1 if flag else 0,
+                'meldung_grund_code': flag.get('reason_code'),
+                'meldung_grund': models.CHECKPOINT_FLAG_REASONS.get(flag.get('reason_code')),
+                'meldung_text': flag.get('reason_text'),
+                'meldung_status': flag.get('status'),
+                'meldung_urteil_notiz': flag.get('resolution_note'),
+            }
+            if flag and not question['answers']:
+                # A report costs nothing to make and needs no draft answer. Without
+                # this row the report would be missing from the export entirely --
+                # exactly the questions worth looking at.
+                rows.append({
+                    'zeitpunkt': flag.get('created_at'),
+                    'schueler': attempt['student_name'],
+                    'schueler_id': attempt['student_id'],
+                    'thema': attempt['task_name'],
+                    'checkpoint': attempt['subtask_name'],
+                    'kern_standard': attempt['kern_standard_tag'],
+                    'frage_nr': question['question_index'] + 1,
+                    'frage_typ': question['question_type'],
+                    'frage': question['question_text'],
+                    'bewertungskriterien': question['rubric'],
+                    'versuch_nr': None,
+                    'antwort': None, 'antwort_roh': None,
+                    'richtige_antwort': question.get('correct_display'),
+                    'ki_urteil': None, 'ki_feedback': None, 'grader': None,
+                    'modell': None, 'prompt_version': None, 'ki_konfidenz': None,
+                    'tipps_vorher': None, 'aufgegeben': 0,
+                    'lehrer_urteil': None, 'lehrer_notiz_antwort': None,
+                    'ki_weicht_ab': 0, 'antwort_war_richtig': None,
+                    'doppelklick_verdacht': 0,
+                    'session_score': attempt['score'],
+                    'lehrer_score': attempt.get('teacher_score'),
+                    'score_gueltig': attempt['effective_score'],
+                    'lehrer_notiz_session': attempt.get('teacher_note'),
+                    **flag_columns,
+                })
             for answer in question['answers']:
                 rows.append({
                     'zeitpunkt': answer['timestamp'],
@@ -3396,6 +3438,7 @@ def _checkpoint_export_rows(sessions):
                     'lehrer_score': attempt.get('teacher_score'),
                     'score_gueltig': attempt['effective_score'],
                     'lehrer_notiz_session': attempt.get('teacher_note'),
+                    **flag_columns,
                 })
     return rows
 
@@ -3480,6 +3523,10 @@ def admin_checkpoint_export_json():
             'score_gueltig': entry['attempt']['effective_score'],
             'lehrer_notiz': entry['attempt'].get('teacher_note'),
             'doppelklick_verdacht': entry['has_duplicates'],
+            # The score is not final while a report on it is undecided -- see
+            # models.checkpoint_score_is_provisional. Exported so nothing
+            # downstream reads a provisional number as a grade.
+            'score_vorlaeufig': bool(entry['open_flag_count']),
             'fragen': [{
                 'nr': question['question_index'] + 1,
                 'typ': question['question_type'],
@@ -3488,6 +3535,20 @@ def admin_checkpoint_export_json():
                 'richtige_antwort': question.get('correct_display'),
                 'punkte': question['scored'],
                 'punkte_ohne_doppelklicks': question['scored_without_duplicates'],
+                # Structured, not free text: "which questions did students report,
+                # for what reason, and what did the teacher decide" is the question
+                # this half of the export exists to answer.
+                'meldungen': [{
+                    'grund_code': flag['reason_code'],
+                    'grund': models.CHECKPOINT_FLAG_REASONS.get(flag['reason_code']),
+                    'grund_text': flag['reason_text'],
+                    'status': flag['status'],
+                    'urteil_notiz': flag['resolution_note'],
+                    'gemeldet_am': flag['created_at'],
+                    'entschieden_am': flag['resolved_at'],
+                    'quelle': flag['source'],
+                    'wortlaut_bei_meldung': flag['question_text_at_flag'],
+                } for flag in question.get('flags', [])],
                 'versuche': [{
                     'nr': answer['attempt_no'],
                     'zeitpunkt': answer['timestamp'],
