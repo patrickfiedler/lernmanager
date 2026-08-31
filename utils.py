@@ -49,6 +49,50 @@ def format_bytes(num_bytes):
     return f"{size:.1f} PB"
 
 
+_LIST_ITEM_RE = re.compile(r'^ {0,3}(?:[-*+]|\d{1,9}[.)])\s+\S')
+_FENCE_RE = re.compile(r'^\s*(?:```|~~~)')
+
+
+def normalize_markdown_lists(text):
+    """Insert the blank line Python-Markdown needs before a list.
+
+    Markdown does not let a list interrupt a paragraph, so the format every
+    Aufgabe is authored in --
+
+        📋 Aufgabe:
+        1. Erster Schritt.
+
+    -- renders as one paragraph of literal "1." text with <br> between the
+    lines, not as <ol>/<li>. Every authored description in the DB hit this.
+    Fixing it in the content would mean re-authoring across MBI, chemie and
+    english-11 and remembering the blank line forever after; fixing it here
+    fixes past and future content at once.
+
+    Only opens a list that is not already open: a wrapped list item followed by
+    the next item must stay one list, not become two.
+    """
+    lines = text.split('\n')
+    out = []
+    in_fence = False
+    in_list = False
+    for line in lines:
+        if _FENCE_RE.match(line):
+            in_fence = not in_fence
+            in_list = False
+        elif in_fence:
+            pass
+        elif _LIST_ITEM_RE.match(line):
+            if not in_list and out and out[-1].strip():
+                out.append('')
+            in_list = True
+        elif line.strip() and not line[:1].isspace():
+            # A blank line or an indented line keeps the list open; anything
+            # else flush left ends it.
+            in_list = False
+        out.append(line)
+    return '\n'.join(out)
+
+
 def slugify(text):
     """Convert text to URL-friendly slug. Handles German umlauts."""
     text = text.replace('ä', 'ae').replace('ö', 'oe').replace('ü', 'ue').replace('ß', 'ss')

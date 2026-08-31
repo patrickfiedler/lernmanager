@@ -29,7 +29,7 @@ import llm_grading
 import quiz_grading
 import artifact_processor
 import artifact_checker
-from utils import generate_username, generate_password, allowed_file, generate_credentials_pdf, generate_credentials_pdf_grouped, generate_name_username_pdf, generate_student_self_report_pdf, generate_class_report_pdf, generate_student_report_pdf, slugify, format_bytes, is_ip_allowed, is_within_time_window, parse_netzwerk_csv, split_tasks_by_stufe, stufe_sort_key
+from utils import generate_username, generate_password, allowed_file, generate_credentials_pdf, generate_credentials_pdf_grouped, generate_name_username_pdf, generate_student_self_report_pdf, generate_class_report_pdf, generate_student_report_pdf, slugify, format_bytes, is_ip_allowed, is_within_time_window, parse_netzwerk_csv, split_tasks_by_stufe, stufe_sort_key, normalize_markdown_lists
 from import_task import validate_task_structure, check_duplicate, import_task as do_import_task, overwrite_task_from_import, ValidationError
 
 app = Flask(__name__)
@@ -59,6 +59,7 @@ def markdown_filter(text):
     """Convert markdown text to HTML."""
     if not text:
         return ''
+    text = normalize_markdown_lists(text)
     html = md.markdown(text, extensions=['nl2br', 'fenced_code', 'tables', 'sane_lists'], tab_length=3)
     return Markup(html)
 
