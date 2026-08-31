@@ -3556,7 +3556,7 @@ def checkpoint_review_status(attempt):
 
 def get_checkpoint_reviews(klasse_id=None, student_id=None, date_from=None,
                            date_to=None, unreviewed_only=False, checkpoint_id=None,
-                           include_superseded=False, limit=300):
+                           include_superseded=False, flagged_only=False, limit=300):
     """Checkpoint sessions for the teacher-review UI, newest first.
 
     One row per completed checkpoint (checkpoint_attempt), enriched with the
@@ -3607,6 +3607,13 @@ def get_checkpoint_reviews(klasse_id=None, student_id=None, date_from=None,
     if date_to:
         sql += ' AND ca.timestamp <= ?'
         params.append(f'{date_to} 23:59:59')
+    if flagged_only:
+        # Its own filter, never folded into unreviewed_only: a reported question is
+        # a claim about the QUESTION and needs a human decision even in a session
+        # that has otherwise been marked reviewed.
+        sql += ''' AND EXISTS (SELECT 1 FROM checkpoint_flag f
+                                WHERE f.checkpoint_attempt_id = ca.id
+                                  AND f.status = 'offen')'''
     if unreviewed_only:
         # "Dealt with" is either a grade override or an explicit review mark. It
         # used to be the score alone, which predates reviewed_at (migrate_049) and
@@ -3966,6 +3973,28 @@ def get_checkpoint_flags(checkpoint_id=None, question_index=None, student_id=Non
             LIMIT ?
         ''', params).fetchall()
         return [dict(r) for r in rows]
+
+
+def count_open_flags_by_question(checkpoint_ids):
+    """How many students currently have an open report on each question.
+
+    Keyed (checkpoint_id, question_index) because that is what the claim is about:
+    a broken question is broken for the whole class, and "three students reported
+    this one" is the number that tells a teacher whether to look at the question or
+    at the student.
+    """
+    checkpoint_ids = list(checkpoint_ids)
+    if not checkpoint_ids:
+        return {}
+    with db_session() as conn:
+        rows = conn.execute(f"""
+            SELECT checkpoint_id, question_index, COUNT(DISTINCT student_id) AS cnt
+            FROM checkpoint_flag
+            WHERE status = 'offen' AND source = 'student'
+              AND checkpoint_id IN ({','.join('?' * len(checkpoint_ids))})
+            GROUP BY checkpoint_id, question_index
+        """, checkpoint_ids).fetchall()
+        return {(r['checkpoint_id'], r['question_index']): r['cnt'] for r in rows}
 
 
 def get_open_student_flag(student_id, checkpoint_id, question_index):

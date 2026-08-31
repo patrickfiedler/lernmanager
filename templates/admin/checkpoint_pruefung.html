@@ -50,6 +50,11 @@
         </label>
 
         <label class="flex gap-1 flex-center">
+            <input type="checkbox" name="gemeldet" value="1" {{ 'checked' if flagged_only }}>
+            <span title="Sitzungen mit einer gemeldeten Frage, über die noch nicht entschieden ist">nur gemeldete</span>
+        </label>
+
+        <label class="flex gap-1 flex-center">
             <input type="checkbox" name="verlauf" value="1" {{ 'checked' if show_superseded }}>
             <span title="Zurückgesetzte Sitzungen bleiben gespeichert und werden hier wieder sichtbar">zurückgesetzte anzeigen</span>
         </label>
@@ -62,6 +67,10 @@
 <div class="flex flex-between flex-center mb-2" style="gap: 1rem; flex-wrap: wrap;">
     <p class="text-muted" style="margin: 0;">
         <strong>{{ sessions|length }}</strong> Checkpoint-Sitzung(en)
+        {% if flagged_session_count %}
+        · <span class="badge badge-warning"
+                title="Sitzungen mit mindestens einer gemeldeten Frage, über die noch nicht entschieden ist">{{ flagged_session_count }} mit gemeldeter Frage</span>
+        {% endif %}
         {% if duplicate_count %}
         · <span class="badge badge-warning"
                 title="Erkannte Doppelklicks. Korrigierbar sind davon {{ correctable_count }} — bei den übrigen ändert der Doppelklick die Punktzahl nicht, oder du hast die Note schon selbst gesetzt.">{{ duplicate_count }} mit Doppelklick-Verdacht</span>
@@ -79,6 +88,7 @@
         <input type="hidden" name="von" value="{{ date_from or '' }}">
         <input type="hidden" name="bis" value="{{ date_to or '' }}">
         <input type="hidden" name="offen" value="{{ '1' if unreviewed_only else '' }}">
+        <input type="hidden" name="gemeldet" value="{{ '1' if flagged_only else '' }}">
     {% endmacro %}
 
     <div class="flex gap-1" style="flex-wrap: wrap;">
@@ -204,7 +214,7 @@
    unavailable and a question was scored as a give-up, so a human has to re-grade.
    has_duplicates used to open sessions too, which inverted the page -- routine
    double-clicks expanded themselves while the real review cases stayed collapsed. #}
-<details class="card mb-1 checkpoint-session{{ ' checkpoint-session-reset' if is_reset }}" {{ 'open' if not is_reset and attempt.needs_review }}>
+<details class="card mb-1 checkpoint-session{{ ' checkpoint-session-reset' if is_reset }}" {{ 'open' if not is_reset and (attempt.needs_review or entry.open_flag_count) }}>
     <summary class="checkpoint-session-head">
         <span class="checkpoint-session-title">
             <strong>{{ attempt.student_name }}</strong>
@@ -221,6 +231,10 @@
             {% endif %}
             {% if entry.has_duplicates %}<span class="badge badge-warning">Doppelklick</span>{% endif %}
             {% if attempt.needs_review %}<span class="badge badge-danger">KI-Fehler</span>{% endif %}
+            {% if entry.open_flag_count %}
+            <span class="badge badge-warning"
+                  title="Gemeldete Frage(n) — die Punktzahl ist vorläufig, bis du entschieden hast">⚠️ {{ entry.open_flag_count }} gemeldet</span>
+            {% endif %}
             {% if is_reset %}<span class="badge badge-secondary" title="Am {{ attempt.superseded_at[:16] }} zurückgesetzt — zählt nicht mehr">zurückgesetzt</span>{% endif %}
             <span class="text-muted">{{ attempt.timestamp[:16] }}</span>
         </span>
@@ -255,9 +269,13 @@
             <div class="checkpoint-question-head">
                 <strong>Frage {{ question.question_index + 1 }}</strong>
                 {% if question.question_type %}<span class="text-muted">({{ question.question_type }})</span>{% endif %}
+                {% if question.scored is none %}
+                <span class="badge badge-warning" title="Gemeldet — zählt erst, wenn du entschieden hast">— P.</span>
+                {% else %}
                 <span class="badge {{ 'badge-success' if question.scored == 3 else ('badge-warning' if question.scored == 2 else 'badge-danger') }}">
                     {{ question.scored }} P.
                 </span>
+                {% endif %}
                 {% if question.scored_without_duplicates != question.scored %}
                 <span class="badge badge-warning" title="Punktzahl ohne die als Doppelklick erkannten Versuche">
                     ohne Doppelklick: {{ question.scored_without_duplicates }} P.
@@ -276,6 +294,51 @@
             {% if question.correct_display %}
             <p class="checkpoint-question-correct">✅ Richtig: {{ question.correct_display }}</p>
             {% endif %}
+
+            {% for flag in question.flags %}
+            {# One report, one decision. The class-wide count is the number that
+               says whether to look at the question or at the student. #}
+            <div class="checkpoint-flag{{ ' is-resolved' if flag.status != 'offen' }}">
+                <p class="checkpoint-flag-head">
+                    ⚠️ Gemeldet: {{ flag_reasons.get(flag.reason_code, flag.reason_code or 'ohne Grund') }}
+                    {% if question.flag_class_count > 1 %}
+                    <span class="badge badge-warning">{{ question.flag_class_count }} Schüler haben diese Frage gemeldet</span>
+                    {% endif %}
+                    <span class="text-muted">{{ flag.created_at[:16] }}</span>
+                </p>
+                {% if flag.reason_text %}
+                <p class="checkpoint-flag-text">„{{ flag.reason_text }}"</p>
+                {% endif %}
+                {% if flag.question_text_at_flag and flag.question_text_at_flag != question.question_text %}
+                <p class="text-muted checkpoint-flag-text">
+                    Wortlaut bei der Meldung: {{ flag.question_text_at_flag }}
+                </p>
+                {% endif %}
+
+                {% if flag.status == 'offen' %}
+                <form method="POST" action="{{ url_for('admin_checkpoint_flag_resolve', flag_id=flag.id) }}"
+                      class="checkpoint-flag-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="text" name="resolution_note" class="form-control"
+                           placeholder="Notiz zur Frage (freiwillig)">
+                    <div class="flex gap-1 mt-1" style="flex-wrap: wrap;">
+                        {% for code, label in flag_resolutions.items() %}
+                        <button type="submit" name="status" value="{{ code }}"
+                                class="btn btn-sm {{ 'btn-secondary' if code == 'abgelehnt' else 'btn-primary' }}">
+                            {{ label }}
+                        </button>
+                        {% endfor %}
+                    </div>
+                </form>
+                {% else %}
+                <p class="checkpoint-flag-verdict">
+                    {{ flag_resolutions.get(flag.status, flag.status) }}
+                    {% if flag.status == 'nachgeholt' %}(nachgeholt){% endif %}
+                    {% if flag.resolution_note %}— {{ flag.resolution_note }}{% endif %}
+                </p>
+                {% endif %}
+            </div>
+            {% endfor %}
 
             {# Duplicates are held back below: a flagged row is >=0.95 identical
                to the one above it, same verdict, within 15s (_is_duplicate_submission).
@@ -438,6 +501,14 @@
 /* A suspected double-click is tinted, not hidden: the teacher decides, and the
    raw log stays fully visible either way. */
 .checkpoint-answer.is-duplicate { background: #fff8e1; border-left: 3px solid #ffc107; }
+.checkpoint-flag { border-left: 3px solid #d97706; background: #fffbeb; border-radius: 4px;
+                   padding: 0.5rem 0.75rem; margin: 0.5rem 0; }
+.checkpoint-flag.is-resolved { border-left-color: #9ca3af; background: #f9fafb; }
+.checkpoint-flag p { margin: 0.15rem 0; }
+.checkpoint-flag-head { font-size: 0.9rem; font-weight: 600; }
+.checkpoint-flag-text { font-size: 0.85rem; }
+.checkpoint-flag-verdict { font-size: 0.85rem; color: #374151; }
+.checkpoint-flag-form { margin-top: 0.5rem; }
 .checkpoint-duplicates { font-size: 0.8rem; color: #6b7280; margin: 0.25rem 0 0.5rem; }
 .checkpoint-duplicates > summary { cursor: pointer; padding: 0.15rem 0; }
 .checkpoint-duplicates[open] > summary { margin-bottom: 0.35rem; }

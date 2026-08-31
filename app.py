@@ -2810,24 +2810,34 @@ def _resolve_mc_answer(question, answer_text):
     return _mc_option_labels(question, indices)
 
 
-def _checkpoint_question_review(answers):
+def _checkpoint_question_review(answers, flagged_indices=frozenset()):
     """Group one session's logged answers by question and work out, per question:
     what was submitted, which submissions look like accidental duplicates, and what
     the score would be without them.
 
     Returns list of dicts (one per question_index, ascending):
-        {'question_index', 'answers', 'duplicate_ids', 'scored', 'scored_without_duplicates'}
+        {'question_index', 'answers', 'duplicate_ids', 'flagged', 'scored',
+         'scored_without_duplicates'}
     where 'scored'/'scored_without_duplicates' are the 0/2/3 values from
     _checkpoint_question_scores, so the two numbers are always derived by the same
-    rule the student was graded under -- never a second copy of it.
+    rule the student was graded under -- never a second copy of it. Both are None
+    for a reported question: it carries no score until a teacher has ruled.
+
+    flagged_indices: questions the student reported as broken. They are listed even
+    when there is no answer to show -- a report costs nothing to make and needs no
+    draft, so a question reported without one would otherwise vanish from the very
+    view that exists to rule on it.
     """
     by_question = {}
     for answer in answers:
         by_question.setdefault(answer['question_index'], []).append(answer)
+    for question_index in flagged_indices:
+        by_question.setdefault(question_index, [])
 
     review = []
     for question_index in sorted(by_question):
         rows = sorted(by_question[question_index], key=lambda r: (r['attempt_no'], r['id']))
+        flagged = question_index in flagged_indices
 
         duplicate_ids = set()
         # Compare each graded submission against the last one that wasn't itself
@@ -2853,6 +2863,7 @@ def _checkpoint_question_review(answers):
                 # direction in which a wrong flag could actually harm a student.
                 'solved': any(r.get('correct') for r in rows if not r.get('gave_up')),
                 'gave_up': any(r.get('gave_up') for r in rows),
+                'flagged': flagged,
                 'attempts': len(counted),
                 'hints_used': max([r.get('hints_used_before') or 0 for r in rows], default=0),
             }
@@ -2863,6 +2874,7 @@ def _checkpoint_question_review(answers):
             'question_index': question_index,
             'answers': rows,
             'duplicate_ids': duplicate_ids,
+            'flagged': flagged,
             'scored': scored,
             'scored_without_duplicates': scored_clean,
         })
@@ -2930,14 +2942,33 @@ def _build_checkpoint_sessions(attempts):
     answers_by_attempt = models.get_checkpoint_answers_for_attempts(
         [a['id'] for a in attempts]
     )
+    flags_by_attempt = {}
+    for flag in models.get_checkpoint_flags(attempt_ids=[a['id'] for a in attempts],
+                                            limit=2000):
+        flags_by_attempt.setdefault(flag['checkpoint_attempt_id'], {}) \
+                        .setdefault(flag['question_index'], []).append(flag)
+    # How many students reported each question, across the whole class -- the number
+    # that says whether the question or the student is the problem.
+    open_by_question = models.count_open_flags_by_question(
+        {a['checkpoint_id'] for a in attempts}
+    )
 
     sessions = []
     for attempt in attempts:
         answers = answers_by_attempt.get(attempt['id'], [])
         questions = _checkpoint_snapshot_questions(attempt)
-        review = _checkpoint_question_review(answers)
+        flags = flags_by_attempt.get(attempt['id'], {})
+        # Only reports still awaiting a decision take the question out of the score.
+        # Once ruled on, the verdict decides: 'abgelehnt' puts it back on the
+        # student (they redo it), the other two leave it out for good.
+        open_flags = {idx for idx, rows in flags.items()
+                      if any(r['status'] == 'offen' for r in rows)}
+        review = _checkpoint_question_review(answers, open_flags)
 
         for entry in review:
+            entry['flags'] = flags.get(entry['question_index'], [])
+            entry['flag_class_count'] = open_by_question.get(
+                (attempt['checkpoint_id'], entry['question_index']), 0)
             question = (questions[entry['question_index']]
                         if entry['question_index'] < len(questions) else None)
             entry['question_text'] = question.get('text') if question else None
@@ -2965,14 +2996,21 @@ def _build_checkpoint_sessions(attempts):
 
         has_duplicates = any(entry['duplicate_ids'] for entry in review)
         # The score the session would have had if no duplicate had been counted.
-        # min() across questions, exactly as the live scoring does.
-        suggested = (min(entry['scored_without_duplicates'] for entry in review)
-                     if review else attempt['score'])
+        # min() across questions, exactly as the live scoring does -- reported
+        # questions left out, exactly as _score_checkpoint_session leaves them out.
+        clean_scores = [entry['scored_without_duplicates'] for entry in review
+                        if entry['scored_without_duplicates'] is not None]
+        if clean_scores:
+            suggested = min(clean_scores)
+        else:
+            suggested = 0 if review else attempt['score']
 
         sessions.append({
             'attempt': attempt,
             'questions': review,
             'has_duplicates': has_duplicates,
+            'open_flag_count': len(open_flags),
+            'flag_count': sum(len(rows) for rows in flags.values()),
             # Only offer a correction when it would actually change something and
             # the teacher has not already decided -- a suggestion that repeats the
             # current score is noise.
@@ -3024,7 +3062,12 @@ def admin_checkpoint_pruefung():
                            date_from=filters['date_from'],
                            date_to=filters['date_to'],
                            unreviewed_only=filters['unreviewed_only'],
+                           flagged_only=filters['flagged_only'],
                            show_superseded=filters['include_superseded'],
+                           flag_reasons=models.CHECKPOINT_FLAG_REASONS,
+                           flag_resolutions=models.CHECKPOINT_FLAG_RESOLUTIONS,
+                           flagged_session_count=sum(1 for s in sessions
+                                                     if s['open_flag_count']),
                            resettable_count=sum(1 for s in sessions
                                                 if not s['attempt'].get('superseded_at')),
                            duplicate_count=sum(1 for s in sessions if s['has_duplicates']),
@@ -3246,6 +3289,36 @@ def admin_checkpoint_correct_double_clicks():
     return redirect(request.referrer or url_for('admin_checkpoint_pruefung'))
 
 
+@app.route('/admin/checkpoint-pruefung/meldung/<int:flag_id>/urteil', methods=['POST'])
+@admin_required
+def admin_checkpoint_flag_resolve(flag_id):
+    """Rule on one student report of a broken checkpoint question.
+
+    Three outcomes (models.CHECKPOINT_FLAG_RESOLUTIONS): the question is broken,
+    the question is fine but sits in the wrong place, or the report is rejected and
+    the student has to answer it after all. The first two leave the question out of
+    that session's score for good; only 'abgelehnt' sends it back to the student.
+
+    The verdict is stored on the flag, never on checkpoint_answer.teacher_note --
+    that field is the prompt-tuning note and ships as `lehrer_notiz_antwort` in the
+    calibration export, where a question-design note would be indistinguishable
+    from a grading note.
+    """
+    status = request.form.get('status')
+    if status not in models.CHECKPOINT_FLAG_RESOLUTIONS:
+        flash('Unbekanntes Urteil.', 'danger')
+        return redirect(request.referrer or url_for('admin_checkpoint_pruefung'))
+
+    note = (request.form.get('resolution_note') or '').strip()
+    models.resolve_checkpoint_flag(flag_id, status, note, session['admin_id'])
+    flash({
+        'frage_kaputt': 'Frage als kaputt vermerkt — sie zählt für diese Sitzung nicht.',
+        'kontext_falsch': 'Frage als falsch platziert vermerkt — sie zählt für diese Sitzung nicht.',
+        'abgelehnt': 'Meldung abgelehnt — der Schüler holt die Frage nach.',
+    }[status], 'success')
+    return redirect(request.referrer or url_for('admin_checkpoint_pruefung'))
+
+
 @app.route('/admin/checkpoint-pruefung/antwort/<int:answer_id>/urteil', methods=['POST'])
 @admin_required
 def admin_checkpoint_answer_verdict(answer_id):
@@ -3349,6 +3422,7 @@ def _checkpoint_filters(source=None, limit=300):
         'date_from': args.get('von') or None,
         'date_to': args.get('bis') or None,
         'unreviewed_only': args.get('offen') == '1',
+        'flagged_only': args.get('gemeldet') == '1',
         'include_superseded': args.get('verlauf') == '1',
         'limit': limit,
     }
