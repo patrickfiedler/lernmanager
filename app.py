@@ -5007,14 +5007,21 @@ def student_quiz_subtask(slug, position):
 # to checkpoint_attempt instead of quiz_attempt. See
 # docs/shared/lernmanager/chemie-data-contract.md §3-4.
 
-def _serialize_checkpoint_question(q):
+def _serialize_checkpoint_question(q, index):
     """Question payload for the client. Same visibility rule as warmup
     (_serialize_question_for_js): MC options go to the client, fill_blank
     answers don't. Never include 'correct' - unlike warmup this is a
     retry-until-correct session, so leaking the answer up front (or on a
-    wrong attempt) would break the 3-vs-2 scoring signal."""
+    wrong attempt) would break the 3-vs-2 scoring signal.
+
+    `index` is the question's position in the stored quiz_json, which is what every
+    route validates against -- not its position in the list the client was handed.
+    The two diverge whenever the rendered list is a subset: short_answer questions
+    are dropped when the LLM budget is spent, and a retry session shows only the
+    questions whose flag was rejected. The client sends this value back, never its
+    own array position."""
     qtype = q.get('type', 'multiple_choice')
-    result = {'type': qtype, 'text': q['text']}
+    result = {'type': qtype, 'text': q['text'], 'index': index}
     if quiz_grading.is_interactive(qtype):
         result.update(quiz_grading.presentation(q))
     elif qtype not in ('fill_blank', 'short_answer'):
@@ -5054,8 +5061,12 @@ def _checkpoint_progress(subtask_id):
     see create_checkpoint_answer/create_checkpoint_attempt."""
     all_progress = session.get('checkpoint_progress', {})
     progress = all_progress.get(str(subtask_id)) or {
-        'attempts': {}, 'hints_used': {}, 'solved': {}, 'gave_up': {}, 'llm_errors': {}
+        'attempts': {}, 'hints_used': {}, 'solved': {}, 'gave_up': {}, 'llm_errors': {},
+        'flagged': {}
     }
+    # setdefault, not part of the literal above: a session already in progress when
+    # flags shipped must not KeyError on its first report.
+    progress.setdefault('flagged', {})
     # setdefault, not unconditional -- a session already in progress when this
     # field was introduced must keep the uid it was first given, not get a new
     # one on every request.
@@ -5077,25 +5088,59 @@ def _score_checkpoint_session(question_results):
     score stays a strict three-value category, matching the Kern-Sperre gate's
     `score >= 2` ("every required question was eventually solved").
 
-    question_results: list of dicts, one per question in this checkpoint's
-    quiz: {'solved': bool, 'gave_up': bool, 'attempts': int, 'hints_used': int}
+    A flagged question carries no score and is left out of the min() -- decided
+    2026-08-31, the optimistic reading. The student reported it as broken and moved
+    on, so holding the whole session at 0 until a teacher rules would recreate exactly
+    the stuck-ness the report exists to remove. The consequence is that the number is
+    PROVISIONAL while any flag on the attempt is still open: `score >= 2` no longer
+    proves every question was solved, only every question that still counts. Nothing
+    downstream may treat such an attempt as final -- see checkpoint_score_is_provisional().
+
+    A session where every question was flagged scores 0: there is nothing to take a
+    min() over, and 0 is the honest floor to hold until the teacher has ruled.
+
+    question_results: list of dicts, one per question in this checkpoint's quiz:
+    {'solved': bool, 'gave_up': bool, 'flagged': bool, 'attempts': int, 'hints_used': int}
     """
-    return min(_checkpoint_question_scores(question_results))
+    scores = [s for s in _checkpoint_question_scores(question_results) if s is not None]
+    return min(scores) if scores else 0
 
 
 def _checkpoint_question_scores(question_results):
     """Per-question 0/2/3 score list, same classification `_score_checkpoint_session`
     consolidates via min() -- factored out so the completion-screen reason text
     (`_checkpoint_score_reason`) can break the session score down by question
-    without re-deriving the 0/2/3 rule a second time."""
+    without re-deriving the 0/2/3 rule a second time.
+
+    None at a position = the question was flagged as broken and has no score yet.
+    Stored as-is in checkpoint_attempt.question_scores_json, which is what lets one
+    question be rescored later without rebuilding the whole session."""
     def question_score(result):
+        if result.get('flagged'):
+            return None
         if not result['solved']:
             return 0
         if result['attempts'] > 1 or result['hints_used'] > 0:
             return 2
+        if result.get('retry_after_rejected_flag'):
+            # Interim rule, pending the min()-vs-average decision with Chemie
+            # (docs/shared/chemie/inbox.md, 2026-08-31). A question redone after a
+            # REJECTED flag cannot score 3 even if solved cleanly: the student had a
+            # second look at it with the clock stopped, which is exactly what a retry
+            # or a hint costs. Without this, reporting a question is a free
+            # think-break and the report becomes the cheapest move on hard questions.
+            # How much it should really cost depends on the aggregation rule -- under
+            # min() this caps the WHOLE checkpoint at 2, under an average it is one
+            # question of seven. Revisit when Chemie answers.
+            return REJECTED_FLAG_RETRY_CAP
         return 3
 
     return [question_score(result) for result in question_results]
+
+
+# See the retry_after_rejected_flag branch above. Named rather than inlined because
+# it is the one number in this feature that is explicitly interim.
+REJECTED_FLAG_RETRY_CAP = 2
 
 
 def _checkpoint_score_reason(question_results):
@@ -5104,30 +5149,45 @@ def _checkpoint_score_reason(question_results):
     live during the session)."""
     scores = _checkpoint_question_scores(question_results)
     total = len(scores)
+    flagged = sum(1 for s in scores if s is None)
     unsolved = sum(1 for s in scores if s == 0)
     first_try = sum(1 for s in scores if s == 3)
 
+    # The flagged part comes first and is stated separately: it is the one part of
+    # the number the student cannot influence and a teacher still has to rule on.
+    flagged_note = ''
+    if flagged:
+        counted = total - flagged
+        flagged_note = (f'{flagged} von {total} Fragen hast du gemeldet — '
+                        f'die zählen hier noch nicht mit. ')
+        if not counted:
+            return flagged_note + 'Deine Lehrkraft schaut sich den Checkpoint an.'
+        total = counted
+
     if unsolved:
-        return f'{unsolved} von {total} Fragen wurden nicht gelöst.'
+        return flagged_note + f'{unsolved} von {total} Fragen wurden nicht gelöst.'
     if first_try == total:
-        return 'Alle Fragen im ersten Versuch ohne Tipp richtig beantwortet.'
+        return flagged_note + 'Alle Fragen im ersten Versuch ohne Tipp richtig beantwortet.'
     if first_try == 0:
-        return 'Alle Fragen gelöst, aber mit Tipp oder mehreren Versuchen.'
-    return f'{first_try} von {total} Fragen im ersten Versuch richtig, der Rest mit Tipp oder mehreren Versuchen.'
+        return flagged_note + 'Alle Fragen gelöst, aber mit Tipp oder mehreren Versuchen.'
+    return (flagged_note + f'{first_try} von {total} Fragen im ersten Versuch richtig, '
+            'der Rest mit Tipp oder mehreren Versuchen.')
 
 
 def _handle_checkpoint_quiz(student, task, slug, subtask, position, klasse):
     """GET: render a Chemie Quiz-checkpoint as an immediate-retry session."""
     quiz = json.loads(subtask['quiz_json'])
     llm_available = models.check_llm_rate_limit(student['id'], usage_tag='checkpoint_quiz')
-    questions = [q for q in quiz.get('questions', [])
+    questions = [(i, q) for i, q in enumerate(quiz.get('questions', []))
                  if llm_available or q.get('type', 'multiple_choice') != 'short_answer']
     if not questions:
         flash('Für diesen Checkpoint sind aktuell keine Fragen verfügbar. Versuche es später erneut.', 'warning')
         return redirect(url_for('student_klasse', slug=slug))
 
     hints = json.loads(subtask['checkpoint_hints_json']) if subtask.get('checkpoint_hints_json') else []
-    questions_json = json.dumps([_serialize_checkpoint_question(q) for q in questions])
+    # enumerate over the STORED quiz, then filter -- so each question keeps the index
+    # every route validates against even when the rendered list is a subset.
+    questions_json = json.dumps([_serialize_checkpoint_question(q, i) for i, q in questions])
     transparency_mode = models.get_effective_transparency_mode(student['id'], klasse['id'] if klasse else None)
 
     # A student who already finished this checkpoint sees the standing result and

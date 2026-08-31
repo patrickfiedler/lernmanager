@@ -152,9 +152,12 @@ def test_warmup_payload_carries_no_matching_answer_key():
 
 
 def test_checkpoint_payload_carries_no_answer_key():
-    result = _serialize_checkpoint_question(QUIZ["questions"][1])
+    result = _serialize_checkpoint_question(QUIZ["questions"][1], 1)
     assert "pairs" not in result and "distractors" not in result
-    assert set(result) == {"type", "text", "left", "right"}
+    # The exact key set is pinned on purpose: a new key has to be admitted here
+    # deliberately, so an answer-carrying field cannot slip into the payload.
+    assert set(result) == {"type", "text", "left", "right", "index"}
+    assert result["index"] == 1
 
 
 def test_interactive_types_stay_in_the_warmup_pool():
