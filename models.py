@@ -142,7 +142,7 @@ def init_db():
                 lernpfad TEXT DEFAULT 'bergweg',  -- wanderweg/bergweg/gipfeltour/seilbahn
                 easy_reading_mode INTEGER DEFAULT 0,
                 llm_transparency_mode INTEGER DEFAULT 0,
-                step_checkboxes INTEGER NOT NULL DEFAULT 0,
+                step_checkboxes INTEGER NOT NULL DEFAULT 0,  -- on for new students: create_student passes 1 (migrate_054)
                 netzwerk_id TEXT  -- surname.firstname school network ID, matches scan-folders' folder names (grading-service-deployment.md §Phase 2)
             );
             CREATE UNIQUE INDEX IF NOT EXISTS idx_student_netzwerk_id ON student(netzwerk_id) WHERE netzwerk_id IS NOT NULL;
@@ -1434,7 +1434,7 @@ def create_student(nachname, vorname, username, password, lernpfad='bergweg', ne
     """Create a new student."""
     with db_session() as conn:
         cursor = conn.execute(
-            "INSERT INTO student (nachname, vorname, username, password_hash, lernpfad, netzwerk_id) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO student (nachname, vorname, username, password_hash, lernpfad, netzwerk_id, step_checkboxes) VALUES (?, ?, ?, ?, ?, ?, 1)",
             (nachname, vorname, username, hash_password(password), lernpfad, netzwerk_id)
         )
         return cursor.lastrowid
