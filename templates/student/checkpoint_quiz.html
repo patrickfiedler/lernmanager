@@ -42,6 +42,21 @@
 </div>
 {% endif %}
 
+{% if retry_flags %}
+{# A rejected report: the question comes back, and only that question. Says why,
+   because from the student's side this looks like the checkpoint reopening. #}
+<div class="checkpoint-reopened-banner">
+    <p class="checkpoint-reopened-lead">
+        📝 Deine Lehrkraft hat sich deine Meldung angeschaut und die Frage in Ordnung
+        gefunden. Du holst sie jetzt nach — {{ retry_flags|length }} von den Fragen
+        dieses Checkpoints, mehr nicht.
+    </p>
+    {% for flag in retry_flags if flag.resolution_note %}
+    <p class="checkpoint-reopened-feedback">💬 {{ flag.resolution_note }}</p>
+    {% endfor %}
+</div>
+{% endif %}
+
 {% if reopened %}
 {# A teacher reopened this checkpoint. Without this the reset was silent: the
    result and the Rueckmeldung simply disappeared. Shows no old score -- it does

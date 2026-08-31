@@ -4029,6 +4029,27 @@ def get_rejected_flags_for_retry(student_id, checkpoint_id):
         return [dict(r) for r in rows]
 
 
+def attach_checkpoint_session_to_attempt(session_uid, attempt_id):
+    """Point one session's answer and flag rows at an EXISTING attempt.
+
+    Same backfill create_checkpoint_attempt does, for the one case where no new
+    attempt is created: a student redoing the questions whose report was rejected
+    is still the same graded session, rescored -- a second checkpoint_attempt would
+    read as a second sitting of the whole checkpoint.
+    """
+    if not session_uid:
+        return
+    with db_session() as conn:
+        conn.execute("""
+            UPDATE checkpoint_answer SET checkpoint_attempt_id = ?
+            WHERE session_uid = ? AND checkpoint_attempt_id IS NULL
+        """, (attempt_id, session_uid))
+        conn.execute("""
+            UPDATE checkpoint_flag SET checkpoint_attempt_id = ?
+            WHERE session_uid = ? AND checkpoint_attempt_id IS NULL
+        """, (attempt_id, session_uid))
+
+
 def resolve_checkpoint_flag(flag_id, status, resolution_note, admin_id):
     """Record the teacher's verdict on one flag.
 

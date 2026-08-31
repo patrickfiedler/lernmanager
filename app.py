@@ -5154,6 +5154,12 @@ def _save_checkpoint_progress(subtask_id, progress):
     session['checkpoint_progress'] = all_progress
 
 
+def _clear_checkpoint_progress(subtask_id):
+    all_progress = session.get('checkpoint_progress', {})
+    all_progress.pop(str(subtask_id), None)
+    session['checkpoint_progress'] = all_progress
+
+
 def _score_checkpoint_session(question_results):
     """0/2/3 score for one completed Quiz-checkpoint session, per
     docs/shared/lernmanager/chemie-data-contract.md §3a: per-question score
@@ -5254,6 +5260,20 @@ def _handle_checkpoint_quiz(student, task, slug, subtask, position, klasse):
     llm_available = models.check_llm_rate_limit(student['id'], usage_tag='checkpoint_quiz')
     questions = [(i, q) for i, q in enumerate(quiz.get('questions', []))
                  if llm_available or q.get('type', 'multiple_choice') != 'short_answer']
+
+    # A rejected report puts exactly those questions back in front of the student,
+    # and nothing else. Not a second sitting: the existing attempt is rescored on
+    # finish, so the Aufgabe is not re-ticked and no second checkpoint_attempt
+    # appears. Only meaningful while that attempt is still the live one -- after a
+    # teacher reset there is nothing to rescore, so the checkpoint is simply taken
+    # again from the top and the reports are closed on the way out.
+    standing_attempt = models.get_latest_checkpoint_attempt(student['id'], subtask['id'])
+    retry_flags = (models.get_rejected_flags_for_retry(student['id'], subtask['id'])
+                   if standing_attempt else [])
+    retry_indices = {f['question_index'] for f in retry_flags}
+    if retry_indices:
+        questions = [(i, q) for i, q in questions if i in retry_indices]
+
     if not questions:
         flash('Für diesen Checkpoint sind aktuell keine Fragen verfügbar. Versuche es später erneut.', 'warning')
         return redirect(url_for('student_klasse', slug=slug))
@@ -5269,6 +5289,14 @@ def _handle_checkpoint_quiz(student, task, slug, subtask, position, klasse):
     # questions are dropped, and finish then waited forever for answers to questions
     # the student was never shown.
     progress = _checkpoint_progress(subtask['id'])
+    # Entering or leaving retry mode starts a clean session: the two score
+    # different things, and carrying counters across would let a solved question
+    # from the first sitting count as solved in the redo.
+    if bool(retry_indices) != bool(progress.get('retry')):
+        _clear_checkpoint_progress(subtask['id'])
+        progress = _checkpoint_progress(subtask['id'])
+        progress['retry'] = bool(retry_indices)
+    progress['retry_flag_ids'] = [f['id'] for f in retry_flags]
     progress['rendered'] = [i for i, _ in questions]
     _save_checkpoint_progress(subtask['id'], progress)
     transparency_mode = models.get_effective_transparency_mode(student['id'], klasse['id'] if klasse else None)
@@ -5277,7 +5305,7 @@ def _handle_checkpoint_quiz(student, task, slug, subtask, position, klasse):
     # whether a teacher has checked it (migrate_049). Without this the review was
     # invisible to them: the score appeared once on the completion screen and there
     # was nowhere to look afterwards.
-    last_attempt = models.get_latest_checkpoint_attempt(student['id'], subtask['id'])
+    last_attempt = standing_attempt
     review = None
     reopened = None
     if last_attempt:
@@ -5303,6 +5331,7 @@ def _handle_checkpoint_quiz(student, task, slug, subtask, position, klasse):
                            has_hints=bool(hints), transparency_mode=transparency_mode,
                            review=review, reopened=reopened,
                            flag_reasons=models.CHECKPOINT_FLAG_REASONS,
+                           retry_flags=retry_flags,
                            llm_enabled=config.LLM_ENABLED)
 
 
@@ -5577,6 +5606,59 @@ def student_checkpoint_flag():
     return jsonify({'flagged': True, 'message': CHECKPOINT_FLAGGED_LOCK_MESSAGE})
 
 
+def _finish_checkpoint_retry(student_id, subtask_id, slug, progress, question_results):
+    """End a redo of the questions whose report a teacher rejected.
+
+    Rescores the EXISTING attempt instead of creating a second one: this is the
+    same graded session, with the gaps filled in. So no new checkpoint_attempt, no
+    re-ticking the Aufgabe, no second task_complete -- all of which already
+    happened when the session was first finished.
+    """
+    attempt = models.get_latest_checkpoint_attempt(student_id, subtask_id)
+    if not attempt:
+        # The attempt was reset while the redo was open. Nothing to rescore, and
+        # writing a fresh one here would silently turn a redo into a full sitting.
+        _clear_checkpoint_progress(subtask_id)
+        return jsonify({'error': ('Dieser Checkpoint wurde neu geöffnet. Lade die Seite neu '
+                                  'und bearbeite ihn von vorn.')}), 409
+
+    if attempt.get('question_scores_json'):
+        scores = json.loads(attempt['question_scores_json'])
+    else:
+        # An attempt from before per-question scores were stored. All that is known
+        # about the other questions is the min() they produced, so keep it as a
+        # floor -- the redo may lower the score, never invent a higher one.
+        scores = {'vorher': attempt['score']}
+
+    scores.update(zip(
+        (str(r['index']) for r in question_results),
+        _checkpoint_question_scores(question_results)
+    ))
+    counted = [v for v in scores.values() if v is not None]
+    score = min(counted) if counted else 0
+
+    models.update_checkpoint_attempt_scores(attempt['id'], scores, score)
+    models.attach_checkpoint_session_to_attempt(progress['session_uid'], attempt['id'])
+    models.mark_checkpoint_flags_retried(progress.get('retry_flag_ids') or [])
+    models.log_analytics_event(
+        event_type='checkpoint_flag_retry', user_id=student_id, user_type='student',
+        metadata={'subtask_id': subtask_id, 'attempt_id': attempt['id'], 'score': score,
+                  'questions': [r['index'] for r in question_results]}
+    )
+    _clear_checkpoint_progress(subtask_id)
+
+    solved = sum(1 for r in question_results if r['solved'])
+    total = len(question_results)
+    return jsonify({
+        'score': score,
+        'score_reason': (f'{solved} von {total} nachgeholten Fragen gelöst. '
+                         'Nachgeholte Fragen zählen höchstens '
+                         f'{REJECTED_FLAG_RETRY_CAP} Punkte.'),
+        'needs_review': False, 'flagged_count': 0, 'retry': True,
+        'redirect_url': url_for('student_klasse', slug=slug)
+    })
+
+
 @app.route('/schueler/checkpoint/fertig', methods=['POST'])
 @student_required
 def student_checkpoint_finish():
@@ -5614,12 +5696,20 @@ def student_checkpoint_finish():
             'solved': solved,
             'gave_up': gave_up,
             'flagged': flagged,
+            # Caps a redone question at REJECTED_FLAG_RETRY_CAP: the student had a
+            # second look at it with the clock stopped, which is what a retry costs
+            # anywhere else in this scoring rule.
+            'retry_after_rejected_flag': bool(progress.get('retry')),
             'attempts': progress['attempts'].get(qidx, 0),
             'hints_used': progress['hints_used'].get(qidx, 0),
             # True only if an /antwort call for this question got correct=None
             # (LLM grading unavailable) at least once -- see student_checkpoint_answer.
             'llm_error': progress.get('llm_errors', {}).get(qidx, 0) > 0,
         })
+
+    if progress.get('retry'):
+        return _finish_checkpoint_retry(student_id, subtask_id, slug, progress,
+                                        question_results)
 
     score = _score_checkpoint_session(question_results)
     score_reason = _checkpoint_score_reason(question_results)
