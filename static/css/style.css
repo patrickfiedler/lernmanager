@@ -1562,6 +1562,26 @@ tr.unsaved-row td {
     }
 }
 
+/* Work steps: give each numbered step room to breathe.
+   Only direct children, so sub-items inside a step stay tight to it. */
+.task-content ol > li {
+    margin-bottom: 0.9rem;
+}
+
+.task-content ol > li:last-child {
+    margin-bottom: 0;
+}
+
+.task-content ol > li > ul,
+.task-content ol > li > ol {
+    margin-top: 0.35rem;
+    margin-bottom: 0;
+}
+
+body.easy-reading-mode .task-content ol > li {
+    margin-bottom: 1.5rem;
+}
+
 /* Task Checkbox */
 .task-complete {
     background: var(--box-neutral-bg);
