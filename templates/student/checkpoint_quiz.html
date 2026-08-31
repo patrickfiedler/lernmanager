@@ -114,6 +114,14 @@
     let currentIdx = 0;
     let answered = false;   // true once the current question is solved or given up
 
+    // The question's index in the STORED quiz, which is what every route validates
+    // against -- never our position in `questions`. The two differ whenever the
+    // rendered list is a subset (short_answer dropped when the LLM budget is spent,
+    // or a retry session showing only the questions whose report was rejected).
+    function questionIndex() {
+        return questions[currentIdx].index;
+    }
+
     function shuffleIndices(length) {
         var indices = [];
         for (var i = 0; i < length; i++) indices.push(i);
@@ -356,7 +364,7 @@
         const waitLabel = LLMButton.labelFor(questions[currentIdx].type, llmEnabled);
 
         guarded(btn, waitLabel, '{{ url_for("student_checkpoint_answer") }}', {
-            slug: slug, subtask_id: subtaskId, question_index: currentIdx, answer: answer
+            slug: slug, subtask_id: subtaskId, question_index: questionIndex(), answer: answer
         }, function(data) {
             showFeedback(data.correct);
             var hintBtn = document.getElementById('hint-btn');
@@ -386,7 +394,7 @@
         var btn = document.getElementById('hint-btn');
         if (LLMButton.isBusy(btn)) return;
         guarded(btn, LLMButton.WAITING_LABELS.generic, '{{ url_for("student_checkpoint_hint") }}', {
-            slug: slug, subtask_id: subtaskId, question_index: currentIdx
+            slug: slug, subtask_id: subtaskId, question_index: questionIndex()
         }, function(data) {
             var hintArea = document.getElementById('hint-area');
             if (data.hint === null) {
@@ -408,7 +416,7 @@
         var btn = document.getElementById('giveup-btn');
         if (answered || LLMButton.isBusy(btn)) return;
         guarded(btn, LLMButton.WAITING_LABELS.generic, '{{ url_for("student_checkpoint_give_up") }}', {
-            slug: slug, subtask_id: subtaskId, question_index: currentIdx
+            slug: slug, subtask_id: subtaskId, question_index: questionIndex()
         }, function(data) {
             answered = true;
             lockQuestion('Richtige Antwort: ' + data.correct_answer);

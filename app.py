@@ -5188,6 +5188,15 @@ def _handle_checkpoint_quiz(student, task, slug, subtask, position, klasse):
     # enumerate over the STORED quiz, then filter -- so each question keeps the index
     # every route validates against even when the rendered list is a subset.
     questions_json = json.dumps([_serialize_checkpoint_question(q, i) for i, q in questions])
+
+    # Remember which questions were actually shown. `finish` scores exactly these:
+    # walking the stored quiz instead left a checkpoint unfinishable whenever the
+    # rendered list was a subset -- with the LLM budget spent, its short_answer
+    # questions are dropped, and finish then waited forever for answers to questions
+    # the student was never shown.
+    progress = _checkpoint_progress(subtask['id'])
+    progress['rendered'] = [i for i, _ in questions]
+    _save_checkpoint_progress(subtask['id'], progress)
     transparency_mode = models.get_effective_transparency_mode(student['id'], klasse['id'] if klasse else None)
 
     # A student who already finished this checkpoint sees the standing result and
@@ -5412,14 +5421,20 @@ def student_checkpoint_finish():
     questions = json.loads(subtask['quiz_json']).get('questions', [])
     progress = _checkpoint_progress(subtask_id)
 
+    # The questions this session actually rendered, not the whole stored quiz --
+    # see _handle_checkpoint_quiz. The fallback keeps a session that was already
+    # running before `rendered` existed finishable.
+    rendered = progress.get('rendered') or list(range(len(questions)))
+
     question_results = []
-    for i in range(len(questions)):
+    for i in rendered:
         qidx = str(i)
         solved = progress['solved'].get(qidx, False)
         gave_up = progress['gave_up'].get(qidx, False)
         if not solved and not gave_up:
             return jsonify({'error': 'Checkpoint noch nicht abgeschlossen.'}), 400
         question_results.append({
+            'index': i,
             'solved': solved,
             'gave_up': gave_up,
             'attempts': progress['attempts'].get(qidx, 0),
@@ -5436,7 +5451,7 @@ def student_checkpoint_finish():
 
     # A give-up only needs manual review if it was forced by an LLM failure, not
     # a genuine "student didn't know it" -- otherwise the 0 stands as-is.
-    review_questions = [i for i, r in enumerate(question_results) if r['gave_up'] and r['llm_error']]
+    review_questions = [r['index'] for r in question_results if r['gave_up'] and r['llm_error']]
     needs_review = bool(review_questions)
     review_notes = json.dumps({'questions': review_questions}) if needs_review else None
 
