@@ -30,6 +30,12 @@
         ✏️ Von deiner Lehrkraft geprüft und geändert.
         {% endif %}
     </p>
+    {% if review.provisional %}
+    <p class="checkpoint-review-status">
+        ⚠️ Du hast in diesem Checkpoint eine Frage gemeldet. Solange deine Lehrkraft
+        sie nicht angeschaut hat, ist diese Punktzahl noch nicht endgültig.
+    </p>
+    {% endif %}
     {% if review.feedback %}
     <p class="checkpoint-review-feedback">💬 {{ review.feedback }}</p>
     {% endif %}
@@ -68,6 +74,31 @@
             <button class="btn btn-secondary" id="hint-btn" onclick="requestHint()" style="display: none;">💡 Tipp</button>
             {% endif %}
             <button class="btn btn-secondary" id="giveup-btn" onclick="giveUp()">Ich weiß es nicht</button>
+            <button class="btn btn-secondary" id="flag-btn" onclick="openFlagPanel()">⚠️ Frage melden</button>
+        </div>
+
+        {# Inline, never a confirm() dialog: a browser modal blocks the page and
+           tells the student nothing about what the four reasons mean. #}
+        <div id="flag-panel" class="checkpoint-flag-panel" style="display: none;">
+            <p class="checkpoint-flag-lead">Was stimmt mit dieser Frage nicht?</p>
+            <div id="flag-reasons">
+                {% for code, label in flag_reasons.items() %}
+                <label class="quiz-option checkpoint-flag-reason" data-reason="{{ code }}">
+                    <input type="radio" name="flag-reason" value="{{ code }}">
+                    <span>{{ label }}</span>
+                </label>
+                {% endfor %}
+            </div>
+            <textarea id="flag-text" class="form-control mt-1" rows="2"
+                      placeholder="Wenn du magst: Was genau ist das Problem? (freiwillig)"></textarea>
+            <p class="text-muted checkpoint-flag-note">
+                Die Frage wird nicht bewertet und die Lösung nicht verraten — deine
+                Lehrkraft schaut sie sich an. Wenn sie in Ordnung ist, holst du sie nach.
+            </p>
+            <div class="mt-1 flex gap-1">
+                <button class="btn btn-primary" id="flag-submit-btn" onclick="submitFlag()">Melden</button>
+                <button class="btn btn-secondary" onclick="closeFlagPanel()">Abbrechen</button>
+            </div>
         </div>
     </div>
 
@@ -96,6 +127,11 @@
 .checkpoint-reopened-banner p { margin: 0.15rem 0; }
 .checkpoint-reopened-lead { font-size: 1.05rem; }
 .checkpoint-reopened-feedback { margin-top: 0.4rem !important; font-size: 0.9rem; }
+.checkpoint-flag-panel { border-left: 4px solid #d97706; background: #fffbeb;
+                         border-radius: 4px; padding: 0.75rem 0.9rem; margin-top: 1rem; }
+.checkpoint-flag-lead { margin: 0 0 0.5rem 0; font-weight: 600; }
+.checkpoint-flag-reason { display: block; margin-bottom: 0.25rem; background: #fff; }
+.checkpoint-flag-note { font-size: 0.85rem; margin: 0.5rem 0 0 0; }
 </style>
 {% endblock %}
 
@@ -112,7 +148,11 @@
     const ZEICHENLEISTE_FACH = {{ task.fach|tojson }};
     let questions = {{ questions_json|safe }};
     let currentIdx = 0;
-    let answered = false;   // true once the current question is solved or given up
+    let answered = false;   // true once the current question is solved, given up or reported
+    // Mirrors the server's attempt counter for this question. Only used to decide
+    // whether "Die KI erkennt meine Antwort nicht an" may be offered -- the server
+    // checks the same thing again, this only keeps a dead option off the list.
+    let attemptsMade = 0;
 
     // The question's index in the STORED quiz, which is what every route validates
     // against -- never our position in `questions`. The two differ whenever the
@@ -153,6 +193,9 @@
     function renderQuestion() {
         const q = questions[currentIdx];
         answered = false;
+        attemptsMade = 0;
+        closeFlagPanel();
+        document.getElementById('flag-btn').style.display = '';
 
         document.getElementById('progress-text').textContent =
             'Frage ' + (currentIdx + 1) + ' von ' + questions.length;
@@ -339,6 +382,8 @@
         }
         document.getElementById('check-btn').style.display = 'none';
         document.getElementById('giveup-btn').style.display = 'none';
+        document.getElementById('flag-btn').style.display = 'none';
+        closeFlagPanel();
         var hintBtn = document.getElementById('hint-btn');
         if (hintBtn) hintBtn.style.display = 'none';
         document.getElementById('next-btn').style.display = '';
@@ -367,6 +412,8 @@
             slug: slug, subtask_id: subtaskId, question_index: questionIndex(), answer: answer
         }, function(data) {
             showFeedback(data.correct);
+            attemptsMade = data.attempts || (attemptsMade + 1);
+            updateFlagReasons();
             var hintBtn = document.getElementById('hint-btn');
             if (hintBtn) hintBtn.style.display = '';
             if (data.correct) {
@@ -409,6 +456,52 @@
             if (data.hints_remaining <= 0) {
                 document.getElementById('hint-btn').style.display = 'none';
             }
+        });
+    };
+
+    // Reporting a question: no grading, no solution, no score until a teacher has
+    // ruled. The draft the student had typed goes along as evidence.
+    window.openFlagPanel = function() {
+        updateFlagReasons();
+        document.getElementById('flag-panel').style.display = 'block';
+        document.getElementById('flag-btn').style.display = 'none';
+    };
+
+    window.closeFlagPanel = function() {
+        var panel = document.getElementById('flag-panel');
+        panel.style.display = 'none';
+        panel.querySelectorAll('input[name="flag-reason"]').forEach(function(el) { el.checked = false; });
+        document.getElementById('flag-text').value = '';
+        if (!answered) document.getElementById('flag-btn').style.display = '';
+    };
+
+    function updateFlagReasons() {
+        // "Die KI erkennt meine Antwort nicht an" is a claim about a verdict, so it
+        // only appears once there is one. The server enforces this too.
+        var kiOption = document.querySelector('.checkpoint-flag-reason[data-reason="ki_bewertung"]');
+        if (!kiOption) return;
+        var allowed = attemptsMade >= 1;
+        kiOption.style.display = allowed ? '' : 'none';
+        if (!allowed) kiOption.querySelector('input').checked = false;
+    }
+
+    window.submitFlag = function() {
+        var btn = document.getElementById('flag-submit-btn');
+        if (answered || LLMButton.isBusy(btn)) return;
+        var chosen = document.querySelector('input[name="flag-reason"]:checked');
+        if (!chosen) {
+            showError('Bitte wähle aus, was mit der Frage nicht stimmt.');
+            return;
+        }
+        guarded(btn, LLMButton.WAITING_LABELS.generic, '{{ url_for("student_checkpoint_flag") }}', {
+            slug: slug, subtask_id: subtaskId, question_index: questionIndex(),
+            reason_code: chosen.value,
+            reason_text: document.getElementById('flag-text').value,
+            answer: isAnswerEmpty() ? null : getAnswer()
+        }, function(data) {
+            answered = true;
+            document.getElementById('flag-panel').style.display = 'none';
+            lockQuestion('⚠️ ' + data.message);
         });
     };
 
@@ -469,6 +562,14 @@
             gradingNote.className = 'text-muted text-center';
             gradingNote.textContent = 'Unverbindliche KI-Rückmeldung. Die Bewertung erfolgt durch den Lehrer.';
             reasonLine.insertAdjacentElement('afterend', gradingNote);
+            if (data.flagged_count) {
+                var flagNote = document.createElement('p');
+                flagNote.className = 'text-muted text-center';
+                flagNote.textContent = data.flagged_count === 1
+                    ? 'Eine gemeldete Frage zählt hier noch nicht mit — deine Lehrkraft schaut sie sich an.'
+                    : data.flagged_count + ' gemeldete Fragen zählen hier noch nicht mit — deine Lehrkraft schaut sie sich an.';
+                gradingNote.insertAdjacentElement('afterend', flagNote);
+            }
             if (data.needs_review) {
                 var note = document.createElement('p');
                 note.className = 'text-muted text-center';

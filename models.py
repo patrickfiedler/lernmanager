@@ -3954,7 +3954,7 @@ def get_checkpoint_flags(checkpoint_id=None, question_index=None, student_id=Non
     with db_session() as conn:
         rows = conn.execute(f'''
             SELECT f.*,
-                   s.name AS student_name,
+                   s.vorname, s.nachname,
                    sub.beschreibung AS subtask_beschreibung,
                    t.name AS task_name
             FROM checkpoint_flag f
@@ -4024,6 +4024,28 @@ def mark_checkpoint_flags_retried(flag_ids):
             UPDATE checkpoint_flag SET status = 'nachgeholt'
             WHERE id IN ({','.join('?' * len(flag_ids))}) AND status = 'abgelehnt'
         ''', list(flag_ids))
+
+
+def checkpoint_score_is_provisional(attempt):
+    """True while this attempt's score is still waiting on a human.
+
+    A reported question is left out of the min() the session score is built from
+    (the optimistic reading, decided 2026-08-31), so `score >= 2` no longer proves
+    every question was solved -- only every question that currently counts. Both
+    open reports and rejected-but-not-yet-redone ones make the number provisional:
+    the first because a teacher has not ruled, the second because the student still
+    owes that question and answering it can only lower the score.
+
+    Nothing downstream may present such a score as final without saying so.
+    """
+    if not attempt:
+        return False
+    with db_session() as conn:
+        row = conn.execute("""
+            SELECT COUNT(*) AS cnt FROM checkpoint_flag
+            WHERE checkpoint_attempt_id = ? AND status IN ('offen', 'abgelehnt')
+        """, (attempt['id'],)).fetchone()
+        return row['cnt'] > 0
 
 
 def update_checkpoint_attempt_scores(attempt_id, question_scores, score):

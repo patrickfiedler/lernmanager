@@ -5212,6 +5212,9 @@ def _handle_checkpoint_quiz(student, task, slug, subtask, position, klasse):
             'score': models.effective_checkpoint_score(last_attempt),
             'llm_score': last_attempt['score'],
             'feedback': last_attempt.get('student_feedback'),
+            # A score with a reported question still open is not the final number --
+            # saying so here is the only place the student would ever find out.
+            'provisional': models.checkpoint_score_is_provisional(last_attempt),
         }
     else:
         # No live session, but there may be a superseded one -- a reset. Saying so
@@ -5225,6 +5228,7 @@ def _handle_checkpoint_quiz(student, task, slug, subtask, position, klasse):
                            subtask_id=subtask['id'], questions_json=questions_json,
                            has_hints=bool(hints), transparency_mode=transparency_mode,
                            review=review, reopened=reopened,
+                           flag_reasons=models.CHECKPOINT_FLAG_REASONS,
                            llm_enabled=config.LLM_ENABLED)
 
 
@@ -5283,6 +5287,9 @@ def student_checkpoint_answer():
     if progress['solved'].get(qidx):
         return jsonify({'correct': True, 'attempts': progress['attempts'].get(qidx, 1),
                         'duplicate': True})
+
+    if progress['flagged'].get(qidx):
+        return jsonify({'error': 'flagged', 'message': CHECKPOINT_FLAGGED_LOCK_MESSAGE}), 403
 
     # Checkpoint grading is graded (feeds a real school grade), so it must never
     # silently fall back to "assume correct" like warmup does on an LLM outage --
@@ -5347,6 +5354,8 @@ def student_checkpoint_hint():
     subtask_id = subtask['id']
     qidx = str(data.get('question_index'))
     progress = _checkpoint_progress(subtask_id)
+    if progress['flagged'].get(qidx):
+        return jsonify({'error': 'flagged', 'message': CHECKPOINT_FLAGGED_LOCK_MESSAGE}), 403
     if progress['attempts'].get(qidx, 0) < 1:
         return jsonify({'error': 'Erst nach dem ersten Versuch verfügbar.'}), 403
 
@@ -5393,6 +5402,11 @@ def student_checkpoint_give_up():
     subtask_id = subtask['id']
     qidx = str(question_index)
     progress = _checkpoint_progress(subtask_id)
+    if progress['flagged'].get(qidx):
+        # A reported question must not reveal its answer: the student still owes it
+        # if the teacher rejects the report, and giving up here would hand over the
+        # solution for free.
+        return jsonify({'error': 'flagged', 'message': CHECKPOINT_FLAGGED_LOCK_MESSAGE}), 403
     progress['gave_up'][qidx] = True
     _save_checkpoint_progress(subtask_id, progress)
     models.create_checkpoint_answer(
@@ -5403,6 +5417,90 @@ def student_checkpoint_give_up():
     )
 
     return jsonify({'correct_answer': correct_answer})
+
+
+# Every route that could still change a reported question says the same thing --
+# one sentence, one place, so "gemeldet" cannot come to mean three different things.
+CHECKPOINT_FLAGGED_LOCK_MESSAGE = ('Diese Frage hast du gemeldet. Deine Lehrkraft '
+                                   'schaut sie sich an — du kannst hier weitermachen.')
+
+
+@app.route('/schueler/checkpoint/melden', methods=['POST'])
+@student_required
+def student_checkpoint_flag():
+    """AJAX: report one checkpoint question as broken and move on.
+
+    Deliberately not a give-up: nothing is graded (no LLM call), the correct answer
+    is NOT revealed, and the question carries no score until a teacher has ruled on
+    the report -- if the report is rejected, the student still owes the question.
+    Whatever was already typed is logged as information (correct = NULL,
+    grader='flagged'), because it is the best evidence for whether the question or
+    its grading was at fault.
+    """
+    student_id = session['student_id']
+    data = request.get_json() or {}
+    task, subtask = _resolve_checkpoint_subtask(student_id, data.get('slug'), data.get('subtask_id'))
+    if not subtask:
+        return jsonify({'error': 'Not found'}), 404
+
+    questions = json.loads(subtask['quiz_json']).get('questions', [])
+    question_index = data.get('question_index')
+    if question_index is None or not (0 <= question_index < len(questions)):
+        return jsonify({'error': 'Invalid question'}), 400
+    question = questions[question_index]
+
+    reason_code = data.get('reason_code')
+    if reason_code not in models.CHECKPOINT_FLAG_REASONS:
+        return jsonify({'error': 'Bitte sag kurz, was mit der Frage nicht stimmt.'}), 400
+
+    subtask_id = subtask['id']
+    qidx = str(question_index)
+    progress = _checkpoint_progress(subtask_id)
+
+    if progress['solved'].get(qidx) or progress['gave_up'].get(qidx) or progress['flagged'].get(qidx):
+        return jsonify({'error': 'Diese Frage ist schon abgeschlossen.'}), 400
+
+    # "Die KI erkennt meine Antwort nicht an" is a claim about a verdict, so there
+    # has to BE a verdict: at least one answer graded wrong on this question.
+    # Ungated it would be the most attractive option on the list and the only one a
+    # student could pick without ever typing anything.
+    if reason_code == 'ki_bewertung' and progress['attempts'].get(qidx, 0) < 1:
+        return jsonify({'error': ('Diesen Grund kannst du erst wählen, wenn du die Frage '
+                                  'mindestens einmal beantwortet hast.')}), 400
+
+    if models.get_open_student_flag(student_id, subtask_id, question_index):
+        return jsonify({'error': 'Du hast diese Frage schon gemeldet.'}), 400
+
+    progress['flagged'][qidx] = True
+    _save_checkpoint_progress(subtask_id, progress)
+
+    # The draft, if there is one. Serialized exactly like a graded answer so the
+    # review UI and both exports read it the same way (see student_checkpoint_answer).
+    draft = data.get('answer')
+    draft_text = (json.dumps(draft, ensure_ascii=False)
+                  if isinstance(draft, (list, dict)) else (draft or '').strip())
+    if draft_text:
+        models.create_checkpoint_answer(
+            student_id, subtask_id, progress['session_uid'], question_index,
+            attempt_no=progress['attempts'].get(qidx, 0) + 1, answer_text=draft_text,
+            correct=None, feedback=None, grader='flagged',
+            hints_used_before=progress['hints_used'].get(qidx, 0)
+        )
+
+    models.create_checkpoint_flag(
+        subtask_id, question_index, source='student', student_id=student_id,
+        session_uid=progress['session_uid'], reason_code=reason_code,
+        reason_text=(data.get('reason_text') or '').strip()[:1000] or None,
+        # The question as it read today: content gets edited, and without this a
+        # report outlives the thing it describes.
+        question_text_at_flag=question.get('text')
+    )
+    models.log_analytics_event(
+        event_type='checkpoint_flag', user_id=student_id, user_type='student',
+        metadata={'subtask_id': subtask_id, 'question_index': question_index,
+                  'reason_code': reason_code}
+    )
+    return jsonify({'flagged': True, 'message': CHECKPOINT_FLAGGED_LOCK_MESSAGE})
 
 
 @app.route('/schueler/checkpoint/fertig', methods=['POST'])
@@ -5431,12 +5529,17 @@ def student_checkpoint_finish():
         qidx = str(i)
         solved = progress['solved'].get(qidx, False)
         gave_up = progress['gave_up'].get(qidx, False)
-        if not solved and not gave_up:
+        # Third terminal state next to solved and gave_up: reported as broken. It
+        # ends the question without ending it in a score -- see
+        # _checkpoint_question_scores.
+        flagged = progress['flagged'].get(qidx, False)
+        if not solved and not gave_up and not flagged:
             return jsonify({'error': 'Checkpoint noch nicht abgeschlossen.'}), 400
         question_results.append({
             'index': i,
             'solved': solved,
             'gave_up': gave_up,
+            'flagged': flagged,
             'attempts': progress['attempts'].get(qidx, 0),
             'hints_used': progress['hints_used'].get(qidx, 0),
             # True only if an /antwort call for this question got correct=None
@@ -5446,6 +5549,15 @@ def student_checkpoint_finish():
 
     score = _score_checkpoint_session(question_results)
     score_reason = _checkpoint_score_reason(question_results)
+    # Keyed by the question's index in the STORED quiz, not by position in this
+    # list: the session may have rendered a subset, and rescoring one question
+    # after a rejected report has to find it again. A key that is present with a
+    # null value = reported, no score yet; a missing key = not part of this session.
+    question_scores = json.dumps(dict(zip(
+        (str(r['index']) for r in question_results),
+        _checkpoint_question_scores(question_results)
+    )))
+    flagged_count = sum(1 for r in question_results if r['flagged'])
     total_attempts = sum(r['attempts'] for r in question_results) or 1
     total_hints = sum(r['hints_used'] for r in question_results)
 
@@ -5461,11 +5573,13 @@ def student_checkpoint_finish():
         checkpoint_type='quiz', kern_standard_tag=subtask['kern_standard_tag'],
         score=score, attempt_count=total_attempts, hint_count=total_hints,
         needs_review=needs_review, review_notes=review_notes,
-        quiz_snapshot_json=subtask['quiz_json'], session_uid=progress['session_uid']
+        quiz_snapshot_json=subtask['quiz_json'], session_uid=progress['session_uid'],
+        question_scores_json=question_scores
     )
     models.log_analytics_event(
         event_type='checkpoint_attempt', user_id=student_id, user_type='student',
-        metadata={'student_task_id': student_task_id, 'subtask_id': subtask_id, 'score': score, 'needs_review': needs_review}
+        metadata={'student_task_id': student_task_id, 'subtask_id': subtask_id, 'score': score,
+                  'needs_review': needs_review, 'flagged_count': flagged_count}
     )
 
     toggle_result = models.toggle_student_subtask(student_task_id, subtask_id, True)
@@ -5482,6 +5596,7 @@ def student_checkpoint_finish():
 
     return jsonify({
         'score': score, 'score_reason': score_reason, 'needs_review': needs_review,
+        'flagged_count': flagged_count,
         'redirect_url': url_for('student_klasse', slug=slug)
     })
 
