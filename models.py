@@ -4050,6 +4050,21 @@ def attach_checkpoint_session_to_attempt(session_uid, attempt_id):
         """, (attempt_id, session_uid))
 
 
+def get_checkpoints_awaiting_retry(student_id):
+    """Checkpoint ids (= subtask.id) where a rejected report is still owed a redo.
+
+    Drives the notice on the Thema page. Without it a rejected report is invisible
+    to the student: the Aufgabe is already ticked off, so nothing would send them
+    back to the checkpoint that is now waiting for them.
+    """
+    with db_session() as conn:
+        rows = conn.execute("""
+            SELECT DISTINCT checkpoint_id FROM checkpoint_flag
+            WHERE student_id = ? AND status = 'abgelehnt'
+        """, (student_id,)).fetchall()
+        return {r['checkpoint_id'] for r in rows}
+
+
 def resolve_checkpoint_flag(flag_id, status, resolution_note, admin_id):
     """Record the teacher's verdict on one flag.
 

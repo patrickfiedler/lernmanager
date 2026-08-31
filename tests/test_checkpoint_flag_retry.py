@@ -127,3 +127,13 @@ def test_once_redone_the_checkpoint_is_a_normal_one_again(app, client, as_admin)
     body = client.get("/schueler/thema/redoxreaktionen/aufgabe-1/quiz").get_data(as_text=True)
     assert "Frage 2" in body                        # full checkpoint again
     assert "holst sie jetzt nach" not in body
+
+
+def test_the_thema_page_points_back_to_the_owed_question(app, client, as_admin):
+    """The Aufgabe is already ticked off, so the notice is the only thing that
+    would ever send the student back to it."""
+    _session_with_rejected_report(app, client, as_admin)
+
+    body = client.get("/schueler/thema/redoxreaktionen").get_data(as_text=True)
+    assert "Jetzt nachholen" in body
+    assert "/schueler/thema/redoxreaktionen/aufgabe-1/quiz" in body

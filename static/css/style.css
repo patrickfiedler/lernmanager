@@ -2007,6 +2007,17 @@ body.easy-reading-mode .step-box {
     .feedback-col.bad { order: -1; }
 }
 
+/* Ausstehende Nachhol-Frage: gleiche Farbsprache wie das Melde-Panel im
+   Checkpoint (amber = "wartet auf jemanden"), damit beide zusammengehoeren. */
+.checkpoint-retry-notice {
+    border-left: 4px solid #d97706;
+    background: #fffbeb;
+    border-radius: 4px;
+    padding: 0.6rem 0.9rem;
+    margin-bottom: 1rem;
+}
+.checkpoint-retry-notice a { margin-left: 0.35rem; font-weight: 600; }
+
 /* Success Banner */
 .success-banner {
     background: #10b981;

@@ -4337,7 +4337,12 @@ def student_klasse(slug):
     if task and task.get('unit_slug'):
         looking_forward_to = models.get_looking_forward_to(task['unit_slug'])
 
+    # Checkpoints where a rejected report left a question owed. The Aufgabe is
+    # already ticked off, so without this notice nothing points the student back.
+    retry_checkpoint_ids = models.get_checkpoints_awaiting_retry(student_id)
+
     return render_template('student/klasse.html',
+                           retry_checkpoint_ids=retry_checkpoint_ids,
                            connections=connections,
                            looking_forward_to=looking_forward_to,
                            student=student,

@@ -10,6 +10,17 @@
     <!-- Topic Headline -->
     <h1 class="topic-headline">{{ task.name }}</h1>
 
+    {# A report the teacher rejected: the Aufgabe is ticked off, so nothing else on
+       this page would ever send the student back to the question they still owe. #}
+    {% for sub in subtasks %}{% if sub.id in retry_checkpoint_ids %}
+    <div class="checkpoint-retry-notice">
+        📝 Im Checkpoint <strong>{{ sub.beschreibung|aufgabe_titel|striptags|truncate(60) }}</strong>
+        wartet eine gemeldete Frage auf dich — deine Lehrkraft hat sie sich angeschaut
+        und in Ordnung gefunden.
+        <a href="{{ url_for('student_quiz_subtask', slug=task.name|slugify, position=loop.index) }}">Jetzt nachholen →</a>
+    </div>
+    {% endif %}{% endfor %}
+
     <!-- Progress Section with Dots -->
     {% if subtasks or pending_fork_dot_positions %}
     <div class="progress-section">
