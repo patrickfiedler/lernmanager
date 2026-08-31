@@ -5601,6 +5601,8 @@ def student_settings():
         models.update_student_setting(student_id, 'easy_reading_mode', easy_reading_mode)
         transparency_mode = 1 if request.form.get('llm_transparency_mode') == 'on' else 0
         models.update_student_setting(student_id, 'llm_transparency_mode', transparency_mode)
+        step_checkboxes = 1 if request.form.get('step_checkboxes') == 'on' else 0
+        models.update_student_setting(student_id, 'step_checkboxes', step_checkboxes)
 
         flash('Einstellungen gespeichert! ✅', 'success')
         return redirect(url_for('student_settings'))

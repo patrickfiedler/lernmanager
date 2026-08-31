@@ -37,6 +37,21 @@
             </label>
         </div>
 
+        <div class="form-group" style="margin-top: 1rem;">
+            <label class="checkbox-label">
+                <input type="checkbox" name="step_checkboxes" {% if student.step_checkboxes %}checked{% endif %}>
+                <span>
+                    <strong>Arbeitsschritte abhaken</strong>
+                    <small class="text-muted d-block" style="margin-top: 0.5rem;">
+                        Setzt vor jeden nummerierten Arbeitsschritt einer Aufgabe ein kleines Kästchen.
+                        Du kannst abhaken, was du schon erledigt hast, und findest so leichter zurück,
+                        wenn du unterbrochen wurdest. Ein zweiter Klick nimmt den Haken wieder weg.
+                        Diese Haken sind nur für dich: Sie werden nicht gespeichert und niemand sieht sie.
+                    </small>
+                </span>
+            </label>
+        </div>
+
         <button type="submit" class="btn btn-primary">Speichern</button>
         <a href="{{ url_for('student_dashboard') }}" class="btn btn-secondary">Abbrechen</a>
     </form>

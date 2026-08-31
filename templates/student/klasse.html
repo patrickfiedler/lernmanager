@@ -1260,4 +1260,152 @@ function adjustZoom(delta) {
     });
 })();
 {% endif %}
+
+{% if student and student.step_checkboxes and session.student_id %}
+/* Arbeitsschritte abhaken -- opt-in per student (student.step_checkboxes).
+
+   Ticks live in localStorage only, never on the server: they are scratchpad
+   state for one ~20-minute Aufgabe, and the durable record is student_subtask.
+   Keyed by student id because school PCs are shared.
+
+   Steps are keyed by a hash of their own text, not by position. A teacher who
+   inserts a step must not shift every tick below it -- that would show a
+   student confident green ticks on steps they never did. Hashing instead
+   fails empty: fix a typo in a step and its tick quietly disappears. */
+(function () {
+    const content = document.querySelector('.task-content');
+    if (!content) return;
+
+    const steps = Array.from(content.querySelectorAll('ol > li'))
+        .filter(li => !li.parentElement.closest('li'));
+    if (!steps.length) return;
+
+    const STORE_KEY = 'lm.steps.{{ session.student_id }}.' + topicSlug + '.{{ current_index + 1 }}';
+
+    function stepText(li) {
+        // Nested sub-items are excluded so that editing a sub-bullet does not
+        // silently drop the tick on the step it belongs to.
+        const clone = li.cloneNode(true);
+        clone.querySelectorAll('ul, ol').forEach(n => n.remove());
+        return clone.textContent.replace(/\s+/g, ' ').trim();
+    }
+
+    function hash(str) {
+        let h = 5381;
+        for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0;
+        return (h >>> 0).toString(36);
+    }
+
+    function load() {
+        try {
+            const raw = localStorage.getItem(STORE_KEY);
+            return raw ? new Set(JSON.parse(raw)) : new Set();
+        } catch (e) {
+            return new Set();
+        }
+    }
+
+    function save() {
+        // Only hashes still present in the DOM are written back, so steps the
+        // teacher removed garbage-collect themselves.
+        const live = steps.filter(li => li.classList.contains('step-done'))
+                          .map(li => li.dataset.stepKey);
+        try {
+            if (live.length) localStorage.setItem(STORE_KEY, JSON.stringify(live));
+            else localStorage.removeItem(STORE_KEY);
+        } catch (e) { /* private mode: ticks still work for this page view */ }
+    }
+
+    /* The decisive control, in the order the system actually cares about: an
+       unpassed artifact gate outranks the completion checkbox, because for MBI
+       the gate is what releases the Aufgabe. Ticking every step releases
+       nothing -- this is what the nudge has to make obvious. */
+    function decisiveTarget() {
+        for (const id of ['inline-gate-card', 'gate-card']) {
+            const gate = document.getElementById(id);
+            if (gate && !gate.classList.contains('gate-passed')) {
+                return { el: gate, label: 'Zur Dateiprüfung' };
+            }
+        }
+        const zone = document.getElementById('completion-zone');
+        if (zone && !zone.hidden) {
+            const cb = zone.querySelector('.subtask-checkbox');
+            if (cb && !cb.checked) return { el: zone, label: 'Zum Haken' };
+        }
+        return null;
+    }
+
+    const nudge = document.createElement('div');
+    nudge.className = 'step-nudge';
+    nudge.hidden = true;
+    content.appendChild(nudge);
+
+    function refreshNudge() {
+        const allDone = steps.every(li => li.classList.contains('step-done'));
+        const target = allDone ? decisiveTarget() : null;
+        if (!target) { nudge.hidden = true; return; }
+
+        nudge.innerHTML = '';
+        nudge.append('Alle Schritte abgehakt — die Aufgabe selbst ist damit noch nicht fertig.');
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.textContent = target.label;
+        btn.addEventListener('click', () => {
+            target.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            target.el.classList.add('step-target-pulse');
+            setTimeout(() => target.el.classList.remove('step-target-pulse'), 2500);
+        });
+        nudge.appendChild(btn);
+        nudge.hidden = false;
+    }
+
+    function setDone(li, done) {
+        li.classList.toggle('step-done', done);
+        li.setAttribute('aria-checked', done ? 'true' : 'false');
+        li.querySelector('.step-box').textContent = done ? '✓' : '';
+        save();
+        refreshNudge();
+    }
+
+    const stored = load();
+
+    steps.forEach(li => {
+        li.dataset.stepKey = hash(stepText(li));
+        li.classList.add('step-item');
+        li.setAttribute('role', 'checkbox');
+        li.setAttribute('tabindex', '0');
+
+        const box = document.createElement('span');
+        box.className = 'step-box';
+        box.setAttribute('aria-hidden', 'true');
+        li.insertBefore(box, li.firstChild);
+
+        li.addEventListener('click', ev => {
+            // Links, buttons and form controls inside a step keep their own job.
+            if (ev.target.closest('a, button, input, textarea, select, label, summary')) return;
+            // Highlighting a sentence to read it is not a click.
+            if (String(window.getSelection())) return;
+            setDone(li, !li.classList.contains('step-done'));
+        });
+
+        li.addEventListener('keydown', ev => {
+            if (ev.key !== ' ' && ev.key !== 'Enter') return;
+            if (ev.target !== li) return;
+            ev.preventDefault();
+            setDone(li, !li.classList.contains('step-done'));
+        });
+
+        if (stored.has(li.dataset.stepKey)) {
+            li.classList.add('step-done');
+            li.setAttribute('aria-checked', 'true');
+            box.textContent = '✓';
+        } else {
+            li.setAttribute('aria-checked', 'false');
+        }
+    });
+
+    save();
+    refreshNudge();
+})();
+{% endif %}
 {% endblock %}

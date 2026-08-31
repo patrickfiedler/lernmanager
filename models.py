@@ -142,6 +142,7 @@ def init_db():
                 lernpfad TEXT DEFAULT 'bergweg',  -- wanderweg/bergweg/gipfeltour/seilbahn
                 easy_reading_mode INTEGER DEFAULT 0,
                 llm_transparency_mode INTEGER DEFAULT 0,
+                step_checkboxes INTEGER NOT NULL DEFAULT 0,
                 netzwerk_id TEXT  -- surname.firstname school network ID, matches scan-folders' folder names (grading-service-deployment.md §Phase 2)
             );
             CREATE UNIQUE INDEX IF NOT EXISTS idx_student_netzwerk_id ON student(netzwerk_id) WHERE netzwerk_id IS NOT NULL;
