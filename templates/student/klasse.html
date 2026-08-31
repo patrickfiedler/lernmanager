@@ -1286,7 +1286,7 @@ function adjustZoom(delta) {
         // Nested sub-items are excluded so that editing a sub-bullet does not
         // silently drop the tick on the step it belongs to.
         const clone = li.cloneNode(true);
-        clone.querySelectorAll('ul, ol').forEach(n => n.remove());
+        clone.querySelectorAll('ul, ol, .step-box').forEach(n => n.remove());
         return clone.textContent.replace(/\s+/g, ' ').trim();
     }
 
@@ -1375,10 +1375,18 @@ function adjustZoom(delta) {
         li.setAttribute('role', 'checkbox');
         li.setAttribute('tabindex', '0');
 
+        // Row layout is [number] [box] [text]. The step's own content has to
+        // live in one element or flex would treat every text node as a column.
+        li.parentElement.classList.add('step-list');
+        const text = document.createElement('span');
+        text.className = 'step-text';
+        while (li.firstChild) text.appendChild(li.firstChild);
+
         const box = document.createElement('span');
         box.className = 'step-box';
         box.setAttribute('aria-hidden', 'true');
-        li.insertBefore(box, li.firstChild);
+        li.appendChild(box);
+        li.appendChild(text);
 
         li.addEventListener('click', ev => {
             // Links, buttons and form controls inside a step keep their own job.
