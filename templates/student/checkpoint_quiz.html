@@ -516,6 +516,9 @@
         }, function(data) {
             answered = true;
             document.getElementById('flag-panel').style.display = 'none';
+            // Clear first: an earlier "pick a reason" warning would otherwise stay
+            // stacked above the confirmation and read as a second problem.
+            document.getElementById('feedback-area').innerHTML = '';
             lockQuestion('⚠️ ' + data.message);
         });
     };
