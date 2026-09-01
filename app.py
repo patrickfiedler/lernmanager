@@ -5399,23 +5399,22 @@ def _checkpoint_question_scores(question_results):
         if result['attempts'] > 1 or result['hints_used'] > 0:
             return 2
         if result.get('retry_after_rejected_flag'):
-            # Interim rule, pending the min()-vs-average decision with Chemie
-            # (docs/shared/chemie/inbox.md, 2026-08-31). A question redone after a
-            # REJECTED flag cannot score 3 even if solved cleanly: the student had a
-            # second look at it with the clock stopped, which is exactly what a retry
-            # or a hint costs. Without this, reporting a question is a free
-            # think-break and the report becomes the cheapest move on hard questions.
-            # How much it should really cost depends on the aggregation rule -- under
-            # min() this caps the WHOLE checkpoint at 2, under an average it is one
-            # question of seven. Revisit when Chemie answers.
+            # A question redone after a REJECTED report cannot score 3 even if solved
+            # cleanly: the student had a second look at it with the clock stopped,
+            # which is exactly what a retry or a hint costs. Without this, reporting a
+            # question is a free think-break and the report becomes the cheapest move
+            # on a hard question.
             return REJECTED_FLAG_RETRY_CAP
         return 3
 
     return [question_score(result) for result in question_results]
 
 
-# See the retry_after_rejected_flag branch above. Named rather than inlined because
-# it is the one number in this feature that is explicitly interim.
+# See the retry_after_rejected_flag branch above. Confirmed by Chemie on 2026-09-01,
+# after the question this number was waiting on was settled a level up: their grade
+# now averages over QUESTIONS rather than over consolidated checkpoint scores, so a
+# capped redo is one question of N and not, as under min(), a cap on the whole
+# checkpoint. min() itself is unchanged and now feeds only the Kern-Sperre.
 REJECTED_FLAG_RETRY_CAP = 2
 
 
