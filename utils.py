@@ -1,5 +1,7 @@
+import io
 import re
 import random
+import zipfile
 import secrets
 import ipaddress
 import unicodedata
@@ -455,6 +457,88 @@ def file_extension(filename):
     file accepted by one is served under a rule meant for another.
     """
     return filename.rsplit('.', 1)[1].lower() if '.' in filename else ''
+
+
+# The ZIP-based formats are all PK\x03\x04 at byte 0, so magic bytes alone
+# cannot tell a .docx from a .pptx from a .sb3. What distinguishes them is a
+# marker entry in the container, read from the ZIP's central directory --
+# namelist() decompresses nothing.
+_ZIP_MARKERS = (
+    ('word/document.xml', 'docx'),
+    ('ppt/presentation.xml', 'pptx'),
+    ('xl/workbook.xml', 'xlsx'),
+    ('project.json', 'sb3'),
+)
+_ODF_MIMETYPES = {
+    'application/vnd.oasis.opendocument.text': 'odt',
+    'application/vnd.oasis.opendocument.presentation': 'odp',
+    'application/vnd.oasis.opendocument.spreadsheet': 'ods',
+}
+
+
+def sniff_type(file_bytes):
+    """Identify a file from its content. Returns a canonical extension or None.
+
+    Answers "is this what it claims to be", not "is this harmless": a genuine
+    PDF carrying JavaScript and a genuine docx carrying a macro both pass.
+
+    The PDF check scans the first kilobyte rather than requiring %PDF- at byte
+    0 -- real PDFs out of Word and from scanners carry preamble bytes, and a
+    strict check would produce support cases with no security gain.
+    """
+    if not file_bytes:
+        return None
+    head = file_bytes[:1024]
+
+    if head.startswith(b'\x89PNG\r\n\x1a\n'):
+        return 'png'
+    if head.startswith(b'\xff\xd8\xff'):
+        return 'jpg'
+    if head.startswith((b'GIF87a', b'GIF89a')):
+        return 'gif'
+    if b'%PDF-' in head:
+        return 'pdf'
+
+    if head.startswith(b'PK\x03\x04'):
+        try:
+            with zipfile.ZipFile(io.BytesIO(file_bytes)) as zf:
+                names = set(zf.namelist())
+                for marker, ext in _ZIP_MARKERS:
+                    if marker in names:
+                        return ext
+                # ODF stores its type as the content of a 'mimetype' entry, so
+                # .odt and .odp are only distinguishable by reading it.
+                if 'mimetype' in names:
+                    mimetype = zf.read('mimetype').decode('ascii', 'replace').strip()
+                    if mimetype in _ODF_MIMETYPES:
+                        return _ODF_MIMETYPES[mimetype]
+        except (zipfile.BadZipFile, OSError, KeyError):
+            return None
+        return 'zip'
+
+    return None
+
+
+def content_matches_extension(filename, file_bytes):
+    """Does the content agree with the name? Returns (ok, sniffed_type).
+
+    Unrecognised content is *not* a mismatch: the whitelist already decided
+    which extensions may be stored, and this only catches a file whose content
+    positively identifies as something else. Being lenient here keeps the check
+    from rejecting an odd-but-valid file it simply does not know.
+    """
+    claimed = file_extension(filename)
+    sniffed = sniff_type(file_bytes)
+    if sniffed is None:
+        return True, None
+    # jpg/jpeg are one format with two spellings; a plain .zip legitimately
+    # contains anything, including an unmarked OOXML-looking tree.
+    normalize = {'jpeg': 'jpg'}
+    if normalize.get(claimed, claimed) == normalize.get(sniffed, sniffed):
+        return True, sniffed
+    if claimed == 'zip':
+        return True, sniffed
+    return False, sniffed
 
 
 def allowed_file(filename):

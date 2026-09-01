@@ -29,7 +29,7 @@ import llm_grading
 import quiz_grading
 import artifact_processor
 import artifact_checker
-from utils import generate_username, generate_password, allowed_file, file_extension, generate_credentials_pdf, generate_credentials_pdf_grouped, generate_name_username_pdf, generate_student_self_report_pdf, generate_class_report_pdf, generate_student_report_pdf, slugify, format_bytes, is_ip_allowed, is_within_time_window, parse_netzwerk_csv, split_tasks_by_stufe, stufe_sort_key, normalize_markdown_lists
+from utils import generate_username, generate_password, allowed_file, file_extension, content_matches_extension, generate_credentials_pdf, generate_credentials_pdf_grouped, generate_name_username_pdf, generate_student_self_report_pdf, generate_class_report_pdf, generate_student_report_pdf, slugify, format_bytes, is_ip_allowed, is_within_time_window, parse_netzwerk_csv, split_tasks_by_stufe, stufe_sort_key, normalize_markdown_lists
 from import_task import validate_task_structure, check_duplicate, import_task as do_import_task, overwrite_task_from_import, ValidationError
 
 app = Flask(__name__)
@@ -2107,6 +2107,24 @@ def admin_themen_import():
             if missing:
                 errors.append(f"Fehlende Dateien im ZIP: {', '.join(missing)}")
 
+            # Content has to match the name here too -- caught now, while the
+            # admin is still looking at a preview, rather than as a silently
+            # skipped file at extraction time.
+            if not missing:
+                with zipfile.ZipFile(io.BytesIO(file_bytes)) as zf:
+                    for td in task_list:
+                        for mat in td['task'].get('materials', []):
+                            if mat.get('typ') != 'datei':
+                                continue
+                            ok, sniffed = content_matches_extension(
+                                mat['pfad'], zf.read(mat['pfad'])
+                            )
+                            if not ok:
+                                errors.append(
+                                    f"'{mat['pfad']}' ist in Wirklichkeit eine "
+                                    f"{sniffed.upper()}-Datei."
+                                )
+
         if errors:
             return render_template('admin/themen_import.html', preview=True, errors=errors)
 
@@ -2404,6 +2422,17 @@ def admin_thema_material_upload(task_id):
               f"{', '.join(sorted(e.upper() for e in config.ALLOWED_EXTENSIONS))}", 'danger')
         return redirect(url_for('admin_thema_detail', task_id=task_id))
 
+    # The extension says what we may store and how we serve it; the content has
+    # to agree, or renaming a file is enough to pick a serving rule meant for
+    # something else.
+    file_bytes = file.read()
+    ok, sniffed = content_matches_extension(file.filename, file_bytes)
+    if not ok:
+        flash(f"Der Inhalt passt nicht zur Dateiendung: „{file.filename}“ ist "
+              f"eine {sniffed.upper()}-Datei. Bitte mit der richtigen Endung "
+              f"speichern und erneut hochladen.", 'danger')
+        return redirect(url_for('admin_thema_detail', task_id=task_id))
+
     try:
         # Ensure upload directory exists
         os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
@@ -2417,8 +2446,9 @@ def admin_thema_material_upload(task_id):
         filename = f"{task_id}_{filename}"
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
 
-        # Save the file
-        file.save(filepath)
+        # Save the file (already read into memory for the content check above)
+        with open(filepath, 'wb') as out:
+            out.write(file_bytes)
 
         # Verify file was saved
         if not os.path.exists(filepath):
@@ -4527,6 +4557,22 @@ def _template_loader(task_id):
     return load
 
 
+def _artifact_format_error(filename, file_bytes):
+    """Student-facing message when an upload's content contradicts its name.
+
+    docx, pptx, odt, odp and sb3 are all ZIP containers, so the extension check
+    alone cannot tell them apart -- a .pptx saved as .docx used to run into the
+    document extractor and come back with a confusing parse error instead of
+    "wrong format". Returns None when name and content agree.
+    """
+    ok, sniffed = content_matches_extension(filename, file_bytes)
+    if ok:
+        return None
+    claimed = file_extension(filename).upper()
+    return (f"Diese Datei ist eine {sniffed.upper()}-Datei, heißt aber „.{claimed.lower()}“. "
+            f"Speichere sie als {claimed} und lade sie noch einmal hoch.")
+
+
 def _save_artifact_file(student_id, task_id, subtask_id, file_bytes, original_filename):
     """Persist the latest artifact upload for a student+task (unit), overwriting any previous file.
 
@@ -4597,6 +4643,9 @@ def student_artifact_preview(slug, position):
         return jsonify({'error': f'Erwartet: {", ".join(allowed_formats)}'}), 400
 
     raw_bytes = f.read()
+    format_error = _artifact_format_error(filename, raw_bytes)
+    if format_error:
+        return jsonify({'error': format_error}), 400
     extract_bytes = artifact_processor.strip_pptx_metadata(raw_bytes) if ext == '.pptx' else raw_bytes
 
     try:
@@ -4703,6 +4752,9 @@ def student_artifact_gate_check(slug, position):
         return jsonify({'error': f'Erwartet: {", ".join(allowed)}'}), 400
 
     file_bytes = f.read()
+    format_error = _artifact_format_error(filename, file_bytes)
+    if format_error:
+        return jsonify({'error': format_error}), 400
     try:
         result = artifact_checker.check_gate(file_bytes, filename, gate_config,
                                              _template_loader(task['task_id']))
