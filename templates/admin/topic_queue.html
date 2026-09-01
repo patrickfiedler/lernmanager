@@ -30,7 +30,7 @@
                 {% for item in queue %}
                 <tr data-task-id="{{ item.task_id }}">
                     <td class="row-number">{{ item.position }}</td>
-                    <td>{{ item.name }}</td>
+                    <td>{% if item.is_seilbahn %}🚡 {% endif %}{{ item.name }}</td>
                     <td>{{ item.fach }} ({{ item.stufe }})</td>
                     <td>
                         <button type="button" class="btn btn-sm btn-secondary btn-move-up" title="Nach oben">↑</button>

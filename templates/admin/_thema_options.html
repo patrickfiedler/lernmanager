@@ -1,11 +1,17 @@
 {# Topic <option> lists for the admin assignment dropdowns.
 
+   Seilbahn topics (every subtask on the seilbahn path -- models.is_seilbahn)
+   are marked with a cable-car icon so admins can tell them from their regular
+   twin. Students never see this; the icon is in the label only, so the
+   topic_queue JS round-trip through data-name keeps it.
+
    thema_options() renders exact grade matches in their own optgroup above the
    rest. If the class has no klassenstufe set, `exact` is empty and the macro
    falls back to a single flat list -- see utils.split_tasks_by_stufe(). #}
 
 {% macro thema_option(task) -%}
-<option value="{{ task.id }}" data-name="{{ task.name }}" data-fach="{{ task.fach }}" data-stufe="{{ task.stufe }}">{{ task.fach }} ({{ task.stufe }}): {{ task.name }}</option>
+{% set label = ('🚡 ' if task.is_seilbahn else '') ~ task.name -%}
+<option value="{{ task.id }}" data-name="{{ label }}" data-fach="{{ task.fach }}" data-stufe="{{ task.stufe }}">{{ task.fach }} ({{ task.stufe }}): {{ label }}</option>
 {%- endmacro %}
 
 {% macro thema_options(exact, others, exclude_ids=None) -%}

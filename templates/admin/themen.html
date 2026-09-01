@@ -52,7 +52,7 @@
                 data-stufe-key="{{ task.stufe_key }}" data-kategorie="{{ task.kategorie }}">
                 <td>
                     <a href="{{ url_for('admin_thema_detail', task_id=task.id) }}">
-                        <strong>{{ task.name }}</strong>
+                        <strong>{% if task.is_seilbahn %}🚡 {% endif %}{{ task.name }}</strong>
                     </a>
                 </td>
                 <td>{{ task.fach }}</td>

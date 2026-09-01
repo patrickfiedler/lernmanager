@@ -1733,11 +1733,13 @@ def is_student_task_owner(student_id, student_task_id):
 # ============ Task functions ============
 
 def get_all_tasks():
-    """Get all tasks."""
+    """Get all tasks, with the derived is_seilbahn flag for the admin UI."""
     with db_session() as conn:
-        rows = conn.execute('''
-            SELECT * FROM task
-            ORDER BY fach, stufe, number, name
+        rows = conn.execute(f'''
+            SELECT t.*,
+                {_IS_SEILBAHN_SQL}
+            FROM task t
+            ORDER BY t.fach, t.stufe, t.number, t.name
         ''').fetchall()
         result = [dict(r) for r in rows]
     return result
@@ -1978,8 +1980,9 @@ def get_topic_queue(klasse_id):
     Empty list if no queue defined.
     """
     with db_session() as conn:
-        rows = conn.execute('''
-            SELECT tq.position, tq.task_id, t.name, t.fach, t.stufe, t.kategorie
+        rows = conn.execute(f'''
+            SELECT tq.position, tq.task_id, t.name, t.fach, t.stufe, t.kategorie,
+                {_IS_SEILBAHN_SQL}
             FROM topic_queue tq
             JOIN task t ON tq.task_id = t.id
             WHERE tq.klasse_id = ?
