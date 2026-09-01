@@ -4053,6 +4053,125 @@ def attach_checkpoint_session_to_attempt(session_uid, attempt_id):
         """, (attempt_id, session_uid))
 
 
+def resume_unfinished_checkpoint_session(student_id, checkpoint_id):
+    """Rebuild the per-question state of a checkpoint session that was never finished.
+
+    The counters that decide a checkpoint's score live in the Flask session cookie
+    (app._checkpoint_progress), so a student who runs out of lesson -- or whose
+    school PC wipes its browser data at logout -- used to come back to a blank
+    checkpoint and have to redo questions they had already solved. Measured on the
+    first production run: 8 of 18 sessions ended that way, three of them in the
+    three minutes before the bell.
+
+    Nothing new is stored to fix that. Every answer was already logged to
+    checkpoint_answer as it happened, and every report to checkpoint_flag; both
+    carry checkpoint_attempt_id = NULL until the session finishes, which is exactly
+    the marker for "work on this checkpoint that has not been scored yet". This
+    reads those rows back into the shape the cookie holds.
+
+    Rows from ALL unfinished sittings of this checkpoint are merged, not just the
+    newest: a student cut off twice must not lose the first half. Rows belonging to
+    a finished attempt are excluded by the NULL test, and rows predating a teacher's
+    reset by the superseded_at cut-off -- a reset means start over, so pre-reset work
+    must not come back.
+
+    Returns None when there is nothing to resume. Otherwise:
+        {'session_uid': str, 'questions': {index: {solved, attempts, hints_used,
+                                                   gave_up, llm_errors, flagged}}}
+
+    One field is not exactly recoverable: `hints_used` is only written to
+    checkpoint_answer alongside an answer (as hints_used_before), so a hint taken
+    after the last answer of the sitting is lost. That cannot cost the student a
+    point -- a hint needs a prior attempt on a still-unsolved question, so solving it
+    after the resume takes at least a second attempt, which scores 2 either way (see
+    app._checkpoint_question_scores). Only checkpoint_attempt.hint_count, a
+    statistic, can come out low.
+    """
+    with db_session() as conn:
+        # A reset supersedes the attempt but leaves these rows alone (they belong to
+        # no attempt). Timestamps are all local-time strings in one format, so the
+        # string comparison below is a real time comparison -- see now_local().
+        cutoff = conn.execute("""
+            SELECT MAX(superseded_at) AS cut FROM checkpoint_attempt
+            WHERE student_id = ? AND checkpoint_id = ?
+        """, (student_id, checkpoint_id)).fetchone()['cut'] or ''
+
+        answers = conn.execute("""
+            SELECT question_index,
+                   MAX(CASE WHEN correct = 1 THEN 1 ELSE 0 END) AS solved,
+                   -- An attempt is a graded submission. A give-up carries correct = 0
+                   -- but is not an attempt, and an ungraded row (LLM outage, or the
+                   -- draft saved beside a report) carries correct = NULL -- neither
+                   -- may cost the student the 3 that only a clean first try scores.
+                   SUM(CASE WHEN correct IS NOT NULL AND gave_up = 0 THEN 1 ELSE 0 END) AS attempts,
+                   MAX(hints_used_before) AS hints_used,
+                   MAX(gave_up) AS gave_up,
+                   SUM(CASE WHEN correct IS NULL AND grader != 'flagged' THEN 1 ELSE 0 END) AS llm_errors,
+                   MAX(session_uid) AS any_session_uid,
+                   MAX(timestamp) AS last_seen
+            FROM checkpoint_answer
+            WHERE student_id = ? AND checkpoint_id = ?
+              AND checkpoint_attempt_id IS NULL AND timestamp > ?
+            GROUP BY question_index
+        """, (student_id, checkpoint_id, cutoff)).fetchall()
+
+        # A report needs no answer text, so a flagged question can have no
+        # checkpoint_answer row at all. 'abgelehnt' is left out on purpose: the
+        # teacher sent that question back, so it is open again, not reported.
+        flags = conn.execute("""
+            SELECT DISTINCT question_index, session_uid, created_at
+            FROM checkpoint_flag
+            WHERE student_id = ? AND checkpoint_id = ?
+              AND checkpoint_attempt_id IS NULL AND status != 'abgelehnt'
+              AND created_at > ?
+        """, (student_id, checkpoint_id, cutoff)).fetchall()
+
+        if not answers and not flags:
+            return None
+
+        questions = {}
+        for row in answers:
+            questions[row['question_index']] = {
+                'solved': bool(row['solved']),
+                'attempts': row['attempts'] or 0,
+                'hints_used': row['hints_used'] or 0,
+                'gave_up': bool(row['gave_up']),
+                'llm_errors': row['llm_errors'] or 0,
+                'flagged': False,
+            }
+        for row in flags:
+            entry = questions.setdefault(row['question_index'], {
+                'solved': False, 'attempts': 0, 'hints_used': 0,
+                'gave_up': False, 'llm_errors': 0, 'flagged': False,
+            })
+            entry['flagged'] = True
+
+        # Carry on under the newest sitting's uid, so finishing stamps every merged
+        # row -- attach_checkpoint_session_to_attempt keys on session_uid, and rows
+        # left under an older uid would stay orphans and resume a second time.
+        session_uid = max(
+            [(r['last_seen'], r['any_session_uid']) for r in answers]
+            + [(r['created_at'], r['session_uid']) for r in flags if r['session_uid']]
+        )[1]
+
+        # Carry on under the newest sitting's uid and pull the earlier ones onto it.
+        # This is why the function resumes rather than merely reads: finishing stamps
+        # rows by session_uid (attach_checkpoint_session_to_attempt), so rows left
+        # under an older uid would stay unscored and resume a second time. The
+        # cut-off is repeated here for the same reason as above -- pre-reset rows
+        # must not be dragged into the new attempt.
+        for table in ('checkpoint_answer', 'checkpoint_flag'):
+            time_col = 'timestamp' if table == 'checkpoint_answer' else 'created_at'
+            conn.execute(f"""
+                UPDATE {table} SET session_uid = ?
+                WHERE student_id = ? AND checkpoint_id = ?
+                  AND checkpoint_attempt_id IS NULL AND session_uid != ?
+                  AND {time_col} > ?
+            """, (session_uid, student_id, checkpoint_id, session_uid, cutoff))
+
+        return {'session_uid': session_uid, 'questions': questions}
+
+
 def get_checkpoints_awaiting_retry(student_id):
     """Checkpoint ids (= subtask.id) where a rejected report is still owed a redo.
 

@@ -57,6 +57,21 @@
 </div>
 {% endif %}
 
+{% if resume %}
+{# Picked up an interrupted sitting. Says the count out loud: only the open
+   questions are on screen, so without this the checkpoint looks like it shrank. #}
+<div class="checkpoint-resume-banner">
+    <p class="checkpoint-resume-lead">
+        ▶ Du machst hier weiter — {{ resume.done }} von {{ resume.total }} Fragen
+        hast du schon erledigt.
+    </p>
+    <p class="checkpoint-resume-note">
+        Was du geschafft hast, bleibt geschafft. Unten stehen nur noch die Fragen,
+        die offen sind.
+    </p>
+</div>
+{% endif %}
+
 {% if reopened %}
 {# A teacher reopened this checkpoint. Without this the reset was silent: the
    result and the Rueckmeldung simply disappeared. Shows no old score -- it does
@@ -137,6 +152,13 @@
 .checkpoint-review-unreviewed { border-left-color: #9ca3af; }
 .checkpoint-review-confirmed { border-left-color: #16a34a; background: #f0fdf4; }
 .checkpoint-review-changed   { border-left-color: #2563eb; background: #eff6ff; }
+/* Green, not the amber of "reopened"/"reported": continuing is the normal, good
+   case -- nothing went wrong and nothing needs the student's attention. */
+.checkpoint-resume-banner { border-left: 4px solid #16a34a; background: #f0fdf4;
+                            border-radius: 4px; padding: 0.6rem 0.9rem; margin-bottom: 1rem; }
+.checkpoint-resume-banner p { margin: 0.15rem 0; }
+.checkpoint-resume-lead { font-size: 1.05rem; }
+.checkpoint-resume-note { font-size: 0.9rem; color: #4b5563; }
 .checkpoint-reopened-banner { border-left: 4px solid #d97706; background: #fffbeb;
                               border-radius: 4px; padding: 0.6rem 0.9rem; margin-bottom: 1rem; }
 .checkpoint-reopened-banner p { margin: 0.15rem 0; }
@@ -597,6 +619,14 @@
         });
     }
 
-    renderQuestion();
+    // Empty only when a resumed sitting has nothing left open -- the student
+    // answered the last question and the connection died before `finish` landed.
+    // Scoring it straight away is the only way out; renderQuestion() would read
+    // questions[0] of an empty list and leave a blank page.
+    if (questions.length === 0) {
+        finishCheckpoint();
+    } else {
+        renderQuestion();
+    }
 })();
 {% endblock %}

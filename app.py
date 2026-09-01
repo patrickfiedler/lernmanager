@@ -5307,6 +5307,43 @@ def _checkpoint_progress(subtask_id):
     return progress
 
 
+def _has_live_checkpoint_progress(subtask_id):
+    """Whether this browser session already holds progress for this checkpoint.
+
+    The resume path (_resume_checkpoint_progress) may only run when it does not:
+    the cookie is the newer record of the two while a sitting is live, and it holds
+    the one thing the log cannot give back -- hints taken since the last answer.
+    """
+    return session.get('checkpoint_progress', {}).get(str(subtask_id)) is not None
+
+
+def _resume_checkpoint_progress(student_id, subtask_id, progress):
+    """Fill an empty progress dict from the answer log, if there is a sitting to
+    resume. Returns the set of question indices that are already finished
+    (solved, given up or reported), empty when there is nothing to resume."""
+    resumed = models.resume_unfinished_checkpoint_session(student_id, subtask_id)
+    if not resumed:
+        return set()
+
+    progress['session_uid'] = resumed['session_uid']
+    done = set()
+    for index, state in resumed['questions'].items():
+        qidx = str(index)
+        progress['attempts'][qidx] = state['attempts']
+        progress['hints_used'][qidx] = state['hints_used']
+        if state['solved']:
+            progress['solved'][qidx] = True
+        if state['gave_up']:
+            progress['gave_up'][qidx] = True
+        if state['flagged']:
+            progress['flagged'][qidx] = True
+        if state['llm_errors']:
+            progress.setdefault('llm_errors', {})[qidx] = state['llm_errors']
+        if state['solved'] or state['gave_up'] or state['flagged']:
+            done.add(index)
+    return done
+
+
 def _save_checkpoint_progress(subtask_id, progress):
     all_progress = session.get('checkpoint_progress', {})
     all_progress[str(subtask_id)] = progress
@@ -5438,15 +5475,7 @@ def _handle_checkpoint_quiz(student, task, slug, subtask, position, klasse):
         return redirect(url_for('student_klasse', slug=slug))
 
     hints = json.loads(subtask['checkpoint_hints_json']) if subtask.get('checkpoint_hints_json') else []
-    # enumerate over the STORED quiz, then filter -- so each question keeps the index
-    # every route validates against even when the rendered list is a subset.
-    questions_json = json.dumps([_serialize_checkpoint_question(q, i) for i, q in questions])
 
-    # Remember which questions were actually shown. `finish` scores exactly these:
-    # walking the stored quiz instead left a checkpoint unfinishable whenever the
-    # rendered list was a subset -- with the LLM budget spent, its short_answer
-    # questions are dropped, and finish then waited forever for answers to questions
-    # the student was never shown.
     progress = _checkpoint_progress(subtask['id'])
     # Entering or leaving retry mode starts a clean session: the two score
     # different things, and carrying counters across would let a solved question
@@ -5454,10 +5483,34 @@ def _handle_checkpoint_quiz(student, task, slug, subtask, position, klasse):
     if bool(retry_indices) != bool(progress.get('retry')):
         _clear_checkpoint_progress(subtask['id'])
         progress = _checkpoint_progress(subtask['id'])
-        progress['retry'] = bool(retry_indices)
+
+    # A sitting that ran out of lesson (or lost its cookie to a school PC wiping
+    # browser data at logout) picks up where it stopped, instead of making the
+    # student redo questions they already solved -- Chemie's requirement of
+    # 2026-09-01, and the reason a checkpoint's hardness is completeness, not time.
+    # Only when the cookie is empty: a live sitting is the newer record.
+    done = (set() if _has_live_checkpoint_progress(subtask['id'])
+            else _resume_checkpoint_progress(student['id'], subtask['id'], progress))
+    progress['retry'] = bool(retry_indices)
     progress['retry_flag_ids'] = [f['id'] for f in retry_flags]
-    progress['rendered'] = [i for i, _ in questions]
+
+    # `finish` scores exactly `rendered`, so it must cover the whole sitting --
+    # including questions finished before the interruption, which are not shown
+    # again. The union matters when the LLM budget is spent on the day of the
+    # resume: a short_answer solved earlier is dropped from `questions` but still
+    # has to be scored, while an unsolved one stays out or finish would wait
+    # forever for an answer the student was never shown.
+    progress['rendered'] = sorted({i for i, _ in questions} | done)
     _save_checkpoint_progress(subtask['id'], progress)
+
+    # Only what is still open goes on screen. The banner carries the rest -- without
+    # it, coming back to 3 of 7 questions looks like the checkpoint shrank.
+    open_questions = [(i, q) for i, q in questions if i not in done]
+    resume = ({'done': len(done), 'total': len(progress['rendered'])} if done else None)
+
+    # enumerate over the STORED quiz, then filter -- so each question keeps the index
+    # every route validates against even when the rendered list is a subset.
+    questions_json = json.dumps([_serialize_checkpoint_question(q, i) for i, q in open_questions])
     transparency_mode = models.get_effective_transparency_mode(student['id'], klasse['id'] if klasse else None)
 
     # A student who already finished this checkpoint sees the standing result and
@@ -5488,7 +5541,7 @@ def _handle_checkpoint_quiz(student, task, slug, subtask, position, klasse):
                            student=student, task=task, slug=slug, position=position,
                            subtask_id=subtask['id'], questions_json=questions_json,
                            has_hints=bool(hints), transparency_mode=transparency_mode,
-                           review=review, reopened=reopened,
+                           review=review, reopened=reopened, resume=resume,
                            flag_reasons=models.CHECKPOINT_FLAG_REASONS,
                            retry_flags=retry_flags,
                            llm_enabled=config.LLM_ENABLED)
