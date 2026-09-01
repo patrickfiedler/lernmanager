@@ -6395,6 +6395,34 @@ def get_current_user_info():
     return user_id, user_type
 
 
+# Routes the browser calls with fetch() and reads as JSON. An error on one of
+# these used to fall through to the handlers below, which flash + redirect: the
+# student's upload came back as a 302 to the dashboard with an HTML body, so the
+# JS saw no error message at all and the page just went quiet. A 65 MB
+# photo-heavy .pptx did exactly this.
+_JSON_UPLOAD_ENDPOINTS = frozenset({
+    'student_artifact_preview',
+    'student_artifact_feedback',
+    'student_artifact_gate_check',
+})
+
+
+def _wants_json_error():
+    return request.endpoint in _JSON_UPLOAD_ENDPOINTS
+
+
+@app.errorhandler(413)
+def handle_too_large(error):
+    """Upload above MAX_CONTENT_LENGTH -- say so, in the shape the caller reads."""
+    limit_mb = config.MAX_CONTENT_LENGTH // (1024 * 1024)
+    message = (f'Die Datei ist zu groß (Maximum: {limit_mb} MB). '
+               f'Bitte verkleinere sie und versuche es noch einmal.')
+    if _wants_json_error():
+        return jsonify({'error': message}), 413
+    flash(message, 'danger')
+    return redirect(request.referrer or url_for('index'))
+
+
 @app.errorhandler(400)
 def handle_bad_request(error):
     """Handle 400 Bad Request errors."""
@@ -6487,6 +6515,9 @@ def handle_exception(error):
         method=request.method,
         url=request.url
     )
+    if _wants_json_error():
+        return jsonify({'error': 'Beim Verarbeiten der Datei ist etwas schiefgelaufen. '
+                                 'Bitte versuche es noch einmal.'}), 500
     flash('Ein unerwarteter Fehler ist aufgetreten. Der Fehler wurde protokolliert.', 'danger')
     return redirect(url_for('index'))
 
