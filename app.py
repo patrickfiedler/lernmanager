@@ -29,7 +29,7 @@ import llm_grading
 import quiz_grading
 import artifact_processor
 import artifact_checker
-from utils import generate_username, generate_password, allowed_file, generate_credentials_pdf, generate_credentials_pdf_grouped, generate_name_username_pdf, generate_student_self_report_pdf, generate_class_report_pdf, generate_student_report_pdf, slugify, format_bytes, is_ip_allowed, is_within_time_window, parse_netzwerk_csv, split_tasks_by_stufe, stufe_sort_key, normalize_markdown_lists
+from utils import generate_username, generate_password, allowed_file, file_extension, generate_credentials_pdf, generate_credentials_pdf_grouped, generate_name_username_pdf, generate_student_self_report_pdf, generate_class_report_pdf, generate_student_report_pdf, slugify, format_bytes, is_ip_allowed, is_within_time_window, parse_netzwerk_csv, split_tasks_by_stufe, stufe_sort_key, normalize_markdown_lists
 from import_task import validate_task_structure, check_duplicate, import_task as do_import_task, overwrite_task_from_import, ValidationError
 
 app = Flask(__name__)
@@ -2573,6 +2573,12 @@ def download_material(material_id):
             }
         )
 
+        # Only formats a browser is meant to display are served inline. Anything
+        # else is handed over as a download, so a file type we never render
+        # cannot become a page on our own origin. The whitelist decides what may
+        # be stored; this decides what may be *shown* -- two different questions.
+        inline = file_extension(material['pfad']) in config.INLINE_EXTENSIONS
+
         # In production, let nginx serve the file directly (X-Accel-Redirect)
         # This frees the Python thread immediately instead of streaming bytes
         if not app.debug and request.headers.get('X-Forwarded-For'):
@@ -2581,13 +2587,17 @@ def download_material(material_id):
             response = Response('')
             response.headers['X-Accel-Redirect'] = f'/protected-files/{material["pfad"]}'
             response.headers['Content-Type'] = content_type
+            if not inline:
+                response.headers['Content-Disposition'] = (
+                    f'attachment; filename="{material["pfad"]}"'
+                )
             return response
 
         # Development fallback: serve directly through Flask
         return send_from_directory(
             config.UPLOAD_FOLDER,
             material['pfad'],
-            as_attachment=False
+            as_attachment=not inline
         )
     except PermissionError as e:
         app.logger.error(f'Download permission error: {e}')
@@ -6423,6 +6433,23 @@ def handle_exception(error):
 
 
 # ============ Analytics Middleware ============
+
+@app.after_request
+def set_security_headers(response):
+    """Stop the browser second-guessing the Content-Type we declared.
+
+    Without it a browser may inspect the bytes and decide an upload we serve as
+    image/jpeg is really a page, which turns a renamed file into a script on our
+    own origin. It is insurance, not the control: a file we *declare* as
+    text/html still renders, which is why download_material only serves
+    config.INLINE_EXTENSIONS inline in the first place.
+
+    In app rather than nginx so it holds in development too, and so it cannot be
+    lost the next time certbot rewrites the server block.
+    """
+    response.headers.setdefault('X-Content-Type-Options', 'nosniff')
+    return response
+
 
 @app.before_request
 def log_analytics():
