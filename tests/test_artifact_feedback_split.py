@@ -9,10 +9,13 @@ import io
 import json
 import config
 import models
+from tests.test_content_sniffing import DOCX
 
-GATE_CONFIG = {"format": [".txt", ".md"]}
+# A checkable format: check_gate fails closed on anything it cannot inspect
+# (see tests/test_gate_fails_closed.py), so a .txt gate no longer passes.
+GATE_CONFIG = {"format": [".docx"]}
 GRADED_CONFIG = {
-    "format": [".txt", ".md"],
+    "format": [".docx"],
     "expected_filename": "Abgabe-Alex",
     "criteria": ["Enthaelt eine Einleitung"],
 }
@@ -46,7 +49,7 @@ def test_gate_check_filename_feedback_runs_with_llm_disabled(app, client, tmp_pa
 
     resp = client.post(
         "/schueler/thema/testthema/aufgabe-1/abgabe-pruefen",
-        data={"file": (io.BytesIO(b"meine abgabe"), "Abgabe-Alex.txt")},
+        data={"file": (io.BytesIO(DOCX), "Abgabe-Alex.docx")},
         content_type="multipart/form-data",
     )
     assert resp.status_code == 200

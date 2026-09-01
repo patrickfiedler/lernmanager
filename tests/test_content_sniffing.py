@@ -28,7 +28,15 @@ def _zip(entries):
     return buf.getvalue()
 
 
-DOCX = _zip({"word/document.xml": "<w:document/>", "[Content_Types].xml": "<x/>"})
+# Valid enough to be parsed, not only recognised: artifact_processor reads
+# word/document.xml with ElementTree, so the namespace has to be declared.
+_W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+_DOCUMENT_XML = (
+    f'<w:document xmlns:w="{_W}"><w:body>'
+    '<w:p><w:r><w:t>Hallo Welt, das ist mein Dokument.</w:t></w:r></w:p>'
+    '</w:body></w:document>'
+)
+DOCX = _zip({"word/document.xml": _DOCUMENT_XML, "[Content_Types].xml": "<x/>"})
 PPTX = _zip({"ppt/presentation.xml": "<p:presentation/>", "[Content_Types].xml": "<x/>"})
 SB3 = _zip({"project.json": '{"targets": []}'})
 ODT = _zip({"mimetype": "application/vnd.oasis.opendocument.text", "content.xml": "<x/>"})

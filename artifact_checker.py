@@ -11,12 +11,26 @@ import json
 from difflib import SequenceMatcher
 
 
+# The formats check_gate can actually inspect. A gate configured for anything
+# else cannot be checked at all, and import_task refuses such a config -- it
+# imports this rather than repeating the list, so the two cannot drift.
+CHECKABLE_FORMATS = ('.pptx', '.odp', '.docx', '.odt', '.sb3')
+
+
 def check_gate(file_bytes: bytes, filename: str, gate_config: dict, load_template=None) -> dict:
-    """Dispatch to format-specific check. Passes by default for unknown formats.
+    """Dispatch to format-specific check. Fails closed on formats it cannot check.
 
     load_template(name) -> bytes|None resolves gate_config['template_material']
     against the topic's registered materials. Optional: without it, a
     min_added_words check falls back to a warning (see _check_added_words).
+
+    An unknown format used to return passed=True. That meant a gate whose format
+    we cannot inspect -- .pdf, .txt, or a config with no `format` key at all --
+    accepted *any* file, and on an inline (non-capstone) gate went on to
+    auto-complete the Aufgabe: a checkpoint that looked checked and was not.
+    Failing closed makes that state visible instead of silently passing work
+    through. import_task rejects such a config at import, so this is the safety
+    net rather than the guard.
     """
     ext = ('.' + filename.rsplit('.', 1)[-1].lower()) if '.' in filename else ''
     if ext in ('.pptx', '.odp'):
@@ -25,7 +39,13 @@ def check_gate(file_bytes: bytes, filename: str, gate_config: dict, load_templat
         return _check_document(file_bytes, ext, gate_config, load_template)
     if ext == '.sb3':
         return _check_scratch(file_bytes, gate_config)
-    return {'passed': True, 'message': '', 'details': [], 'matches': []}
+    return {
+        'passed': False,
+        'message': 'Abgabe kann nicht geprüft werden',
+        'details': ['Diese Abgabe kann gerade nicht automatisch geprüft werden. '
+                    'Bitte melde dich bei deiner Lehrkraft.'],
+        'matches': [],
+    }
 
 
 def _fuzzy_match(a: str, b: str) -> float:

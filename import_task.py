@@ -18,6 +18,7 @@ import sys
 import zipfile
 from pathlib import Path
 
+import artifact_checker
 import config
 import models
 from utils import allowed_file
@@ -73,12 +74,12 @@ def extract_zip_materials(zip_path, task_data, dry_run=False):
         zip_names = set(zf.namelist())
         for mat in task_data.get('task', {}).get('materials', []):
             if mat.get('typ') == 'datei' and mat.get('pfad') in zip_names:
-                # Zip entry names aren't restricted by the format -- a crafted
-                # '../../etc/...' pfad would otherwise write outside upload_root.
                 # Second line of defence behind validate_task_structure: nothing
                 # reaches UPLOAD_FOLDER that the download route would not serve safely.
                 if not allowed_file(mat['pfad']):
                     continue
+                # Zip entry names aren't restricted by the format -- a crafted
+                # '../../etc/...' pfad would otherwise write outside upload_root.
                 dest = (upload_root / mat['pfad']).resolve()
                 if dest != upload_root and upload_root not in dest.parents:
                     continue
@@ -131,6 +132,24 @@ def _validate_artifact_gate(gate, label):
                       f"(Dateiname der Vorlage) — wird nicht geprüft")
 
     return gate, None
+
+
+def _uncheckable_gate_formats(gate, label):
+    """Errors for artifact_gate.format entries check_gate cannot inspect.
+
+    artifact_checker.check_gate fails closed on anything outside
+    CHECKABLE_FORMATS, so a gate declaring e.g. '.pdf' would reject every
+    submission a student could make. Catching it at import turns a wall the
+    student runs into during the lesson into a message the author sees.
+    """
+    if not isinstance(gate, dict) or not isinstance(gate.get('format'), list):
+        return []   # shape problems are already a soft warning above
+    bad = [f for f in gate['format']
+           if str(f).lower() not in artifact_checker.CHECKABLE_FORMATS]
+    if not bad:
+        return []
+    return [f"{label}: artifact_gate.format {bad} kann nicht geprüft werden. "
+            f"Möglich: {', '.join(artifact_checker.CHECKABLE_FORMATS)}"]
 
 
 def _validate_fork_groups(subtasks, errors):
@@ -391,6 +410,10 @@ def validate_task_structure(data, warnings=None):
                     _, warn = _validate_artifact_gate(sub['artifact_gate'], f"Subtask {i+1}")
                     if warn and warnings is not None:
                         warnings.append(warn)
+                    # ...except a format the checker cannot inspect. That is a hard
+                    # error: such a gate cannot pass anyone (check_gate fails closed),
+                    # so importing it would wall the students behind it.
+                    errors.extend(_uncheckable_gate_formats(sub['artifact_gate'], f"Subtask {i+1}"))
             _validate_fork_groups(task['subtasks'], errors)
 
     # Validate materials
