@@ -312,7 +312,7 @@
             <form method="POST" action="{{ url_for('admin_thema_material_upload', task_id=task.id) }}" enctype="multipart/form-data">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <div class="form-group">
-                    <input type="file" name="file" class="form-control" accept=".pdf,.png,.jpg,.jpeg,.gif" required>
+                    <input type="file" name="file" class="form-control" accept="{{ upload_accept }}" required>
                 </div>
                 <div class="form-group">
                     <input type="text" name="beschreibung" class="form-control" placeholder="Beschreibung (optional)">

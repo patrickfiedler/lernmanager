@@ -152,6 +152,17 @@ def _student_display_name():
 
 
 @app.context_processor
+def inject_upload_accept():
+    """The file picker's accept="" list, derived from config.ALLOWED_EXTENSIONS.
+
+    Hardcoding it in the template let the form and the server-side check drift
+    apart: the picker still offered only images and PDFs after the whitelist
+    had grown to cover the docx/pptx templates the gates need.
+    """
+    return {'upload_accept': ','.join('.' + e for e in sorted(config.ALLOWED_EXTENSIONS))}
+
+
+@app.context_processor
 def inject_student_display_name():
     """Make student_display_name available in all templates."""
     if 'student_id' in session:
@@ -1968,6 +1979,11 @@ def _extract_import_zip_files(tmp_id, task_list):
             for task_data in task_list:
                 for mat in task_data['task'].get('materials', []):
                     if mat.get('typ') == 'datei' and mat.get('pfad') in zip_names:
+                        # Second line of defence behind validate_task_structure:
+                        # nothing reaches UPLOAD_FOLDER that download_material
+                        # would not serve safely.
+                        if not allowed_file(mat['pfad']):
+                            continue
                         dest = os.path.abspath(os.path.join(upload_dir, mat['pfad']))
                         # Zip entry names aren't restricted by the format -- a crafted
                         # '../../etc/...' pfad would otherwise write outside upload_dir.
@@ -2384,7 +2400,8 @@ def admin_thema_material_upload(task_id):
         return redirect(url_for('admin_thema_detail', task_id=task_id))
 
     if not (file and allowed_file(file.filename)):
-        flash('Ungültiger Dateityp. Erlaubt: PDF, PNG, JPG, JPEG, GIF', 'danger')
+        flash(f"Ungültiger Dateityp. Erlaubt: "
+              f"{', '.join(sorted(e.upper() for e in config.ALLOWED_EXTENSIONS))}", 'danger')
         return redirect(url_for('admin_thema_detail', task_id=task_id))
 
     try:

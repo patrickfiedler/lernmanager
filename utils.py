@@ -5,6 +5,8 @@ import ipaddress
 import unicodedata
 from datetime import datetime
 
+import config
+
 
 def is_ip_allowed(ip_str, ranges_str):
     """Check if ip_str is in any CIDR/IP in ranges_str (comma/newline separated). Empty ranges = allow all."""
@@ -445,10 +447,19 @@ def generate_password():
     return password
 
 
+def file_extension(filename):
+    """Lowercase extension without the dot, or '' when there is none.
+
+    One definition for every caller: the upload routes, the ZIP import and the
+    download route all have to agree on what the extension of a file is, or a
+    file accepted by one is served under a rule meant for another.
+    """
+    return filename.rsplit('.', 1)[1].lower() if '.' in filename else ''
+
+
 def allowed_file(filename):
-    """Check if file extension is allowed."""
-    return '.' in filename and \
-           filename.rsplit('.', 1)[1].lower() in {'pdf', 'png', 'jpg', 'jpeg', 'gif'}
+    """Check if file extension is allowed (config.ALLOWED_EXTENSIONS)."""
+    return file_extension(filename) in config.ALLOWED_EXTENSIONS
 
 
 def _credentials_group_elements(students, klasse_name, styles):

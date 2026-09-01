@@ -20,6 +20,7 @@ from pathlib import Path
 
 import config
 import models
+from utils import allowed_file
 
 
 class ValidationError(Exception):
@@ -74,6 +75,10 @@ def extract_zip_materials(zip_path, task_data, dry_run=False):
             if mat.get('typ') == 'datei' and mat.get('pfad') in zip_names:
                 # Zip entry names aren't restricted by the format -- a crafted
                 # '../../etc/...' pfad would otherwise write outside upload_root.
+                # Second line of defence behind validate_task_structure: nothing
+                # reaches UPLOAD_FOLDER that the download route would not serve safely.
+                if not allowed_file(mat['pfad']):
+                    continue
                 dest = (upload_root / mat['pfad']).resolve()
                 if dest != upload_root and upload_root not in dest.parents:
                     continue
@@ -402,6 +407,16 @@ def validate_task_structure(data, warnings=None):
                     errors.append(f"Material {i+1} has invalid typ '{mat['typ']}'. Must be 'link' or 'datei'")
                 if 'pfad' not in mat or not mat['pfad']:
                     errors.append(f"Material {i+1} missing 'pfad'")
+                elif mat.get('typ') == 'datei' and not allowed_file(mat['pfad']):
+                    # The ZIP import writes these straight into UPLOAD_FOLDER and
+                    # the download route serves them back. Without this the manual
+                    # upload's whitelist was trivially bypassed by shipping the file
+                    # in a bundle instead -- an .html material is a script running
+                    # on our own origin for whoever opens it.
+                    errors.append(
+                        f"Material {i+1} ('{mat['pfad']}'): Dateityp nicht erlaubt. "
+                        f"Erlaubt: {', '.join(sorted(config.ALLOWED_EXTENSIONS))}"
+                    )
 
     # Validate topic-level quiz
     if 'quiz' in task and task['quiz']:
