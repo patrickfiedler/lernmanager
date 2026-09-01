@@ -4580,7 +4580,14 @@ def _save_artifact_file(student_id, task_id, subtask_id, file_bytes, original_fi
     (docs/shared/mbi/content-design.md) -- one growing document uploaded at each checkpoint.
     subtask_id is recorded for context only (which checkpoint triggered this upload).
     """
-    ext = ('.' + original_filename.rsplit('.', 1)[-1].lower()) if '.' in original_filename else ''
+    # The stored name is {student}_{task}{ext} and only ext comes from the
+    # upload, so a crafted filename cannot walk up out of the directory -- '..'
+    # can never be the first path component. It can still decide the stored
+    # extension though ('1_1.php', a null byte surviving as '.py'), so pin it to
+    # the formats we actually accept and fall back to .bin for anything else.
+    ext = '.' + file_extension(original_filename)
+    if ext[1:] not in config.ALLOWED_EXTENSIONS:
+        ext = '.bin'
     upload_dir = _artifact_upload_dir()
     os.makedirs(upload_dir, exist_ok=True)
     for old in glob.glob(os.path.join(upload_dir, f'{student_id}_{task_id}.*')):

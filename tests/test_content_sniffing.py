@@ -37,6 +37,9 @@ _DOCUMENT_XML = (
     '</w:body></w:document>'
 )
 DOCX = _zip({"word/document.xml": _DOCUMENT_XML, "[Content_Types].xml": "<x/>"})
+# A second, byte-different docx, for tests that check one upload replaced another.
+DOCX2 = _zip({"word/document.xml": _DOCUMENT_XML.replace("Hallo Welt", "Zweite Fassung"),
+              "[Content_Types].xml": "<x/>"})
 PPTX = _zip({"ppt/presentation.xml": "<p:presentation/>", "[Content_Types].xml": "<x/>"})
 SB3 = _zip({"project.json": '{"targets": []}'})
 ODT = _zip({"mimetype": "application/vnd.oasis.opendocument.text", "content.xml": "<x/>"})

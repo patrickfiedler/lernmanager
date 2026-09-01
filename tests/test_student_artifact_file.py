@@ -11,8 +11,12 @@ import io
 import json
 import config
 import models
+from tests.test_content_sniffing import DOCX, DOCX2, ODT
 
-GATE_CONFIG = {"format": [".txt", ".md"]}
+# Checkable formats: check_gate fails closed on anything it cannot inspect
+# (tests/test_gate_fails_closed.py), and the stored extension is pinned to
+# config.ALLOWED_EXTENSIONS (tests/test_artifact_storage_name.py).
+GATE_CONFIG = {"format": [".docx", ".odt"]}
 
 
 def _student_with_gated_subtask(app, tmp_path):
@@ -67,7 +71,7 @@ def test_gate_upload_saves_file_and_db_row(app, client, tmp_path):
 
     resp = client.post(
         "/schueler/thema/testthema/aufgabe-1/abgabe-pruefen",
-        data={"file": (io.BytesIO(b"meine abgabe"), "abgabe.txt")},
+        data={"file": (io.BytesIO(DOCX), "abgabe.docx")},
         content_type="multipart/form-data",
     )
     assert resp.status_code == 200
@@ -77,18 +81,18 @@ def test_gate_upload_saves_file_and_db_row(app, client, tmp_path):
 
     record = models.get_student_artifact_file(student_id, task_id)
     assert record is not None
-    assert record["original_filename"] == "abgabe.txt"
-    assert record["disk_filename"] == f"{student_id}_{task_id}.txt"
+    assert record["original_filename"] == "abgabe.docx"
+    assert record["disk_filename"] == f"{student_id}_{task_id}.docx"
 
     stored_path = tmp_path / "uploads" / "artefakte" / record["disk_filename"]
     assert stored_path.exists()
-    assert stored_path.read_bytes() == b"meine abgabe"
+    assert stored_path.read_bytes() == DOCX
 
     # Topic page must render the download link without error (capstone gate
     # card here, since the only subtask is also the last one)
     page = client.get("/schueler/thema/testthema")
     assert page.status_code == 200
-    assert b"abgabe.txt" in page.data
+    assert b"abgabe.docx" in page.data
     assert f"/artefakt-datei/{student_id}/{task_id}/download".encode() in page.data
 
 
@@ -98,7 +102,7 @@ def test_admin_student_detail_shows_uploaded_file(app, client, tmp_path):
         sess["student_id"] = student_id
     client.post(
         "/schueler/thema/testthema/aufgabe-1/abgabe-pruefen",
-        data={"file": (io.BytesIO(b"meine abgabe"), "abgabe.txt")},
+        data={"file": (io.BytesIO(DOCX), "abgabe.docx")},
         content_type="multipart/form-data",
     )
 
@@ -111,7 +115,7 @@ def test_admin_student_detail_shows_uploaded_file(app, client, tmp_path):
 
     page = client.get(f"/admin/schueler/{student_id}")
     assert page.status_code == 200
-    assert b"abgabe.txt" in page.data
+    assert b"abgabe.docx" in page.data
     assert f"/artefakt-datei/{student_id}/{task_id}/download".encode() in page.data
 
 
@@ -122,7 +126,7 @@ def test_reupload_with_different_extension_replaces_old_file(app, client, tmp_pa
 
     client.post(
         "/schueler/thema/testthema/aufgabe-1/abgabe-pruefen",
-        data={"file": (io.BytesIO(b"erste version"), "abgabe.txt")},
+        data={"file": (io.BytesIO(DOCX), "abgabe.docx")},
         content_type="multipart/form-data",
     )
     first_record = models.get_student_artifact_file(student_id, task_id)
@@ -131,7 +135,7 @@ def test_reupload_with_different_extension_replaces_old_file(app, client, tmp_pa
 
     client.post(
         "/schueler/thema/testthema/aufgabe-1/abgabe-pruefen",
-        data={"file": (io.BytesIO(b"zweite version"), "abgabe.md")},
+        data={"file": (io.BytesIO(ODT), "abgabe.odt")},
         content_type="multipart/form-data",
     )
 
@@ -139,9 +143,9 @@ def test_reupload_with_different_extension_replaces_old_file(app, client, tmp_pa
     assert not first_path.exists()
 
     second_record = models.get_student_artifact_file(student_id, task_id)
-    assert second_record["disk_filename"] == f"{student_id}_{task_id}.md"
+    assert second_record["disk_filename"] == f"{student_id}_{task_id}.odt"
     second_path = tmp_path / "uploads" / "artefakte" / second_record["disk_filename"]
-    assert second_path.read_bytes() == b"zweite version"
+    assert second_path.read_bytes() == ODT
 
     # Still exactly one row for this (student, task) -- overwrite, not append
     with models.db_session() as conn:
@@ -162,16 +166,16 @@ def test_second_checkpoint_overwrites_first_checkpoints_file(app, client, tmp_pa
 
     client.post(
         "/schueler/thema/testthema/aufgabe-2/abgabe-pruefen",
-        data={"file": (io.BytesIO(b"nach checkpoint 1"), "wachsende-datei.txt")},
+        data={"file": (io.BytesIO(DOCX), "wachsende-datei.docx")},
         content_type="multipart/form-data",
     )
     first_record = models.get_student_artifact_file(student_id, task_id)
     first_path = tmp_path / "uploads" / "artefakte" / first_record["disk_filename"]
-    assert first_path.read_bytes() == b"nach checkpoint 1"
+    assert first_path.read_bytes() == DOCX
 
     client.post(
         "/schueler/thema/testthema/aufgabe-3/abgabe-pruefen",
-        data={"file": (io.BytesIO(b"nach checkpoint 2, laenger"), "wachsende-datei.txt")},
+        data={"file": (io.BytesIO(DOCX2), "wachsende-datei.docx")},
         content_type="multipart/form-data",
     )
 
@@ -184,9 +188,9 @@ def test_second_checkpoint_overwrites_first_checkpoints_file(app, client, tmp_pa
     assert count == 1
 
     record = models.get_student_artifact_file(student_id, task_id)
-    assert first_path.read_bytes() == b"nach checkpoint 2, laenger"  # same disk file, overwritten in place
+    assert first_path.read_bytes() == DOCX2  # same disk file, overwritten in place
     stored_path = tmp_path / "uploads" / "artefakte" / record["disk_filename"]
-    assert stored_path.read_bytes() == b"nach checkpoint 2, laenger"
+    assert stored_path.read_bytes() == DOCX2
 
     # Viewing the unit at checkpoint 1's position shows the up-to-date (checkpoint 2) file
     page = client.get("/schueler/thema/testthema?aufgabe=2")
@@ -211,7 +215,7 @@ def test_download_ownership_check(app, client, tmp_path):
         sess["student_id"] = student_id
     client.post(
         "/schueler/thema/testthema/aufgabe-1/abgabe-pruefen",
-        data={"file": (io.BytesIO(b"meine abgabe"), "abgabe.txt")},
+        data={"file": (io.BytesIO(DOCX), "abgabe.docx")},
         content_type="multipart/form-data",
     )
 
@@ -220,7 +224,7 @@ def test_download_ownership_check(app, client, tmp_path):
     # Owner can download
     owner_resp = client.get(download_url)
     assert owner_resp.status_code == 200
-    assert owner_resp.data == b"meine abgabe"
+    assert owner_resp.data == DOCX
 
     # A different student is refused -- app-wide 403 handler redirects with a flash message
     with client.session_transaction() as sess:
