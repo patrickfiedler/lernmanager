@@ -166,3 +166,28 @@ def test_nothing_to_resume_leaves_a_fresh_checkpoint_alone(app, client):
     body = client.get(URL).get_data(as_text=True)
     assert "Du machst hier weiter" not in body
     assert "Frage eins" in body
+
+
+def test_a_sitting_that_lost_only_its_last_click_can_still_be_finished(app, client):
+    """Every question answered, the connection died before `finish` landed.
+
+    The page renders with an empty question list here, so the template finishes the
+    checkpoint straight away instead of reading questions[0] of an empty list. If the
+    resume ever redirected away from a checkpoint with no open questions, this sitting
+    would be unscorable and the Kern gate unpassable.
+    """
+    app.config["WTF_CSRF_ENABLED"] = False
+    student_id, subtask_id = _checkpoint(client)
+    client.get(URL)
+    for index in (0, 1, 2):
+        _answer(client, subtask_id, index)
+    _lesson_ends(client, student_id)
+
+    page = client.get(URL)
+    assert page.status_code == 200          # not a redirect back to the Thema
+    assert "3 von 3 Fragen" in page.get_data(as_text=True)
+
+    finish = client.post("/schueler/checkpoint/fertig",
+                         json={"slug": SLUG, "subtask_id": subtask_id}).get_json()
+    assert finish["score"] == 3
+    assert len(models.get_checkpoint_attempts_for_student(student_id)) == 1
