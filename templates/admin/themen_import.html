@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% import 'admin/_thema_options.html' as thema_opts %}
 
 {% block title %}Themen importieren - Lernmanager{% endblock %}
 
@@ -106,7 +107,7 @@
                 <optgroup label="Vorhandenes Thema überschreiben">
                     {% for et in existing_tasks %}
                     <option value="{{ et.id }}" {% if topic.existing_task_id == et.id %}selected{% endif %}>
-                        {{ et.fach }} {{ et.stufe }}: {{ et.name }}
+                        {{ et.fach }} {{ et.stufe }}: {{ thema_opts.thema_label(et) }}
                     </option>
                     {% endfor %}
                 </optgroup>

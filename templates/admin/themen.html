@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% import 'admin/_thema_options.html' as thema_opts %}
 
 {% block title %}Themen - Lernmanager{% endblock %}
 
@@ -52,7 +53,7 @@
                 data-stufe-key="{{ task.stufe_key }}" data-kategorie="{{ task.kategorie }}">
                 <td>
                     <a href="{{ url_for('admin_thema_detail', task_id=task.id) }}">
-                        <strong>{% if task.is_seilbahn %}🚡 {% endif %}{{ task.name }}</strong>
+                        <strong>{{ thema_opts.thema_label(task) }}</strong>
                     </a>
                 </td>
                 <td>{{ task.fach }}</td>

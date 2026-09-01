@@ -9,8 +9,14 @@
    rest. If the class has no klassenstufe set, `exact` is empty and the macro
    falls back to a single flat list -- see utils.split_tasks_by_stufe(). #}
 
+{# The one place the Seilbahn marker is defined -- also used by the Themenliste,
+   the Themen-Reihenfolge table and the import overwrite dropdown. #}
+{% macro thema_label(task) -%}
+{% if task.is_seilbahn %}🚡 {% endif %}{{ task.name }}
+{%- endmacro %}
+
 {% macro thema_option(task) -%}
-{% set label = ('🚡 ' if task.is_seilbahn else '') ~ task.name -%}
+{% set label = thema_label(task) -%}
 <option value="{{ task.id }}" data-name="{{ label }}" data-fach="{{ task.fach }}" data-stufe="{{ task.stufe }}">{{ task.fach }} ({{ task.stufe }}): {{ label }}</option>
 {%- endmacro %}
 
