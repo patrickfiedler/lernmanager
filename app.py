@@ -3010,9 +3010,19 @@ def _build_checkpoint_sessions(attempts):
                         .setdefault(flag['question_index'], []).append(flag)
     # How many students reported each question, across the whole class -- the number
     # that says whether the question or the student is the problem.
-    open_by_question = models.count_open_flags_by_question(
-        {a['checkpoint_id'] for a in attempts}
-    )
+    checkpoint_ids = {a['checkpoint_id'] for a in attempts}
+    open_by_question = models.count_open_flags_by_question(checkpoint_ids)
+
+    # Flags the teacher raised about the QUESTION belong to no single sitting, so
+    # they are not in flags_by_attempt and would otherwise never appear again --
+    # the teacher would mark a question, reload, and see no trace of it. Keyed by
+    # (checkpoint, question) and merged into every session that contains it.
+    question_flags = {}
+    for checkpoint_id in checkpoint_ids:
+        for flag in models.get_checkpoint_flags(checkpoint_id=checkpoint_id):
+            if flag['checkpoint_attempt_id'] is None and flag['student_id'] is None:
+                question_flags.setdefault(
+                    (checkpoint_id, flag['question_index']), []).append(flag)
 
     sessions = []
     for attempt in attempts:
@@ -3026,8 +3036,20 @@ def _build_checkpoint_sessions(attempts):
                       if any(r['status'] == 'offen' for r in rows)}
         review = _checkpoint_question_review(answers, open_flags)
 
+        # Scores in `review` are re-derived from the answer log. A hand-set score
+        # is not in that log by definition, so it has to be laid over the top --
+        # otherwise the page would keep showing the number the teacher corrected.
+        manual_scores = (json.loads(attempt['question_scores_manual_json'])
+                         if attempt.get('question_scores_manual_json') else {})
+
         for entry in review:
-            entry['flags'] = flags.get(entry['question_index'], [])
+            entry['scored_manual'] = str(entry['question_index']) in manual_scores
+            if entry['scored_manual']:
+                entry['scored'] = manual_scores[str(entry['question_index'])]
+                entry['scored_without_duplicates'] = entry['scored']
+            entry['flags'] = (flags.get(entry['question_index'], [])
+                              + question_flags.get((attempt['checkpoint_id'],
+                                                    entry['question_index']), []))
             entry['flag_class_count'] = open_by_question.get(
                 (attempt['checkpoint_id'], entry['question_index']), 0)
             question = (questions[entry['question_index']]
@@ -3127,6 +3149,7 @@ def admin_checkpoint_pruefung():
                            show_superseded=filters['include_superseded'],
                            flag_reasons=models.CHECKPOINT_FLAG_REASONS,
                            flag_resolutions=models.CHECKPOINT_FLAG_RESOLUTIONS,
+                           teacher_verdicts=models.CHECKPOINT_FLAG_TEACHER_VERDICTS,
                            flagged_session_count=sum(1 for s in sessions
                                                      if s['open_flag_count']),
                            resettable_count=sum(1 for s in sessions
@@ -3372,12 +3395,190 @@ def admin_checkpoint_flag_resolve(flag_id):
 
     note = (request.form.get('resolution_note') or '').strip()
     models.resolve_checkpoint_flag(flag_id, status, note, session['admin_id'])
-    flash({
-        'frage_kaputt': 'Frage als kaputt vermerkt — sie zählt für diese Sitzung nicht.',
-        'kontext_falsch': 'Frage als falsch platziert vermerkt — sie zählt für diese Sitzung nicht.',
-        'abgelehnt': 'Meldung abgelehnt — der Schüler holt die Frage nach.',
-    }[status], 'success')
+    flash(_FLAG_VERDICT_FLASH[status], 'success')
     return redirect(request.referrer or url_for('admin_checkpoint_pruefung'))
+
+
+# Keyed on every value of CHECKPOINT_FLAG_RESOLUTIONS -- a verdict added to the dict
+# without a line here used to KeyError the route rather than the import.
+_FLAG_VERDICT_FLASH = {
+    'frage_kaputt': 'Frage als kaputt vermerkt — sie zählt für diese Sitzung nicht.',
+    'kontext_falsch': 'Frage als falsch platziert vermerkt — sie zählt für diese Sitzung nicht.',
+    'design_fehlerhaft': 'Frage als vom Aufgabendesign nicht gedeckt vermerkt — sie zählt für diese Sitzung nicht.',
+    'abgelehnt': 'Meldung abgelehnt — der Schüler holt die Frage nach.',
+}
+
+
+def _checkpoint_question_wording(checkpoint_id, question_index):
+    """The question as it reads RIGHT NOW, for pinning onto a flag.
+
+    Deliberately the live subtask.quiz_json and not the session's snapshot: a
+    teacher flagging a question is about to rewrite that question, and the record
+    has to say which wording they were looking at when they condemned it.
+    """
+    subtask = models.get_subtask(checkpoint_id)
+    if not subtask or not subtask.get('quiz_json'):
+        return None
+    try:
+        questions = json.loads(subtask['quiz_json']).get('questions', [])
+    except (ValueError, AttributeError):
+        return None
+    if 0 <= question_index < len(questions):
+        return questions[question_index].get('text')
+    return None
+
+
+@app.route('/admin/checkpoint-pruefung/frage/<int:checkpoint_id>/<int:question_index>/markieren',
+           methods=['POST'])
+@admin_required
+def admin_checkpoint_flag_question(checkpoint_id, question_index):
+    """Flag a question as faulty without any student having reported it.
+
+    This is a statement about the QUESTION, so it is stored with student_id NULL on
+    (checkpoint_id, question_index) -- not on checkpoint_answer.teacher_verdict,
+    which asks the narrower "was the KI right about this one answer?" and feeds the
+    calibration export.
+
+    It changes NO score by itself (Patrick, 2026-09-01). A confirmed student report
+    drops its question from that student's min(); doing the same here would silently
+    rewrite the grade of every session that ever contained the question, including
+    long-finished ones. The repair is chosen per session afterwards: send the
+    question back (admin_checkpoint_question_retry) or set its score by hand
+    (admin_checkpoint_question_score).
+    """
+    status = request.form.get('status')
+    if status not in models.CHECKPOINT_FLAG_TEACHER_VERDICTS:
+        flash('Unbekanntes Urteil.', 'danger')
+        return redirect(request.referrer or url_for('admin_checkpoint_pruefung'))
+
+    models.create_checkpoint_flag(
+        checkpoint_id=checkpoint_id, question_index=question_index,
+        source='teacher', status=status,
+        reason_text=(request.form.get('reason_text') or '').strip(),
+        question_text_at_flag=_checkpoint_question_wording(checkpoint_id, question_index),
+        resolved_by=session['admin_id'])
+    flash(f'Frage {question_index + 1} markiert: '
+          f'{models.CHECKPOINT_FLAG_TEACHER_VERDICTS[status]}. '
+          'Die Punkte der Schüler ändert das nicht — dafür sind die zwei Knöpfe an '
+          'der Sitzung da.', 'success')
+    return redirect(request.referrer or url_for('admin_checkpoint_pruefung'))
+
+
+@app.route('/admin/checkpoint-pruefung/<int:attempt_id>/frage/<int:question_index>/nachbessern',
+           methods=['POST'])
+@admin_required
+def admin_checkpoint_question_retry(attempt_id, question_index):
+    """Send one question back to one student, without reopening the whole checkpoint.
+
+    Reuses the machinery a rejected report already drives (get_flags_for_retry ->
+    the student sees only the owed questions -> _finish_checkpoint_retry rescores
+    the SAME attempt). The difference is the status: 'nachbesserung' is not capped
+    at REJECTED_FLAG_RETRY_CAP, because the student is redoing the question on our
+    account, not on their own.
+    """
+    attempt = models.get_checkpoint_attempt(attempt_id)
+    if not attempt:
+        flash('Diese Sitzung gibt es nicht mehr.', 'danger')
+        return redirect(request.referrer or url_for('admin_checkpoint_pruefung'))
+    if attempt.get('superseded_at'):
+        # A reset already gives the student the whole checkpoint back. Handing one
+        # question back on top of that would leave a flag nothing ever closes.
+        flash('Diese Sitzung ist zurückgesetzt — der Schüler bearbeitet ohnehin den '
+              'ganzen Checkpoint neu.', 'warning')
+        return redirect(request.referrer or url_for('admin_checkpoint_pruefung'))
+
+    existing = models.get_checkpoint_flags(
+        checkpoint_id=attempt['checkpoint_id'], question_index=question_index,
+        student_id=attempt['student_id'], statuses=('nachbesserung',))
+    if existing:
+        flash(f'Frage {question_index + 1} ist bei diesem Schüler schon zur '
+              'Nachbesserung offen.', 'warning')
+        return redirect(request.referrer or url_for('admin_checkpoint_pruefung'))
+
+    models.create_checkpoint_flag(
+        checkpoint_id=attempt['checkpoint_id'], question_index=question_index,
+        source='teacher', student_id=attempt['student_id'], status='nachbesserung',
+        # Bound to the session it is owed from: without it the flag is invisible to
+        # the review page (which groups by attempt) and to
+        # checkpoint_score_is_provisional, so the score would read as final while a
+        # question is still outstanding.
+        checkpoint_attempt_id=attempt['id'],
+        reason_text=(request.form.get('reason_text') or '').strip(),
+        question_text_at_flag=_checkpoint_question_wording(attempt['checkpoint_id'],
+                                                           question_index),
+        resolved_by=session['admin_id'])
+    flash(f'Frage {question_index + 1} geht zurück an den Schüler — sie wird beim '
+          'nächsten Öffnen des Checkpoints gestellt, ohne Punktabzug fürs Nachholen.',
+          'success')
+    return redirect(request.referrer or url_for('admin_checkpoint_pruefung'))
+
+
+@app.route('/admin/checkpoint-pruefung/<int:attempt_id>/frage/<int:question_index>/punkte',
+           methods=['POST'])
+@admin_required
+def admin_checkpoint_question_score(attempt_id, question_index):
+    """Set one question's score by hand -- the other repair next to a redo.
+
+    Not the same thing as the session-level teacher_score: that one overrides the
+    whole sitting and says "I have judged this session". This says "this one question
+    was ours to fix", leaves the rest of the breakdown alone, and lets the session
+    score follow from it.
+    """
+    raw = request.form.get('punkte', '')
+    if raw not in ('0', '2', '3', ''):
+        flash('Für eine Frage sind nur 0, 2, 3 oder „zählt nicht" möglich.', 'danger')
+        return redirect(request.referrer or url_for('admin_checkpoint_pruefung'))
+
+    attempt = models.get_checkpoint_attempt(attempt_id)
+    if not attempt:
+        flash('Diese Sitzung gibt es nicht mehr.', 'danger')
+        return redirect(request.referrer or url_for('admin_checkpoint_pruefung'))
+
+    score, counted = _set_checkpoint_question_score(
+        attempt, question_index, None if raw == '' else int(raw))
+    flash(f'Frage {question_index + 1}: '
+          + ('zählt nicht mehr mit' if raw == '' else f'{raw} Punkte')
+          + f'. Sitzungswert jetzt {score}.', 'success')
+    if not counted:
+        # A session where nothing counts scores 0, and 0 is what the Kern-Sperre
+        # reads -- so "excusing" every question would lock the student out instead
+        # of freeing them. Say so rather than let the number quietly do it.
+        flash('Jetzt zählt in dieser Sitzung keine einzige Frage mehr — der Wert '
+              'steht damit auf 0 und die Kern-Sperre bleibt zu. Wolltest du die '
+              'ganze Sitzung erlassen, setze stattdessen unten die Punktzahl der '
+              'Sitzung.', 'warning')
+    return redirect(request.referrer or url_for('admin_checkpoint_pruefung'))
+
+
+def _set_checkpoint_question_score(attempt, question_index, score):
+    """Write one hand-set question score into an attempt and rebuild the session
+    score around it. Returns (session score, how many questions still count).
+
+    `score`: 0, 2, 3, or None for "this question does not count".
+
+    The stored breakdown is keyed by the question's index in the STORED quiz, as a
+    string -- see the question_scores comment in student_checkpoint_finish. A key
+    that is absent was never part of the sitting; a key holding None is present but
+    uncounted, which is how a reported question is already recorded.
+    """
+    scores = (json.loads(attempt['question_scores_json'])
+              if attempt.get('question_scores_json') else {})
+    manual = (json.loads(attempt['question_scores_manual_json'])
+              if attempt.get('question_scores_manual_json') else {})
+    scores[str(question_index)] = score
+    manual[str(question_index)] = score
+
+    session_score = _consolidate_question_scores(scores)
+    counted = sum(1 for v in scores.values() if v is not None)
+
+    models.update_checkpoint_attempt_scores(attempt['id'], scores, session_score,
+                                            manual_scores=manual)
+    models.log_analytics_event(
+        event_type='checkpoint_question_rescored', user_id=session['admin_id'],
+        user_type='admin',
+        metadata={'attempt_id': attempt['id'], 'question_index': question_index,
+                  'score': score, 'session_score': session_score})
+    return session_score, counted
 
 
 @app.route('/admin/checkpoint-pruefung/antwort/<int:answer_id>/urteil', methods=['POST'])
@@ -5463,7 +5664,7 @@ def _handle_checkpoint_quiz(student, task, slug, subtask, position, klasse):
     # teacher reset there is nothing to rescore, so the checkpoint is simply taken
     # again from the top and the reports are closed on the way out.
     standing_attempt = models.get_latest_checkpoint_attempt(student['id'], subtask['id'])
-    retry_flags = (models.get_rejected_flags_for_retry(student['id'], subtask['id'])
+    retry_flags = (models.get_flags_for_retry(student['id'], subtask['id'])
                    if standing_attempt else [])
     retry_indices = {f['question_index'] for f in retry_flags}
     if retry_indices:
@@ -5492,6 +5693,11 @@ def _handle_checkpoint_quiz(student, task, slug, subtask, position, klasse):
             else _resume_checkpoint_progress(student['id'], subtask['id'], progress))
     progress['retry'] = bool(retry_indices)
     progress['retry_flag_ids'] = [f['id'] for f in retry_flags]
+    # Which of the redone questions may not score 3. Per question, not per session:
+    # one sitting can mix a rejected report (capped, the student reported a working
+    # question) with a question we sent back ourselves (uncapped, our bug).
+    progress['retry_capped'] = [f['question_index'] for f in retry_flags
+                                if f['status'] == 'abgelehnt']
 
     # `finish` scores exactly `rendered`, so it must cover the whole sitting --
     # including questions finished before the interruption, which are not shown
@@ -5817,6 +6023,29 @@ def student_checkpoint_flag():
     return jsonify({'flagged': True, 'message': CHECKPOINT_FLAGGED_LOCK_MESSAGE})
 
 
+def _consolidate_question_scores(scores):
+    """The stored per-question breakdown -> the one session score, per
+    chemie-data-contract.md 3a: min() across the questions that count.
+
+    Same rule as _score_checkpoint_session, applied to the STORED breakdown rather
+    than to a live sitting -- which is what the two after-the-fact paths need (a
+    student redoing one question, a teacher setting one by hand). Kept in one place
+    because the two used to spell it out separately and only ever agreed by luck.
+
+    None = the question does not count (reported, or set to "zählt nicht"). The
+    legacy 'vorher' key counts: on an attempt that predates per-question scores it
+    stands for everything not broken out, and dropping it would let one hand-set 3
+    lift a session above what it earned.
+
+    Nothing left to take a min() over is 0, not None -- the Kern-Sperre reads a
+    number and nothing else, so the floor has to be a number. A teacher voiding a
+    whole session wants the session-level teacher_score override instead, which
+    effective_checkpoint_score() lets win.
+    """
+    counted = [v for v in scores.values() if v is not None]
+    return min(counted) if counted else 0
+
+
 def _finish_checkpoint_retry(student_id, subtask_id, slug, progress, question_results):
     """End a redo of the questions whose report a teacher rejected.
 
@@ -5845,8 +6074,7 @@ def _finish_checkpoint_retry(student_id, subtask_id, slug, progress, question_re
         (str(r['index']) for r in question_results),
         _checkpoint_question_scores(question_results)
     ))
-    counted = [v for v in scores.values() if v is not None]
-    score = min(counted) if counted else 0
+    score = _consolidate_question_scores(scores)
 
     models.update_checkpoint_attempt_scores(attempt['id'], scores, score)
     models.attach_checkpoint_session_to_attempt(progress['session_uid'], attempt['id'])
@@ -5890,6 +6118,7 @@ def student_checkpoint_finish():
     # see _handle_checkpoint_quiz. The fallback keeps a session that was already
     # running before `rendered` existed finishable.
     rendered = progress.get('rendered') or list(range(len(questions)))
+    capped = (set(progress['retry_capped']) if 'retry_capped' in progress else None)
 
     question_results = []
     for i in rendered:
@@ -5909,8 +6138,12 @@ def student_checkpoint_finish():
             'flagged': flagged,
             # Caps a redone question at REJECTED_FLAG_RETRY_CAP: the student had a
             # second look at it with the clock stopped, which is what a retry costs
-            # anywhere else in this scoring rule.
-            'retry_after_rejected_flag': bool(progress.get('retry')),
+            # anywhere else in this scoring rule. Only for a REJECTED report -- a
+            # question the teacher sent back is our fault and costs the student
+            # nothing. The fallback caps everything, which is what a session started
+            # before retry_capped existed meant by retry=True.
+            'retry_after_rejected_flag': (i in capped if capped is not None
+                                          else bool(progress.get('retry'))),
             'attempts': progress['attempts'].get(qidx, 0),
             'hints_used': progress['hints_used'].get(qidx, 0),
             # True only if an /antwort call for this question got correct=None

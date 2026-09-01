@@ -270,11 +270,17 @@
                 <strong>Frage {{ question.question_index + 1 }}</strong>
                 {% if question.question_type %}<span class="text-muted">({{ question.question_type }})</span>{% endif %}
                 {% if question.scored is none %}
-                <span class="badge badge-warning" title="Gemeldet — zählt erst, wenn du entschieden hast">— P.</span>
+                <span class="badge badge-warning"
+                      title="{{ 'Von dir auf „zählt nicht“ gesetzt' if question.scored_manual else 'Gemeldet — zählt erst, wenn du entschieden hast' }}">— P.</span>
                 {% else %}
                 <span class="badge {{ 'badge-success' if question.scored == 3 else ('badge-warning' if question.scored == 2 else 'badge-danger') }}">
                     {{ question.scored }} P.
                 </span>
+                {% endif %}
+                {# A corrected score must not look like a computed one -- otherwise the
+                   teacher cannot see their own correction on the next visit. #}
+                {% if question.scored_manual %}
+                <span class="badge badge-secondary" title="Nicht aus den Antworten gerechnet, sondern von dir gesetzt">✋ von Hand</span>
                 {% endif %}
                 {% if question.scored_without_duplicates != question.scored %}
                 <span class="badge badge-warning" title="Punktzahl ohne die als Doppelklick erkannten Versuche">
@@ -295,12 +301,65 @@
             <p class="checkpoint-question-correct">✅ Richtig: {{ question.correct_display }}</p>
             {% endif %}
 
+            {# The teacher's handle on the QUESTION. Deliberately not the same control
+               as "War die KI-Bewertung richtig?" further down: that one rates a single
+               grading decision for calibration and never moves a score. This one says
+               the question is at fault, and opens the two repairs -- because marking it
+               alone changes nothing, on purpose (a confirmed flag would otherwise
+               silently rewrite every finished session that contained the question). #}
+            <details class="checkpoint-teacher-flag">
+                <summary>🛠️ Frage bemängeln · Punkte reparieren</summary>
+
+                <form method="POST" class="checkpoint-flag-form"
+                      action="{{ url_for('admin_checkpoint_flag_question',
+                                         checkpoint_id=attempt.checkpoint_id,
+                                         question_index=question.question_index) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <p class="text-muted">Gilt für die Frage bei allen Schülern. Ändert keine Punktzahl.</p>
+                    <input type="text" name="reason_text" class="form-control"
+                           placeholder="Was stimmt nicht? (optional, für die spätere Überarbeitung)">
+                    {% for code, label in teacher_verdicts.items() %}
+                    <button type="submit" name="status" value="{{ code }}"
+                            class="btn btn-sm btn-secondary">{{ label }}</button>
+                    {% endfor %}
+                </form>
+
+                <div class="checkpoint-repair">
+                    <p class="text-muted">Nur für <strong>{{ attempt.student_name }}</strong>:</p>
+                    <form method="POST" class="checkpoint-repair-form"
+                          action="{{ url_for('admin_checkpoint_question_retry',
+                                             attempt_id=attempt.id,
+                                             question_index=question.question_index) }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="btn btn-sm btn-secondary"
+                                title="Der Schüler bekommt beim nächsten Öffnen nur diese Frage — ohne Abzug fürs Nachholen">
+                            Nochmal versuchen lassen
+                        </button>
+                    </form>
+                    <form method="POST" class="checkpoint-repair-form"
+                          action="{{ url_for('admin_checkpoint_question_score',
+                                             attempt_id=attempt.id,
+                                             question_index=question.question_index) }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <span class="text-muted">Punkte von Hand:</span>
+                        {% for value, label in [('3', '3'), ('2', '2'), ('0', '0'), ('', 'zählt nicht')] %}
+                        <button type="submit" name="punkte" value="{{ value }}"
+                                class="btn btn-sm btn-secondary">{{ label }}</button>
+                        {% endfor %}
+                    </form>
+                </div>
+            </details>
+
             {% for flag in question.flags %}
             {# One report, one decision. The class-wide count is the number that
                says whether to look at the question or at the student. #}
             <div class="checkpoint-flag{{ ' is-resolved' if flag.status != 'offen' }}">
                 <p class="checkpoint-flag-head">
+                    {% if flag.source == 'teacher' %}
+                    🛠️ Von dir markiert: {{ flag_resolutions.get(flag.status, flag.status) }}
+                    {% else %}
                     ⚠️ Gemeldet: {{ flag_reasons.get(flag.reason_code, flag.reason_code or 'ohne Grund') }}
+                    {% endif %}
                     {% if question.flag_class_count > 1 %}
                     <span class="badge badge-warning">{{ question.flag_class_count }} Schüler haben diese Frage gemeldet</span>
                     {% endif %}
@@ -509,6 +568,13 @@
 .checkpoint-flag-text { font-size: 0.85rem; }
 .checkpoint-flag-verdict { font-size: 0.85rem; color: #374151; }
 .checkpoint-flag-form { margin-top: 0.5rem; }
+.checkpoint-teacher-flag { margin: 0.5rem 0; font-size: 0.9rem; }
+.checkpoint-teacher-flag > summary { cursor: pointer; color: #374151; }
+.checkpoint-teacher-flag[open] { border-left: 3px solid #cbd5e1; background: #f8fafc;
+                                 border-radius: 4px; padding: 0.5rem 0.75rem; }
+.checkpoint-teacher-flag p { margin: 0.15rem 0; font-size: 0.85rem; }
+.checkpoint-repair { margin-top: 0.75rem; border-top: 1px solid #e5e7eb; padding-top: 0.5rem; }
+.checkpoint-repair-form { display: inline-block; margin-right: 0.75rem; }
 .checkpoint-duplicates { font-size: 0.8rem; color: #6b7280; margin: 0.25rem 0 0.5rem; }
 .checkpoint-duplicates > summary { cursor: pointer; padding: 0.15rem 0; }
 .checkpoint-duplicates[open] > summary { margin-bottom: 0.35rem; }

@@ -326,7 +326,8 @@ def init_db():
                 review_notes TEXT,  -- JSON: {"questions": [question_index, ...]} that need manual re-grading
                 quiz_snapshot_json TEXT,  -- quiz_json as it was at completion time (content can be edited later)
                 superseded_at TEXT,  -- set instead of deleting on a "Fortschritte zurücksetzen" re-import -- see reset_student_progress_for_task
-                question_scores_json TEXT,  -- migrate_055: per-question 0/2/3 breakdown behind `score`, JSON list. `null` at a position = the question was flagged and carries no score yet. Without this, a finished attempt could be overridden by hand but never recomputed -- per-question hint counts are not exactly recoverable from checkpoint_answer
+                question_scores_json TEXT,
+                question_scores_manual_json TEXT,  -- migrate_056: which of those values a teacher set by hand, same {"<index>": 0|2|3|null} shape. Provenance only -- question_scores_json stays the effective breakdown. Without it a corrected score is indistinguishable from a computed one in the review page and the export  -- migrate_055: per-question 0/2/3 breakdown behind `score`, JSON list. `null` at a position = the question was flagged and carries no score yet. Without this, a finished attempt could be overridden by hand but never recomputed -- per-question hint counts are not exactly recoverable from checkpoint_answer
                 teacher_score INTEGER,  -- migrate_048: teacher's override, NULL = not reviewed. Read via effective_checkpoint_score(), never `score` directly
                 teacher_note TEXT,  -- short reason for the override, shown to nobody but the teacher
                 student_feedback TEXT,  -- migrate_049: the ONE field on this table the student reads. teacher_note stays private -- rows were written under that promise
@@ -402,7 +403,7 @@ def init_db():
                 reason_code TEXT,  -- student presets: unklar/nicht_behandelt/technisch/ki_bewertung
                 reason_text TEXT,  -- optional free text (student) or the teacher's own wording
                 question_text_at_flag TEXT,  -- questions get edited; without this a flag outlives the thing it describes
-                status TEXT NOT NULL DEFAULT 'offen',  -- offen -> frage_kaputt | kontext_falsch | abgelehnt; abgelehnt -> nachgeholt once the student redid it
+                status TEXT NOT NULL DEFAULT 'offen',  -- offen -> frage_kaputt | kontext_falsch | design_fehlerhaft | abgelehnt; abgelehnt -> nachgeholt once the student redid it; any verdict -> nachbesserung when the teacher sends the question back to a student, -> nachgeholt once redone
                 resolution_note TEXT,
                 resolved_at TEXT,
                 resolved_by INTEGER,  -- admin.id, no FK (an admin row going away must not erase the record)
@@ -2391,6 +2392,15 @@ def _filter_fork_subtasks(subtasks, student_id):
 
 # ============ Subtask functions ============
 
+def get_subtask(subtask_id):
+    """One Aufgabe by id, or None. Callers that only have a subtask id -- the admin
+    checkpoint review addresses questions by (checkpoint_id, question_index) and has
+    no Thema in hand."""
+    with db_session() as conn:
+        row = conn.execute('SELECT * FROM subtask WHERE id = ?', (subtask_id,)).fetchone()
+        return dict(row) if row else None
+
+
 def get_subtasks(task_id):
     """Get subtasks for a task."""
     with db_session() as conn:
@@ -3489,6 +3499,15 @@ def get_latest_checkpoint_attempt(student_id, checkpoint_id):
         return dict(row) if row else None
 
 
+def get_checkpoint_attempt(attempt_id):
+    """One session by id, superseded or not -- the admin review page addresses
+    sessions by id and has to be able to act on a reset one too."""
+    with db_session() as conn:
+        row = conn.execute('SELECT * FROM checkpoint_attempt WHERE id = ?',
+                           (attempt_id,)).fetchone()
+        return dict(row) if row else None
+
+
 def get_reopened_checkpoint_notice(student_id, checkpoint_id):
     """The reset that reopened this checkpoint, so the student can be told why.
 
@@ -3893,14 +3912,23 @@ CHECKPOINT_FLAG_REASONS = {
 CHECKPOINT_FLAG_RESOLUTIONS = {
     'frage_kaputt': 'Frage ist kaputt',
     'kontext_falsch': 'Frage ist in Ordnung, steht aber am falschen Platz',
+    'design_fehlerhaft': 'Frage ist in Ordnung, die Aufgabe bereitet nicht darauf vor',
     'abgelehnt': 'Meldung abgelehnt - Frage nachholen',
+}
+
+# What a teacher can say about a question WITHOUT any student having reported it
+# (source='teacher'). Same three content verdicts, minus 'abgelehnt' -- there is no
+# report to reject, so offering it here would be a button that cannot mean anything.
+CHECKPOINT_FLAG_TEACHER_VERDICTS = {
+    code: label for code, label in CHECKPOINT_FLAG_RESOLUTIONS.items()
+    if code != 'abgelehnt'
 }
 
 
 def create_checkpoint_flag(checkpoint_id, question_index, source, student_id=None,
                            session_uid=None, reason_code=None, reason_text=None,
                            question_text_at_flag=None, status='offen',
-                           resolved_by=None):
+                           resolved_by=None, checkpoint_attempt_id=None):
     """Report one checkpoint question as broken or misplaced (migrate_055).
 
     source='student': the report comes from a session in progress, `status` stays
@@ -3915,15 +3943,21 @@ def create_checkpoint_flag(checkpoint_id, question_index, source, student_id=Non
     question_text_at_flag: the question as it read when flagged. Content gets edited;
     without this a flag outlives the thing it describes and nobody can tell whether a
     later rewrite already fixed it.
+
+    checkpoint_attempt_id: set it directly when the flag is raised against a session
+    that is already finished -- a teacher sending one question back has an attempt in
+    hand and no session_uid, so the usual backfill never fires. Leave it None for a
+    flag about the question itself: that one belongs to no single sitting.
     """
     with db_session() as conn:
         cursor = conn.execute('''
             INSERT INTO checkpoint_flag
             (checkpoint_id, question_index, student_id, session_uid, source,
-             reason_code, reason_text, question_text_at_flag, status,
-             resolved_at, resolved_by, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             checkpoint_attempt_id, reason_code, reason_text, question_text_at_flag,
+             status, resolved_at, resolved_by, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (checkpoint_id, question_index, student_id, session_uid, source,
+              checkpoint_attempt_id,
               reason_code, reason_text or None, question_text_at_flag, status,
               now_local() if status != 'offen' else None,
               resolved_by if status != 'offen' else None, now_local()))
@@ -4015,18 +4049,23 @@ def get_open_student_flag(student_id, checkpoint_id, question_index):
         return dict(row) if row else None
 
 
-def get_rejected_flags_for_retry(student_id, checkpoint_id):
-    """Flags this student raised that the teacher rejected and that have not been
-    redone yet -- i.e. the questions the student still owes an answer for.
+def get_flags_for_retry(student_id, checkpoint_id):
+    """Questions this student still owes an answer for, from either direction.
 
-    Drives the retry session: the student re-enters the checkpoint and answers only
-    these questions, and the existing attempt is rescored rather than a second one
-    being created.
+    'abgelehnt': the student reported the question, the teacher rejected the report.
+    'nachbesserung': the teacher sent the question back on their own after finding it
+    broken -- nobody reported anything, the fault is ours.
+
+    Both drive the same retry session (the student re-enters the checkpoint, answers
+    only these questions, the existing attempt is rescored rather than a second one
+    created); they differ only in what the redo may score, which is why callers need
+    `status` back. See REJECTED_FLAG_RETRY_CAP in app.py.
     """
     with db_session() as conn:
         rows = conn.execute('''
             SELECT * FROM checkpoint_flag
-            WHERE student_id = ? AND checkpoint_id = ? AND status = 'abgelehnt'
+            WHERE student_id = ? AND checkpoint_id = ?
+              AND status IN ('abgelehnt', 'nachbesserung')
             ORDER BY question_index
         ''', (student_id, checkpoint_id)).fetchall()
         return [dict(r) for r in rows]
@@ -4190,9 +4229,11 @@ def get_checkpoints_awaiting_retry(student_id):
 def resolve_checkpoint_flag(flag_id, status, resolution_note, admin_id):
     """Record the teacher's verdict on one flag.
 
-    'frage_kaputt' and 'kontext_falsch' both mean "not the student's fault", so both
-    leave the question out of that attempt's score; they differ only in what the
-    content export tells Chemie. 'abgelehnt' sends the question back to the student.
+    'frage_kaputt', 'kontext_falsch' and 'design_fehlerhaft' all mean "not the
+    student's fault", so all three leave the question out of that attempt's score;
+    they differ only in what the content export tells Chemie -- the question itself,
+    its placement, or the Aufgabe that should have prepared for it. 'abgelehnt' sends
+    the question back to the student.
     """
     with db_session() as conn:
         conn.execute('''
@@ -4203,13 +4244,15 @@ def resolve_checkpoint_flag(flag_id, status, resolution_note, admin_id):
 
 
 def mark_checkpoint_flags_retried(flag_ids):
-    """Close rejected flags once the student has redone those questions."""
+    """Close owed questions once the student has redone them -- both a rejected
+    report and a question the teacher sent back land in 'nachgeholt'."""
     if not flag_ids:
         return
     with db_session() as conn:
         conn.execute(f'''
             UPDATE checkpoint_flag SET status = 'nachgeholt'
-            WHERE id IN ({','.join('?' * len(flag_ids))}) AND status = 'abgelehnt'
+            WHERE id IN ({','.join('?' * len(flag_ids))})
+              AND status IN ('abgelehnt', 'nachbesserung')
         ''', list(flag_ids))
 
 
@@ -4230,24 +4273,37 @@ def checkpoint_score_is_provisional(attempt):
     with db_session() as conn:
         row = conn.execute("""
             SELECT COUNT(*) AS cnt FROM checkpoint_flag
-            WHERE checkpoint_attempt_id = ? AND status IN ('offen', 'abgelehnt')
+            WHERE checkpoint_attempt_id = ?
+              AND status IN ('offen', 'abgelehnt', 'nachbesserung')
         """, (attempt['id'],)).fetchone()
         return row['cnt'] > 0
 
 
-def update_checkpoint_attempt_scores(attempt_id, question_scores, score):
+def update_checkpoint_attempt_scores(attempt_id, question_scores, score,
+                                     manual_scores=None):
     """Rewrite one attempt's per-question breakdown and its consolidated score.
 
     The only path that changes a computed `score` after the fact. `teacher_score` is
     left alone on purpose: a teacher who already overrode this attempt has made a
     judgement about the whole session, and a retry on one question does not retract it
     -- effective_checkpoint_score() keeps the override winning.
+
+    manual_scores: the hand-set subset (migrate_056), or None to leave the stored
+    provenance untouched -- which is what a student's redo wants: it changes what a
+    question scored, not the record of which values a teacher had chosen.
     """
     with db_session() as conn:
-        conn.execute('''
-            UPDATE checkpoint_attempt SET score = ?, question_scores_json = ?
-            WHERE id = ?
-        ''', (score, json.dumps(question_scores), attempt_id))
+        if manual_scores is None:
+            conn.execute('''
+                UPDATE checkpoint_attempt SET score = ?, question_scores_json = ?
+                WHERE id = ?
+            ''', (score, json.dumps(question_scores), attempt_id))
+        else:
+            conn.execute('''
+                UPDATE checkpoint_attempt
+                SET score = ?, question_scores_json = ?, question_scores_manual_json = ?
+                WHERE id = ?
+            ''', (score, json.dumps(question_scores), json.dumps(manual_scores), attempt_id))
 
 
 def get_text_quiz_answers(klasse_id=None, only_fallback=False):
