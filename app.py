@@ -2123,6 +2123,8 @@ def admin_themen_import():
                                 errors.append(
                                     f"'{mat['pfad']}' ist in Wirklichkeit eine "
                                     f"{sniffed.upper()}-Datei."
+                                    if sniffed else
+                                    f"'{mat['pfad']}' ist keine gültige Datei dieses Typs."
                                 )
 
         if errors:
@@ -2428,9 +2430,11 @@ def admin_thema_material_upload(task_id):
     file_bytes = file.read()
     ok, sniffed = content_matches_extension(file.filename, file_bytes)
     if not ok:
-        flash(f"Der Inhalt passt nicht zur Dateiendung: „{file.filename}“ ist "
-              f"eine {sniffed.upper()}-Datei. Bitte mit der richtigen Endung "
-              f"speichern und erneut hochladen.", 'danger')
+        was_ist_es = (f"ist eine {sniffed.upper()}-Datei"
+                      if sniffed else "ist keine gültige Datei dieses Typs")
+        flash(f"Der Inhalt passt nicht zur Dateiendung: „{file.filename}“ "
+              f"{was_ist_es}. Bitte mit der richtigen Endung speichern und "
+              f"erneut hochladen.", 'danger')
         return redirect(url_for('admin_thema_detail', task_id=task_id))
 
     try:
@@ -4569,6 +4573,9 @@ def _artifact_format_error(filename, file_bytes):
     if ok:
         return None
     claimed = file_extension(filename).upper()
+    if not sniffed:
+        return (f"Diese Datei ist keine gültige {claimed}-Datei. "
+                f"Speichere sie noch einmal als {claimed} und lade sie erneut hoch.")
     return (f"Diese Datei ist eine {sniffed.upper()}-Datei, heißt aber „.{claimed.lower()}“. "
             f"Speichere sie als {claimed} und lade sie noch einmal hoch.")
 

@@ -8,9 +8,18 @@ import io
 
 import config
 import models
+from tests.test_content_sniffing import PDF, PNG, JPG, DOCX, PPTX, SB3, PLAIN_ZIP
+
+# Real bytes per format: an inline-served format must prove what it is
+# (tests/test_content_sniffing.py::test_inline_formats_must_prove_what_they_are).
+BYTES_FOR = {
+    "pdf": PDF, "png": PNG, "jpg": JPG, "jpeg": JPG,
+    "docx": DOCX, "pptx": PPTX, "sb3": SB3, "zip": PLAIN_ZIP,
+}
 
 
-def _upload(as_admin, task_id, name, data=b"x"):
+def _upload(as_admin, task_id, name, data=None):
+    data = data if data is not None else BYTES_FOR[name.rsplit(".", 1)[1].lower()]
     as_admin.post(f"/admin/thema/{task_id}/material-upload",
                   data={"file": (io.BytesIO(data), name)},
                   content_type="multipart/form-data", follow_redirects=True)

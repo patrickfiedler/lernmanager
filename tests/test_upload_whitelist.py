@@ -13,6 +13,7 @@ import config
 import models
 import import_task
 from utils import allowed_file, file_extension
+from tests.test_content_sniffing import PDF, DOCX, PY_SCRIPT
 
 
 def _bundle(materials, extra_entries):
@@ -119,10 +120,10 @@ def test_manual_upload_accepts_docx_and_rejects_script(as_admin, app, tmp_path):
     app.config["UPLOAD_FOLDER"] = up
     task_id = models.create_task("T", "", "", "MBI", "5", "pflicht")
 
-    for name, expect_stored in [("Vorlage.docx", True), ("skript.pdf", True),
-                                ("payload.py", False), ("evil.html", False)]:
+    for name, content in [("Vorlage.docx", DOCX), ("skript.pdf", PDF),
+                          ("payload.py", PY_SCRIPT), ("evil.html", b"<h1>x</h1>")]:
         as_admin.post(f"/admin/thema/{task_id}/material-upload",
-                      data={"file": (io.BytesIO(b"x"), name)},
+                      data={"file": (io.BytesIO(content), name)},
                       content_type="multipart/form-data", follow_redirects=True)
     stored = {m["pfad"] for m in models.get_materials(task_id)}
     assert stored == {f"{task_id}_Vorlage.docx", f"{task_id}_skript.pdf"}

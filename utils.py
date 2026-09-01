@@ -530,6 +530,12 @@ def content_matches_extension(filename, file_bytes):
     claimed = file_extension(filename)
     sniffed = sniff_type(file_bytes)
     if sniffed is None:
+        # A format we serve *inline* has to prove what it is. PDFs and images
+        # all carry recognisable magic bytes, so unidentifiable content under
+        # one of those names is a renamed something-else -- and inline is the
+        # one case where the file is handed to the browser to render.
+        if claimed in config.INLINE_EXTENSIONS:
+            return False, None
         return True, None
     # jpg/jpeg are one format with two spellings; a plain .zip legitimately
     # contains anything, including an unmarked OOXML-looking tree.

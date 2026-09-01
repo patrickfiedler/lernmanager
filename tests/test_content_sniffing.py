@@ -171,3 +171,31 @@ def test_gate_names_the_real_format_instead_of_a_parse_error(client, app, tmp_pa
     import os
     artefakte = os.path.join(config.UPLOAD_FOLDER, "artefakte")
     assert not os.path.isdir(artefakte) or os.listdir(artefakte) == []
+
+
+def test_inline_formats_must_prove_what_they_are():
+    """PDFs and images are the formats served inline, so unidentifiable content
+    under one of those names is rejected rather than waved through."""
+    for name in ["script.pdf", "page.jpg", "page.jpeg", "bild.png", "bild.gif"]:
+        ok, sniffed = content_matches_extension(name, PY_SCRIPT)
+        assert not ok, name
+        assert sniffed is None
+    # Genuine ones still pass
+    assert content_matches_extension("echt.pdf", PDF)[0]
+    assert content_matches_extension("echt.png", PNG)[0]
+
+
+def test_download_only_formats_stay_lenient():
+    """A format we only ever hand over as a download does not have to be
+    identifiable -- the extractors reject what they cannot read anyway."""
+    assert content_matches_extension("bundle.zip", PY_SCRIPT)[0]
+    assert content_matches_extension("a.docx", PY_SCRIPT)[0]
+
+
+def test_renamed_script_is_refused_by_material_upload(as_admin, app, tmp_path):
+    task_id = _setup(app, tmp_path)
+    r = as_admin.post(f"/admin/thema/{task_id}/material-upload",
+                      data={"file": (io.BytesIO(PY_SCRIPT), "script.pdf")},
+                      content_type="multipart/form-data", follow_redirects=True)
+    assert "keine gültige Datei dieses Typs" in r.get_data(as_text=True)
+    assert models.get_materials(task_id) == []
