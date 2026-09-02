@@ -107,10 +107,10 @@ def test_zip_extraction_skips_disallowed_even_if_validation_bypassed(tmp_path):
         {"typ": "datei", "pfad": "evil.html"},
         {"typ": "datei", "pfad": "ok.pdf"},
     ]}}
-    extracted = import_task.extract_zip_materials(str(zip_path), task_data)
+    extracted = import_task.extract_zip_materials(str(zip_path), task_data, task_id=7)
     assert extracted == ["ok.pdf"]
-    assert not (tmp_path / "uploads" / "evil.html").exists()
-    assert (tmp_path / "uploads" / "ok.pdf").exists()
+    assert not (tmp_path / "uploads" / "thema-7" / "evil.html").exists()
+    assert (tmp_path / "uploads" / "thema-7" / "ok.pdf").exists()
 
 
 def test_manual_upload_accepts_docx_and_rejects_script(as_admin, app, tmp_path):
@@ -126,4 +126,4 @@ def test_manual_upload_accepts_docx_and_rejects_script(as_admin, app, tmp_path):
                       data={"file": (io.BytesIO(content), name)},
                       content_type="multipart/form-data", follow_redirects=True)
     stored = {m["pfad"] for m in models.get_materials(task_id)}
-    assert stored == {f"{task_id}_Vorlage.docx", f"{task_id}_skript.pdf"}
+    assert stored == {f"thema-{task_id}/Vorlage.docx", f"thema-{task_id}/skript.pdf"}

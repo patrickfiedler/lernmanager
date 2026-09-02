@@ -21,7 +21,7 @@ from pathlib import Path
 import artifact_checker
 import config
 import models
-from utils import allowed_file
+from utils import allowed_file, material_pfad, is_reserved_material_folder
 
 
 class ValidationError(Exception):
@@ -66,8 +66,13 @@ def load_task_zip(filepath):
         raise ValidationError("Ungültige ZIP-Datei.")
 
 
-def extract_zip_materials(zip_path, task_data, dry_run=False):
-    """Copy material files from ZIP to UPLOAD_FOLDER. Returns list of extracted filenames."""
+def extract_zip_materials(zip_path, task_data, task_id=None, unit_slug=None, dry_run=False):
+    """Copy material files from ZIP to UPLOAD_FOLDER. Returns list of extracted filenames.
+
+    ZIP entries are bare filenames (the content contract with MBI); on disk they
+    land in the topic's own folder, so two topics may ship the same filename.
+    task_id is None only on a dry run, where nothing is written anyway.
+    """
     extracted = []
     upload_root = Path(config.UPLOAD_FOLDER).resolve()
     with zipfile.ZipFile(zip_path) as zf:
@@ -78,14 +83,20 @@ def extract_zip_materials(zip_path, task_data, dry_run=False):
                 # reaches UPLOAD_FOLDER that the download route would not serve safely.
                 if not allowed_file(mat['pfad']):
                     continue
+                if dry_run:
+                    extracted.append(mat['pfad'])
+                    continue
+                pfad = material_pfad(task_id, mat['pfad'], unit_slug)
+                if not pfad:
+                    continue
                 # Zip entry names aren't restricted by the format -- a crafted
                 # '../../etc/...' pfad would otherwise write outside upload_root.
-                dest = (upload_root / mat['pfad']).resolve()
-                if dest != upload_root and upload_root not in dest.parents:
+                # material_pfad already reduces it to a basename; this is the belt.
+                dest = (upload_root / pfad).resolve()
+                if upload_root not in dest.parents:
                     continue
-                if not dry_run:
-                    dest.parent.mkdir(parents=True, exist_ok=True)
-                    dest.write_bytes(zf.read(mat['pfad']))
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_bytes(zf.read(mat['pfad']))
                 extracted.append(mat['pfad'])
     return extracted
 
@@ -601,16 +612,27 @@ def import_task(task_data, dry_run=False, warnings=None):
 def _create_materials(task_id, materials_data, subtask_id_by_position):
     """Create materials for a task and set subtask assignments.
 
+    File materials are stored per topic: the import JSON carries a bare
+    filename, the DB pfad becomes '<folder>/<filename>'. That is what lets a
+    Seilbahn twin ship the same filename as its regular counterpart without
+    one overwriting the other. Links keep their pfad (a URL) untouched.
+
     Args:
         task_id: The task ID to attach materials to
         materials_data: List of material dicts from import JSON
         subtask_id_by_position: Dict mapping reihenfolge -> subtask_id
     """
+    task = models.get_task(task_id) or {}
     for mat in materials_data:
+        pfad = mat['pfad']
+        if mat.get('typ') == 'datei':
+            pfad = material_pfad(task_id, pfad, task.get('unit_slug'))
+            if not pfad:
+                continue
         mat_id = models.create_material(
             task_id,
             mat['typ'],
-            mat['pfad'],
+            pfad,
             mat.get('beschreibung', ''),
             mat.get('attribution'),
             mat.get('school_only', False)
@@ -693,7 +715,12 @@ def overwrite_task_from_import(existing_task_id, task_data, reset_progress=False
     )
 
     # Replace all materials (no student-side progress to preserve)
-    _replace_materials(existing_task_id, task.get('materials', []), subtask_id_by_position)
+    removed_files = _replace_materials(existing_task_id, task.get('materials', []), subtask_id_by_position)
+    if removed_files and warnings is not None:
+        warnings.append(
+            f"{len(removed_files)} nicht mehr verwendete Datei(en) gelöscht: "
+            + ', '.join(sorted(Path(p).name for p in removed_files))
+        )
 
     # Recalculate completion status for affected students
     if not reset_progress:
@@ -703,9 +730,15 @@ def overwrite_task_from_import(existing_task_id, task_data, reset_progress=False
 
 
 def _replace_materials(task_id, materials_data, subtask_id_by_position):
-    """Delete all old materials for a task and create new ones from import data."""
+    """Delete all old materials for a task and create new ones from import data.
+
+    Returns the list of files removed from disk (see _prune_orphaned_files).
+    """
     from models import db_session
     with db_session() as conn:
+        old_pfade = [r['pfad'] for r in conn.execute(
+            "SELECT pfad FROM material WHERE task_id = ? AND typ = 'datei'", (task_id,)
+        ).fetchall()]
         # Delete old material assignments, then old materials
         conn.execute("""
             DELETE FROM material_subtask
@@ -713,8 +746,55 @@ def _replace_materials(task_id, materials_data, subtask_id_by_position):
         """, (task_id,))
         conn.execute("DELETE FROM material WHERE task_id = ?", (task_id,))
 
-    # Create new materials
+    # Create new materials. Disk cleanup happens only after this succeeded --
+    # if it raises, the old files are still on disk and still reachable.
     _create_materials(task_id, materials_data, subtask_id_by_position)
+
+    return _prune_orphaned_files(old_pfade)
+
+
+def _prune_orphaned_files(pfade):
+    """Delete material files that no material row points at any more.
+
+    Called after an overwrite import has written its new rows, so "unreferenced"
+    is decided against the *final* state. Deliberately cautious -- it walks past
+    anything it is not certain it owns:
+
+      - a pfad still referenced by any material row (incl. another topic's, the
+        legacy flat-namespace case) is kept;
+      - a flat pfad with no folder is skipped: that is an un-migrated legacy
+        file, possibly shared, and not this topic's to delete;
+      - reserved folders (student artefacts, grading uploads) are never touched;
+      - anything resolving outside UPLOAD_FOLDER is skipped;
+      - an OSError on one file never fails the import.
+
+    Returns the list of pfade actually removed.
+    """
+    from models import db_session
+    upload_root = Path(config.UPLOAD_FOLDER).resolve()
+    removed = []
+    with db_session() as conn:
+        for pfad in pfade:
+            if not pfad or '/' not in pfad:
+                continue
+            if is_reserved_material_folder(pfad.split('/', 1)[0]):
+                continue
+            if conn.execute(
+                "SELECT 1 FROM material WHERE pfad = ? AND typ = 'datei'", (pfad,)
+            ).fetchone():
+                continue
+            try:
+                dest = (upload_root / pfad).resolve()
+            except OSError:
+                continue
+            if upload_root not in dest.parents or not dest.is_file():
+                continue
+            try:
+                dest.unlink()
+                removed.append(pfad)
+            except OSError:
+                pass
+    return removed
 
 
 def _recalculate_completion(task_id):
@@ -883,7 +963,10 @@ Examples:
                 return 1
             task_id = import_task(data, dry_run=args.dry_run)
             if task_id:
-                extracted = extract_zip_materials(args.file, data, dry_run=args.dry_run)
+                task = models.get_task(task_id) or {}
+                extracted = extract_zip_materials(
+                    args.file, data, task_id=task_id,
+                    unit_slug=task.get('unit_slug'), dry_run=args.dry_run)
                 print(f"Imported: {data['task']['name']} (ID: {task_id})")
                 if extracted:
                     print(f"  Files: {', '.join(extracted)}")

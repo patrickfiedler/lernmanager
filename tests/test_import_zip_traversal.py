@@ -34,10 +34,13 @@ def test_cli_importer_rejects_traversal_pfad(tmp_path):
         f.write(_make_zip({traversal_name: b"payload"}).read())
 
     task_data = {"task": {"materials": [{"typ": "datei", "pfad": traversal_name}]}}
-    extracted = extract_zip_materials(str(zip_path), task_data)
+    extracted = extract_zip_materials(str(zip_path), task_data, task_id=7)
 
     assert extracted == []
     assert not outside_target.exists()
+    # material_pfad reduces the entry to a basename, so the traversal cannot even
+    # land inside the topic folder under a harmless name.
+    assert not (upload_root / "thema-7" / "outside.txt").exists()
 
 
 def test_cli_importer_still_extracts_legit_pfad(tmp_path):
@@ -50,10 +53,12 @@ def test_cli_importer_still_extracts_legit_pfad(tmp_path):
         f.write(_make_zip({"arbeitsblatt.pdf": b"payload"}).read())
 
     task_data = {"task": {"materials": [{"typ": "datei", "pfad": "arbeitsblatt.pdf"}]}}
-    extracted = extract_zip_materials(str(zip_path), task_data)
+    extracted = extract_zip_materials(str(zip_path), task_data, task_id=7,
+                                      unit_slug="kl6_startklar")
 
+    # The ZIP still speaks bare filenames; only storage is namespaced.
     assert extracted == ["arbeitsblatt.pdf"]
-    assert (upload_root / "arbeitsblatt.pdf").read_bytes() == b"payload"
+    assert (upload_root / "kl6_startklar" / "arbeitsblatt.pdf").read_bytes() == b"payload"
 
 
 def test_web_importer_rejects_traversal_pfad(tmp_path):
@@ -65,9 +70,10 @@ def test_web_importer_rejects_traversal_pfad(tmp_path):
 
     traversal_name = "../outside.txt"
     tmp_id = app_module._save_import_zip(_make_zip({traversal_name: b"payload"}).read())
-    task_list = [{"task": {"materials": [{"typ": "datei", "pfad": traversal_name}]}}]
+    targets = [(7, {"materials": [{"typ": "datei", "pfad": traversal_name}]})]
 
-    extracted = app_module._extract_import_zip_files(tmp_id, task_list)
+    extracted = app_module._extract_import_zip_files(tmp_id, targets)
 
     assert extracted == []
     assert not outside_target.exists()
+    assert not (upload_root / "thema-7" / "outside.txt").exists()

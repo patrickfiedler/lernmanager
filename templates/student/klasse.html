@@ -182,7 +182,8 @@
                         {% set is_image = ext in ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'] %}
                         {% set is_pdf = ext == 'pdf' %}
                         {% set is_youtube = 'youtube.com' in mat.pfad or 'youtu.be/' in mat.pfad %}
-                        {% set label = mat.beschreibung or mat.pfad %}
+                        {# A file's pfad carries its topic folder; a link's pfad is a URL. #}
+                        {% set label = mat.beschreibung or (mat.pfad|material_filename if mat.typ == 'datei' else mat.pfad) %}
                         {% set mat_locked = mat.school_only and not client_school_ok %}
                         {# Icon by type/extension #}
                         {% if mat.typ == 'link' %}

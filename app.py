@@ -29,7 +29,7 @@ import llm_grading
 import quiz_grading
 import artifact_processor
 import artifact_checker
-from utils import generate_username, generate_password, allowed_file, file_extension, content_matches_extension, generate_credentials_pdf, generate_credentials_pdf_grouped, generate_name_username_pdf, generate_student_self_report_pdf, generate_class_report_pdf, generate_student_report_pdf, slugify, format_bytes, is_ip_allowed, is_within_time_window, parse_netzwerk_csv, split_tasks_by_stufe, stufe_sort_key, normalize_markdown_lists
+from utils import generate_username, generate_password, allowed_file, file_extension, material_pfad, material_filename, content_matches_extension, generate_credentials_pdf, generate_credentials_pdf_grouped, generate_name_username_pdf, generate_student_self_report_pdf, generate_class_report_pdf, generate_student_report_pdf, slugify, format_bytes, is_ip_allowed, is_within_time_window, parse_netzwerk_csv, split_tasks_by_stufe, stufe_sort_key, normalize_markdown_lists
 from import_task import validate_task_structure, check_duplicate, import_task as do_import_task, overwrite_task_from_import, ValidationError
 
 app = Flask(__name__)
@@ -116,6 +116,12 @@ def aufgabe_titel(beschreibung, fallback_length=80):
 def aufgabe_titel_filter(beschreibung, fallback_length=80):
     """Template-side aufgabe_titel(); see there."""
     return aufgabe_titel(beschreibung, fallback_length)
+
+
+@app.template_filter('material_filename')
+def material_filename_filter(pfad):
+    """Bare filename from a stored material pfad (which carries the topic folder)."""
+    return material_filename(pfad)
 
 
 @app.template_filter('json_lines')
@@ -1930,7 +1936,9 @@ def admin_thema_export_zip(task_id):
             if mat['typ'] == 'datei':
                 filepath = os.path.join(config.UPLOAD_FOLDER, mat['pfad'])
                 if os.path.isfile(filepath):
-                    zf.write(filepath, mat['pfad'])
+                    # Storage is namespaced per topic, the ZIP is not: entries are
+                    # bare filenames, so a re-import lands them in its own folder.
+                    zf.write(filepath, material_filename(mat['pfad']))
 
     buf.seek(0)
     safe_name = slugify(task_data['name'])
@@ -1963,8 +1971,15 @@ def _save_import_zip(file_bytes):
     return tmp_id
 
 
-def _extract_import_zip_files(tmp_id, task_list):
-    """Extract material files from temp ZIP to UPLOAD_FOLDER. Always removes temp. Returns list of extracted filenames."""
+def _extract_import_zip_files(tmp_id, imported_targets):
+    """Extract material files from temp ZIP to UPLOAD_FOLDER. Always removes temp.
+
+    imported_targets is a list of (task_id, task_dict) for the topics that were
+    actually created or overwritten -- a topic whose import failed gets no files.
+    ZIP entries are bare filenames; on disk each topic's files go in its own
+    folder, so two topics may ship the same filename without clobbering.
+    Returns the list of extracted filenames (bare, as the teacher named them).
+    """
     if not tmp_id:
         return []
     tmp_path = os.path.join(_IMPORT_TMP_DIR, f'{tmp_id}.zip')
@@ -1976,19 +1991,25 @@ def _extract_import_zip_files(tmp_id, task_list):
             zip_names = set(zf.namelist())
             os.makedirs(config.UPLOAD_FOLDER, exist_ok=True)
             upload_dir = os.path.abspath(config.UPLOAD_FOLDER)
-            for task_data in task_list:
-                for mat in task_data['task'].get('materials', []):
+            for task_id, task_data in imported_targets:
+                unit_slug = (models.get_task(task_id) or {}).get('unit_slug')
+                for mat in task_data.get('materials', []):
                     if mat.get('typ') == 'datei' and mat.get('pfad') in zip_names:
                         # Second line of defence behind validate_task_structure:
                         # nothing reaches UPLOAD_FOLDER that download_material
                         # would not serve safely.
                         if not allowed_file(mat['pfad']):
                             continue
-                        dest = os.path.abspath(os.path.join(upload_dir, mat['pfad']))
+                        pfad = material_pfad(task_id, mat['pfad'], unit_slug)
+                        if not pfad:
+                            continue
+                        dest = os.path.abspath(os.path.join(upload_dir, pfad))
                         # Zip entry names aren't restricted by the format -- a crafted
                         # '../../etc/...' pfad would otherwise write outside upload_dir.
+                        # material_pfad already reduces it to a basename; this is the belt.
                         if os.path.commonpath([upload_dir, dest]) != upload_dir:
                             continue
+                        os.makedirs(os.path.dirname(dest), exist_ok=True)
                         with zf.open(mat['pfad']) as src, open(dest, 'wb') as dst:
                             dst.write(src.read())
                         extracted.append(mat['pfad'])
@@ -2167,6 +2188,9 @@ def admin_themen_import():
         overwritten = []
         overwritten_reset = []
         warnings = []
+        # (task_id, task_dict) for topics that really landed -- the ZIP step below
+        # writes each topic's files into that topic's own folder, so it needs the id.
+        import_targets = []
 
         for i, task_entry in enumerate(data.get('tasks', [])):
             wrapped = {'task': task_entry}
@@ -2180,6 +2204,7 @@ def admin_themen_import():
                     w = []
                     overwrite_task_from_import(target_id, wrapped, reset_progress=reset, warnings=w)
                     warnings.extend(w)
+                    import_targets.append((target_id, task_entry))
                     if reset:
                         overwritten_reset.append(task_entry['name'])
                     else:
@@ -2192,6 +2217,7 @@ def admin_themen_import():
                 task_id = do_import_task(wrapped, warnings=w)
                 warnings.extend(w)
                 if task_id:
+                    import_targets.append((task_id, task_entry))
                     imported.append(task_entry['name'])
 
         if imported:
@@ -2204,18 +2230,17 @@ def admin_themen_import():
             flash(w, 'warning')
 
         if zip_tmp_id:
-            task_list_all = [{'task': t} for t in data.get('tasks', [])]
             expected_files = [
                 mat['pfad']
-                for t in task_list_all
-                for mat in t['task'].get('materials', [])
+                for _tid, t in import_targets
+                for mat in t.get('materials', [])
                 if mat.get('typ') == 'datei' and mat.get('pfad')
             ]
             tmp_path = os.path.join(_IMPORT_TMP_DIR, f'{zip_tmp_id}.zip')
             if not os.path.isfile(tmp_path):
                 flash('ZIP-Datei nicht mehr verfügbar (Server-Neustart?). Bitte erneut als ZIP importieren, um die Dateien zu übertragen.', 'warning')
             else:
-                extracted = _extract_import_zip_files(zip_tmp_id, task_list_all)
+                extracted = _extract_import_zip_files(zip_tmp_id, import_targets)
                 if extracted:
                     flash(f"{len(extracted)} Datei(en) importiert: {', '.join(extracted)}", 'success')
                 not_extracted = [f for f in expected_files if f not in extracted]
@@ -2442,13 +2467,14 @@ def admin_thema_material_upload(task_id):
         os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
         filename = secure_filename(file.filename)
-        if not filename:
+        # Same rule as the ZIP importer: the file lives in this topic's folder,
+        # so its name only has to be unique within the topic (was a "<id>_" prefix).
+        pfad = material_pfad(task_id, filename, (models.get_task(task_id) or {}).get('unit_slug'))
+        if not pfad:
             flash('Ungültiger Dateiname.', 'danger')
             return redirect(url_for('admin_thema_detail', task_id=task_id))
-
-        # Add task_id to make filename unique
-        filename = f"{task_id}_{filename}"
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], pfad)
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
 
         # Save the file (already read into memory for the content check above)
         with open(filepath, 'wb') as out:
@@ -2462,7 +2488,7 @@ def admin_thema_material_upload(task_id):
         beschreibung = request.form.get('beschreibung', '').strip()
         attribution = request.form.get('attribution', '').strip() or None
         school_only = 'school_only' in request.form
-        models.create_material(task_id, 'datei', filename, beschreibung, attribution, school_only)
+        models.create_material(task_id, 'datei', pfad, beschreibung, attribution, school_only)
 
         flash('Datei hochgeladen. ✅', 'success')
 
@@ -2602,7 +2628,7 @@ def download_material(material_id):
             user_type=user_type,
             metadata={
                 'material_id': material_id,
-                'filename': material['pfad'],
+                'filename': material_filename(material['pfad']),
                 'typ': material['typ']
             }
         )
@@ -2622,8 +2648,10 @@ def download_material(material_id):
             response.headers['X-Accel-Redirect'] = f'/protected-files/{material["pfad"]}'
             response.headers['Content-Type'] = content_type
             if not inline:
+                # The stored pfad carries the topic folder; the student gets the
+                # plain filename, not "kl6_startklar/01_Vorlage.docx".
                 response.headers['Content-Disposition'] = (
-                    f'attachment; filename="{material["pfad"]}"'
+                    f'attachment; filename="{material_filename(material["pfad"])}"'
                 )
             return response
 

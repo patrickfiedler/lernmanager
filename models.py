@@ -10,6 +10,7 @@ import urllib.request
 import urllib.error
 from werkzeug.security import generate_password_hash, check_password_hash
 import config
+from utils import material_filename
 
 # Terminology mapping (UI German → Database English):
 #   Thema (topic)       → task table
@@ -1849,10 +1850,10 @@ def delete_task(task_id):
     task/subtask -- keep this in sync when adding another one.
 
     Returns (student_artifact_disk_filenames, material_pfade_to_unlink) for
-    the caller to remove from disk. Material filenames aren't task-scoped
-    (ZIP-imported pfad values are plain content filenames, no task_id
-    prefix -- see docs/shared/lernmanager/conventions.md), so a pfad is only
-    safe to unlink once no other task's material row still references it.
+    the caller to remove from disk. A pfad written since the per-topic storage
+    change carries the topic's own folder and so is never shared, but rows
+    predating it are plain filenames that a second topic may still point at --
+    hence a pfad is only unlinked once no other material row references it.
     """
     with db_session() as conn:
         subtask_ids = [r['id'] for r in conn.execute(
@@ -2103,7 +2104,11 @@ def export_task_to_dict(task_id):
         for material in materials:
             mat_data = {
                 'typ': material['typ'],
-                'pfad': material['pfad'],
+                # Files export under their bare name -- storage is namespaced per
+                # topic, the exchange format is not, so a re-import (here or in
+                # another instance) puts them in that instance's own folder.
+                'pfad': (material_filename(material['pfad'])
+                         if material['typ'] == 'datei' else material['pfad']),
                 'beschreibung': material['beschreibung'],
                 'attribution': material.get('attribution')
             }

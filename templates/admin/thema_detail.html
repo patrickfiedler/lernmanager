@@ -217,7 +217,7 @@
                 <a class="mat-label" href="{{ mat.pfad }}" target="_blank">{{ mat.beschreibung or mat.pfad }}</a>
                 {% else %}
                 <span class="material-icon">📄</span>
-                <a class="mat-label" href="{{ url_for('download_material', material_id=mat.id) }}" target="_blank">{{ mat.beschreibung or mat.pfad }}</a>
+                <a class="mat-label" href="{{ url_for('download_material', material_id=mat.id) }}" target="_blank">{{ mat.beschreibung or mat.pfad|material_filename }}</a>
                 {% endif %}
                 {% if mat.attribution %}
                 <small class="text-muted">© {{ mat.attribution }}</small>
@@ -227,7 +227,7 @@
                         onclick="toggleMaterialSchulnetz({{ mat.id }})"
                         title="{{ 'Nur im Schulnetzwerk abrufbar (klicken zum Aufheben)' if mat.school_only else 'Überall verfügbar (klicken zum Beschränken auf Schulnetzwerk)' }}">{{ '🔒' if mat.school_only else '🔓' }}</button>
                 {% endif %}
-                <input class="mat-input form-control" type="text" value="{{ mat.beschreibung or mat.pfad }}" style="display:none; width: 220px;" data-mat-id="{{ mat.id }}">
+                <input class="mat-input form-control" type="text" value="{{ mat.beschreibung or (mat.pfad|material_filename if mat.typ == 'datei' else mat.pfad) }}" style="display:none; width: 220px;" data-mat-id="{{ mat.id }}">
                 <button class="btn btn-sm mat-save" style="display:none;" onclick="saveMaterialName({{ mat.id }})">✓</button>
                 <button class="btn btn-sm mat-cancel" style="display:none;" onclick="cancelMaterialEdit({{ mat.id }})">✗</button>
                 <button class="btn btn-sm mat-edit" onclick="startMaterialEdit({{ mat.id }})" title="Namen bearbeiten">✏️</button>
@@ -265,7 +265,7 @@
                     <tr>
                         <td>
                             {% if mat.typ == 'link' %}🔗{% else %}📄{% endif %}
-                            {{ mat.beschreibung or mat.pfad }}
+                            {{ mat.beschreibung or (mat.pfad|material_filename if mat.typ == 'datei' else mat.pfad) }}
                         </td>
                         {% for st in subtasks %}
                         <td style="text-align: center;">

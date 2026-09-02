@@ -1,4 +1,5 @@
 import io
+import os
 import re
 import random
 import zipfile
@@ -105,6 +106,52 @@ def slugify(text):
     text = text.encode('ascii', 'ignore').decode('ascii').lower()
     text = re.sub(r'[^a-z0-9]+', '-', text).strip('-')
     return text
+
+
+# Folder names already in use under UPLOAD_FOLDER for something other than a
+# topic's materials. A unit_slug matching one of these falls back to thema-<id>.
+_RESERVED_MATERIAL_FOLDERS = {'artefakte', 'grading', 'tmp'}
+
+
+def material_folder(task_id, unit_slug=None):
+    """Folder under UPLOAD_FOLDER that holds one topic's material files.
+
+    Per-topic folders are what let a Seilbahn twin and its regular counterpart
+    ship a file under the *same* name -- in a flat namespace the second import
+    would silently overwrite the first (see docs/shared/lernmanager/inbox.md).
+
+    unit_slug is preferred because it makes the folder readable on the server.
+    It is safe as a folder name: the DB holds a UNIQUE index on it and both the
+    importer and the admin form restrict it to ^[a-z0-9_]+$, so it can never
+    contain a separator and can never collide with a 'thema-<id>' fallback
+    (that regex forbids the dash).
+    """
+    if unit_slug and re.match(r'^[a-z0-9_]+$', unit_slug) and unit_slug not in _RESERVED_MATERIAL_FOLDERS:
+        return unit_slug
+    return f'thema-{int(task_id)}'
+
+
+def material_pfad(task_id, filename, unit_slug=None):
+    """Where a material file is stored, relative to UPLOAD_FOLDER.
+
+    The bare filename stays the contract in import/export ZIPs -- only storage
+    is namespaced -- so anything coming from a ZIP is reduced to its basename
+    here. Returns None for a name that is not a usable filename.
+    """
+    name = os.path.basename((filename or '').replace('\\', '/').strip())
+    if not name or name in ('.', '..'):
+        return None
+    return f'{material_folder(task_id, unit_slug)}/{name}'
+
+
+def is_reserved_material_folder(name):
+    """True for a folder under UPLOAD_FOLDER that never holds a topic's materials."""
+    return name in _RESERVED_MATERIAL_FOLDERS
+
+
+def material_filename(pfad):
+    """The filename a student sees, from a stored pfad. Tolerates legacy flat pfade."""
+    return os.path.basename((pfad or '').replace('\\', '/'))
 
 
 def parse_stufen(stufe):
