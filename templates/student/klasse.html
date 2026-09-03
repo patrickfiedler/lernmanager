@@ -842,13 +842,28 @@ function renderFeedbackSplit(feedback) {
             ${item.note ? `<div class="feedback-note">💬 ${escapeHtml(item.note)}${item.source !== 'deterministic' ? ' <span class="feedback-src">✨ KI</span>' : ''}</div>` : ''}
         </div>
     </div>`;
+    // The two columns are not mirror images, so their empty states are not either.
+    // "Hier gibt's noch was zu tun" is meant to empty out -- when it does the column
+    // goes away entirely and the green panel takes the full width; that structural
+    // change IS the success signal, and a stronger one than an empty red column.
+    // "Gut so" empty means "not yet", a starting state, so it stays and says where to
+    // look. Both used to render "-", and students read the empty red half as
+    // "something is missing but the site won't tell me what" -- an absence of problems
+    // and an absence of information had the same glyph.
+    const BAD_LABEL = "Hier gibt's noch was zu tun";
     const col = (title, items, cls) => `<div class="feedback-col ${cls}">
-        <div class="feedback-col-title">${title}</div>
-        ${items.length ? items.map(row).join('') : '<p class="feedback-empty">–</p>'}
+        ${title ? `<div class="feedback-col-title">${title}</div>` : ''}
+        ${items.length ? items.map(row).join('')
+                       : `<p class="feedback-empty">Mögliche Verbesserungen stehen unter „${BAD_LABEL}“.</p>`}
     </div>`;
     const header = feedback.some(item => item.source !== 'deterministic') ? 'KI-Feedback:' : 'Prüfung:';
+    // No column title in single-column mode: "✅ Gut so" labels a column against its
+    // counterpart, and there is no counterpart left to contrast it with.
+    const allDone = bad.length === 0;
+    const cols = allDone ? col('', good, 'good')
+                         : col('✅ Gut so', good, 'good') + col('❌ ' + BAD_LABEL, bad, 'bad');
     return `<div class="checklist-header">${header}</div>
-        <div class="feedback-split">${col('✅ Gut so', good, 'good')}${col("❌ Hier gibt's noch was zu tun", bad, 'bad')}</div>
+        <div class="feedback-split${allDone ? ' feedback-split--single' : ''}">${cols}</div>
         <p style="font-size:0.8rem;color:#6b7280;margin-top:0.5rem;">Note wird von der Lehrkraft gesetzt.</p>`;
 }
 

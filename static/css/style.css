@@ -1981,6 +1981,9 @@ body.easy-reading-mode .step-box {
     gap: 0.75rem;
     margin: 0.5rem 0;
 }
+/* Nothing left to do: the "zu tun" column is not rendered at all, so the remaining
+   green panel must take the full width instead of sitting in a half-empty grid. */
+.feedback-split--single { grid-template-columns: 1fr; }
 .feedback-col {
     border-radius: var(--box-radius);
     padding: var(--box-pad-nested);
