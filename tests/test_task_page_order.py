@@ -16,11 +16,12 @@ import models
 GATE = {"format": [".docx"], "required_text": ["Fachraumregeln"]}
 
 
-def _page(app, client, tmp_path, gate_passed):
+def _page(app, client, tmp_path, gate_passed, thema_done=False):
     app.config["WTF_CSRF_ENABLED"] = False
     config.UPLOAD_FOLDER = str(tmp_path / "uploads")
 
-    student_id = models.create_student("Alex", "Schueler", f"order{gate_passed}", "pw123")
+    username = f"order{gate_passed}{'done' if thema_done else ''}"
+    student_id = models.create_student("Alex", "Schueler", username, "pw123")
     klasse_id = models.create_klasse("Testklasse")
     models.add_student_to_klasse(student_id, klasse_id)
     task_id = models.create_task("Testthema", "", "", "MBI", "5", "pflicht")
@@ -32,9 +33,12 @@ def _page(app, client, tmp_path, gate_passed):
     )
     models.create_material(task_id, "link", "https://example.org/poster.pdf", "Poster")
     models.assign_task_to_student(student_id, klasse_id, task_id)
+    st = models.get_student_task(student_id, klasse_id)
     if gate_passed:
-        st = models.get_student_task(student_id, klasse_id)
         models.save_artifact_gate_result(st["id"], gate_id, True)
+    if thema_done:
+        models.toggle_student_subtask(st["id"], gate_id, True)
+        models.mark_task_complete(st["id"])
 
     with client.session_transaction() as sess:
         sess["student_id"] = student_id
@@ -65,11 +69,20 @@ def test_working_sequence_on_a_passed_gate(app, client, tmp_path):
         "the criterion must sit directly on the checkbox that commits to it"
 
 
-def test_criterion_closes_its_own_box_when_no_checkbox_follows(app, client, tmp_path):
-    """A withheld completion zone leaves the callout as the last element -- it has to
-    close its bottom edge instead of running into nothing."""
+def test_a_failed_gate_still_leaves_the_criterion_on_its_checkbox(app, client, tmp_path):
+    """Until 2026-09-03 a failing gate hid the checkbox, so the callout had to close its
+    own bottom edge. Artifact checks no longer withhold anything: the checkbox follows,
+    and the criterion sits directly on it -- which is the whole point of the ordering."""
     page = _page(app, client, tmp_path, gate_passed=False)
-    assert '<div id="completion-zone" hidden' in page
+    assert '<div id="completion-zone" hidden' not in page
+    assert 'id="completion-zone"' in page
+    assert "fertig-wenn-callout--standalone" not in page
+
+
+def test_criterion_closes_its_own_box_on_a_finished_thema(app, client, tmp_path):
+    """The standalone rule still has one caller: a closed Thema drops the checkbox, and
+    then the callout really is the last element."""
+    page = _page(app, client, tmp_path, gate_passed=True, thema_done=True)
     assert "fertig-wenn-callout--standalone" in page
 
 

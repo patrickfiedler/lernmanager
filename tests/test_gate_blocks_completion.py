@@ -1,21 +1,21 @@
-"""A failing artifact gate must not sit under a live completion checkbox.
+"""An artifact gate reports; it does not block.
 
-Found in production 2026-08-30 from a screenshot: a deliberately failing upload on
-"Startklar im Fachraum" showed a green "📎 Abgabe geprüft ✓ — Deine Datei wurde
-erfolgreich geprüft" header, a live "Ich habe das geschafft!" checkbox one click from
-the Aufgaben-Quiz, and -- two sections further down -- the real result, five errors and
-two warnings. Three separate defects, one screen:
+Since 2026-09-03 every artifact check is a hint: a failing gate leaves the completion
+checkbox live and does not hold the Thema open. What it still must do is describe the
+file that is actually stored, and keep the attempt on record for the teacher.
 
-1. templates/student/klasse.html tested `inline_gate` only when deciding whether to
-   render the completion zone. 5 of the 6 gates in production are CAPSTONE gates, where
-   `inline_gate` is None, so the guard short-circuited to "allowed" and never fired.
+The three defects this file was written for (2026-08-30) are still guarded, two of them
+inverted by the policy change:
+
+1. The completion zone used to be withheld only when `inline_gate` was set, but 5 of 6
+   production gates are capstone gates -- so the guard short-circuited to "allowed".
+   The guard is gone entirely now, and these tests pin that it stays gone on BOTH paths
+   rather than coming back for one of them.
 2. student_artifact_gate_check() refused to persist a failing re-check once the gate had
-   passed ("if not already_passed or result['passed']"), so the card header described an
-   upload that had since been replaced -- _save_artifact_file keeps the LATEST file, not
-   the latest passing one.
-3. check_task_completion() never looked at artifact_gate_passed, so a Thema closed on
-   ticked boxes and passed quizzes alone -- contradicting the card's own promise that the
-   file "muss geprüft sein, bevor du das Thema abschließen kannst".
+   passed, so the card described a file that had since been replaced. Still guarded --
+   _save_artifact_file keeps the LATEST file, and the verdict has to follow it.
+3. check_task_completion() ignored artifact_gate_passed. It now ignores it deliberately,
+   which is a different thing from ignoring it by accident: the test says so out loud.
 """
 import io
 import json
@@ -31,7 +31,7 @@ PASS_BODY = ('<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr>'
 FAIL_BODY = '<w:p><w:r><w:t>Nichts davon steht hier.</w:t></w:r></w:p>'
 
 
-def _capstone_setup(app, tmp_path, username, gate_required=True):
+def _capstone_setup(app, tmp_path, username):
     """One Aufgabe carrying the gate -> it is the last one -> capstone path."""
     app.config["WTF_CSRF_ENABLED"] = False
     config.UPLOAD_FOLDER = str(tmp_path / "uploads")
@@ -39,8 +39,6 @@ def _capstone_setup(app, tmp_path, username, gate_required=True):
     student_id = models.create_student("Alex", "Schueler", username, "pw123")
     klasse_id = models.create_klasse("Testklasse")
     models.add_student_to_klasse(student_id, klasse_id)
-    if not gate_required:
-        models.set_klasse_artifact_gate_required(klasse_id, False)
     task_id = models.create_task("Testthema", "", "", "MBI", "5", "pflicht")
     gate_id = models.create_subtask(
         task_id, "Abgabe", reihenfolge=1,
@@ -64,21 +62,21 @@ def _login(client, student_id):
         sess["student_id"] = student_id
 
 
-# --- 1. the checkbox is withheld on the capstone path, not just the inline one ---
+# --- 1. a failing gate leaves the checkbox live, on both gate paths ---
 
-def test_failing_capstone_gate_withholds_the_checkbox(app, client, tmp_path):
+def test_failing_capstone_gate_leaves_the_checkbox_live(app, client, tmp_path):
+    """The student decides when to move on; the check only tells them what it saw."""
     student_id, *_ = _capstone_setup(app, tmp_path, "capstone1")
     _login(client, student_id)
 
     assert _upload(client, FAIL_BODY).get_json()["passed"] is False
     page = client.get("/schueler/thema/testthema").get_data(as_text=True)
-    # Rendered but hidden, so a passing re-check can reveal it without a reload.
-    assert '<div id="completion-zone" hidden' in page, \
-        "a failing capstone gate must not leave a live completion checkbox on the page"
+    assert 'id="completion-zone"' in page
+    assert '<div id="completion-zone" hidden' not in page, \
+        "an artifact check must not withhold the completion checkbox"
 
 
-def test_passing_capstone_gate_releases_the_checkbox(app, client, tmp_path):
-    """The guard must not lock students out -- it lifts the moment the gate passes."""
+def test_passing_capstone_gate_leaves_the_checkbox_live(app, client, tmp_path):
     student_id, *_ = _capstone_setup(app, tmp_path, "capstone2")
     _login(client, student_id)
 
@@ -88,15 +86,16 @@ def test_passing_capstone_gate_releases_the_checkbox(app, client, tmp_path):
     assert '<div id="completion-zone" hidden' not in page
 
 
-def test_checkbox_stays_when_the_class_does_not_require_the_gate(app, client, tmp_path):
-    """artifact_gate_required is the teacher's switch; off means advisory, as before."""
-    student_id, *_ = _capstone_setup(app, tmp_path, "capstone3", gate_required=False)
+def test_the_page_never_ships_a_hidden_completion_zone(app, client, tmp_path):
+    """The old guard hid the zone server-side and JS handed it back. Both are gone --
+    if either returns, a failing upload strands the student with no way forward."""
+    student_id, *_ = _capstone_setup(app, tmp_path, "capstone3")
     _login(client, student_id)
+    _upload(client, FAIL_BODY)
 
-    assert _upload(client, FAIL_BODY).get_json()["passed"] is False
     page = client.get("/schueler/thema/testthema").get_data(as_text=True)
-    assert 'id="completion-zone"' in page
-    assert '<div id="completion-zone" hidden' not in page
+    assert "setCompletionZoneVisible" not in page
+    assert "artifactGateRequired" not in page
 
 
 # --- 2. the verdict follows the stored file ---
@@ -118,20 +117,20 @@ def test_failing_reupload_takes_the_pass_back(app, client, tmp_path):
     assert 'class="gate-card mt-2 gate-ready"' in page
 
 
-# --- 3. an unpassed required gate blocks Thema completion ---
+# --- 3. an unpassed gate does not hold the Thema open ---
 
-def test_thema_does_not_complete_while_the_gate_fails(app, client, tmp_path):
+def test_thema_completes_although_the_gate_failed(app, client, tmp_path):
+    """Deliberate, not an oversight: the check advises, the student's tick decides."""
     student_id, klasse_id, task_id, gate_id, student_task_id = _capstone_setup(
         app, tmp_path, "completion1")
     _login(client, student_id)
     _upload(client, FAIL_BODY)
 
     models.toggle_student_subtask(student_task_id, gate_id, True)
-    assert models.check_task_completion(student_task_id) is False, \
-        "the gate card promises the file must be checked before the Thema can close"
+    assert models.check_task_completion(student_task_id) is True
 
 
-def test_thema_completes_once_the_gate_passes(app, client, tmp_path):
+def test_thema_completes_when_the_gate_passes(app, client, tmp_path):
     student_id, klasse_id, task_id, gate_id, student_task_id = _capstone_setup(
         app, tmp_path, "completion2")
     _login(client, student_id)
@@ -141,11 +140,23 @@ def test_thema_completes_once_the_gate_passes(app, client, tmp_path):
     assert models.check_task_completion(student_task_id) is True
 
 
-def test_gate_does_not_block_completion_when_the_class_switched_it_off(app, client, tmp_path):
+def test_an_unticked_aufgabe_still_holds_the_thema_open(app, client, tmp_path):
+    """Dropping the gate condition must not have dropped the completion check with it."""
     student_id, klasse_id, task_id, gate_id, student_task_id = _capstone_setup(
-        app, tmp_path, "completion3", gate_required=False)
+        app, tmp_path, "completion3")
+    _login(client, student_id)
+    _upload(client, PASS_BODY)
+
+    assert models.check_task_completion(student_task_id) is False
+
+
+def test_the_failed_attempt_stays_on_record_for_the_teacher(app, client, tmp_path):
+    """Nothing blocks any more, so the log is the only thing that remembers."""
+    student_id, klasse_id, task_id, gate_id, student_task_id = _capstone_setup(
+        app, tmp_path, "record1")
     _login(client, student_id)
     _upload(client, FAIL_BODY)
-
     models.toggle_student_subtask(student_task_id, gate_id, True)
-    assert models.check_task_completion(student_task_id) is True
+
+    attempts = models.get_artifact_gate_attempts_for_student(student_id)
+    assert any(not a["passed"] for a in attempts)

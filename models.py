@@ -127,6 +127,9 @@ def init_db():
                 name TEXT NOT NULL,
                 llm_artifact_feedback_enabled INTEGER NOT NULL DEFAULT 0,
                 llm_transparency_mode INTEGER DEFAULT NULL,
+                -- Unused since 2026-09-03: artifact checks advise, they never block, so
+                -- there is nothing left to switch. Column kept rather than migrated away,
+                -- same as subtask_visibility and task_voraussetzung.
                 artifact_gate_required INTEGER NOT NULL DEFAULT 1,
                 klassenstufe INTEGER DEFAULT NULL,
                 kurs_code TEXT DEFAULT NULL,
@@ -3288,18 +3291,13 @@ def check_task_completion(student_task_id):
             ''', [student_task_id] + required_ids).fetchall()
 
             quiz_required = task_info and task_info['subtask_quiz_required']
-            # The capstone gate card tells the student the file "muss geprueft sein,
-            # bevor du das Thema abschliessen kannst". Nothing enforced that: a Thema
-            # closed on ticked boxes and passed quizzes alone, failing gate and all.
-            gate_required = conn.execute(
-                "SELECT artifact_gate_required FROM klasse WHERE id = ?", (klasse_id,)
-            ).fetchone()
-            gate_required = bool(gate_required['artifact_gate_required']) if gate_required else True
+            # An unpassed artifact gate does NOT hold a Thema open (2026-09-03). Artifact
+            # checks advise, they do not block -- see the class comment on Aufgabe
+            # completion in templates/student/klasse.html. Quizzes still gate below;
+            # that threshold was left alone deliberately.
 
             for sub in subtask_rows:
                 if not sub['erledigt']:
-                    return False
-                if gate_required and sub['artifact_gate_json'] and not sub['artifact_gate_passed']:
                     return False
                 # Check subtask quiz if required
                 if quiz_required and sub['quiz_json']:
@@ -5664,15 +5662,6 @@ def set_klasse_llm_feedback(klasse_id, enabled: bool):
         conn.execute(
             "UPDATE klasse SET llm_artifact_feedback_enabled = ? WHERE id = ?",
             (1 if enabled else 0, klasse_id)
-        )
-
-
-def set_klasse_artifact_gate_required(klasse_id, required: bool):
-    """Set whether artifact gate blocks task completion (True) or is informational (False)."""
-    with db_session() as conn:
-        conn.execute(
-            "UPDATE klasse SET artifact_gate_required = ? WHERE id = ?",
-            (1 if required else 0, klasse_id)
         )
 
 

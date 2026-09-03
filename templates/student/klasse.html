@@ -109,13 +109,13 @@
     {% set current_has_unpassed_quiz = active_subtask.quiz_json and not subtask_quiz_status.get(active_subtask.id, false) %}
     {% set has_next = current_has_unpassed_quiz or current_index < (subtasks|length - 1) or (current_index == (subtasks|length - 1) and task.quiz_json) %}
 
-    {# A required gate on the ACTIVE Aufgabe withholds the completion checkbox until it
-       passes. This used to test inline_gate only -- but 5 of 6 gates in production are
-       capstone gates, where inline_gate is None, so the test short-circuited to "allowed"
-       and the checkbox sat above a failing gate, one click from the quiz. #}
-    {% set on_capstone_gate = capstone_gate and active_subtask and active_subtask.id == capstone_gate.id %}
-    {% set active_gate_passed = inline_gate_passed if inline_gate else capstone_gate_passed %}
-    {% set gate_withholds_completion = artifact_gate_required and (inline_gate or on_capstone_gate) and not active_gate_passed %}
+    {# An artifact check never withholds the completion checkbox (2026-09-03). Every
+       result is a hint; the student decides when to move on, and the attempt log
+       (artifact_gate_attempt) keeps the record for the teacher either way. A leftover
+       "______" is not ideal, but it is not a reason to stop someone -- and the one
+       check that used to look strictest, the filename, was measuring something the
+       app does not even identify files by. Quiz and checkpoint thresholds are
+       untouched: there the threshold does real work. #}
 
     {% if pending_fork %}
     <div id="fork-picker-card" class="card mt-2" style="border-left: 4px solid #f59e0b;">
@@ -321,7 +321,7 @@
             {% endif %}
 
             {% if active_subtask and active_subtask.fertig_wenn %}
-            <div class="fertig-wenn-callout {% if gate_withholds_completion or task.abgeschlossen %}fertig-wenn-callout--standalone{% endif %}">
+            <div class="fertig-wenn-callout {% if task.abgeschlossen %}fertig-wenn-callout--standalone{% endif %}">
                 {{ active_subtask.fertig_wenn | markdown }}
             </div>
             {% endif %}
@@ -331,7 +331,7 @@
             {# Einführung is read, not done -- the checkbox means something different there. #}
             {% set complete_label = 'Ich habe das gelesen und verstanden! ✓ In der nächsten Aufgabe beginnst du mit der Arbeit.' if active_subtask.get('is_intro') else 'Ich habe das geschafft! ✓' %}
             {% if graded_artifact %}
-            <div id="completion-zone" {% if gate_withholds_completion %}hidden{% endif %} class="task-complete {% if active_subtask.fertig_wenn %}has-fertig-wenn{% endif %} has-artifact">
+            <div id="completion-zone" class="task-complete {% if active_subtask.fertig_wenn %}has-fertig-wenn{% endif %} has-artifact">
                 <!-- Left: completion checkbox -->
                 <div class="task-complete-left" onclick="document.getElementById('subtask-checkbox-{{ active_subtask.id }}').click()">
                     <input type="checkbox"
@@ -376,7 +376,7 @@
                 </div>
             </div>
             {% else %}
-            <div id="completion-zone" {% if gate_withholds_completion %}hidden{% endif %} class="task-complete {% if active_subtask.fertig_wenn %}has-fertig-wenn{% endif %}" onclick="document.getElementById('subtask-checkbox-{{ active_subtask.id }}').click()">
+            <div id="completion-zone" class="task-complete {% if active_subtask.fertig_wenn %}has-fertig-wenn{% endif %}" onclick="document.getElementById('subtask-checkbox-{{ active_subtask.id }}').click()">
                 <input type="checkbox"
                        id="subtask-checkbox-{{ active_subtask.id }}"
                        class="subtask-checkbox"
@@ -569,7 +569,6 @@ const gatePassed = {{ 'true' if capstone_gate_passed else 'false' }};
 const artifactKeyword = {{ (graded_artifact.keyword if graded_artifact and graded_artifact.keyword else None) | tojson }};
 const inlineGateKeyword = {{ inline_gate_keyword | tojson }};
 const capstoneGateKeyword = {{ capstone_gate_keyword | tojson }};
-const artifactGateRequired = {{ artifact_gate_required | tojson }};
 
 function toggleSubtask(position, checked) {
     const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
@@ -945,21 +944,6 @@ function markGatePassed(card) {
     if (desc) desc.textContent = 'Neue Version einreichen:';
 }
 
-// Only when the class requires the gate -- artifact_gate_required is the teacher's
-// switch, and with it off the checkbox was never gated in the first place.
-// Hidden rather than removed, so a passing re-check can hand it straight back: the
-// student who corrects their file gets the checkbox inline, next to the feedback they
-// are still reading, instead of having to reload and lose it.
-function setCompletionZoneVisible(visible) {
-    if (!artifactGateRequired) return;
-    const zone = document.getElementById('completion-zone');
-    if (zone) zone.hidden = !visible;
-    // With nothing beneath it the criterion callout closes its own bottom edge --
-    // the same rule the server applies through gate_withholds_completion.
-    const callout = document.querySelector('.fertig-wenn-callout');
-    if (callout) callout.classList.toggle('fertig-wenn-callout--standalone', !visible);
-}
-
 function allFeedbackItems(data, filenameItem) {
     return gateFeedbackItems(data.matches, data.details, data.warnings,
                              data.filename_checked ? null : filenameItem)
@@ -1162,7 +1146,6 @@ function adjustZoom(delta) {
                     const rateNote = (data.checks_remaining !== undefined && data.checks_remaining <= 3 && data.checks_remaining > 0)
                         ? `<p style="font-size:0.8rem;color:#6b7280;">Noch ${data.checks_remaining} KI-Check${data.checks_remaining === 1 ? '' : 's'} übrig.</p>` : '';
                     markGatePassed(submitBtn.closest('.gate-card'));
-                    setCompletionZoneVisible(true);
                     let html = `<p class="gate-success-msg" style="margin-bottom:0.5rem;">✓ Abgabe geprüft!</p>`;
                     html += renderFeedbackSplit(allFeedbackItems(data, filenameItem)) + rateNote;
                     html += `<button class="btn btn-primary mt-1" onclick="location.reload()">Weiter →</button>`;
@@ -1171,7 +1154,6 @@ function adjustZoom(delta) {
                     submitBtn.style.display = 'none';
                 } else {
                     markGateFailed(submitBtn.closest('.gate-card'));
-                    setCompletionZoneVisible(false);
                     let html = `<p class="gate-fail-msg">${data.message}</p>`;
                     html += renderFeedbackSplit(allFeedbackItems(data, filenameItem));
                     resultDiv.innerHTML = html;
@@ -1259,7 +1241,6 @@ function adjustZoom(delta) {
                     const rateNote = (data.checks_remaining !== undefined && data.checks_remaining <= 3 && data.checks_remaining > 0)
                         ? `<p style="font-size:0.8rem;color:#6b7280;">Noch ${data.checks_remaining} KI-Check${data.checks_remaining === 1 ? '' : 's'} übrig.</p>` : '';
                     markGatePassed(submitBtn.closest('.gate-card'));
-                    setCompletionZoneVisible(true);
                     let html = `<p class="gate-success-msg" style="margin-bottom:0.5rem;">✓ Abgabe geprüft!</p>`;
                     html += renderFeedbackSplit(allFeedbackItems(data, filenameItem)) + rateNote;
                     html += `<button class="btn btn-primary mt-1" onclick="location.reload()">Weiter →</button>`;
@@ -1268,16 +1249,12 @@ function adjustZoom(delta) {
                     submitBtn.style.display = 'none';
                 } else {
                     markGateFailed(submitBtn.closest('.gate-card'));
-                    setCompletionZoneVisible(false);
                     let html = `<p class="gate-fail-msg">${data.message}</p>`;
+                    // No "trotzdem weitermachen" escape here any more: it existed to get
+                    // past a checkbox the gate was hiding, and nothing hides it now. The
+                    // ordinary completion checkbox below the card is the one way to move
+                    // on, so the student is not offered two controls doing one thing.
                     html += renderFeedbackSplit(allFeedbackItems(data, filenameItem));
-                    {% if artifact_gate_required %}
-                    html += `<div class="task-complete" style="margin-top:0.75rem;font-size:0.9rem;"
-                                  onclick="if(!this.dataset.used){this.dataset.used='1';this.querySelector('input').checked=true;this.style.opacity='0.5';this.style.pointerEvents='none';toggleSubtask({{ current_index + 1 }}, true);}">
-                        <input type="checkbox" onclick="event.stopPropagation()">
-                        <label style="cursor:pointer;">Trotzdem mit der nächsten Aufgabe weitermachen</label>
-                    </div>`;
-                    {% endif %}
                     resultDiv.innerHTML = html;
                     resultDiv.style.display = 'block';
                     submitBtn.disabled = false;
