@@ -374,21 +374,16 @@ def grade_artifact_checklist(extracted_text: str, criteria: list) -> list:
     Args:
         extracted_text: Pseudonymized text extracted from the student's file.
         criteria: List of criterion strings (from graded_artifact_json['criteria']).
-            Filename criteria ("Datei..." prefix) are filtered out — see
-            artifact_checker.check_filename for the deterministic equivalent.
+            Filenames belong in graded_artifact.expected_filename, not here — see
+            artifact_checker.check_filename. Authoring rule, not enforced here:
+            a "Datei..." criterion used to be dropped silently, which also ate
+            legitimate ones ("Dateiformat ist .odt").
 
     Returns:
         List of dicts: [{"criterion": str, "passed": bool, "note": str, "source": "llm"}, ...]
         Returns an empty list on failure (caller should handle gracefully).
     """
     if not config.LLM_ENABLED or not criteria or not extracted_text:
-        return []
-
-    # Filenames are checked deterministically (see artifact_checker.check_filename /
-    # graded_artifact.expected_filename) — never send them to the LLM. This also protects
-    # legacy content still using the old inline "Datei..." criterion pattern.
-    criteria = [c for c in criteria if not c.strip().lower().startswith('datei')]
-    if not criteria:
         return []
 
     numbered = "\n".join(f"{i+1}. {c}" for i, c in enumerate(criteria))
