@@ -55,15 +55,27 @@ def _fuzzy_match(a: str, b: str) -> float:
 def check_filename(filename: str, expected_filename: str, student_vorname: str = '', student_name: str = '') -> dict:
     """Deterministic filename check — never sent to the LLM (see conventions.md).
 
-    Compares the uploaded filename's stem against expected_filename with
+    Looks for expected_filename *inside* the uploaded filename's stem, with
     [Vorname]/[Name] placeholders substituted for the student's real name.
     Shaped like an LLM checklist item so it can be spliced into the same
     feedback list; the caller marks it non-LLM (e.g. source='deterministic').
+
+    Containment, not equality: exact equality rejected "1-startklar_v2.docx" and
+    "1-startklar (1).docx" -- the first is deliberate version-keeping (a file-handling
+    habit the units teach elsewhere), the second is what a browser produces when you
+    download the same file twice. Punishing either is bad advice, and this check only
+    ever advises. It also stopped mattering for identification: uploads are stored as
+    {student_id}_{task_id} (app._save_artifact_file), so nothing is lost to a name.
     """
     stem = filename.rsplit('.', 1)[0] if '.' in filename else filename
     ext = filename[len(stem):]
     expected = expected_filename.replace('[Vorname]', student_vorname).replace('[Name]', student_name)
-    passed = stem.strip().lower() == expected.strip().lower()
+    # conventions.md has expected_filename authored as a stem, but one that carries
+    # the extension anyway used to fail against a stem it otherwise matched exactly.
+    expected_cmp = expected.strip()
+    if ext and expected_cmp.lower().endswith(ext.lower()):
+        expected_cmp = expected_cmp[:-len(ext)]
+    passed = expected_cmp.lower() in stem.strip().lower()
     # Show the name the student should end up with, extension included -- they
     # compare against a whole filename, not a stem, so spelling out "ohne
     # Dateiendung" only made the message harder to act on. expected_filename is
@@ -80,7 +92,9 @@ def check_filename(filename: str, expected_filename: str, student_vorname: str =
         if passed
         else f'Deine Datei heißt „{filename}“.'
     )
-    return {'criterion': f'Dateiname ist „{expected_display}“', 'passed': passed,
+    # "enthält", not "ist": the check accepts a name that carries the expected one
+    # plus a version suffix, and the criterion has to describe what is actually tested.
+    return {'criterion': f'Dateiname enthält „{expected_display}“', 'passed': passed,
             'note': note, 'source': 'deterministic'}
 
 
