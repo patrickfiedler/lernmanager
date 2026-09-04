@@ -105,3 +105,19 @@ def test_settled_report_makes_the_score_final(app, client, as_admin):
 
     export = json.loads(as_admin.get("/admin/checkpoint-pruefung/export.json").get_data(as_text=True))
     assert export["sessions"][0]["score_vorlaeufig"] is False
+
+
+def test_both_exports_name_the_checkpoint_type(app, client, as_admin):
+    """Including the row a report writes without an answer -- that row is built by
+    its own dict and has drifted from the answer row before."""
+    _session_with_report(app, client)
+
+    body = as_admin.get("/admin/checkpoint-pruefung/export.csv").get_data(as_text=True)
+    lines = [line for line in body.splitlines() if line.strip()]
+    header = lines[0].split(";")
+    column = header.index("checkpoint_type")
+    reported = next(line for line in lines[1:] if "Das Bild fehlt" in line)
+    assert reported.split(";")[column] == "quiz"
+
+    export = json.loads(as_admin.get("/admin/checkpoint-pruefung/export.json").get_data(as_text=True))
+    assert export["sessions"][0]["checkpoint_type"] == "quiz"

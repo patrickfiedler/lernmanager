@@ -107,3 +107,14 @@ def test_an_unjudged_answer_has_no_derived_correctness(data):
     row = _row(data, ki_correct=True, teacher_verdict=None)
     assert row["antwort_war_richtig"] is None
     assert row["ki_weicht_ab"] == 0
+
+
+# ------------------------------------------------------- which axis the row scores
+
+def test_the_row_says_which_axis_the_checkpoint_scores(data):
+    """Chemie routes a score by `checkpoint_type` (quiz/artefakt -> Qualitaet,
+    abnahme -> Arbeitsprozess). The attempt has carried the field since it was
+    created; the export just never passed it on, leaving the reader to guess the
+    axis from the checkpoint's name."""
+    row = _row(data, ki_correct=True, teacher_verdict=1)
+    assert row["checkpoint_type"] == "quiz"

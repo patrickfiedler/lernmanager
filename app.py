@@ -3660,6 +3660,7 @@ def _checkpoint_export_rows(sessions):
                     'schueler_id': attempt['student_id'],
                     'thema': attempt['task_name'],
                     'checkpoint': attempt['subtask_name'],
+                    'checkpoint_type': attempt['checkpoint_type'],
                     'kern_standard': attempt['kern_standard_tag'],
                     'frage_nr': question['question_index'] + 1,
                     'frage_typ': question['question_type'],
@@ -3687,6 +3688,7 @@ def _checkpoint_export_rows(sessions):
                     'schueler_id': attempt['student_id'],
                     'thema': attempt['task_name'],
                     'checkpoint': attempt['subtask_name'],
+                    'checkpoint_type': attempt['checkpoint_type'],
                     'kern_standard': attempt['kern_standard_tag'],
                     'frage_nr': question['question_index'] + 1,
                     'frage_typ': question['question_type'],
@@ -3816,6 +3818,10 @@ def admin_checkpoint_export_json():
             'student_id': entry['attempt']['student_id'],
             'thema': entry['attempt']['task_name'],
             'checkpoint': entry['attempt']['subtask_name'],
+            # Which axis this sitting scores (chemie-data-contract § 6): quiz and
+            # artefakt feed the Qualitaets-Note, abnahme the Arbeitsprozess-Note.
+            # Without it the reader has to guess the axis from the checkpoint name.
+            'checkpoint_type': entry['attempt']['checkpoint_type'],
             'kern_standard': entry['attempt']['kern_standard_tag'],
             'zeitpunkt': entry['attempt']['timestamp'],
             'score_berechnet': entry['attempt']['score'],
