@@ -2086,10 +2086,14 @@ body.easy-reading-mode .step-box {
 .material-item a:not(.btn-newtab) {
     color: var(--primary, #2563eb);
     text-decoration: underline;
-    font-size: inherit;
-    font-family: inherit;
 }
 .material-name-btn {
+    /* `font` als Kurzform, nicht `font-size`/`font-family` einzeln: sie setzt auch
+       `line-height` zurueck. Ein <button> erbt die naemlich nicht, sondern behaelt
+       `normal` (19px) gegen die 1.5 des <body> (24px). Bei einem umbrechenden
+       Materialnamen stehen die beiden Zeilen dadurch enger als beim <a> daneben --
+       was wie eine andere Schrift aussieht, obwohl die Glyphen identisch sind. */
+    font: inherit;
     background: none;
     border: none;
     padding: 0;
