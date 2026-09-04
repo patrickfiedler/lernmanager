@@ -5827,6 +5827,55 @@ def student_checkpoint_answer():
     if progress['flagged'].get(qidx):
         return jsonify({'error': 'flagged', 'message': CHECKPOINT_FLAGGED_LOCK_MESSAGE}), 403
 
+    # MC answers arrive as a list of indices and matching answers as an object, not as
+    # text -- store those as JSON so the log is unambiguous either way (see
+    # get_checkpoint_answers_for_attempt). str() on a dict would write a Python repr
+    # into the review UI and both exports.
+    #
+    # Computed here rather than after grading: the unchanged-answer guard below
+    # compares against the logged text, so both must be the same string by
+    # construction, not by two matching expressions.
+    answer_text = (json.dumps(answer, ensure_ascii=False)
+                   if isinstance(answer, (list, dict)) else str(answer))
+
+    # Unchanged text -> hand back the previous verdict, grade nothing, count nothing.
+    #
+    # The guard above only covers a SOLVED question. Resubmitting an unchanged WRONG
+    # answer fell through it and was regraded every time: on 2026-09-02 that was 47 of
+    # the day's resubmissions (17 within 15s, 30 later). It costs no points -- the
+    # score ladder is 3 -> 2 -> 2 -> 2, so the first wrong attempt already did the
+    # damage -- but it spends an LLM call per click and puts a duplicate row in front
+    # of the teacher.
+    #
+    # Exact match after normalising, deliberately NOT the fuzzy 0.95 rule
+    # _is_duplicate_submission uses to *detect* double-clicks after the fact. That rule
+    # is safe only because it also requires both verdicts to agree, which cannot be
+    # known before grading; applied here it would swallow a genuine typo fix that flips
+    # the verdict ("Neutron" -> "Neutronen"). A miss just means we grade again, as
+    # before; a false positive would deny a real retry.
+    #
+    # No time window either: identical text is pointless to regrade at 1 second or at
+    # 5 minutes, and the >15s bucket was the larger half.
+    #
+    # `correct is None` disables the guard on purpose. That row is either an LLM
+    # failure -- whose own error message tells the student "Versuch es gleich nochmal",
+    # so resending the same text is the retry we asked for, not a duplicate -- or a
+    # 'flagged' row written by student_checkpoint_flag, which is a report and never an
+    # answer to compare against. Checked here rather than filtered out in the query:
+    # skipping such a row would compare against an older one instead, and could then
+    # suppress exactly the retry the error invited.
+    previous = models.get_last_checkpoint_answer(progress['session_uid'], question_index)
+    if previous and previous['correct'] is not None and \
+            _normalized_answer_text(previous) == _normalized_answer_text(
+                {'answer_text': answer_text}):
+        # bool(), not the raw column: SQLite hands back 0/1, and this route's other
+        # paths return real booleans. One endpoint must not answer `false` on one path
+        # and `0` on another -- JS treats them alike, a strict comparison downstream
+        # does not. Safe here because correct is None was already excluded above.
+        return jsonify({'correct': bool(previous['correct']), 'feedback': previous['feedback'],
+                        'attempts': progress['attempts'].get(qidx, 1),
+                        'unchanged': True})
+
     # Checkpoint grading is graded (feeds a real school grade), so it must never
     # silently fall back to "assume correct" like warmup does on an LLM outage --
     # strict=True surfaces failure as correct=None instead.
@@ -5834,12 +5883,6 @@ def student_checkpoint_answer():
         question, answer, usage_tag='checkpoint_quiz', strict=True
     )
 
-    # MC answers arrive as a list of indices and matching answers as an object,
-    # not as text -- store those as JSON so the log is unambiguous either way
-    # (see get_checkpoint_answers_for_attempt). str() on a dict would write a
-    # Python repr into the review UI and both exports.
-    answer_text = (json.dumps(answer, ensure_ascii=False)
-                   if isinstance(answer, (list, dict)) else str(answer))
     llm_model = config.LLM_MODEL if source in ('llm', 'fallback', 'error') else None
 
     if correct is None:

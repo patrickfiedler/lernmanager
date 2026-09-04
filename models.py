@@ -3550,6 +3550,31 @@ def get_checkpoint_answers_for_attempt(checkpoint_attempt_id):
         return [dict(r) for r in rows]
 
 
+def get_last_checkpoint_answer(session_uid, question_index):
+    """The most recently logged attempt at one question in one live session, or None.
+
+    Read before grading (app.student_checkpoint_answer) to recognise a resubmission
+    of unchanged text. Deliberately the logged row rather than a copy kept in the
+    Flask session: the log is what the review UI and the export read, so comparing
+    against it cannot drift from what the teacher later sees, and the session cookie
+    stays small (feedback text is long enough to matter there).
+
+    Give-up rows are excluded -- they carry no answer text to compare against, and a
+    student who gave up and then answers is not resubmitting anything.
+
+    Ordered by id, not attempt_no: two concurrent in-flight requests can write the
+    same attempt_no (confirmed in production 2026-09-02), and the newest row is the
+    one to compare against either way.
+    """
+    with db_session() as conn:
+        row = conn.execute('''
+            SELECT * FROM checkpoint_answer
+            WHERE session_uid = ? AND question_index = ? AND gave_up = 0
+            ORDER BY id DESC LIMIT 1
+        ''', (session_uid, question_index)).fetchone()
+        return dict(row) if row else None
+
+
 def effective_checkpoint_score(attempt):
     """The score that counts: the teacher's override if one exists, else the
     computed one (migrate_048).
