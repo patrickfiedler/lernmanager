@@ -1075,200 +1075,111 @@ function adjustZoom(delta) {
     });
 })();
 
-// --- Capstone Gate ---
+// --- Artifact gate cards (capstone + inline) ---
+/* One implementation, wired twice. The two cards differ only in their element ids
+   and their filename keyword; everything else -- upload, busy state, feedback
+   rendering, pass/fail styling -- is the same behaviour and used to be the same code
+   twice. That duplication has already cost a production bug: the inline copy never
+   read data.llm_feedback while the capstone copy did, so mid-topic gates silently
+   showed no AI feedback for weeks (fixed in f6a4402). Keeping one body is what stops
+   the next divergence.
+
+   Busy state goes through LLMButton.withBusy rather than being hand-rolled. That
+   gives the same one-click-one-request guarantee the checkpoint "Prüfen" button has:
+   a re-entry check that blocks any second call while one is in flight, and -- the
+   part that was actually missing here -- a restore that runs on EVERY exit path.
+   The old code restored the label only in its two failure branches, so a throw
+   anywhere in the render left the button disabled with a frozen spinner and no way
+   back except re-picking a file. */
+function wireGateCard(prefix, feedbackId, keyword) {
+    const fileInput = document.getElementById(prefix + '-file-input');
+    const filenameSpan = document.getElementById(prefix + '-filename');
+    const submitBtn = document.getElementById(prefix + '-submit-btn');
+    const resultDiv = document.getElementById(prefix + '-result');
+
+    const initialFeedbackEl = document.getElementById(feedbackId);
+    const initialFeedbackData = document.getElementById(feedbackId + '-data');
+    if (initialFeedbackEl && initialFeedbackData) {
+        initialFeedbackEl.innerHTML = renderFeedbackSplit(JSON.parse(initialFeedbackData.textContent));
+    }
+    if (!fileInput) return;
+
+    fileInput.addEventListener('change', function() {
+        const name = fileInput.files[0] ? fileInput.files[0].name : '';
+        filenameSpan.textContent = name;
+        submitBtn.disabled = !name;
+        // A passing check hides this button and offers "Weiter →" instead. But a pass
+        // is structural, and the AI feedback shown beside it can still say the work
+        // needs another round -- so students pick a corrected file right here instead
+        // of clicking Weiter. Without this the button stays display:none and the only
+        // way back to it is reloading the page.
+        //
+        // The label no longer needs restoring here: withBusy captures the button's
+        // markup before it spins and puts it back afterwards, so the button is never
+        // left holding a stale "Datei wird geprüft …".
+        submitBtn.style.display = '';
+    });
+
+    submitBtn.addEventListener('click', function() {
+        if (!fileInput.files[0] || LLMButton.isBusy(submitBtn)) return;
+        const filename = fileInput.files[0].name;
+        const filenameItem = keyword
+            ? (filename.toLowerCase().includes(keyword.toLowerCase())
+                ? { text: `Dateiname enthält „${keyword}“`, type: 'pass' }
+                : { text: `Dateiname sollte „${keyword}“ enthalten.`, type: 'warn' })
+            : null;
+        resultDiv.style.display = 'none';
+
+        const formData = new FormData();
+        formData.append('file', fileInput.files[0]);
+        formData.append('csrf_token', document.querySelector('meta[name="csrf-token"]').content);
+
+        // 90s window: the gate may run a full LLM checklist server-side (60s budget).
+        // Without a timeout a hung upload fires neither .then nor .catch, leaving the
+        // button disabled with no way to retry.
+        LLMButton.withBusy(submitBtn, LLMButton.WAITING_LABELS.upload, function() {
+            return LLMButton.postForm(submitBtn.dataset.url, formData, { timeoutMs: 90000 });
+        }).then(data => {
+            if (!data) return;                  // re-entry blocked: a check is running
+            if (!data.ok || data.error) {
+                resultDiv.innerHTML = `<p class="gate-error">⚠️ ${data.message || data.error}</p>`;
+                resultDiv.style.display = 'block';
+                return;
+            }
+            // The result below describes the newly uploaded file, so feedback rendered
+            // from the previous upload is stale -- drop it rather than leaving two
+            // feedback tables stacked in one card.
+            if (initialFeedbackEl) initialFeedbackEl.innerHTML = '';
+            if (data.passed) {
+                const rateNote = (data.checks_remaining !== undefined && data.checks_remaining <= 3 && data.checks_remaining > 0)
+                    ? `<p style="font-size:0.8rem;color:#6b7280;">Noch ${data.checks_remaining} KI-Check${data.checks_remaining === 1 ? '' : 's'} übrig.</p>` : '';
+                markGatePassed(submitBtn.closest('.gate-card'));
+                let html = `<p class="gate-success-msg" style="margin-bottom:0.5rem;">✓ Abgabe geprüft!</p>`;
+                html += renderFeedbackSplit(allFeedbackItems(data, filenameItem)) + rateNote;
+                html += `<button class="btn btn-primary mt-1" onclick="location.reload()">Weiter →</button>`;
+                resultDiv.innerHTML = html;
+                resultDiv.style.display = 'block';
+                submitBtn.style.display = 'none';
+            } else {
+                markGateFailed(submitBtn.closest('.gate-card'));
+                let html = `<p class="gate-fail-msg">${data.message}</p>`;
+                // No "trotzdem weitermachen" escape on the inline gate any more: it
+                // existed to get past a checkbox the gate was hiding, and nothing hides
+                // it now. The ordinary completion checkbox below the card is the one way
+                // to move on, so the student is not offered two controls doing one thing.
+                html += renderFeedbackSplit(allFeedbackItems(data, filenameItem));
+                resultDiv.innerHTML = html;
+                resultDiv.style.display = 'block';
+            }
+        });
+    });
+}
+
 {% if capstone_gate %}
-(function() {
-    const fileInput = document.getElementById('gate-file-input');
-    const filenameSpan = document.getElementById('gate-filename');
-    const submitBtn = document.getElementById('gate-submit-btn');
-    const resultDiv = document.getElementById('gate-result');
-
-    const initialFeedbackEl = document.getElementById('capstone-gate-feedback');
-    const initialFeedbackData = document.getElementById('capstone-gate-feedback-data');
-    if (initialFeedbackEl && initialFeedbackData) {
-        initialFeedbackEl.innerHTML = renderFeedbackSplit(JSON.parse(initialFeedbackData.textContent));
-    }
-    if (!fileInput) return;
-
-    fileInput.addEventListener('change', function() {
-        const name = fileInput.files[0] ? fileInput.files[0].name : '';
-        filenameSpan.textContent = name;
-        submitBtn.disabled = !name;
-        // A passing check hides this button and offers "Weiter →" instead. But a pass
-        // is structural, and the AI feedback shown beside it can still say the work
-        // needs another round -- so students pick a corrected file right here instead
-        // of clicking Weiter. Without this the button stays display:none and the only
-        // way back to it is reloading the page.
-        submitBtn.style.display = '';
-        // ...and it comes back wearing the spinner. The click handler swaps the label
-        // for "Datei wird geprüft …", and only the FAILURE branches swap it back --
-        // the success branch just hides the button, freezing the busy label inside it.
-        // Restoring all three properties together is what makes this handler the one
-        // place that undoes a check.
-        submitBtn.textContent = 'Datei prüfen';
-    });
-
-    submitBtn.addEventListener('click', function() {
-        if (!fileInput.files[0]) return;
-        const filename = fileInput.files[0].name;
-        const filenameItem = capstoneGateKeyword
-            ? (filename.toLowerCase().includes(capstoneGateKeyword.toLowerCase())
-                ? { text: `Dateiname enthält „${capstoneGateKeyword}“`, type: 'pass' }
-                : { text: `Dateiname sollte „${capstoneGateKeyword}“ enthalten.`, type: 'warn' })
-            : null;
-        submitBtn.disabled = true;
-        submitBtn.innerHTML = '<span class="llm-spinner" aria-hidden="true"></span>' +
-                              '<span class="llm-busy-label">Datei wird geprüft …</span>';
-        resultDiv.style.display = 'none';
-
-        const formData = new FormData();
-        formData.append('file', fileInput.files[0]);
-        formData.append('csrf_token', document.querySelector('meta[name="csrf-token"]').content);
-
-        // 90s window: the gate may run a full LLM checklist server-side (60s budget).
-        // Without a timeout a hung upload fires neither .then nor .catch, leaving the
-        // button disabled with no way to retry.
-        LLMButton.postForm(submitBtn.dataset.url, formData, { timeoutMs: 90000 })
-            .then(data => {
-                if (!data.ok) {
-                    resultDiv.innerHTML = `<p class="gate-error">⚠️ ${data.message}</p>`;
-                    resultDiv.style.display = 'block';
-                    submitBtn.disabled = false;
-                    submitBtn.textContent = 'Datei prüfen';
-                    return;
-                }
-                if (data.error) {
-                    resultDiv.innerHTML = `<p class="gate-error">⚠️ ${data.error}</p>`;
-                    resultDiv.style.display = 'block';
-                    submitBtn.disabled = false;
-                    submitBtn.textContent = 'Datei prüfen';
-                    return;
-                }
-                // The result below describes the newly uploaded file, so feedback
-                // rendered from the previous upload is stale -- drop it rather than
-                // leaving two feedback tables stacked in one card.
-                if (initialFeedbackEl) initialFeedbackEl.innerHTML = '';
-                if (data.passed) {
-                    const rateNote = (data.checks_remaining !== undefined && data.checks_remaining <= 3 && data.checks_remaining > 0)
-                        ? `<p style="font-size:0.8rem;color:#6b7280;">Noch ${data.checks_remaining} KI-Check${data.checks_remaining === 1 ? '' : 's'} übrig.</p>` : '';
-                    markGatePassed(submitBtn.closest('.gate-card'));
-                    let html = `<p class="gate-success-msg" style="margin-bottom:0.5rem;">✓ Abgabe geprüft!</p>`;
-                    html += renderFeedbackSplit(allFeedbackItems(data, filenameItem)) + rateNote;
-                    html += `<button class="btn btn-primary mt-1" onclick="location.reload()">Weiter →</button>`;
-                    resultDiv.innerHTML = html;
-                    resultDiv.style.display = 'block';
-                    submitBtn.style.display = 'none';
-                } else {
-                    markGateFailed(submitBtn.closest('.gate-card'));
-                    let html = `<p class="gate-fail-msg">${data.message}</p>`;
-                    html += renderFeedbackSplit(allFeedbackItems(data, filenameItem));
-                    resultDiv.innerHTML = html;
-                    resultDiv.style.display = 'block';
-                    submitBtn.disabled = false;
-                    submitBtn.textContent = 'Datei prüfen';
-                }
-            });
-    });
-})();
+wireGateCard('gate', 'capstone-gate-feedback', capstoneGateKeyword);
 {% endif %}
-
-// --- Inline Gate ---
 {% if inline_gate %}
-(function() {
-    const fileInput = document.getElementById('inline-gate-file-input');
-    const filenameSpan = document.getElementById('inline-gate-filename');
-    const submitBtn = document.getElementById('inline-gate-submit-btn');
-    const resultDiv = document.getElementById('inline-gate-result');
-
-    const initialFeedbackEl = document.getElementById('inline-gate-feedback');
-    const initialFeedbackData = document.getElementById('inline-gate-feedback-data');
-    if (initialFeedbackEl && initialFeedbackData) {
-        initialFeedbackEl.innerHTML = renderFeedbackSplit(JSON.parse(initialFeedbackData.textContent));
-    }
-    if (!fileInput) return;
-
-    fileInput.addEventListener('change', function() {
-        const name = fileInput.files[0] ? fileInput.files[0].name : '';
-        filenameSpan.textContent = name;
-        submitBtn.disabled = !name;
-        // A passing check hides this button and offers "Weiter →" instead. But a pass
-        // is structural, and the AI feedback shown beside it can still say the work
-        // needs another round -- so students pick a corrected file right here instead
-        // of clicking Weiter. Without this the button stays display:none and the only
-        // way back to it is reloading the page.
-        submitBtn.style.display = '';
-        // ...and it comes back wearing the spinner. The click handler swaps the label
-        // for "Datei wird geprüft …", and only the FAILURE branches swap it back --
-        // the success branch just hides the button, freezing the busy label inside it.
-        // Restoring all three properties together is what makes this handler the one
-        // place that undoes a check.
-        submitBtn.textContent = 'Datei prüfen';
-    });
-
-    submitBtn.addEventListener('click', function() {
-        if (!fileInput.files[0]) return;
-        const filename = fileInput.files[0].name;
-        const filenameItem = inlineGateKeyword
-            ? (filename.toLowerCase().includes(inlineGateKeyword.toLowerCase())
-                ? { text: `Dateiname enthält „${inlineGateKeyword}“`, type: 'pass' }
-                : { text: `Dateiname sollte „${inlineGateKeyword}“ enthalten.`, type: 'warn' })
-            : null;
-        submitBtn.disabled = true;
-        submitBtn.innerHTML = '<span class="llm-spinner" aria-hidden="true"></span>' +
-                              '<span class="llm-busy-label">Datei wird geprüft …</span>';
-        resultDiv.style.display = 'none';
-
-        const formData = new FormData();
-        formData.append('file', fileInput.files[0]);
-        formData.append('csrf_token', document.querySelector('meta[name="csrf-token"]').content);
-
-        // 90s window: the gate may run a full LLM checklist server-side (60s budget).
-        // Without a timeout a hung upload fires neither .then nor .catch, leaving the
-        // button disabled with no way to retry.
-        LLMButton.postForm(submitBtn.dataset.url, formData, { timeoutMs: 90000 })
-            .then(data => {
-                if (!data.ok) {
-                    resultDiv.innerHTML = `<p class="gate-error">⚠️ ${data.message}</p>`;
-                    resultDiv.style.display = 'block';
-                    submitBtn.disabled = false;
-                    submitBtn.textContent = 'Datei prüfen';
-                    return;
-                }
-                if (data.error) {
-                    resultDiv.innerHTML = `<p class="gate-error">⚠️ ${data.error}</p>`;
-                    resultDiv.style.display = 'block';
-                    submitBtn.disabled = false;
-                    submitBtn.textContent = 'Datei prüfen';
-                    return;
-                }
-                // Live result supersedes the previous upload's feedback.
-                if (initialFeedbackEl) initialFeedbackEl.innerHTML = '';
-                if (data.passed) {
-                    const rateNote = (data.checks_remaining !== undefined && data.checks_remaining <= 3 && data.checks_remaining > 0)
-                        ? `<p style="font-size:0.8rem;color:#6b7280;">Noch ${data.checks_remaining} KI-Check${data.checks_remaining === 1 ? '' : 's'} übrig.</p>` : '';
-                    markGatePassed(submitBtn.closest('.gate-card'));
-                    let html = `<p class="gate-success-msg" style="margin-bottom:0.5rem;">✓ Abgabe geprüft!</p>`;
-                    html += renderFeedbackSplit(allFeedbackItems(data, filenameItem)) + rateNote;
-                    html += `<button class="btn btn-primary mt-1" onclick="location.reload()">Weiter →</button>`;
-                    resultDiv.innerHTML = html;
-                    resultDiv.style.display = 'block';
-                    submitBtn.style.display = 'none';
-                } else {
-                    markGateFailed(submitBtn.closest('.gate-card'));
-                    let html = `<p class="gate-fail-msg">${data.message}</p>`;
-                    // No "trotzdem weitermachen" escape here any more: it existed to get
-                    // past a checkbox the gate was hiding, and nothing hides it now. The
-                    // ordinary completion checkbox below the card is the one way to move
-                    // on, so the student is not offered two controls doing one thing.
-                    html += renderFeedbackSplit(allFeedbackItems(data, filenameItem));
-                    resultDiv.innerHTML = html;
-                    resultDiv.style.display = 'block';
-                    submitBtn.disabled = false;
-                    submitBtn.textContent = 'Datei prüfen';
-                }
-            });
-    });
-})();
+wireGateCard('inline-gate', 'inline-gate-feedback', inlineGateKeyword);
 {% endif %}
 
 {% if student and student.step_checkboxes and session.student_id %}

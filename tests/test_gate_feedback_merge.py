@@ -95,11 +95,17 @@ def _source():
 
 def test_client_merges_instead_of_choosing():
     """Source-level guard: no Flask response reveals which branch the card rendered.
-    Both gates must go through allFeedbackItems(), and the old either/or must be gone."""
+    Both gates must go through allFeedbackItems(), and the old either/or must be gone.
+
+    Two call sites since 2026-09-04, not four: the capstone and inline gates now share
+    one body (wireGateCard), so pass/fail is the only axis left. That the two gates
+    cannot diverge here at all is the stronger version of what this test was checking --
+    the bug it was written for (f6a4402) was exactly one copy drifting from the other.
+    """
     source = _source()
     assert "function allFeedbackItems(" in source
     calls = re.findall(r"renderFeedbackSplit\(allFeedbackItems\(data, filenameItem\)\)", source)
-    assert len(calls) == 4, "expected 4 call sites (2 gates x pass/fail)"
+    assert len(calls) == 2, "expected 2 call sites (pass/fail in the shared gate body)"
     assert "renderFeedbackSplit(data.llm_feedback)" not in source, \
         "rendering llm_feedback alone drops every structural gate hit"
     assert not re.search(r"if \(data\.llm_feedback && data\.llm_feedback\.length\)", source), \
