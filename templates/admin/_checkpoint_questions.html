@@ -41,12 +41,19 @@
             {% if q.gave_up_count %}
             <span class="badge badge-secondary" title="Schüler, die „Ich weiß es nicht“ geklickt haben">{{ q.gave_up_count }} aufgegeben</span>
             {% endif %}
-            {% if q.low_confidence %}
-            {# Shown only when low. 127 of 207 graded answers in the production exports
-               sat at >=0.99, and printing that everywhere is pure noise. #}
-            <span class="badge badge-warning"
-                  title="Die KI war sich bei dieser Frage im Schnitt unsicher (Median über alle bewerteten Antworten). Deutet eher auf eine mehrdeutige Rubrik als auf die Schüler.">
-                KI unsicher {{ '%.2f'|format(q.confidence_mean) }}
+            {% if q.unsure_count %}
+            {# Shown only when there is something to show -- 153 of 207 graded answers
+               in the production exports sat at >=0.95.
+
+               Neutral wording on purpose. It is tempting to read "KI unsicher" as
+               "Frage mehrdeutig", but measured against the only proxy available so
+               far, question-level confidence does NOT predict which questions
+               students report as broken. Until Phase 4 collects Lehrer-Urteile on
+               low-confidence answers, this badge says what happened and nothing
+               more. #}
+            <span class="badge badge-secondary"
+                  title="So oft war sich die KI ihres eigenen Urteils nicht sicher (unter {{ '%.1f'|format(unsure_confidence) }}). Noch unklar, was das über die Frage aussagt — bisher kein Zusammenhang mit gemeldeten oder besonders oft verhauenen Fragen messbar.">
+                🤖 {{ q.unsure_count }}× gezögert
             </span>
             {% endif %}
             {% if q.has_drift %}

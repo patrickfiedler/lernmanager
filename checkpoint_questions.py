@@ -8,13 +8,20 @@ head. This module re-groups the same display model
 
 Three independent detectors, deliberately NOT merged into one suspicion score:
 
-  1. failure / give-up rate  -- something is wrong here
-  2. failure CLUSTERING      -- they fail the same way (the reason it is the question)
-  3. grader confidence       -- the model itself was unsure (migrate_052)
+  1. failure / report / give-up rate -- something went wrong here, for how many
+  2. failure CLUSTERING              -- they went wrong the SAME way
+  3. grader confidence               -- how often the model hesitated (migrate_052)
 
-Merging them would destroy the distinction that decides what to do. Low confidence
-plus high failure points at the rubric; high confidence plus high failure points at
-the teaching, and that second one is a finding to act on, not a question to repair.
+Merging them would destroy the distinction that decides what to do with a question.
+A shared failure can mean the question is broken OR that the class has not learnt the
+material, and those need opposite responses -- the first is a repair, the second is a
+finding for the next lesson. Nothing here decides between them; it puts the evidence
+in one place so a teacher can.
+
+Detector 3 is the weakest and is labelled as such in the UI. As of 2026-09-04 there
+is no evidence that per-question confidence says anything about question quality --
+see the UNSURE_CONFIDENCE block below for what was measured and what came back flat.
+It is displayed because it is cheap and already recorded, not because it is trusted.
 
 Everything here is read-only aggregation over data the review page already loaded.
 No queries, no writes -- so a teacher can look without any risk to a grade.
@@ -35,11 +42,32 @@ MIN_CLUSTER_SIZE = 2
 # not an established one; the eval script re-derives it against new data.
 CLUSTER_SIMILARITY = 0.25
 
-# Below this, the grader's own probability for its verdict is worth showing. Above it
-# the number is noise: 127 of 207 graded answers in the same exports sat at >=0.99,
-# and printing that on every row is what "I don't need ALL information ALWAYS" is
-# about. Nothing gates on this -- it decides display only.
-LOW_CONFIDENCE = 0.95
+# Below this, one judgment counts as "the grader was not sure of this one". 0.8 is
+# migrate_052's provisional value and is NOT established -- it was read off 66
+# replayed answers on the 12.2/12.3 question set, which has since been rewritten.
+# Nothing gates on it: it decides display only, so a wrong threshold costs attention
+# rather than anyone's grade.
+UNSURE_CONFIDENCE = 0.8
+
+# What the question view knows, as of 2026-09-04, about what that number MEANS:
+#
+#   * The signal has structure. 23 sub-0.8 judgments in the 2026-08/09 exports sit in
+#     7 questions; 6 questions have none at all. That is not noise sprayed evenly.
+#   * It is symmetric across verdicts -- median 0.994 where the grader said "richtig",
+#     0.999 where it said "falsch", 11 vs 12 unsure judgments. So it is not the
+#     artefact of a grader that is confidently harsh and hesitantly lenient.
+#   * It does NOT predict which questions students report as broken. Grouped at 0.95
+#     mean confidence: 46% vs 45% failure rate, 3/6 vs 3/7 with a failure cluster.
+#     The one question with 8 student reports sits at 1.00; the one with the most
+#     unsure judgments has zero reports.
+#
+# So: measured against the only proxy available without teacher labels, question-level
+# confidence says nothing about question quality. It is surfaced as what it literally
+# is -- "the grader hesitated here N times" -- and never as "this question is bad".
+# The claim migrate_052 actually makes is about INDIVIDUAL judgments (0.997 median
+# when the verdict matched the teacher, 0.731 when it did not), which a per-question
+# average washes out and which cannot be re-tested until Phase 4 collects verdicts on
+# low-confidence rows. See the module docstring.
 
 # German function words plus the grader's own stock phrasing. Without this the top
 # shared terms of every cluster are "antwort", "nicht", "geforderte" -- true of every
@@ -249,7 +277,11 @@ def _build_row(checkpoint_id, question_index, entries):
         'confidence_mean': (sum(confidences) / len(confidences)) if confidences else None,
         'confidence_min': min(confidences) if confidences else None,
         'confidence_n': len(confidences),
-        'low_confidence': bool(confidences) and (sum(confidences) / len(confidences)) < LOW_CONFIDENCE,
+        # A COUNT, not the average. The average hides exactly the structure that
+        # exists: 1.3 F1 has 7 unsure judgments out of 38 and still averages 0.92,
+        # which reads as mild. "7 mal gezoegert" is the honest rendering, and it is a
+        # statement about the grader, never about the question.
+        'unsure_count': sum(1 for c in confidences if c < UNSURE_CONFIDENCE),
         'cluster': cluster_failures(per_student_feedback),
         'open_flag_count': open_flags,
     }

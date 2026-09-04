@@ -3166,7 +3166,7 @@ def admin_checkpoint_pruefung():
                            # bookmarked, and every filter already lives in the URL.
                            ansicht=('fragen' if request.args.get('ansicht') == 'fragen'
                                     else 'sitzungen'),
-                           low_confidence=checkpoint_questions.LOW_CONFIDENCE,
+                           unsure_confidence=checkpoint_questions.UNSURE_CONFIDENCE,
                            klassen=models.get_all_klassen(),
                            students=models.get_checkpoint_students(),
                            checkpoints=models.get_checkpoint_checkpoints(),

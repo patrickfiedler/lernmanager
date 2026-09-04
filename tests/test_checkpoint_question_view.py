@@ -6,8 +6,9 @@ answering it meant opening every session and holding the pattern in your head.
 
 Three detectors, kept separate on purpose (checkpoint_questions module docstring):
 failure/report/give-up rate, failure CLUSTERING, and grader confidence. The second is
-the one that says students failed *the same way*; the third is the one that says the
-grader itself was unsure, which points at the rubric rather than at the class.
+the one that says students went wrong *the same way*. The third only reports how often
+the grader hesitated -- measured 2026-09-04, it does NOT predict which questions
+students report as broken, so nothing here treats it as a quality signal.
 """
 import json
 import re
@@ -189,19 +190,23 @@ def test_a_single_wording_is_not_drift():
 
 # --- confidence -------------------------------------------------------------
 
-def test_confidence_is_averaged_and_flagged_only_when_low():
-    low = cq.build_question_view([
+def test_unsure_judgments_are_counted_not_averaged():
+    """The average hides the structure that exists: 1.3 F1 in the production exports
+    carries 7 unsure judgments out of 38 and still averages 0.92, which reads as
+    mild. The count is what the badge shows."""
+    row = cq.build_question_view([
         _session(1, 1, [_question(scored=0, answers=[_answer(False, 'x', confidence=0.6)])]),
         _session(2, 2, [_question(scored=0, answers=[_answer(False, 'y', confidence=0.7)])]),
+        _session(3, 3, [_question(scored=3, answers=[_answer(True, confidence=0.99)])]),
     ])[0]
-    assert low['low_confidence'] is True
-    assert 0.64 < low['confidence_mean'] < 0.66
-    assert low['confidence_min'] == 0.6
+    assert row['unsure_count'] == 2
+    assert row['confidence_min'] == 0.6
+    assert row['confidence_n'] == 3
 
-    high = cq.build_question_view([
+    confident = cq.build_question_view([
         _session(1, 1, [_question(answers=[_answer(True, confidence=0.999)])]),
     ])[0]
-    assert high['low_confidence'] is False
+    assert confident['unsure_count'] == 0
 
 
 def test_missing_confidence_is_not_zero():
@@ -212,7 +217,7 @@ def test_missing_confidence_is_not_zero():
     ])[0]
     assert row['confidence_mean'] is None
     assert row['confidence_n'] == 0
-    assert row['low_confidence'] is False
+    assert row['unsure_count'] == 0
 
 
 # --- the route --------------------------------------------------------------
