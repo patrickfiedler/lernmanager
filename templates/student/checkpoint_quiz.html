@@ -231,6 +231,7 @@
         const q = questions[currentIdx];
         answered = false;
         attemptsMade = 0;
+        lastSubmitted = null;   // a new question has nothing submitted against it yet
         closeFlagPanel();
         document.getElementById('flag-btn').style.display = '';
 
@@ -365,11 +366,34 @@
         box.style.display = 'block';
     }
 
+    // Text of the last submission that came back graded, or null. The client half of
+    // the server's unchanged-answer guard (student_checkpoint_answer): the server
+    // refuses to regrade identical text, and this stops the student sending it in the
+    // first place, so they get told immediately instead of after a round trip.
+    let lastSubmitted = null;
+
+    // Comparable form of an answer. JSON, not the raw value: getAnswer() returns a
+    // string for fill_blank/short_answer but an array for MC and an object for
+    // matching, and === on those two compares references, never content.
+    function answerKey(answer) {
+        return JSON.stringify(answer);
+    }
+
     // Prüfen stays disabled until there's actually an answer to grade -- an
     // accidental empty submit would otherwise burn a real attempt against the
-    // checkpoint's 3-vs-2 scoring rule (chemie-data-contract.md §3a).
+    // checkpoint's 3-vs-2 scoring rule (chemie-data-contract.md §3a) -- and again
+    // once that answer has been graded and not touched since.
     function updateCheckBtnState() {
-        document.getElementById('check-btn').disabled = isAnswerEmpty();
+        const btn = document.getElementById('check-btn');
+        const empty = isAnswerEmpty();
+        const unchanged = !empty && lastSubmitted !== null &&
+                          answerKey(getAnswer()) === lastSubmitted;
+        btn.disabled = empty || unchanged;
+        // Says why, because a dead button with no explanation reads as a bug. Cleared
+        // on any edit, which is the same event that re-enables the button.
+        btn.title = unchanged
+            ? 'Das ist dieselbe Antwort wie eben — ändere etwas oder hol dir einen Tipp.'
+            : '';
     }
 
     function isAnswerEmpty() {
@@ -448,6 +472,11 @@
         guarded(btn, waitLabel, '{{ url_for("student_checkpoint_answer") }}', {
             slug: slug, subtask_id: subtaskId, question_index: questionIndex(), answer: answer
         }, function(data) {
+            // Remember what was graded BEFORE rendering, so updateCheckBtnState below
+            // sees it. Set from `answer` rather than re-reading the field: the student
+            // may have typed on during the call, and what must be blocked is resending
+            // exactly what the server just judged.
+            lastSubmitted = answerKey(answer);
             showFeedback(data.correct);
             attemptsMade = data.attempts || (attemptsMade + 1);
             updateFlagReasons();
@@ -456,6 +485,11 @@
             if (data.correct) {
                 answered = true;
                 lockQuestion(null);
+            } else {
+                // Re-lock Prüfen until something actually changes. withBusy has just
+                // restored the button to its pre-click enabled state, which is the one
+                // path that would otherwise let the same text straight back through.
+                updateCheckBtnState();
             }
         });
     };
