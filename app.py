@@ -3030,6 +3030,12 @@ def _build_checkpoint_sessions(attempts):
     # that says whether the question or the student is the problem.
     checkpoint_ids = {a['checkpoint_id'] for a in attempts}
     open_by_question = models.count_open_flags_by_question(checkpoint_ids)
+    # Not derivable from `open_flags` below: that set answers "which question drops
+    # out of the min() right now" ('offen' only), this one answers "may anyone read
+    # this number as a grade" -- a rejected report is settled for the scoring but
+    # still owed by the student. See models.PROVISIONAL_FLAG_STATUSES.
+    provisional_ids = models.checkpoint_attempts_with_provisional_scores(
+        [a['id'] for a in attempts])
 
     # Flags the teacher raised about the QUESTION belong to no single sitting, so
     # they are not in flags_by_attempt and would otherwise never appear again --
@@ -3112,6 +3118,7 @@ def _build_checkpoint_sessions(attempts):
             'has_duplicates': has_duplicates,
             'open_flag_count': len(open_flags),
             'flag_count': sum(len(rows) for rows in flags.values()),
+            'score_provisional': attempt['id'] in provisional_ids,
             # Only offer a correction when it would actually change something and
             # the teacher has not already decided -- a suggestion that repeats the
             # current score is noise.
@@ -3819,7 +3826,7 @@ def admin_checkpoint_export_json():
             # The score is not final while a report on it is undecided -- see
             # models.checkpoint_score_is_provisional. Exported so nothing
             # downstream reads a provisional number as a grade.
-            'score_vorlaeufig': bool(entry['open_flag_count']),
+            'score_vorlaeufig': entry['score_provisional'],
             'fragen': [{
                 'nr': question['question_index'] + 1,
                 'typ': question['question_type'],

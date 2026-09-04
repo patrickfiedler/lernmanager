@@ -4284,6 +4284,12 @@ def mark_checkpoint_flags_retried(flag_ids):
         ''', list(flag_ids))
 
 
+# A score stays provisional while a flag in one of these states hangs on it.
+# Named because two callers ask the same question of different-sized inputs, and
+# the answer must not depend on which one asked.
+PROVISIONAL_FLAG_STATUSES = ('offen', 'abgelehnt', 'nachbesserung')
+
+
 def checkpoint_score_is_provisional(attempt):
     """True while this attempt's score is still waiting on a human.
 
@@ -4298,13 +4304,25 @@ def checkpoint_score_is_provisional(attempt):
     """
     if not attempt:
         return False
+    return attempt['id'] in checkpoint_attempts_with_provisional_scores([attempt['id']])
+
+
+def checkpoint_attempts_with_provisional_scores(attempt_ids):
+    """Which of these attempts still wait on a human -- the same rule, asked once.
+
+    The review page and both exports build a model for every sitting on screen, so
+    asking per sitting would be one query each. Returns a set of attempt ids.
+    """
+    ids = [i for i in attempt_ids if i is not None]
+    if not ids:
+        return set()
     with db_session() as conn:
-        row = conn.execute("""
-            SELECT COUNT(*) AS cnt FROM checkpoint_flag
-            WHERE checkpoint_attempt_id = ?
-              AND status IN ('offen', 'abgelehnt', 'nachbesserung')
-        """, (attempt['id'],)).fetchone()
-        return row['cnt'] > 0
+        rows = conn.execute(f"""
+            SELECT DISTINCT checkpoint_attempt_id FROM checkpoint_flag
+            WHERE checkpoint_attempt_id IN ({','.join('?' * len(ids))})
+              AND status IN ({','.join('?' * len(PROVISIONAL_FLAG_STATUSES))})
+        """, ids + list(PROVISIONAL_FLAG_STATUSES)).fetchall()
+        return {r['checkpoint_attempt_id'] for r in rows}
 
 
 def update_checkpoint_attempt_scores(attempt_id, question_scores, score,

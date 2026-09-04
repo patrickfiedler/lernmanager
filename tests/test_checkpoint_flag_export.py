@@ -74,3 +74,34 @@ def test_csv_export_keeps_a_report_that_has_no_answer(app, client, as_admin):
     assert len(reported_rows) == 1
     # Every row must carry the same columns, or the spreadsheet shifts.
     assert all(len(line.split(";")) == len(header) for line in lines[1:])
+
+
+def test_rejected_report_keeps_the_score_provisional(app, client, as_admin):
+    """The bug chemie reported 2026-09-01: the export re-derived "is this final?"
+    from the scoring set ('offen' only), so rejecting a report flipped the score to
+    final while the student still owed the question -- and answering it can only
+    lower the number. Two different questions, one variable.
+    """
+    student_id, _ = _session_with_report(app, client)
+    flag = models.get_checkpoint_flags(student_id=student_id)[0]
+
+    as_admin.post(f"/admin/checkpoint-pruefung/meldung/{flag['id']}/urteil",
+                  data={"status": "abgelehnt"})
+
+    assert models.get_checkpoint_flags(student_id=student_id)[0]["status"] == "abgelehnt"
+
+    export = json.loads(as_admin.get("/admin/checkpoint-pruefung/export.json").get_data(as_text=True))
+    assert export["sessions"][0]["score_vorlaeufig"] is True
+
+
+def test_settled_report_makes_the_score_final(app, client, as_admin):
+    """The other side of the same rule -- 'frage_kaputt' takes the question out for
+    good, nobody owes anything, so the number may be read as a grade."""
+    student_id, _ = _session_with_report(app, client)
+    flag = models.get_checkpoint_flags(student_id=student_id)[0]
+
+    as_admin.post(f"/admin/checkpoint-pruefung/meldung/{flag['id']}/urteil",
+                  data={"status": "frage_kaputt"})
+
+    export = json.loads(as_admin.get("/admin/checkpoint-pruefung/export.json").get_data(as_text=True))
+    assert export["sessions"][0]["score_vorlaeufig"] is False
