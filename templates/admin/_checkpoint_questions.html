@@ -1,0 +1,169 @@
+{# The "Fragen" tab: the same filtered sessions, grouped by question.
+
+   Read-only on purpose (Phase 1). Nothing here writes, so the whole view can be
+   opened and read without any risk to a grade -- the repairs stay where they already
+   are, on the session, until the batch lands.
+
+   One row per (Checkpoint, Frage). Rows are ordered by how many students the question
+   went wrong for in ANY way -- failed, reported, or given up -- because a question
+   eight students reported is the strongest evidence available that it is broken, and
+   ranking on failures alone buried exactly that case. #}
+
+{% if not questions %}
+<div class="card">
+    <p class="text-muted">Keine Checkpoint-Fragen für diese Auswahl.</p>
+</div>
+{% endif %}
+
+{% for q in questions %}
+{# Collapsed by default. Open only where there is something to decide: the summary
+   line carries every number needed to triage, and a teacher scanning 24 questions
+   should not have to scroll past 24 opened rubrics to find the two that matter. #}
+<details class="card mb-1 cq-row{{ ' cq-row-quiet' if q.concern_count == 0 }}"
+         {{ 'open' if q.open_flag_count or q.concern_rate >= 0.5 }}>
+    <summary class="cq-head">
+        <span class="cq-title">
+            <strong>Frage {{ q.question_index + 1 }}</strong>
+            <span class="text-muted">{{ q.task_name or 'Thema gelöscht' }}
+                · {{ (q.subtask_name|aufgabe_titel|striptags|truncate(40)) if q.subtask_name else 'Aufgabe gelöscht' }}</span>
+            {% if q.question_type %}<span class="badge badge-secondary">{{ q.question_type }}</span>{% endif %}
+        </span>
+        <span class="cq-meta">
+            <span title="Schüler, die diese Frage bearbeitet haben">{{ q.student_count }} 👤</span>
+            {% if q.failed_count %}
+            <span class="badge {{ 'badge-danger' if q.failure_rate >= 0.5 else 'badge-warning' }}"
+                  title="Schüler, deren Punktzahl für diese Frage unter 3 liegt">{{ q.failed_count }} gescheitert</span>
+            {% endif %}
+            {% if q.reported_count %}
+            <span class="badge badge-danger"
+                  title="Schüler, die diese Frage gemeldet haben — bis zu deiner Entscheidung zählt sie bei ihnen nicht">⚠️ {{ q.reported_count }} gemeldet</span>
+            {% endif %}
+            {% if q.gave_up_count %}
+            <span class="badge badge-secondary" title="Schüler, die „Ich weiß es nicht“ geklickt haben">{{ q.gave_up_count }} aufgegeben</span>
+            {% endif %}
+            {% if q.low_confidence %}
+            {# Shown only when low. 127 of 207 graded answers in the production exports
+               sat at >=0.99, and printing that everywhere is pure noise. #}
+            <span class="badge badge-warning"
+                  title="Die KI war sich bei dieser Frage im Schnitt unsicher (Median über alle bewerteten Antworten). Deutet eher auf eine mehrdeutige Rubrik als auf die Schüler.">
+                KI unsicher {{ '%.2f'|format(q.confidence_mean) }}
+            </span>
+            {% endif %}
+            {% if q.has_drift %}
+            <span class="badge badge-warning"
+                  title="Nicht alle Schüler haben denselben Fragetext gesehen — die Frage wurde zwischendurch geändert.">
+                {{ q.variants|length }} Fassungen
+            </span>
+            {% endif %}
+        </span>
+    </summary>
+
+    <div class="cq-body">
+        {% if q.wording %}
+        <p class="cq-wording">{{ q.wording }}</p>
+        {% else %}
+        <p class="text-muted cq-wording">Kein Fragetext gespeichert (Sitzung vor Einführung des Snapshots).</p>
+        {% endif %}
+
+        {# The "same reason" signal, and the reason this view exists rather than a
+           plain failure-rate table. Terms come from the LAST wrong answer per student,
+           give-ups excluded -- on a give-up the stored feedback is the model solution,
+           identical for everyone, which would make every question cluster perfectly. #}
+        {% if q.cluster %}
+        <p class="cq-cluster">
+            🔎 <strong>{{ q.cluster.size }} von {{ q.clusterable_count }}</strong> scheitern ähnlich
+            {% if q.cluster.terms %}
+            — häufige Begriffe: {% for t in q.cluster.terms %}<code>{{ t }}</code>{{ ', ' if not loop.last }}{% endfor %}
+            {% endif %}
+        </p>
+        <p class="cq-cluster-hint text-muted">
+            Sagt <em>nicht</em>, dass die Frage kaputt ist. Ein gemeinsamer Fehler kann
+            genauso gut heißen, dass der Stoff noch nicht sitzt — das ist ein Befund
+            für den Unterricht, keine Reparatur an der Frage.
+        </p>
+        {% elif q.clusterable_count > 1 %}
+        <p class="cq-cluster-hint text-muted">
+            🔎 Die {{ q.clusterable_count }} falschen Antworten ähneln einander nicht —
+            eher einzelne Fehler als ein Problem der Frage.
+        </p>
+        {% endif %}
+
+        <p class="cq-stats text-muted">
+            ⌀ {{ '%.1f'|format(q.mean_attempts) }} Versuche pro Schüler
+            {% if q.confidence_n %}
+            · KI-Konfidenz ⌀ {{ '%.2f'|format(q.confidence_mean) }},
+              niedrigste {{ '%.2f'|format(q.confidence_min) }}
+              <span class="text-muted">({{ q.confidence_n }} bewertete Antworten)</span>
+            {% else %}
+            · keine KI-Bewertung (deterministisch geprüft)
+            {% endif %}
+        </p>
+
+        {% if q.rubric %}
+        <details class="cq-sub">
+            <summary>Bewertungskriterien</summary>
+            <p>{{ q.rubric }}</p>
+        </details>
+        {% endif %}
+        {% if q.correct_display %}
+        <p class="cq-correct">✅ Richtig: {{ q.correct_display }}</p>
+        {% endif %}
+
+        {# Drift is shown, never silently merged. A batch keyed on the question INDEX
+           would act on students who answered a different question -- 6 of 24 slots in
+           the production data carry more than one wording. #}
+        {% if q.has_drift %}
+        <details class="cq-sub cq-drift">
+            <summary>⚠️ {{ q.variants|length }} verschiedene Fassungen dieser Frage</summary>
+            <p class="text-muted">
+                Die Frage wurde geändert, während schon Sitzungen liefen. Eine spätere
+                Sammelkorrektur wird sich auf die häufigste Fassung beschränken und die
+                übrigen ausdrücklich ausnehmen.
+            </p>
+            {% for v in q.variants %}
+            <div class="cq-variant{{ ' is-reference' if loop.first }}">
+                <p class="cq-variant-head">
+                    {{ '📌 häufigste' if loop.first else 'abweichend' }}
+                    · {{ v.session_count }} Sitzung(en) · zuletzt {{ v.latest[:16] }}
+                </p>
+                <p class="cq-variant-text">{{ v.text or 'kein Fragetext gespeichert' }}</p>
+            </div>
+            {% endfor %}
+        </details>
+        {% endif %}
+
+        <p class="cq-jump">
+            <a href="{{ url_for('admin_checkpoint_pruefung',
+                                **dict(request.args, ansicht='sitzungen',
+                                       checkpoint_id=q.checkpoint_id)) }}">
+                → Sitzungen zu diesem Checkpoint ansehen
+            </a>
+        </p>
+    </div>
+</details>
+{% endfor %}
+
+<style>
+.cq-head { cursor: pointer; display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.cq-title { display: flex; gap: 0.5rem; align-items: baseline; flex-wrap: wrap; min-width: 0; }
+.cq-meta { display: flex; gap: 0.4rem; align-items: center; font-size: 0.85rem; flex-wrap: wrap; }
+/* A question nothing went wrong on is history, not work. It stays readable and
+   fully expandable -- it just does not compete with the ones that need a decision. */
+.cq-row-quiet { opacity: 0.6; }
+.cq-row-quiet:hover, .cq-row-quiet[open] { opacity: 1; }
+.cq-body { margin-top: 0.75rem; }
+.cq-wording { font-size: 0.95rem; margin: 0 0 0.6rem; }
+.cq-cluster { margin: 0.4rem 0 0.1rem; font-size: 0.9rem; }
+.cq-cluster code { background: #f3f4f6; padding: 0.05rem 0.3rem; border-radius: 3px; font-size: 0.85em; }
+.cq-cluster-hint { font-size: 0.8rem; margin: 0 0 0.5rem; }
+.cq-stats { font-size: 0.82rem; margin: 0.4rem 0; }
+.cq-correct { font-size: 0.82rem; color: #15803d; margin: 0.3rem 0; }
+.cq-sub { font-size: 0.82rem; color: #6b7280; margin: 0.4rem 0; }
+.cq-sub > summary { cursor: pointer; }
+.cq-drift > summary { color: #92400e; }
+.cq-variant { border-left: 3px solid #e5e7eb; padding-left: 0.6rem; margin: 0.4rem 0; }
+.cq-variant.is-reference { border-left-color: #2563eb; }
+.cq-variant-head { font-size: 0.78rem; color: #6b7280; margin: 0; }
+.cq-variant-text { font-size: 0.85rem; margin: 0.1rem 0 0; }
+.cq-jump { font-size: 0.85rem; margin: 0.6rem 0 0; }
+</style>

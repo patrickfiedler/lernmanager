@@ -35,6 +35,7 @@
 !/quiz_grading.py
 !/artifact_checker.py
 !/artifact_processor.py
+!/checkpoint_questions.py
 !/analytics_queue.py
 !/import_task.py
 !/list_students.py

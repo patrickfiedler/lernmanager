@@ -29,6 +29,7 @@ import llm_grading
 import quiz_grading
 import artifact_processor
 import artifact_checker
+import checkpoint_questions
 from utils import generate_username, generate_password, allowed_file, file_extension, material_pfad, material_filename, content_matches_extension, generate_credentials_pdf, generate_credentials_pdf_grouped, generate_name_username_pdf, generate_student_self_report_pdf, generate_class_report_pdf, generate_student_report_pdf, slugify, format_bytes, is_ip_allowed, is_within_time_window, parse_netzwerk_csv, split_tasks_by_stufe, stufe_sort_key, normalize_markdown_lists
 from import_task import validate_task_structure, check_duplicate, import_task as do_import_task, overwrite_task_from_import, ValidationError
 
@@ -3141,6 +3142,12 @@ def admin_checkpoint_pruefung():
     filters = _checkpoint_filters()
     sessions = _build_checkpoint_sessions(models.get_checkpoint_reviews(**filters))
 
+    # Same sessions, regrouped by question. Two views over ONE model rather than two
+    # queries: the question view can then never disagree with the session view about
+    # a score, a flag or a duplicate. Built unconditionally because the tab has to
+    # show its count either way, and it is pure aggregation over data already loaded.
+    questions = checkpoint_questions.build_question_view(sessions)
+
     # What each batch button would actually touch, counted here so both can name a
     # real number instead of the broader "has duplicates" badge. The three numbers
     # differ on purpose: a flagged duplicate that cannot move the score is
@@ -3153,6 +3160,13 @@ def admin_checkpoint_pruefung():
 
     return render_template('admin/checkpoint_pruefung.html',
                            sessions=sessions,
+                           questions=questions,
+                           # Which grouping is on screen. A query arg, not a session
+                           # preference: the tab has to survive being linked to and
+                           # bookmarked, and every filter already lives in the URL.
+                           ansicht=('fragen' if request.args.get('ansicht') == 'fragen'
+                                    else 'sitzungen'),
+                           low_confidence=checkpoint_questions.LOW_CONFIDENCE,
                            klassen=models.get_all_klassen(),
                            students=models.get_checkpoint_students(),
                            checkpoints=models.get_checkpoint_checkpoints(),

@@ -59,11 +59,33 @@
             <span title="Zurückgesetzte Sitzungen bleiben gespeichert und werden hier wieder sichtbar">zurückgesetzte anzeigen</span>
         </label>
 
+        {# Carried through the filter form so filtering does not throw you back to the
+           other tab. Every other filter already rides in the URL; this is one more. #}
+        <input type="hidden" name="ansicht" value="{{ ansicht }}">
+
         <button type="submit" class="btn btn-primary btn-sm">Filtern</button>
-        <a href="{{ url_for('admin_checkpoint_pruefung') }}" class="btn btn-secondary btn-sm">Zurücksetzen</a>
+        <a href="{{ url_for('admin_checkpoint_pruefung', ansicht=ansicht) }}" class="btn btn-secondary btn-sm">Zurücksetzen</a>
     </form>
 </div>
 
+{# Two groupings of the SAME filtered sessions. Sitzungen is where a grade gets set,
+   because grading is per student; Fragen answers "is this question broken?", which is
+   a claim about the whole class and was previously only answerable by opening every
+   session and holding the pattern in your head. #}
+<div class="checkpoint-tabs">
+    <a class="checkpoint-tab {{ 'is-active' if ansicht != 'fragen' }}"
+       href="{{ url_for('admin_checkpoint_pruefung', **dict(request.args, ansicht='sitzungen')) }}">
+        Sitzungen <span class="checkpoint-tab-count">{{ sessions|length }}</span>
+    </a>
+    <a class="checkpoint-tab {{ 'is-active' if ansicht == 'fragen' }}"
+       href="{{ url_for('admin_checkpoint_pruefung', **dict(request.args, ansicht='fragen')) }}">
+        Fragen <span class="checkpoint-tab-count">{{ questions|length }}</span>
+    </a>
+</div>
+
+{% if ansicht == "fragen" %}
+{% include "admin/_checkpoint_questions.html" %}
+{% else %}
 <div class="flex flex-between flex-center mb-2" style="gap: 1rem; flex-wrap: wrap;">
     <p class="text-muted" style="margin: 0;">
         <strong>{{ sessions|length }}</strong> Checkpoint-Sitzung(en)
@@ -540,8 +562,26 @@
     </div>
 </details>
 {% endfor %}
+{% endif %}{# /ansicht == sitzungen #}
+
 
 <style>
+/* Two groupings of one dataset, so they read as two views of the same page rather
+   than two pages. The count rides in the tab because it is the reason to switch:
+   "24 Fragen" next to "32 Sitzungen" says which axis is shorter to work through. */
+.checkpoint-tabs { display: flex; gap: 0.25rem; margin-bottom: 1rem;
+                   border-bottom: 2px solid #e5e7eb; }
+.checkpoint-tab { padding: 0.5rem 1rem; text-decoration: none; color: #6b7280;
+                  font-weight: 600; font-size: 0.9rem; border-bottom: 2px solid transparent;
+                  margin-bottom: -2px; display: flex; gap: 0.4rem; align-items: center; }
+.checkpoint-tab:hover { color: #374151; background: #f9fafb; }
+/* Colour is not the only cue -- the active tab also carries the underline and the
+   filled count chip, so the state survives a greyscale or colourblind reading. */
+.checkpoint-tab.is-active { color: #1e40af; border-bottom-color: #2563eb; }
+.checkpoint-tab-count { background: #e5e7eb; color: #4b5563; border-radius: 999px;
+                        padding: 0.05rem 0.5rem; font-size: 0.78rem; }
+.checkpoint-tab.is-active .checkpoint-tab-count { background: #2563eb; color: #fff; }
+
 .checkpoint-session-head { cursor: pointer; display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
 /* A reset session is history, not work in progress -- it reads back, it doesn't
    compete for attention with the sessions still waiting to be graded. */
