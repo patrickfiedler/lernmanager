@@ -217,7 +217,7 @@
                             {% endif %}
                             {% if is_youtube %}
                             {# YouTube: split pane primary, external link secondary #}
-                            <button class="material-name-btn btn-split js-yt-primary"
+                            <button class="material-name-btn js-yt-primary"
                                     data-type="youtube"
                                     data-url="{{ mat.pfad }}"
                                     data-title="{{ label }}"
@@ -230,7 +230,7 @@
                             <span class="material-name-locked text-muted">{{ label }}</span>
                             {% elif is_pdf or is_image %}
                             {# Viewable files: split pane primary, download secondary #}
-                            <button class="material-name-btn btn-split"
+                            <button class="material-name-btn"
                                     data-type="{{ 'image' if is_image else 'pdf' }}"
                                     data-url="{{ url_for('download_material', material_id=mat.id) }}"
                                     data-title="{{ label }}"
@@ -975,6 +975,12 @@ window.addEventListener('DOMContentLoaded', function() {
 // ── Split Pane ───────────────────────────────────────
 
 function openSplitPane(btn) {
+    // Auf dem Handy gibt es keinen Split-Pane: 50% von 400px ist kein Lesebereich.
+    // Der Name verhaelt sich dort wie der ↗-Link daneben.
+    if (window.innerWidth <= 768) {
+        window.open(btn.dataset.url, '_blank');
+        return;
+    }
     const type = btn.dataset.type;
     const url = type === 'youtube' ? (btn.dataset.embedUrl || btn.dataset.url) : btn.dataset.url;
     const title = btn.dataset.title || 'Material';
@@ -1008,7 +1014,7 @@ function openSplitPane(btn) {
     updateSidebarTop();
     window.addEventListener('scroll', updateSidebarTop);
 
-    document.querySelectorAll('.btn-split').forEach(function(b) { b.classList.remove('split-active'); });
+    document.querySelectorAll('.material-name-btn').forEach(function(b) { b.classList.remove('split-active'); });
     btn.classList.add('split-active');
 }
 
@@ -1026,7 +1032,7 @@ function closeSplitPane() {
     document.getElementById('split-viewer-img-wrap').style.display = 'none';
     document.body.classList.remove('split-pane-active');
     document.body.style.removeProperty('--split-sidebar-width');
-    document.querySelectorAll('.btn-split').forEach(function(b) { b.classList.remove('split-active'); });
+    document.querySelectorAll('.material-name-btn').forEach(function(b) { b.classList.remove('split-active'); });
     window.removeEventListener('scroll', updateSidebarTop);
 }
 

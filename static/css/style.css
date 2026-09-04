@@ -2075,19 +2075,31 @@ body.easy-reading-mode .step-box {
 
 /* ── Split Pane Sidebar ─────────────────────────────── */
 
-/* Material name as primary split-pane trigger — looks like a plain link */
+/* Materialname. In derselben Liste stehen zwei Bauteile nebeneinander: ein
+   <button> (oeffnet den Split-Pane) und ein <a> (oeffnet einen neuen Tab). Fuer
+   den Schueler sind das dieselbe Sache, also muessen sie identisch aussehen —
+   eine Regel fuer beide, sonst driften sie wieder auseinander. Ohne die
+   <a>-Haelfte erbte der Link das Browser-Blau #0000EE und der Knopf --primary.
+   Kein `flex: 1` auf dem Knopf: das zog ihn ueber die ganze Zeile, und mit
+   Flaeche und Rahmen las er sich als Eingabefeld statt als Link. */
+.material-name-btn,
+.material-item a:not(.btn-newtab) {
+    color: var(--primary, #2563eb);
+    text-decoration: underline;
+    font-size: inherit;
+    font-family: inherit;
+}
 .material-name-btn {
     background: none;
     border: none;
     padding: 0;
     cursor: pointer;
-    color: var(--primary, #2563eb);
-    text-decoration: underline;
-    font-size: inherit;
     text-align: left;
-    flex: 1;
 }
-.material-name-btn:hover { color: var(--primary-dark, #1d4ed8); }
+.material-name-btn:hover,
+.material-item a:not(.btn-newtab):hover { color: var(--primary-dark, #1d4ed8); }
+/* Offen im Split-Pane: markiert, ohne die Link-Optik aufzugeben. */
+.material-name-btn.split-active { color: var(--primary-dark, #1d4ed8); font-weight: 600; }
 
 /* Small "open in new tab" link */
 .btn-newtab {
@@ -2101,24 +2113,6 @@ body.easy-reading-mode .step-box {
     flex-shrink: 0;
 }
 .btn-newtab:hover { color: var(--primary, #2563eb); background: var(--gray-100); }
-
-.btn-split {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.3rem;
-    background: var(--gray-100);
-    color: var(--gray-700);
-    border: 1px solid var(--gray-300);
-    border-radius: 0.375rem;
-    padding: 0.2rem 0.55rem;
-    font-size: 0.75rem;
-    cursor: pointer;
-    margin-left: 0.4rem;
-    white-space: nowrap;
-    vertical-align: middle;
-}
-.btn-split:hover { background: var(--primary); color: white; border-color: var(--primary); }
-.btn-split.split-active { background: var(--primary); color: white; border-color: var(--primary); }
 
 #split-pane-sidebar {
     position: fixed;
@@ -2194,7 +2188,6 @@ body.split-pane-active .container {
     margin-right: var(--split-sidebar-width, 50%);
     transition: margin-right 0.05s;
 }
-@media (max-width: 768px) { .btn-split { display: none; } }
 
 /* Materials Toggle */
 .materials-toggle,
