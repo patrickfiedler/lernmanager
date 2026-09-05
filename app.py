@@ -3466,6 +3466,124 @@ def admin_checkpoint_correct_double_clicks():
     return redirect(request.referrer or url_for('admin_checkpoint_pruefung'))
 
 
+# The only batch action that exists so far, deliberately. Under min() "zählt nicht"
+# can only raise a session score or leave it alone, and it means the same thing under
+# an average -- so it is the one action that does not have to wait for chemie's
+# min()/average() question. "2 Punkte für alle" would LOWER a session that scored 3,
+# which is why 3.3's preview exists at all; the value stays rejected until that
+# preview has been used in anger.
+BULK_SCORE_VALUES = {'': None}
+
+
+def _bulk_question_score_plan(filters, checkpoint_id, question_index, score,
+                              include_reviewed):
+    """Re-derive the batch selection from the posted filters. Server-side, always:
+    what runs is then by construction what the teacher had on screen, and neither a
+    stale form nor a tampered one can name a session outside it."""
+    filters['include_superseded'] = False
+    sessions = _build_checkpoint_sessions(models.get_checkpoint_reviews(**filters))
+    return checkpoint_questions.plan_bulk_score(
+        sessions, checkpoint_id, question_index, score,
+        consolidate=_consolidate_question_scores,
+        include_reviewed=include_reviewed)
+
+
+@app.route('/admin/checkpoint-pruefung/frage/<int:checkpoint_id>/<int:question_index>'
+           '/sammelkorrektur', methods=['POST'])
+@admin_required
+def admin_checkpoint_bulk_question_score(checkpoint_id, question_index):
+    """Rescore ONE question across every session in the current selection.
+
+    Two steps, not a confirm dialog: the first POST renders the list of sessions
+    with old -> new beside each name, the second one writes. A dialog can only say
+    how many sessions it will touch, and the number a teacher needs is which ones
+    and what each becomes -- "2 Punkte für alle" quietly lowers everyone who scored
+    3, and only the list shows that.
+
+    Selection is by WORDING, never by (checkpoint, index): that pair is not an
+    identifier (6 of 24 slots in production carry more than one wording), so a batch
+    keyed on it would rescore students who answered a different question. Divergent
+    and unknown wordings are counted and listed, never silently included.
+
+    The write is a loop over _set_checkpoint_question_score, the same primitive the
+    single-question button uses -- so the batch invents no second scoring rule, and
+    each session gets its breakdown, its manual marker and its analytics event
+    exactly as it would one at a time.
+    """
+    raw = request.form.get('punkte', '')
+    if raw not in BULK_SCORE_VALUES:
+        flash('Als Sammelkorrektur ist bisher nur „zählt nicht" möglich. Ein Wert, '
+              'der eine 3 senken kann, wartet auf die Aggregationsfrage.', 'danger')
+        return redirect(request.referrer or url_for('admin_checkpoint_pruefung'))
+
+    filters = _checkpoint_filters(source=request.form, limit=5000)
+    if not (filters['klasse_id'] or filters['student_id'] or filters['checkpoint_id']):
+        flash('Bitte zuerst nach Klasse, Schüler oder Checkpoint filtern — '
+              'eine ungefilterte Sammelkorrektur ist nicht möglich.', 'danger')
+        return redirect(request.referrer or url_for('admin_checkpoint_pruefung'))
+
+    include_reviewed = bool(request.form.get('auch_geprueft'))
+    plan = _bulk_question_score_plan(filters, checkpoint_id, question_index,
+                                     BULK_SCORE_VALUES[raw], include_reviewed)
+
+    if not plan['reference']:
+        flash('Für diese Frage ist bei keiner Sitzung ein Fragetext gespeichert. '
+              'Ohne ihn lässt sich nicht belegen, wer dieselbe Fassung beantwortet '
+              'hat — die Sammelkorrektur bleibt deshalb aus.', 'danger')
+        return redirect(request.referrer or url_for('admin_checkpoint_pruefung'))
+
+    if not request.form.get('bestaetigt'):
+        return render_template('admin/checkpoint_sammelkorrektur.html',
+                               plan=plan,
+                               checkpoint_id=checkpoint_id,
+                               question_index=question_index,
+                               punkte=raw,
+                               include_reviewed=include_reviewed,
+                               skip_labels=checkpoint_questions.BULK_SKIP_LABELS,
+                               back_url=request.referrer
+                                        or url_for('admin_checkpoint_pruefung'),
+                               klasse_id=filters['klasse_id'],
+                               student_id=filters['student_id'],
+                               checkpoint_id_filter=filters['checkpoint_id'],
+                               date_from=filters['date_from'],
+                               date_to=filters['date_to'],
+                               unreviewed_only=filters['unreviewed_only'],
+                               flagged_only=filters['flagged_only'])
+
+    attempts = {a['id']: a for a in models.get_checkpoint_reviews(**filters)}
+    emptied = 0
+    for row in plan['apply']:
+        attempt = attempts.get(row['attempt_id'])
+        if not attempt:
+            continue
+        # No note on the attempt: teacher_note is the teacher's own reasoning for the
+        # session grade, and a batch has no business writing into it. The provenance
+        # that matters is already recorded twice -- question_scores_manual_json marks
+        # the question as hand-set (the ✋ badge), and the analytics event carries
+        # `via` so a batch run can be told from a single click afterwards.
+        _score, counted = _set_checkpoint_question_score(
+            attempt, question_index, BULK_SCORE_VALUES[raw], via='sammelkorrektur')
+        if not counted:
+            emptied += 1
+
+    count = len(plan['apply'])
+    flash(f'Frage {question_index + 1}: bei {count} Sitzung(en) auf „zählt nicht" '
+          f'gesetzt.' if count else 'Keine Sitzung erfüllte die Bedingungen.',
+          'success' if count else 'warning')
+    if plan['skipped_count']:
+        flash(f'{plan["skipped_count"]} Sitzung(en) ausgenommen — die Gründe standen '
+              'in der Vorschau.', 'info')
+    if emptied:
+        flash(f'Bei {emptied} Sitzung(en) zählt jetzt keine Frage mehr: der Wert '
+              'steht auf 0 und die Kern-Sperre bleibt zu. Wolltest du diese '
+              'Sitzungen erlassen, setze dort die Punktzahl der Sitzung.', 'warning')
+    return redirect(url_for('admin_checkpoint_pruefung',
+                            ansicht='fragen',
+                            klasse_id=filters['klasse_id'] or None,
+                            student_id=filters['student_id'] or None,
+                            checkpoint_id=filters['checkpoint_id'] or None))
+
+
 @app.route('/admin/checkpoint-pruefung/meldung/<int:flag_id>/urteil', methods=['POST'])
 @admin_required
 def admin_checkpoint_flag_resolve(flag_id):
@@ -3643,11 +3761,15 @@ def admin_checkpoint_question_score(attempt_id, question_index):
     return redirect(request.referrer or url_for('admin_checkpoint_pruefung'))
 
 
-def _set_checkpoint_question_score(attempt, question_index, score):
+def _set_checkpoint_question_score(attempt, question_index, score, via='einzeln'):
     """Write one hand-set question score into an attempt and rebuild the session
     score around it. Returns (session score, how many questions still count).
 
     `score`: 0, 2, 3, or None for "this question does not count".
+    `via`: how the teacher got here, for the analytics row only -- 'einzeln' (the
+    button on one session) or 'sammelkorrektur' (the batch over one question). The
+    write itself is identical, which is the point: the batch loops over this rather
+    than spelling the scoring out a second time.
 
     The stored breakdown is keyed by the question's index in the STORED quiz, as a
     string -- see the question_scores comment in student_checkpoint_finish. A key
@@ -3670,7 +3792,7 @@ def _set_checkpoint_question_score(attempt, question_index, score):
         event_type='checkpoint_question_rescored', user_id=session['admin_id'],
         user_type='admin',
         metadata={'attempt_id': attempt['id'], 'question_index': question_index,
-                  'score': score, 'session_score': session_score})
+                  'score': score, 'session_score': session_score, 'via': via})
     return session_score, counted
 
 

@@ -1,0 +1,180 @@
+{% extends 'base.html' %}
+
+{% block title %}Sammelkorrektur prüfen - Lernmanager{% endblock %}
+
+{# Step one of two. A confirm() dialog can say how many sessions it will touch; the
+   number a teacher actually needs is WHICH ones and what each one becomes. This page
+   is the difference between "18 Sitzungen korrigieren?" and seeing that three of the
+   eighteen would drop to 0.
+
+   Nothing here is trusted on the way back: the confirm POST carries the filters, not
+   the list, and the server rebuilds the plan from them. #}
+
+{% block content %}
+<div class="flex flex-between flex-center mb-2">
+    <h1>Sammelkorrektur prüfen</h1>
+    <a href="{{ back_url }}" class="btn btn-secondary btn-sm">Abbrechen</a>
+</div>
+
+<div class="card mb-2">
+    <p style="margin: 0 0 0.5rem;">
+        <strong>Frage {{ question_index + 1 }}</strong> soll bei den unten genannten
+        Sitzungen <strong>nicht mehr zählen</strong>.
+    </p>
+    <p class="bulk-reference">„{{ plan.reference }}"</p>
+    <p class="text-muted" style="font-size: 0.85rem; margin: 0.5rem 0 0;">
+        Nur Sitzungen mit <em>genau diesem</em> Wortlaut werden angefasst. Der
+        Fragen-Index allein taugt nicht als Kennung — dieselbe Position trägt in den
+        Daten mehr als eine Fassung.
+    </p>
+</div>
+
+{% if not plan.apply %}
+<div class="card mb-2">
+    <p><strong>Keine Sitzung erfüllt die Bedingungen.</strong> Was ausgenommen wurde
+       und warum, steht unten — dort steht auch, ob nur der Haken „auch schon geprüfte"
+       fehlt.</p>
+</div>
+{% else %}
+<div class="card mb-2">
+    <h2 style="font-size: 1.05rem; margin-top: 0;">
+        {{ plan.apply|length }} Sitzung(en) werden geändert
+    </h2>
+    <table class="bulk-table">
+        <thead>
+            <tr>
+                <th>Schüler:in</th>
+                <th>Sitzung</th>
+                <th>Frage {{ question_index + 1 }}</th>
+                <th>Sitzungswert</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in plan.apply %}
+            <tr class="{{ 'is-emptied' if row.empties_session }}">
+                <td>{{ row.student_name }}</td>
+                <td class="text-muted">{{ row.timestamp[:16] }}</td>
+                <td>
+                    {{ row.old if row.old is not none else '—' }} P.
+                    → <strong>zählt nicht</strong>
+                </td>
+                <td>
+                    {{ row.session_old }}
+                    → <strong>{{ row.session_new }}</strong>
+                    {% if row.empties_session %}
+                    {# The one outcome that looks like mercy and is not: a session
+                       where nothing counts scores 0, and 0 is exactly what the
+                       Kern-Sperre reads. #}
+                    <br><span class="badge badge-danger"
+                              title="Danach zählt in dieser Sitzung keine einzige Frage mehr. Der Wert steht damit auf 0 und die Kern-Sperre bleibt zu.">
+                        ⚠️ nichts zählt mehr — Kern-Sperre bleibt zu
+                    </span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+{% if plan.skipped_count %}
+<div class="card mb-2">
+    <h2 style="font-size: 1.05rem; margin-top: 0;">
+        {{ plan.skipped_count }} Sitzung(en) bleiben unangetastet
+    </h2>
+    <p class="text-muted" style="font-size: 0.85rem;">
+        Kein Fehler — jede dieser Sitzungen wäre falsch mitgenommen worden.
+    </p>
+    {% for reason, rows in plan.skipped.items() %}
+    <details class="bulk-skip">
+        <summary>
+            <strong>{{ rows|length }}×</strong> {{ skip_labels.get(reason, reason) }}
+        </summary>
+        <ul>
+            {% for row in rows %}
+            <li>
+                {{ row.student_name }}
+                <span class="text-muted">· {{ row.timestamp[:16] }}</span>
+                {% if reason == 'wortlaut' %}
+                <br><span class="bulk-skip-wording">„{{ row.wording }}"</span>
+                {% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+    </details>
+    {% endfor %}
+</div>
+{% endif %}
+
+{# The filters ride in every form on this page, never the list of sessions: the
+   server rebuilds the plan from them, so what is written is by construction what was
+   shown -- and a stale or edited form cannot name a session outside the selection. #}
+{% macro plan_fields(reviewed) %}
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="klasse_id" value="{{ klasse_id or '' }}">
+    <input type="hidden" name="student_id" value="{{ student_id or '' }}">
+    <input type="hidden" name="checkpoint_id" value="{{ checkpoint_id_filter or '' }}">
+    <input type="hidden" name="von" value="{{ date_from or '' }}">
+    <input type="hidden" name="bis" value="{{ date_to or '' }}">
+    <input type="hidden" name="offen" value="{{ '1' if unreviewed_only else '' }}">
+    <input type="hidden" name="gemeldet" value="{{ '1' if flagged_only else '' }}">
+    <input type="hidden" name="punkte" value="{{ punkte }}">
+    {% if reviewed %}<input type="hidden" name="auch_geprueft" value="1">{% endif %}
+{% endmacro %}
+
+<div class="card">
+    {# Its own form, without `bestaetigt`: toggling the scope has to land back on a
+       fresh preview, never on the write. Two forms rather than a checkbox that
+       submits itself, so the page needs no JavaScript to stay honest. #}
+    <form method="POST"
+          action="{{ url_for('admin_checkpoint_bulk_question_score',
+                             checkpoint_id=checkpoint_id,
+                             question_index=question_index) }}"
+          class="mb-1">
+        {{ plan_fields(not include_reviewed) }}
+        <button type="submit" class="btn btn-secondary btn-sm"
+                title="Eine geprüfte Sitzung trägt eine menschliche Entscheidung. Standardmäßig bleibt sie außen vor.">
+            {% if include_reviewed %}
+            ✓ schon geprüfte Sitzungen sind einbezogen — wieder ausnehmen
+            {% else %}
+            auch schon geprüfte Sitzungen einbeziehen
+            {% endif %}
+        </button>
+        <span class="text-muted" style="font-size: 0.8rem;">
+            lädt nur die Vorschau neu
+        </span>
+    </form>
+
+    <form method="POST"
+          action="{{ url_for('admin_checkpoint_bulk_question_score',
+                             checkpoint_id=checkpoint_id,
+                             question_index=question_index) }}">
+        {{ plan_fields(include_reviewed) }}
+        <input type="hidden" name="bestaetigt" value="1">
+        <div class="flex gap-1">
+            <button type="submit" class="btn btn-primary"
+                    {{ 'disabled' if not plan.apply }}>
+                Ja, {{ plan.apply|length }} Sitzung(en) so ändern
+            </button>
+            <a href="{{ back_url }}" class="btn btn-secondary">Abbrechen</a>
+        </div>
+    </form>
+</div>
+
+<style>
+.bulk-reference { font-size: 0.95rem; border-left: 3px solid #2563eb;
+                  padding-left: 0.75rem; margin: 0; }
+.bulk-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+.bulk-table th, .bulk-table td { text-align: left; padding: 0.4rem 0.6rem;
+                                 border-bottom: 1px solid #e5e7eb; vertical-align: top; }
+.bulk-table th { font-size: 0.8rem; color: #6b7280; }
+/* Amber, not red: the row is not an error, it is the one outcome worth stopping at. */
+.bulk-table tr.is-emptied { background: #fffbeb; }
+.bulk-skip { font-size: 0.85rem; margin: 0.5rem 0; }
+.bulk-skip > summary { cursor: pointer; }
+.bulk-skip ul { margin: 0.4rem 0 0; padding-left: 1.25rem; }
+.bulk-skip li { margin: 0.2rem 0; }
+.bulk-skip-wording { color: #92400e; font-size: 0.82rem; }
+</style>
+{% endblock %}

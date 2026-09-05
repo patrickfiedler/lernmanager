@@ -23,10 +23,13 @@ is no evidence that per-question confidence says anything about question quality
 see the UNSURE_CONFIDENCE block below for what was measured and what came back flat.
 It is displayed because it is cheap and already recorded, not because it is trusted.
 
-Everything here is read-only aggregation over data the review page already loaded.
-No queries, no writes -- so a teacher can look without any risk to a grade.
+Everything here computes; nothing queries and nothing writes. That includes
+plan_bulk_score, which works out what a batch rescore WOULD do so a teacher can read
+it before agreeing to it -- the writing is app's, one call to
+_set_checkpoint_question_score per session.
 """
 import collections
+import json
 import re
 
 # Two failing students who fail *differently* are not evidence about the question.
@@ -298,4 +301,167 @@ def _build_row(checkpoint_id, question_index, entries):
         # prompted it. This one is a statement about the question, so it lives here.
         'teacher_flags': sorted(teacher_flags.values(),
                                 key=lambda f: f['created_at'], reverse=True),
+    }
+
+
+# ---------------------------------------------------------------- bulk rescoring
+
+# Why a batch is keyed on the WORDING and not on (checkpoint_id, question_index):
+# the index is not an identifier. 6 of 24 slots in the 2026-08/09 production data
+# carry more than one wording, and one checkpoint has sessions with 2, 0 and 3
+# questions. A batch keyed on the index would silently rescore students who answered
+# a different question. So every session is classified against the reference wording
+# and only exact matches are touched.
+BELONGS_SAFE = 'sicher'
+BELONGS_DIVERGENT = 'abweichend'
+BELONGS_UNKNOWN = 'unbekannt'
+
+# Why each excluded session was excluded, in the order the preview lists them. The
+# labels are what a teacher reads, so they say what to do about it, not just what
+# happened. Nothing here is a failure -- an exclusion is the batch working.
+BULK_SKIP_LABELS = {
+    'wortlaut': 'anderer Fragetext — diese Schüler haben eine andere Fassung '
+                'beantwortet und werden nicht angefasst',
+    'unbekannt': 'kein Fragetext gespeichert — nicht nachweisbar, welche Fassung '
+                 'beantwortet wurde',
+    'ohne_aufschluesselung': 'keine Punkte je Frage gespeichert (Sitzung vor '
+                             'migrate_055) — eine Korrektur würde den Sitzungswert '
+                             'auf 0 ziehen',
+    'gemeldet': 'offene Meldung zu dieser Frage — die wird einzeln entschieden, '
+                'sonst bleibt der Wert trotzdem vorläufig',
+    'von_hand': 'Punkte dieser Frage schon von Hand gesetzt',
+    'note_gesetzt': 'Note der Sitzung schon von Hand gesetzt — eine Korrektur der '
+                    'Frage würde daran nichts ändern',
+    'geprueft': 'schon als geprüft markiert',
+    'zurueckgesetzt': 'zurückgesetzte Sitzung, zählt nicht mehr',
+}
+
+
+def _plan_skip_reason(entry, question, include_reviewed):
+    """Why this session must stay out of the batch, or None if it may go in.
+
+    Order matters only for which single reason a session is listed under; every one
+    of these is on its own sufficient. Checked before the wording so that a session
+    that is excluded anyway is not also reported as a wording problem -- the wording
+    count is the number a teacher acts on ("who saw the other version?"), and
+    padding it with sessions that were never candidates makes it useless.
+    """
+    attempt = entry['attempt']
+    if attempt.get('superseded_at'):
+        return 'zurueckgesetzt'
+    if question['scored_manual']:
+        # Same rule as _double_click_corrections: never overwrite a human decision.
+        return 'von_hand'
+    if attempt.get('teacher_score') is not None:
+        # effective_checkpoint_score() lets teacher_score win, so rescoring the
+        # question would change the stored breakdown and NOT the grade. Listing it
+        # as changed in the preview would be a lie.
+        return 'note_gesetzt'
+    if any(f.get('status') == 'offen' for f in question.get('flags', [])):
+        # A report has its own decision path (admin_checkpoint_flag_resolve). Setting
+        # the score here leaves the flag open, so the session stays provisional
+        # (models.PROVISIONAL_FLAG_STATUSES) and the batch would look like it had
+        # settled something it did not.
+        return 'gemeldet'
+    if attempt.get('reviewed_at') and not include_reviewed:
+        return 'geprueft'
+    if not attempt.get('question_scores_json'):
+        # Nothing to take a min() over: writing one key into an empty breakdown makes
+        # the session score that one key, which on a session that scored 3 is a
+        # silent drop to 0.
+        return 'ohne_aufschluesselung'
+    return None
+
+
+def plan_bulk_score(sessions, checkpoint_id, question_index, score,
+                    consolidate, include_reviewed=False):
+    """What a batch rescore of ONE question would do, session by session.
+
+    Computes, never writes. The caller applies the plan by looping over
+    `_set_checkpoint_question_score`, so the batch does not invent a second scoring
+    rule -- and this function does not either: `consolidate` is passed in
+    (app._consolidate_question_scores) rather than reimplemented, which is also what
+    lets a test assert the preview and the write agree by construction.
+
+    Returns:
+        {'reference':     the wording every applied session matched, or None,
+         'variants':      every wording found, most common first,
+         'apply':         [{attempt_id, student_name, timestamp, old, new,
+                            session_old, session_new, empties_session}],
+         'skipped':       {reason_code: [{attempt_id, student_name, timestamp,
+                                          wording}]},
+         'skipped_count': int}
+
+    An empty `reference` (no session carries a stored wording) means the batch has
+    nothing to match against and the caller must refuse: without it, every session
+    would classify as UNKNOWN and "matches the reference" would be vacuously true.
+    """
+    entries = [(entry, question)
+               for entry in sessions
+               for question in entry['questions']
+               if entry['attempt']['checkpoint_id'] == checkpoint_id
+               and question['question_index'] == question_index]
+    if not entries:
+        return {'reference': None, 'variants': [], 'apply': [],
+                'skipped': {}, 'skipped_count': 0}
+
+    # Reference is the most common wording among the sessions ON SCREEN, re-derived
+    # here rather than posted by the form: the same rule that decides what the
+    # Fragen tab calls the question also decides what the batch acts on.
+    variants = _wording_variants(entries)
+    reference = variants[0]['text']
+
+    apply_rows, skipped = [], {}
+
+    def skip(reason, entry, question):
+        skipped.setdefault(reason, []).append({
+            'attempt_id': entry['attempt']['id'],
+            'student_name': entry['attempt']['student_name'],
+            'timestamp': entry['attempt']['timestamp'],
+            'wording': question.get('question_text'),
+        })
+
+    for entry, question in entries:
+        reason = _plan_skip_reason(entry, question, include_reviewed)
+        if reason:
+            skip(reason, entry, question)
+            continue
+        if not reference:
+            skip('unbekannt', entry, question)
+            continue
+        if not question.get('question_text'):
+            skip('unbekannt', entry, question)
+            continue
+        if question['question_text'] != reference:
+            skip('wortlaut', entry, question)
+            continue
+
+        attempt = entry['attempt']
+        scores = json.loads(attempt['question_scores_json'])
+        after = dict(scores)
+        after[str(question_index)] = score
+        apply_rows.append({
+            'attempt_id': attempt['id'],
+            'student_name': attempt['student_name'],
+            'timestamp': attempt['timestamp'],
+            'old': scores.get(str(question_index)),
+            'new': score,
+            # The stored session score, not consolidate(scores): those can disagree
+            # on a legacy row, and the preview has to state what the teacher will
+            # actually see change.
+            'session_old': attempt['score'],
+            'session_new': consolidate(after),
+            # A session where nothing counts scores 0, and 0 is what the Kern-Sperre
+            # reads -- so "excusing" the last question locks the student out instead
+            # of freeing them. admin_checkpoint_question_score warns about this one
+            # session at a time; the preview has to warn before the batch, not after.
+            'empties_session': not any(v is not None for v in after.values()),
+        })
+
+    return {
+        'reference': reference,
+        'variants': variants,
+        'apply': apply_rows,
+        'skipped': skipped,
+        'skipped_count': sum(len(rows) for rows in skipped.values()),
     }

@@ -83,6 +83,22 @@
     </a>
 </div>
 
+{# Every batch route re-derives its selection from these, server-side, so what runs
+   is by construction what the teacher had on screen. Defined above the tab split
+   because both views post batches now: the Sitzungen tab the two Doppelklick
+   actions, the Fragen tab the Sammelkorrektur. `student` overrides the filter for
+   the per-student buttons. #}
+{% macro filter_fields(student=None) %}
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="klasse_id" value="{{ klasse_id or '' }}">
+    <input type="hidden" name="student_id" value="{{ student or student_id or '' }}">
+    <input type="hidden" name="checkpoint_id" value="{{ checkpoint_id or '' }}">
+    <input type="hidden" name="von" value="{{ date_from or '' }}">
+    <input type="hidden" name="bis" value="{{ date_to or '' }}">
+    <input type="hidden" name="offen" value="{{ '1' if unreviewed_only else '' }}">
+    <input type="hidden" name="gemeldet" value="{{ '1' if flagged_only else '' }}">
+{% endmacro %}
+
 {% if ansicht == "fragen" %}
 {% include "admin/_checkpoint_questions.html" %}
 {% else %}
@@ -98,20 +114,6 @@
                 title="Erkannte Doppelklicks. Korrigierbar sind davon {{ correctable_count }} — bei den übrigen ändert der Doppelklick die Punktzahl nicht, oder du hast die Note schon selbst gesetzt.">{{ duplicate_count }} mit Doppelklick-Verdacht</span>
         {% endif %}
     </p>
-
-    {# Both batch actions re-derive their selection from these, server-side, so
-       what runs is by construction what the teacher had on screen. `student`
-       overrides the filter for the per-student buttons further down. #}
-    {% macro filter_fields(student=None) %}
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <input type="hidden" name="klasse_id" value="{{ klasse_id or '' }}">
-        <input type="hidden" name="student_id" value="{{ student or student_id or '' }}">
-        <input type="hidden" name="checkpoint_id" value="{{ checkpoint_id or '' }}">
-        <input type="hidden" name="von" value="{{ date_from or '' }}">
-        <input type="hidden" name="bis" value="{{ date_to or '' }}">
-        <input type="hidden" name="offen" value="{{ '1' if unreviewed_only else '' }}">
-        <input type="hidden" name="gemeldet" value="{{ '1' if flagged_only else '' }}">
-    {% endmacro %}
 
     <div class="flex gap-1" style="flex-wrap: wrap;">
     {# Batch correction acts on the current filter, like the bulk reset -- the
