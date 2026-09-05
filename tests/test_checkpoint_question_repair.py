@@ -222,16 +222,37 @@ def _session_with_answers():
     return student_id, subtask_id, attempt_id
 
 
-def test_review_page_renders_all_three_controls(as_admin):
-    """The controls are three separate forms in a template that already carries
-    four others -- a rendering test is the only thing that sees them arrive."""
-    _student_id, subtask_id, attempt_id = _session_with_answers()
+def test_the_session_view_renders_the_two_per_student_repairs(as_admin):
+    """The controls are separate forms in a template that already carries several
+    others -- a rendering test is the only thing that sees them arrive."""
+    _student_id, _subtask_id, attempt_id = _session_with_answers()
     html = as_admin.get("/admin/checkpoint-pruefung").get_data(as_text=True)
 
-    assert "Frage bemängeln" in html
-    assert f"/admin/checkpoint-pruefung/frage/{subtask_id}/0/markieren" in html
     assert f"/admin/checkpoint-pruefung/{attempt_id}/frage/0/nachbessern" in html
     assert f"/admin/checkpoint-pruefung/{attempt_id}/frage/0/punkte" in html
+
+
+def test_the_class_wide_flag_form_left_the_session_view(as_admin):
+    """B3: „Frage bemängeln" is one statement about the question for the whole class,
+    and the session view rendered a copy of it per student per question. It lives in
+    the Fragen tab now; the session view only points at it."""
+    _student_id, subtask_id, _attempt_id = _session_with_answers()
+    html = as_admin.get("/admin/checkpoint-pruefung").get_data(as_text=True)
+
+    assert f"/admin/checkpoint-pruefung/frage/{subtask_id}/0/markieren" not in html
+    assert "ansicht=fragen" in html      # the pointer that replaced it
+
+
+def test_the_flag_form_renders_once_per_question_in_the_question_view(as_admin):
+    """Once per question, not once per session that contained it -- that duplication
+    is the whole reason the control moved."""
+    _student_id, subtask_id, _attempt_id = _session_with_answers()
+    html = as_admin.get(
+        "/admin/checkpoint-pruefung?ansicht=fragen").get_data(as_text=True)
+
+    action = f"/admin/checkpoint-pruefung/frage/{subtask_id}/0/markieren"
+    assert html.count(action) == 1
+    assert "Frage bemängeln" in html
     # All three content verdicts offered, 'abgelehnt' not among them.
     assert "Frage ist kaputt" in html
     assert "die Aufgabe bereitet nicht darauf vor" in html
@@ -241,11 +262,13 @@ def test_every_new_form_carries_a_csrf_token(as_admin):
     """Caught in review: all three forms shipped without one first, which CSRF
     protection turns into a generic error flash rather than a visible failure."""
     _session_with_answers()
-    html = as_admin.get("/admin/checkpoint-pruefung").get_data(as_text=True)
-    forms = re.findall(r"<form[^>]*>.*?</form>", html, re.DOTALL)
+    sessions = as_admin.get("/admin/checkpoint-pruefung").get_data(as_text=True)
+    questions = as_admin.get(
+        "/admin/checkpoint-pruefung?ansicht=fragen").get_data(as_text=True)
+    forms = re.findall(r"<form[^>]*>.*?</form>", sessions + questions, re.DOTALL)
     new_forms = [f for f in forms
                  if "/markieren" in f or "/nachbessern" in f or "/punkte" in f]
-    assert len(new_forms) == 9   # 3 controls x 3 questions
+    assert len(new_forms) == 9   # 2 per-student repairs x 3 questions + 3 flag forms
     assert all('name="csrf_token"' in f for f in new_forms)
 
 

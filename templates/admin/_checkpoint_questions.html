@@ -1,8 +1,10 @@
 {# The "Fragen" tab: the same filtered sessions, grouped by question.
 
-   Read-only on purpose (Phase 1). Nothing here writes, so the whole view can be
-   opened and read without any risk to a grade -- the repairs stay where they already
-   are, on the session, until the batch lands.
+   Reading is free: every number here is aggregation over data the session view
+   already loaded, so looking costs nothing. The one thing that writes is „Frage
+   bemängeln" -- a class-wide statement about the question, which moved here from the
+   session cards (B3) and still changes no score. The per-student repairs stay on the
+   session, where the student they concern is.
 
    One row per (Checkpoint, Frage). Rows are ordered by how many students the question
    went wrong for in ANY way -- failed, reported, or given up -- because a question
@@ -139,6 +141,47 @@
         </details>
         {% endif %}
 
+        {# The one control this view owns (B3, 2026-09-04). "Diese Frage ist kaputt" is
+           a statement about the question across the whole class; it used to be
+           rendered inside every single student's session, which is where a teacher
+           would have had to go to make a claim that has nothing to do with that
+           student. Here there is exactly one of it.
+
+           It changes NO score by itself -- see admin_checkpoint_flag_question. The
+           per-student repairs (Frage zurückgeben, Punkte von Hand) stay in the
+           Sitzungen tab, because those really are per student. #}
+        {% for flag in q.teacher_flags %}
+        <p class="cq-flag">
+            🛠️ Von dir markiert: <strong>{{ flag_resolutions.get(flag.status, flag.status) }}</strong>
+            <span class="text-muted">· {{ flag.created_at[:16] }}</span>
+            {% if flag.reason_text %}<br>„{{ flag.reason_text }}"{% endif %}
+        </p>
+        {% endfor %}
+
+        <details class="cq-sub cq-flag-form">
+            <summary>🛠️ Diese Frage bemängeln</summary>
+            <form method="POST"
+                  action="{{ url_for('admin_checkpoint_flag_question',
+                                     checkpoint_id=q.checkpoint_id,
+                                     question_index=q.question_index) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <p class="text-muted">
+                    Gilt für die Frage bei allen {{ q.student_count }} Schüler(n).
+                    <strong>Ändert keine Punktzahl</strong> — die Punkte werden danach
+                    pro Sitzung repariert, damit keine längst fertige Bewertung
+                    stillschweigend umgeschrieben wird.
+                </p>
+                <input type="text" name="reason_text" class="form-control"
+                       placeholder="Was stimmt nicht? (optional, für die spätere Überarbeitung)">
+                <div class="flex gap-1 mt-1" style="flex-wrap: wrap;">
+                    {% for code, label in teacher_verdicts.items() %}
+                    <button type="submit" name="status" value="{{ code }}"
+                            class="btn btn-sm btn-secondary">{{ label }}</button>
+                    {% endfor %}
+                </div>
+            </form>
+        </details>
+
         <p class="cq-jump">
             <a href="{{ url_for('admin_checkpoint_pruefung',
                                 **dict(request.args, ansicht='sitzungen',
@@ -173,4 +216,8 @@
 .cq-variant-head { font-size: 0.78rem; color: #6b7280; margin: 0; }
 .cq-variant-text { font-size: 0.85rem; margin: 0.1rem 0 0; }
 .cq-jump { font-size: 0.85rem; margin: 0.6rem 0 0; }
+.cq-flag { border-left: 3px solid #9ca3af; background: #f9fafb; border-radius: 4px;
+           padding: 0.4rem 0.6rem; margin: 0.4rem 0; font-size: 0.85rem; }
+.cq-flag-form > summary { color: #92400e; }
+.cq-flag-form .form-control { max-width: 32rem; }
 </style>

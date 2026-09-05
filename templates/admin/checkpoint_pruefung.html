@@ -352,28 +352,22 @@
             <p class="checkpoint-question-correct">✅ Richtig: {{ question.correct_display }}</p>
             {% endif %}
 
-            {# The teacher's handle on the QUESTION. Deliberately not the same control
-               as "War die KI-Bewertung richtig?" further down: that one rates a single
-               grading decision for calibration and never moves a score. This one says
-               the question is at fault, and opens the two repairs -- because marking it
-               alone changes nothing, on purpose (a confirmed flag would otherwise
-               silently rewrite every finished session that contained the question). #}
+            {# Repairs for THIS student's sitting. "Frage bemängeln" used to sit here
+               too and no longer does: it is one statement about the question for the
+               whole class, and rendering it inside one student's session produced a
+               copy of it per student per question. It lives in the Fragen tab, where
+               there is exactly one of it -- the link below. What stays here is what
+               is genuinely per student: give the question back, or set its points. #}
             <details class="checkpoint-teacher-flag">
-                <summary>🛠️ Frage bemängeln · Punkte reparieren</summary>
+                <summary>🔧 Punkte reparieren</summary>
 
-                <form method="POST" class="checkpoint-flag-form"
-                      action="{{ url_for('admin_checkpoint_flag_question',
-                                         checkpoint_id=attempt.checkpoint_id,
-                                         question_index=question.question_index) }}">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <p class="text-muted">Gilt für die Frage bei allen Schülern. Ändert keine Punktzahl.</p>
-                    <input type="text" name="reason_text" class="form-control"
-                           placeholder="Was stimmt nicht? (optional, für die spätere Überarbeitung)">
-                    {% for code, label in teacher_verdicts.items() %}
-                    <button type="submit" name="status" value="{{ code }}"
-                            class="btn btn-sm btn-secondary">{{ label }}</button>
-                    {% endfor %}
-                </form>
+                <p class="text-muted">
+                    Etwas mit der <em>Frage</em> stimmt nicht — also bei allen Schülern?
+                    <a href="{{ url_for('admin_checkpoint_pruefung',
+                                        **dict(request.args, ansicht='fragen',
+                                               checkpoint_id=attempt.checkpoint_id)) }}">
+                        → in der Fragen-Ansicht bemängeln</a>
+                </p>
 
                 <div class="checkpoint-repair">
                     <p class="text-muted">Nur für <strong>{{ attempt.student_name }}</strong>:</p>

@@ -206,11 +206,20 @@ def _build_row(checkpoint_id, question_index, entries):
     confidences, per_student_feedback = [], collections.defaultdict(list)
     open_flags = 0
 
+    # Flags the teacher raised about the QUESTION carry no attempt and no student, so
+    # app._build_checkpoint_sessions merges the same row into every session that
+    # contains the question. Keyed by id here, or the mark a teacher set once would
+    # be listed once per student who sat the checkpoint.
+    teacher_flags = {}
+
     for entry, question in entries:
         student_id = entry['attempt']['student_id']
         students.add(student_id)
         open_flags += sum(1 for f in question.get('flags', [])
                           if f.get('status') == 'offen')
+        for flag in question.get('flags', []):
+            if flag.get('source') == 'teacher':
+                teacher_flags[flag['id']] = flag
 
         graded = [a for a in question['answers'] if not a.get('gave_up')]
         attempt_counts.append(len(graded))
@@ -284,4 +293,9 @@ def _build_row(checkpoint_id, question_index, entries):
         'unsure_count': sum(1 for c in confidences if c < UNSURE_CONFIDENCE),
         'cluster': cluster_failures(per_student_feedback),
         'open_flag_count': open_flags,
+        # Only the teacher's own marks. A student's report is answered per session --
+        # it belongs to one sitting and is ruled on there, next to the answer that
+        # prompted it. This one is a statement about the question, so it lives here.
+        'teacher_flags': sorted(teacher_flags.values(),
+                                key=lambda f: f['created_at'], reverse=True),
     }
