@@ -188,6 +188,18 @@
                         <span title="{{ 'Von der KI als falsch bewertet' if answer.llm_graded else 'Automatisch als falsch erkannt (ohne KI)' }}">❌</span>
                         {% endif %}
                         <span class="badge badge-secondary">{{ answer.grader }}</span>
+                        {# Only when the value is LOW. Two thirds of the graded rows in
+                           production sit at >=0.999, so a badge on every row would say
+                           nothing and hide the few where the grader hesitated. It rates
+                           the KI's certainty, never the answer -- see
+                           checkpoint_questions.UNSURE_CONFIDENCE for what is and is not
+                           known about the number. #}
+                        {% if answer.low_confidence %}
+                        <span class="badge badge-warning"
+                              title="Die KI war sich ihres eigenen Urteils nicht sicher ({{ '%.2f'|format(answer.judgment_confidence) }} von 1.00). Das sagt nicht, dass die Bewertung falsch ist — nur, dass ein Blick sich hier eher lohnt als anderswo.">
+                            🤖 unsicher {{ '%.2f'|format(answer.judgment_confidence) }}
+                        </span>
+                        {% endif %}
                         {% if answer.unresolved_choice %}
                         <span class="badge badge-danger"
                               title="Die gespeicherten Antwort-Indizes passen nicht mehr zu den Optionen — die Frage wurde vermutlich nachträglich geändert. Bitte die Bewertung prüfen.">
@@ -287,8 +299,18 @@
         </p>
 
         {% for question in entry.questions %}
-        <div class="checkpoint-question">
-            <div class="checkpoint-question-head">
+        {# A question that went exactly as intended collapses to its head line, and
+           every exception opens itself. The rule is decided in Python
+           (_mark_question_routine) rather than here: it is a claim about the data,
+           so it has to be testable without rendering a page, and the template must
+           not become a second, silently diverging copy of the grading rule.
+
+           Collapsed, never removed -- the body stays in the DOM one click away, so
+           the calibration widget the page JS binds by data-answer-id is still there
+           and nothing is hidden from a Strg-F. #}
+        <details class="checkpoint-question{{ ' is-routine' if question.routine }}"
+                 {{ 'open' if not question.routine }}>
+            <summary class="checkpoint-question-head">
                 <strong>Frage {{ question.question_index + 1 }}</strong>
                 {% if question.question_type %}<span class="text-muted">({{ question.question_type }})</span>{% endif %}
                 {% if question.scored is none %}
@@ -309,7 +331,14 @@
                     ohne Doppelklick: {{ question.scored_without_duplicates }} P.
                 </span>
                 {% endif %}
-            </div>
+                {# On a collapsed row the head line is the whole question, so it
+                   carries enough of the wording to recognise which one it is. #}
+                {% if question.routine and question.question_text %}
+                {# No striptags: the snapshot holds plain text, and striptags' <.*?>
+                   would swallow "pH < 7 und > 3" whole. Autoescaping handles safety. #}
+                <span class="checkpoint-question-peek text-muted">{{ question.question_text|truncate(70) }}</span>
+                {% endif %}
+            </summary>
             {% if question.question_text %}
             <p class="checkpoint-question-text">{{ question.question_text }}</p>
             {% endif %}
@@ -436,7 +465,7 @@
                 {% endfor %}
             </details>
             {% endif %}
-        </div>
+        </details>
         {% endfor %}
 
         </div>{# /checkpoint-col-calib #}
@@ -591,7 +620,19 @@
 .checkpoint-session-meta { display: flex; gap: 0.4rem; align-items: center; font-size: 0.85rem; }
 .checkpoint-session-body { margin-top: 0.75rem; }
 .checkpoint-question { border-left: 3px solid #e5e7eb; padding-left: 0.75rem; margin: 0.75rem 0; }
-.checkpoint-question-head { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+.checkpoint-question-head { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;
+                            cursor: pointer; }
+/* A question that went as intended is history, not work. It keeps its full head
+   line -- number, score, wording -- and simply stops taking a screen of height.
+   The green left border is the second, non-colour-only cue: it lines up with the
+   green "3 P." badge that is the reason the row is collapsed. */
+.checkpoint-question.is-routine { border-left-color: #86efac; margin: 0.35rem 0; }
+.checkpoint-question.is-routine > summary { font-size: 0.85rem; }
+.checkpoint-question-peek { flex: 1 1 12rem; min-width: 0; overflow: hidden;
+                            text-overflow: ellipsis; white-space: nowrap; font-size: 0.82rem; }
+/* Only the collapsed line needs the wording preview -- once open, the real
+   question text is right below it. */
+.checkpoint-question[open] > summary .checkpoint-question-peek { display: none; }
 .checkpoint-question-text { margin: 0.25rem 0; font-size: 0.9rem; }
 .checkpoint-rubric { font-size: 0.8rem; color: #6b7280; margin-bottom: 0.5rem; }
 /* Same role for a MC question that the rubric plays for a short_answer one. */

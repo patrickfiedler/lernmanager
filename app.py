@@ -3013,6 +3013,60 @@ def _mark_calibration_relevance(answer, question_type):
              or answer.get('teacher_verdict') is not None
              or answer.get('teacher_note'))
     )
+    # Only a LOW value earns a badge. Confidence clusters hard at the ceiling --
+    # 127 of the 207 graded answers in the 2026-08/09 exports sit at >=0.999 -- so
+    # printing every value would put "0.999" on two thirds of the rows and bury the
+    # 23 judgments where the grader actually hesitated. The threshold is
+    # checkpoint_questions.UNSURE_CONFIDENCE so both views draw the same line; it is
+    # still an unestablished number (see the B2 block there) and nothing gates on it.
+    confidence = answer.get('judgment_confidence')
+    answer['low_confidence'] = bool(
+        confidence is not None and confidence < checkpoint_questions.UNSURE_CONFIDENCE)
+
+
+def _mark_question_routine(entry):
+    """Decide whether one question of one session needs reading at all.
+
+    A session is mostly questions that went exactly as intended, and the review page
+    rendered each of them at full height -- text, rubric, answers, calibration
+    widget, repair form. The two that needed a decision were somewhere in between.
+    This marks the boring ones so the page can collapse them to their head line.
+
+    "Routine" is the conjunction of every cheap normality signal, so that anything
+    at all unusual keeps its full rendering:
+
+      - the question scored 3, which via _checkpoint_question_scores already means
+        solved, first attempt, no hint, no open report and no post-report redo --
+        read from that one number rather than re-deriving it, so this rule can never
+        disagree with the rule the student was graded under,
+      - and the 3 was computed, not set by hand: an override laid over the top looks
+        identical in `scored`, and collapsing it would hide the teacher's own
+        correction from them on the next visit,
+      - and the question carries no flag at all -- a resolved or rejected report is
+        settled for the scoring but still says this question has a history,
+      - and nothing about the grading looks off: no suspected double-click, no
+        ungraded answer (LLM outage), no multiple-choice indices that no longer
+        resolve, and no judgment the grader was unsure of,
+      - and no calibration verdict or note is on file. An existing one has to stay
+        visible and clearable, exactly as _mark_calibration_relevance keeps the
+        widget alive for it.
+
+    Sets entry['routine']. Display only: a wrong answer here costs a click, never a
+    grade.
+    """
+    entry['routine'] = bool(
+        entry['scored'] == 3
+        and not entry['scored_manual']
+        and not entry['flags']
+        and not entry['duplicate_ids']
+        and all(answer.get('correct') is not None
+                and not answer.get('gave_up')
+                and not answer['unresolved_choice']
+                and not answer['low_confidence']
+                and answer.get('teacher_verdict') is None
+                and not answer.get('teacher_note')
+                for answer in entry['answers'])
+    )
 
 
 def _build_checkpoint_sessions(attempts):
@@ -3100,6 +3154,7 @@ def _build_checkpoint_sessions(attempts):
                 else:
                     answer['answer_display'] = None
                 _mark_calibration_relevance(answer, entry['question_type'])
+            _mark_question_routine(entry)
 
         has_duplicates = any(entry['duplicate_ids'] for entry in review)
         # The score the session would have had if no duplicate had been counted.
