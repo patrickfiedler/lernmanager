@@ -3122,8 +3122,15 @@ def _build_checkpoint_sessions(attempts):
 
         for entry in review:
             entry['scored_manual'] = str(entry['question_index']) in manual_scores
+            # Keep what the answer log implies before the override lands on top.
+            # Without it the export cannot tell "the grader got it right" from "the
+            # teacher repaired it via §8b" -- both look like a question that scored
+            # 2 or 3, and the second one hides a grader or rubric fault.
+            entry['scored_computed'] = entry['scored']
+            entry['scored_teacher'] = None
             if entry['scored_manual']:
-                entry['scored'] = manual_scores[str(entry['question_index'])]
+                entry['scored_teacher'] = manual_scores[str(entry['question_index'])]
+                entry['scored'] = entry['scored_teacher']
                 entry['scored_without_duplicates'] = entry['scored']
             entry['flags'] = (flags.get(entry['question_index'], [])
                               + question_flags.get((attempt['checkpoint_id'],
@@ -4018,6 +4025,12 @@ def admin_checkpoint_export_json():
                 'richtige_antwort': question.get('correct_display'),
                 'punkte': question['scored'],
                 'punkte_ohne_doppelklicks': question['scored_without_duplicates'],
+                # The §8b repair path, split out so it is countable. `punkte` is the
+                # value that counts; `punkte_lehrer` is non-null exactly when a
+                # teacher set it by hand, and `punkte_berechnet` is what the answer
+                # log alone would have given.
+                'punkte_berechnet': question['scored_computed'],
+                'punkte_lehrer': question['scored_teacher'],
                 # Structured, not free text: "which questions did students report,
                 # for what reason, and what did the teacher decide" is the question
                 # this half of the export exists to answer.
