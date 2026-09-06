@@ -296,8 +296,9 @@
         <div class="checkpoint-col-calib">
         <p class="checkpoint-zone-head checkpoint-zone-head-calib">
             🔧 Antworten &amp; Kalibrierung
-            <span>zählt <strong>nicht</strong> für die Note — nur zum Nachschärfen der KI-Prompts.
-                  Urteil und Notiz speichern sich selbst, kein Speichern nötig.</span>
+            <span>Urteil und Notiz zählen <strong>nicht</strong> für die Note, nur zum Nachschärfen
+                  der KI-Prompts. Die Punkte je Frage zählen für die Note.
+                  Beides speichert sich selbst, kein Speichern nötig.</span>
         </p>
 
         {% for question in entry.questions %}
@@ -482,8 +483,8 @@
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
             <p class="checkpoint-zone-head checkpoint-zone-head-grade">
-                ⭐ Note
-                <span>zählt für das Punktekonto</span>
+                ⭐ Checkpoint-Bewertung
+                <span>mindestens 2 Punkte werden benötigt</span>
             </p>
 
             {% set current = attempt.teacher_score if attempt.teacher_score is not none else entry.suggested_score %}
