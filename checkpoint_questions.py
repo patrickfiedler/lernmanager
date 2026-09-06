@@ -157,6 +157,14 @@ def _wording_variants(entries):
 
     Ties break towards the most recent session, so a wording that has just replaced
     another wins once it is equally common.
+
+    The id is the last resort, and it is what makes the order total. `timestamp` is
+    stored to the second (now_local), so two sessions finished in the same second tie
+    on both keys -- and a stable sort then falls through to whatever order SQLite
+    returned, which is not defined for equal keys. That made a batch's reference
+    wording depend on how fast the process ran. Timestamp still decides first: an id
+    is insert order, not answer order, so a re-imported or backfilled attempt can
+    carry a high id and an old timestamp.
     """
     by_text = collections.defaultdict(list)
     for entry, question in entries:
@@ -168,8 +176,10 @@ def _wording_variants(entries):
             'attempt_ids': [e['attempt']['id'] for e in sessions],
             'session_count': len(sessions),
             'latest': max(e['attempt']['timestamp'] for e in sessions),
+            'newest_id': max(e['attempt']['id'] for e in sessions),
         })
-    variants.sort(key=lambda v: (v['session_count'], v['latest']), reverse=True)
+    variants.sort(key=lambda v: (v['session_count'], v['latest'], v['newest_id']),
+                  reverse=True)
     return variants
 
 
@@ -409,7 +419,12 @@ def plan_bulk_score(sessions, checkpoint_id, question_index, score,
     # here rather than posted by the form: the same rule that decides what the
     # Fragen tab calls the question also decides what the batch acts on.
     variants = _wording_variants(entries)
-    reference = variants[0]['text']
+    # The first variant WITH a text, not simply the first. A session whose snapshot is
+    # missing forms a variant keyed on None, and that group can rank top -- it only has
+    # to be as common and as recent as the rest. A None reference then makes every
+    # session UNKNOWN, including the ones that do carry the wording the batch was
+    # meant to act on. Absence of evidence is not a version of the question.
+    reference = next((v['text'] for v in variants if v['text']), None)
 
     apply_rows, skipped = [], {}
 

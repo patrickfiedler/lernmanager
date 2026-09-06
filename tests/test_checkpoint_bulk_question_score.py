@@ -298,8 +298,15 @@ def test_the_confirmed_post_writes(data, as_admin):
 
 
 def test_the_divergent_wording_is_still_untouched_after_the_write(data, as_admin):
-    """The assertion that matters: a batch keyed on the index would have hit Beta."""
+    """The assertion that matters: a batch keyed on the index would have hit Beta.
+
+    Two sessions carry WORDING_A, not one. This test is about a divergent wording
+    being excluded, so it must not also depend on how a 1:1 tie resolves -- that rule
+    has its own test at the bottom of this file. With a clear majority the reference
+    is WORDING_A whatever the tie-break does.
+    """
     _session(data, _student(data, "Alpha"))
+    _session(data, _student(data, "Gamma"))
     beta = _session(data, _student(data, "Beta"), wording=WORDING_B)
 
     _post(as_admin, data, checkpoint_id=data["subtask_id"], bestaetigt="1")
@@ -365,3 +372,28 @@ def test_the_scope_toggle_reloads_the_preview_instead_of_writing(data, as_admin)
     assert "Ja, 1 Sitzung(en) so ändern" in widened
     # Neither is a write.
     assert models.get_checkpoint_attempt(beta)["question_scores_manual_json"] is None
+
+
+def test_a_tie_on_count_and_second_is_broken_by_the_newer_session(data):
+    """Patrick, 2026-09-06. `timestamp` is stored to the second, so two sessions
+    finished in the same second tie on both sort keys. A stable sort then fell
+    through to SQLite's row order, and which wording became the batch reference
+    depended on how fast the suite happened to run -- this file failed roughly one
+    run in three once unrelated work shifted the timing.
+
+    The tie is forced here rather than raced for, so the case is pinned regardless
+    of machine speed.
+    """
+    alpha = _session(data, _student(data, "Alpha"), wording=WORDING_A)
+    beta = _session(data, _student(data, "Beta"), wording=WORDING_B)
+    with models.db_session() as conn:
+        conn.execute("UPDATE checkpoint_attempt SET timestamp = '2026-09-02 08:30:00' "
+                     "WHERE id IN (?, ?)", (alpha, beta))
+
+    plan = _plan(data, checkpoint_id=data["subtask_id"])
+
+    # Beta was inserted later, so its wording is the one that just replaced the other.
+    assert beta > alpha
+    assert plan["reference"] == WORDING_B
+    assert _applied_names(plan) == ["Kaya Beta"]
+    assert _skipped_names(plan, "wortlaut") == ["Kaya Alpha"]
