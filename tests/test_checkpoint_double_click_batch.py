@@ -6,8 +6,17 @@ ungeprüfte" queue, so the page stops showing work that is already dealt with.
 
 Two rules the batch is built around, and most of these tests exist to pin them:
   - it never touches a grade or a note the teacher set by hand
-  - it only acts where the score would actually change; a flagged duplicate that
+  - it only acts where a score would actually change; a flagged duplicate that
     costs nothing is left in the queue for a human to look at
+
+**Rewritten 2026-09-07.** The batch used to work on the SESSION score and stamp a
+teacher_score override. Under min() that meant a duplicate which could not move the
+session value was uncorrectable -- correctly, because min() was the grade (Patrick's
+call 2026-08-28). Since 2026-09-01 chemie's Note averages the QUESTION scores, so
+that same duplicate now costs a real Notenpunkt while the session value sits still.
+The batch therefore repairs the question breakdown and lets the session score follow
+from it, instead of papering over it with an override -- which is also why these
+tests now read question_scores_json rather than teacher_score.
 """
 import json
 
@@ -60,11 +69,15 @@ def _session(data, student_id, session_uid, texts, correct=True, score=2):
             correct=correct, feedback="Passt.", grader="llm",
             llm_model="Qwen/Qwen3-32B-FP8", prompt_version="checkpoint:abc12345",
         )
-    return models.create_checkpoint_attempt(
+    attempt_id = models.create_checkpoint_attempt(
         student_id, data["subtask_id"], data["task_id"], "quiz", "kern",
         score=score, attempt_count=len(texts), hint_count=0,
         quiz_snapshot_json=json.dumps(CHECKPOINT_QUIZ), session_uid=session_uid,
     )
+    # Every sitting since migrate_055 stores its per-question breakdown, and the
+    # batch refuses to touch one that has none -- so the fixtures must have it.
+    models.update_checkpoint_attempt_scores(attempt_id, {"0": score}, score)
+    return attempt_id
 
 
 def _double_click(data, student_id, session_uid):
@@ -75,6 +88,25 @@ def _double_click(data, student_id, session_uid):
 
 def _correct_url():
     return "/admin/checkpoint-pruefung/doppelklick-korrigieren"
+
+
+def _question_scores(attempt_id):
+    """(computed breakdown, hand-set subset) for one session."""
+    row = _attempt(attempt_id)
+    return (json.loads(row["question_scores_json"] or "{}"),
+            json.loads(row["question_scores_manual_json"] or "{}"))
+
+
+def _unfixable_double_click(data, student_id, session_uid="sess-1"):
+    """A duplicate that costs nothing: the student had already retried for real.
+
+    Without the resend the question still took two attempts, so it scores 2 either
+    way. This is what "dismissible" means now -- no question score moves, so there
+    is nothing to write and a human should look at why the flag fired.
+    """
+    return _session(data, student_id, session_uid,
+                    ["Falsch", "Kern und Hülle", "Kern und Hülle"],
+                    correct=True, score=2)
 
 
 def _attempt(attempt_id):
@@ -91,7 +123,11 @@ def test_batch_applies_the_score_without_the_double_click(data, as_admin):
     as_admin.post(_correct_url(), data={"klasse_id": data["klasse_id"]})
 
     row = _attempt(attempt_id)
-    assert row["teacher_score"] == 3
+    scores, manual = _question_scores(attempt_id)
+    assert scores["0"] == 3, "die Frage bekommt ihren Punkt zurueck"
+    assert manual["0"] == 3, "und ist als von Hand gesetzt vermerkt"
+    assert row["score"] == 3, "der Sitzungswert folgt aus den Fragen"
+    assert row["teacher_score"] is None, "kein Overlay noetig, die Daten stimmen jetzt"
     assert row["teacher_note"] == app_module.DOUBLE_CLICK_NOTE
     assert row["reviewed_at"] is not None
 
@@ -156,7 +192,7 @@ def test_batch_keeps_the_rueckmeldung_already_written(data, as_admin):
     as_admin.post(_correct_url(), data={"klasse_id": data["klasse_id"]})
 
     assert _attempt(attempt_id)["student_feedback"] == "Schau dir Frage 2 nochmal an."
-    assert _attempt(attempt_id)["teacher_score"] == 3
+    assert _question_scores(attempt_id)[0]["0"] == 3
 
 
 def test_a_duplicate_that_costs_no_point_is_left_in_the_queue(data, as_admin):
@@ -202,8 +238,8 @@ def test_batch_respects_the_class_filter(data, as_admin):
 
     as_admin.post(_correct_url(), data={"klasse_id": data["klasse_id"]})
 
-    assert _attempt(inside)["teacher_score"] == 3
-    assert _attempt(outside)["teacher_score"] is None
+    assert _question_scores(inside)[0]["0"] == 3
+    assert _question_scores(outside)[0]["0"] == 2, "ausserhalb des Filters unberuehrt"
 
 
 def test_per_student_scope_spares_the_classmate(data, as_admin):
@@ -214,8 +250,8 @@ def test_per_student_scope_spares_the_classmate(data, as_admin):
     as_admin.post(_correct_url(), data={"klasse_id": data["klasse_id"],
                                         "student_id": data["students"]["kaya"]})
 
-    assert _attempt(kaya)["teacher_score"] == 3
-    assert _attempt(nils)["teacher_score"] is None
+    assert _question_scores(kaya)[0]["0"] == 3
+    assert _question_scores(nils)[0]["0"] == 2, "der Klassenkamerad bleibt unberuehrt"
 
 
 def test_batch_covers_every_session_of_the_selection(data, as_admin):
@@ -223,7 +259,7 @@ def test_batch_covers_every_session_of_the_selection(data, as_admin):
 
     as_admin.post(_correct_url(), data={"klasse_id": data["klasse_id"]})
 
-    assert [_attempt(i)["teacher_score"] for i in ids] == [3, 3, 3]
+    assert [_question_scores(i)[0]["0"] for i in ids] == [3, 3, 3]
 
 
 def test_unfiltered_batch_is_refused(data, as_admin):
@@ -316,11 +352,13 @@ def _capped_double_click(data, student_id, session_uid="sess-1"):
         question_index=1, attempt_no=1, answer_text="Weiss nicht",
         correct=False, feedback="Nein.", grader="llm", llm_model="Qwen/Qwen3-32B-FP8",
     )
-    return models.create_checkpoint_attempt(
+    attempt_id = models.create_checkpoint_attempt(
         student_id, data["subtask_id"], data["task_id"], "quiz", "kern",
         score=0, attempt_count=3, hint_count=0,
         quiz_snapshot_json=json.dumps(TWO_QUESTION_QUIZ), session_uid=session_uid,
     )
+    models.update_checkpoint_attempt_scores(attempt_id, {"0": 2, "1": 0}, 0)
+    return attempt_id
 
 
 def _dismiss(as_admin, data, **extra):
@@ -329,19 +367,33 @@ def _dismiss(as_admin, data, **extra):
     return as_admin.post(_correct_url(), data=payload)
 
 
-def test_a_capped_session_is_not_correctable_but_is_dismissible(data, as_admin):
-    """The production symptom, pinned: flagged, no correction possible."""
-    _capped_double_click(data, data["students"]["kaya"])
+def test_a_capped_session_is_corrected_per_question(data, as_admin):
+    """This one changed sides on 2026-09-07, and it is the whole point of the rewrite.
+
+    Q1 was double-clicked (2, would be 3); Q2 was never solved (0). min() pins the
+    session at 0 either way, so the old batch called this uncorrectable and offered
+    only "abhaken" -- which writes nothing. Under a Note that averages the questions,
+    Q1's lost point is real, so it gets repaired even though the session value cannot
+    move.
+    """
+    attempt_id = _capped_double_click(data, data["students"]["kaya"])
     sessions = app_module._build_checkpoint_sessions(models.get_checkpoint_reviews())
 
     assert sessions[0]["has_duplicates"] is True
-    assert sessions[0]["suggested_score"] is None
-    assert app_module._double_click_corrections(sessions)[0] == []
-    assert app_module._double_click_dismissals(sessions)[0] == [sessions[0]["attempt"]["id"]]
+    repairs, _ = app_module._double_click_question_corrections(sessions)
+    assert [(e["attempt"]["id"], c) for e, c in repairs] == [(attempt_id, {0: 3})]
+    assert app_module._double_click_dismissals(sessions)[0] == []
+
+    as_admin.post(_correct_url(), data={"klasse_id": data["klasse_id"]})
+
+    scores, _ = _question_scores(attempt_id)
+    assert scores["0"] == 3, "die doppelt geklickte Frage bekommt ihren Punkt"
+    assert scores["1"] == 0, "die ungeloeste bleibt, wo sie war"
+    assert _attempt(attempt_id)["score"] == 0, "min() zieht die Sitzung weiter auf 0"
 
 
 def test_dismissing_marks_reviewed_without_touching_the_grade(data, as_admin):
-    attempt_id = _capped_double_click(data, data["students"]["kaya"])
+    attempt_id = _unfixable_double_click(data, data["students"]["kaya"])
 
     _dismiss(as_admin, data)
 
@@ -349,12 +401,12 @@ def test_dismissing_marks_reviewed_without_touching_the_grade(data, as_admin):
     assert row["reviewed_at"] is not None
     assert row["teacher_note"] == app_module.DOUBLE_CLICK_NOTE
     assert row["teacher_score"] is None          # no grade invented
-    assert row["score"] == 0                     # computed score untouched
+    assert row["score"] == 2                     # computed score untouched
 
 
 def test_dismissed_sessions_leave_the_open_queue(data, as_admin):
     """The whole point: clearing the review pile."""
-    _capped_double_click(data, data["students"]["kaya"])
+    _unfixable_double_click(data, data["students"]["kaya"])
     assert len(models.get_checkpoint_reviews(unreviewed_only=True)) == 1
 
     _dismiss(as_admin, data)
@@ -363,7 +415,7 @@ def test_dismissed_sessions_leave_the_open_queue(data, as_admin):
 
 
 def test_dismissing_notes_the_flagged_answers_too(data, as_admin):
-    attempt_id = _capped_double_click(data, data["students"]["kaya"])
+    attempt_id = _unfixable_double_click(data, data["students"]["kaya"])
 
     _dismiss(as_admin, data)
 
@@ -375,18 +427,18 @@ def test_dismissing_notes_the_flagged_answers_too(data, as_admin):
 def test_the_two_buttons_do_not_overlap(data, as_admin):
     """A correctable session is never also dismissible, and vice versa."""
     correctable = _double_click(data, data["students"]["kaya"], "sess-1")
-    capped = _capped_double_click(data, data["students"]["nils"], "sess-2")
+    unfixable = _unfixable_double_click(data, data["students"]["nils"], "sess-2")
     sessions = app_module._build_checkpoint_sessions(models.get_checkpoint_reviews())
 
-    corrections, _ = app_module._double_click_corrections(sessions)
+    repairs, _ = app_module._double_click_question_corrections(sessions)
     dismissals, _ = app_module._double_click_dismissals(sessions)
 
-    assert [a for a, _s in corrections] == [correctable]
-    assert dismissals == [capped]
+    assert [e["attempt"]["id"] for e, _c in repairs] == [correctable]
+    assert dismissals == [unfixable]
 
 
 def test_dismissing_skips_what_is_already_reviewed(data, as_admin):
-    attempt_id = _capped_double_click(data, data["students"]["kaya"])
+    attempt_id = _unfixable_double_click(data, data["students"]["kaya"])
     models.set_checkpoint_teacher_review(attempt_id, None, "schon angeschaut", "", 1)
 
     _dismiss(as_admin, data)
@@ -404,7 +456,7 @@ def test_dismissing_leaves_a_session_without_duplicates_alone(data, as_admin):
 
 
 def test_dismissing_is_refused_unfiltered(data, as_admin):
-    attempt_id = _capped_double_click(data, data["students"]["kaya"])
+    attempt_id = _unfixable_double_click(data, data["students"]["kaya"])
 
     as_admin.post(_correct_url(), data={"modus": "abhaken"}, follow_redirects=True)
 
@@ -412,7 +464,7 @@ def test_dismissing_is_refused_unfiltered(data, as_admin):
 
 
 def test_page_offers_the_dismiss_button_when_filtered(data, as_admin):
-    _capped_double_click(data, data["students"]["kaya"])
+    _unfixable_double_click(data, data["students"]["kaya"])
 
     page = as_admin.get(
         f"/admin/checkpoint-pruefung?klasse_id={data['klasse_id']}").get_data(as_text=True)

@@ -3250,9 +3250,9 @@ def admin_checkpoint_pruefung():
     # real number instead of the broader "has duplicates" badge. The three numbers
     # differ on purpose: a flagged duplicate that cannot move the score is
     # abhakbar, not korrigierbar.
-    correctable, _ = _double_click_corrections(sessions)
+    correctable, _ = _double_click_question_corrections(sessions)
     dismissible, _ = _double_click_dismissals(sessions)
-    correctable_ids = {attempt_id for attempt_id, _score in correctable}
+    correctable_ids = {entry['attempt']['id'] for entry, _changed in correctable}
     correctable_by_student = _count_by_student(sessions, correctable_ids)
     dismissible_by_student = _count_by_student(sessions, set(dismissible))
 
@@ -3388,30 +3388,50 @@ DOUBLE_CLICK_NOTE = 'Doppelklick, verworfen'
 LLM_GRADERS = ('llm', 'fallback')
 
 
-def _double_click_corrections(sessions):
-    """Split flagged sessions into what a batch correction would actually write.
+def _double_click_question_corrections(sessions):
+    """Per-QUESTION double-click repairs. Returns (repairs, answer_ids) where
+    repairs is [(entry, {question_index: score})].
 
-    Returns (corrections, answer_ids) where corrections is [(attempt_id, score)].
+    Why per question and not per session: until 2026-09-01 the grade WAS the session
+    min(), so a duplicate that could not move min() cost nothing and was rightly left
+    alone (Patrick's call 2026-08-28, the comment in _double_click_dismissals). Since
+    then chemie's Note averages the QUESTION scores, so a question stuck on 2 instead
+    of 3 is real damage even when the session score does not budge -- and those were
+    exactly the sessions the batch refused to touch, offering only "abhaken", which
+    writes no points at all.
 
-    Selects on `suggested_score is not None`, which _build_checkpoint_sessions
-    already defines as "has duplicates AND the score would change AND the teacher
-    has not decided yet". That single condition is what keeps the batch from
-    touching a grade a teacher already set by hand, so the check lives in one
-    place rather than being restated here.
+    Only ever raises: the de-duplicated score is the same score with a phantom
+    attempt removed. It can never lower one, which is why this needs no chemie
+    sign-off (the same argument BULK_SCORE_VALUES makes for "zählt nicht").
 
-    Sessions flagged as double-clicks whose score would not change are left out
-    entirely (Patrick's call 2026-08-28): correcting them writes nothing, and
-    marking them reviewed would clear them out of the queue without anyone having
-    looked at why the duplicate did not cost a point.
+    Left alone: a question the teacher already scored by hand, a reported question
+    (it carries no score until ruled on), and any session whose grade the teacher has
+    already set -- the confirm dialog promises exactly that.
     """
-    corrections, answer_ids = [], []
+    repairs, answer_ids = [], []
     for entry in sessions:
-        if entry['suggested_score'] is None or entry['attempt'].get('superseded_at'):
+        attempt = entry['attempt']
+        if attempt.get('superseded_at') or attempt.get('teacher_score') is not None:
             continue
-        corrections.append((entry['attempt']['id'], entry['suggested_score']))
+        # No stored breakdown = a sitting from before migrate_055. Writing a single
+        # key into an empty dict would make that one question the whole session
+        # score, so the same guard the single-question route uses
+        # ('ohne_aufschluesselung' in _plan_skip_reason) applies here too.
+        if not attempt.get('question_scores_json'):
+            continue
+        changed = {}
+        for question in entry['questions']:
+            if question['scored_manual'] or question['flagged']:
+                continue
+            clean = question['scored_without_duplicates']
+            if clean is not None and clean != question['scored']:
+                changed[question['question_index']] = clean
+        if not changed:
+            continue
+        repairs.append((entry, changed))
         for question in entry['questions']:
             answer_ids.extend(question['duplicate_ids'])
-    return corrections, answer_ids
+    return repairs, answer_ids
 
 
 def _double_click_dismissals(sessions):
@@ -3427,14 +3447,17 @@ def _double_click_dismissals(sessions):
     many). This is the "abhaken" half: note and review mark, no grade.
 
     Skips what is already dealt with (reviewed) or no longer counts (superseded),
-    and anything the correction button owns (`suggested_score is not None`).
+    and anything the correction button owns -- taken from the same helper the button
+    uses, so the two halves can never both claim a session or both skip it.
     """
+    repairs, _ = _double_click_question_corrections(sessions)
+    owned = {entry['attempt']['id'] for entry, _changed in repairs}
     attempt_ids, answer_ids = [], []
     for entry in sessions:
         attempt = entry['attempt']
         if not entry['has_duplicates'] or attempt.get('superseded_at'):
             continue
-        if entry['suggested_score'] is not None or attempt.get('reviewed_at'):
+        if attempt.get('reviewed_at') or attempt['id'] in owned:
             continue
         attempt_ids.append(attempt['id'])
         for question in entry['questions']:
@@ -3455,15 +3478,29 @@ def _apply_double_click_dismissals(filters):
 
 
 def _apply_double_click_corrections(filters):
-    """Run the batch over one filter selection. Returns the number of sessions."""
+    """Run the batch over one filter selection. Returns the number of sessions.
+
+    Writes the QUESTION scores, not a session override: _set_checkpoint_question_score
+    rebuilds the session value from them, so the stored breakdown ends up right rather
+    than being papered over with a teacher_score. The attempt is re-read between
+    questions because that helper reads the stored breakdown each time.
+    """
     filters['include_superseded'] = False
     sessions = _build_checkpoint_sessions(models.get_checkpoint_reviews(**filters))
-    corrections, answer_ids = _double_click_corrections(sessions)
+    repairs, answer_ids = _double_click_question_corrections(sessions)
 
-    count = models.bulk_correct_double_click_attempts(
-        corrections, DOUBLE_CLICK_NOTE, session['admin_id'])
+    for entry, changed in repairs:
+        attempt = entry['attempt']
+        for question_index, score in sorted(changed.items()):
+            _set_checkpoint_question_score(attempt, question_index, score,
+                                           via='doppelklick')
+            attempt = models.get_checkpoint_attempt(attempt['id'])
+
+    models.bulk_mark_double_click_reviewed(
+        [entry['attempt']['id'] for entry, _ in repairs],
+        DOUBLE_CLICK_NOTE, session['admin_id'])
     models.bulk_note_checkpoint_answers(answer_ids, DOUBLE_CLICK_NOTE)
-    return count
+    return len(repairs)
 
 
 @app.route('/admin/checkpoint-pruefung/doppelklick-korrigieren', methods=['POST'])

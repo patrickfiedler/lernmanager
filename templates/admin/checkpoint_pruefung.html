@@ -111,7 +111,7 @@
         {% endif %}
         {% if duplicate_count %}
         · <span class="badge badge-warning"
-                title="Erkannte Doppelklicks. Korrigierbar sind davon {{ correctable_count }} — bei den übrigen ändert der Doppelklick die Punktzahl nicht, oder du hast die Note schon selbst gesetzt.">{{ duplicate_count }} mit Doppelklick-Verdacht</span>
+                title="Erkannte Doppelklicks. Korrigierbar sind davon {{ correctable_count }} — bei den übrigen ändert der Doppelklick auch die Punktzahl der einzelnen Frage nicht (der Schüler hatte ohnehin einen zweiten Versuch), oder du hast die Note schon selbst gesetzt.">{{ duplicate_count }} mit Doppelklick-Verdacht</span>
         {% endif %}
     </p>
 
@@ -121,10 +121,10 @@
        change score, which is why this number can be lower than the badge above. #}
     {% if correctable_count and (klasse_id or student_id or checkpoint_id) %}
     <form method="POST" action="{{ url_for('admin_checkpoint_correct_double_clicks') }}"
-          onsubmit="return confirm('{{ correctable_count }} Doppelklick-Sitzung(en) korrigieren?\n\nJede bekommt die Punktzahl ohne den Doppelklick, die Notiz \'Doppelklick, verworfen\' und den Prüfvermerk — damit verschwinden sie aus \'nur ungeprüfte\'. Bereits von dir gesetzte Noten bleiben unangetastet.');">
+          onsubmit="return confirm('{{ correctable_count }} Doppelklick-Sitzung(en) korrigieren?\n\nJede betroffene FRAGE bekommt die Punktzahl ohne den Doppelklick — das zählt auch dann, wenn der Sitzungswert dadurch gleich bleibt, weil die Note über die einzelnen Fragen rechnet. Dazu die Notiz \'Doppelklick, verworfen\' und den Prüfvermerk, damit sie aus \'nur ungeprüfte\' verschwinden. Bereits von dir gesetzte Noten bleiben unangetastet.');">
         {{ filter_fields() }}
         <button type="submit" class="btn btn-primary btn-sm"
-                title="Punktzahl ohne Doppelklick übernehmen, Notiz setzen, als geprüft markieren">
+                title="Fragen-Punkte ohne Doppelklick übernehmen, Notiz setzen, als geprüft markieren">
             ✓ Alle {{ correctable_count }} Doppelklicks korrigieren
         </button>
     </form>
