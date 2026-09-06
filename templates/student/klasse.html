@@ -33,7 +33,8 @@
             <div class="progress-dots-column">
             <div class="progress-dots" role="group" aria-label="Aufgabenfortschritt">
                 {% macro fork_pending_dot() %}
-                <div class="dot dot-fork-pending" role="img" aria-label="Verzweigung: Wahl noch offen" title="Verzweigung: Wahl noch offen"><img src="{{ url_for('static', filename='icons/fork.svg') }}" alt=""></div>
+                {% set fork_hint = 'Verzweigung: noch ' ~ pending_fork_remaining ~ ' Aufgabe' ~ ('n' if pending_fork_remaining != 1 else '') ~ ' davor erledigen' if pending_fork_remaining else 'Verzweigung: du kannst jetzt wählen' %}
+                <div class="dot dot-fork-pending" role="img" aria-label="{{ fork_hint }}" title="{{ fork_hint }}"><img src="{{ url_for('static', filename='icons/fork.svg') }}" alt=""></div>
                 {% endmacro %}
                 {% if 0 in pending_fork_dot_positions %}{{ fork_pending_dot() }}{% endif %}
                 {% for sub in subtasks %}
@@ -64,7 +65,11 @@
                      onkeydown="handleDotKeydown(event)"
                      title="Quiz zu Aufgabe {{ disp }}{% if quiz_passed %} (bestanden){% elif quiz_available %} (verfügbar){% endif %}">?</div>
                 {% endif %}
-                {% if loop.index in pending_fork_dot_positions %}{{ fork_pending_dot() }}{% endif %}
+                {# not loop.last: on the final pass loop.index == subtasks|length, which is
+                   the very condition the line after the loop tests. A fork that sits
+                   after every visible subtask -- the normal shape when the branches end
+                   the Thema -- otherwise drew its dot twice. #}
+                {% if not loop.last and loop.index in pending_fork_dot_positions %}{{ fork_pending_dot() }}{% endif %}
                 {% endfor %}
                 {% if (subtasks|length) in pending_fork_dot_positions %}{{ fork_pending_dot() }}{% endif %}
                 {% if capstone_gate %}
@@ -116,6 +121,17 @@
        check that used to look strictest, the filename, was measuring something the
        app does not even identify files by. Quiz and checkpoint thresholds are
        untouched: there the threshold does real work. #}
+
+    {% if pending_fork_remaining %}
+    <div id="fork-locked-card" class="card mt-2" style="border-left: 4px solid #f59e0b;">
+        <div class="card-header">🔀 Gleich darfst du wählen</div>
+        <p style="padding: 0 1rem 1rem;">
+            Am Ende dieses Themas suchst du dir selbst aus, wie du zeigst, was du gelernt hast.
+            Vorher {% if pending_fork_remaining == 1 %}fehlt dir noch <strong>eine Aufgabe</strong>{% else %}fehlen dir noch <strong>{{ pending_fork_remaining }} Aufgaben</strong>{% endif %} —
+            hak sie oben ab, dann erscheint hier deine Auswahl.
+        </p>
+    </div>
+    {% endif %}
 
     {% if pending_fork %}
     <div id="fork-picker-card" class="card mt-2" style="border-left: 4px solid #f59e0b;">

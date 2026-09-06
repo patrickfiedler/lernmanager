@@ -4779,9 +4779,16 @@ def student_klasse(slug):
     # status, not against `current_subtask` (which defaults to position 1 on
     # a fresh page load, not "first incomplete" -- see todo.md § Bugs).
     pending_fork = None
+    # How many subtasks still stand between the student and the choice. The dot alone
+    # said nothing: a production screenshot (Kl.6, 2026-09-06) shows a student parked
+    # in front of an orange fork icon with no way to act on it and no statement of
+    # what would unlock it. 0 means the picker is showing.
+    pending_fork_remaining = 0
     if pending_fork_groups:
         fg = pending_fork_groups[0]
-        if all(s['erledigt'] for s in subtasks if s['reihenfolge'] < fg['min_reihenfolge']):
+        before = [s for s in subtasks if s['reihenfolge'] < fg['min_reihenfolge']]
+        pending_fork_remaining = sum(1 for s in before if not s['erledigt'])
+        if not pending_fork_remaining:
             pending_fork = fg
 
     # Check for next queued topic (only when current is completed)
@@ -4901,6 +4908,7 @@ def student_klasse(slug):
                            artifact_llm_feedback=artifact_llm_feedback,
                            artifact_last_position=artifact_last_position,
                            pending_fork=pending_fork,
+                           pending_fork_remaining=pending_fork_remaining,
                            pending_fork_dot_positions=pending_fork_dot_positions)
 
 
