@@ -288,3 +288,36 @@ def test_tab_links_keep_the_current_filters(as_admin):
     assert tab, 'no link to the Fragen tab'
     assert f'checkpoint_id={subtask_id}' in tab.group(1)
     assert 'offen=1' in tab.group(1)
+
+
+def test_a_missing_snapshot_is_not_a_second_version_of_the_question():
+    """Patrick, 2026-09-06. A session with no stored wording grouped under None and
+    was ranked like a real variant: it could take the reference slot (leaving the row
+    with wording None) and it made the drift badge say "2 Fassungen" -- claiming the
+    question had been edited mid-run -- when only one wording was ever stored.
+
+    The None group is newer here, which is exactly when it used to win.
+    """
+    rows = cq.build_question_view([
+        _session(1, 1, [_question(text='Eine Fassung')], timestamp='2026-08-26 09:00:00'),
+        _session(2, 2, [_question(text=None)], timestamp='2026-09-02 09:00:00'),
+    ])
+    row = rows[0]
+    assert row['wording'] == 'Eine Fassung'
+    assert row['has_drift'] is False
+    assert [v['text'] for v in row['variants']] == ['Eine Fassung']
+    assert row['attempt_ids'] == [1]
+    assert row['divergent_attempt_ids'] == []
+
+
+def test_a_row_where_nothing_stored_a_wording_still_lists_its_sessions():
+    """The fallback: no text anywhere means the wording is genuinely unknown, but the
+    row must keep its sessions rather than raise on an empty variant list."""
+    rows = cq.build_question_view([
+        _session(1, 1, [_question(text=None)]),
+        _session(2, 2, [_question(text=None)]),
+    ])
+    row = rows[0]
+    assert row['wording'] is None
+    assert row['has_drift'] is False
+    assert sorted(row['attempt_ids']) == [1, 2]

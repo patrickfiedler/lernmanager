@@ -212,7 +212,19 @@ def _build_row(checkpoint_id, question_index, entries):
     """One question's aggregate. `entries` is [(session, question), ...]."""
     first_question = entries[0][1]
     variants = _wording_variants(entries)
-    reference = variants[0]
+    # Only a stored text counts as a "Fassung". A session whose snapshot is missing
+    # forms a variant keyed on None, and letting that through had two effects: it
+    # could rank first and put wording: None on the row, and it made the drift badge
+    # claim the question had been edited mid-run when nothing had been touched.
+    # Absence of evidence is not a version of the question -- the same rule
+    # plan_bulk_score applies when it picks its reference.
+    #
+    # The unfiltered list is still the fallback for the one case where NO session
+    # stored a text: the row then has no wording to show, but must keep its
+    # attempt_ids. entries is never empty here, so variants[0] always exists.
+    known_variants = [v for v in variants if v['text']]
+    reference = known_variants[0] if known_variants else variants[0]
+    variants = known_variants
 
     students, failed, gave_up, reported = set(), set(), set(), set()
     attempt_counts = []
