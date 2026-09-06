@@ -181,3 +181,25 @@ def test_ungraded_previous_answer_does_not_block_a_retry(app, client, monkeypatc
     assert retry.get("unchanged") is None
     assert retry["correct"] is False        # actually graded this time
     assert len(_logged(subtask_id, question_index=1)) == 2
+
+
+def test_the_student_is_told_how_often_they_resent_the_same_text(app, client):
+    """Patrick, 2026-09-06. The guard was silent: the same feedback simply appeared
+    again, so from the student's side the click did nothing visible. The 2026-09-02
+    log shows why that matters -- identical text resent up to seven times, because
+    the grader occasionally flipped its verdict on unchanged input.
+
+    resubmit_count counts SENDS of this text, so it is 2 the first time one comes
+    back, which is the number the message speaks in ("schon zweimal").
+    """
+    student_id, subtask_id = _checkpoint_student(app)
+    _login(client, student_id)
+
+    assert _answer(client, subtask_id, [1]).get("resubmit_count") is None
+
+    assert _answer(client, subtask_id, [1])["resubmit_count"] == 2
+    assert _answer(client, subtask_id, [1])["resubmit_count"] == 3
+
+    # Counted per question, and never at the cost of an attempt.
+    assert _answer(client, subtask_id, [1])["attempts"] == 1
+    assert len(_logged(subtask_id)) == 1

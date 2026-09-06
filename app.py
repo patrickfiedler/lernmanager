@@ -2752,6 +2752,30 @@ def _answer_seconds_between(previous, current):
     return abs((b - a).total_seconds())
 
 
+def _checkpoint_resubmitted(progress, subtask_id, qidx, previous):
+    """Response for a resubmission of text already graded: the stored verdict, plus
+    how often this exact answer has now been sent.
+
+    Counted per question and kept server-side with the other counters, so the client
+    cannot inflate or reset it. It changes no score -- a resubmission never was an
+    attempt and still isn't -- it exists only so the student is told what happened
+    instead of watching the same feedback appear again with no explanation.
+    """
+    repeats = progress.setdefault('resubmits', {}).get(qidx, 0) + 1
+    progress['resubmits'][qidx] = repeats
+    _save_checkpoint_progress(subtask_id, progress)
+    return {
+        'correct': bool(previous['correct']),
+        'feedback': previous['feedback'],
+        'attempts': progress['attempts'].get(qidx, 1),
+        'unchanged': True,
+        # How often this exact text has now been SENT, not how often it repeated:
+        # 2 the first time it comes back. That is the number a message speaks in
+        # ("schon zweimal"), so the count is converted here rather than in the copy.
+        'resubmit_count': repeats + 1,
+    }
+
+
 def _normalized_answer_text(answer):
     """Answer text reduced for comparison: lowercased, collapsed whitespace.
     None for a give-up row (no text at all)."""
@@ -2947,7 +2971,8 @@ def _checkpoint_question_review(answers, flagged_indices=frozenset()):
                 'hints_used': max([r.get('hints_used_before') or 0 for r in rows], default=0),
             }
 
-        scored = _checkpoint_question_scores([summarize(set())])[0]
+        counted = summarize(set())
+        scored = _checkpoint_question_scores([counted])[0]
         scored_clean = _checkpoint_question_scores([summarize(duplicate_ids)])[0]
         review.append({
             'question_index': question_index,
@@ -2956,6 +2981,10 @@ def _checkpoint_question_review(answers, flagged_indices=frozenset()):
             'flagged': flagged,
             'scored': scored,
             'scored_without_duplicates': scored_clean,
+            # The number the 0/2/3 rule actually used. NOT attempt_no, which is a log
+            # sequence and also numbers rows this count excludes (ungraded LLM
+            # failures, give-ups). Anyone counting attempts per question wants this.
+            'attempts_counted': counted['attempts'],
         })
     return review
 
@@ -4031,6 +4060,7 @@ def admin_checkpoint_export_json():
                 # log alone would have given.
                 'punkte_berechnet': question['scored_computed'],
                 'punkte_lehrer': question['scored_teacher'],
+                'versuche_gezaehlt': question['attempts_counted'],
                 # Structured, not free text: "which questions did students report,
                 # for what reason, and what did the teacher decide" is the question
                 # this half of the export exists to answer.
@@ -5729,7 +5759,7 @@ def _checkpoint_progress(subtask_id):
     all_progress = session.get('checkpoint_progress', {})
     progress = all_progress.get(str(subtask_id)) or {
         'attempts': {}, 'hints_used': {}, 'solved': {}, 'gave_up': {}, 'llm_errors': {},
-        'flagged': {}
+        'flagged': {}, 'resubmits': {}
     }
     # setdefault, not part of the literal above: a session already in progress when
     # flags shipped must not KeyError on its first report.
@@ -6089,9 +6119,7 @@ def student_checkpoint_answer():
         # paths return real booleans. One endpoint must not answer `false` on one path
         # and `0` on another -- JS treats them alike, a strict comparison downstream
         # does not. Safe here because correct is None was already excluded above.
-        return jsonify({'correct': bool(previous['correct']), 'feedback': previous['feedback'],
-                        'attempts': progress['attempts'].get(qidx, 1),
-                        'unchanged': True})
+        return jsonify(_checkpoint_resubmitted(progress, subtask_id, qidx, previous))
 
     # Checkpoint grading is graded (feeds a real school grade), so it must never
     # silently fall back to "assume correct" like warmup does on an LLM outage --
@@ -6120,17 +6148,27 @@ def student_checkpoint_answer():
                         'deine Lehrkraft prüft die Antwort dann von Hand.')
         }), 503
 
+    # Write first, count second. The guard above ran in its own transaction before a
+    # grading call that takes seconds; a second request can clear it in that window and
+    # arrive here too. dedupe=True re-checks under the write lock, so the loser writes
+    # nothing -- and must then not count an attempt either, which is why the counter
+    # moved below the insert.
+    logged = models.create_checkpoint_answer(
+        student_id, subtask_id, progress['session_uid'], question_index,
+        attempt_no=None, answer_text=answer_text,
+        correct=correct, feedback=feedback, grader=source, llm_model=llm_model,
+        hints_used_before=progress['hints_used'].get(qidx, 0),
+        prompt_version=prompt_version, judgment_confidence=confidence,
+        dedupe=True
+    )
+    if not logged['created']:
+        return jsonify(_checkpoint_resubmitted(progress, subtask_id, qidx,
+                                               logged['existing']))
+
     progress['attempts'][qidx] = progress['attempts'].get(qidx, 0) + 1
     if correct:
         progress['solved'][qidx] = True
     _save_checkpoint_progress(subtask_id, progress)
-    models.create_checkpoint_answer(
-        student_id, subtask_id, progress['session_uid'], question_index,
-        attempt_no=progress['attempts'][qidx], answer_text=answer_text,
-        correct=correct, feedback=feedback, grader=source, llm_model=llm_model,
-        hints_used_before=progress['hints_used'].get(qidx, 0),
-        prompt_version=prompt_version, judgment_confidence=confidence
-    )
 
     return jsonify({'correct': correct, 'attempts': progress['attempts'][qidx]})
 

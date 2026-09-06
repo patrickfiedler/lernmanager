@@ -436,6 +436,42 @@
         fb.style.display = 'block';
     }
 
+    // Shown when the student sends text that was already graded. Nothing was
+    // regraded, no attempt was counted and the verdict above is the stored one --
+    // without a word here that is invisible, and the same feedback simply appears
+    // again as if the click did nothing.
+    function showResubmitNote(count) {
+        const message = resubmitMessage(count);
+        if (!message) return;
+        const fb = document.getElementById('feedback-area');
+        const line = document.createElement('div');
+        line.className = 'quiz-option';
+        line.style.cssText = 'border-left: 4px solid var(--warning-color, #f0ad4e); '
+            + 'padding-left: 1rem; background: #fff8e6; margin-top: 0.5rem;';
+        line.textContent = message;
+        fb.appendChild(line);
+    }
+
+    // count = how often this exact answer has now been sent (2 on the first repeat).
+    //
+    // Escalates once, deliberately. The first repeat is usually an honest "did that
+    // register?", so it gets a plain fact. From the third send on it is a strategy --
+    // the 2026-09-02 log has students resending identical text up to seven times,
+    // seconds apart, because the grader occasionally flipped its verdict on unchanged
+    // text. That is worth naming, without scolding: nothing is being deducted, and the
+    // way out is the hint or an edit, not another click.
+    function resubmitMessage(count) {
+        if (count < 2) return '';
+        if (count === 2) {
+            return 'Das ist dieselbe Antwort wie eben — sie wurde nicht noch einmal '
+                + 'bewertet. Das kostet dich keinen Punkt, bringt dich aber auch nicht '
+                + 'weiter. Ändere etwas an deiner Antwort, oder hol dir einen 💡 Tipp.';
+        }
+        return 'Denselben Text hast du jetzt ' + count + '-mal geschickt. Die Bewertung '
+            + 'ändert sich davon nicht. Schau in der Rückmeldung nach, was noch fehlt, '
+            + 'und ergänze genau das — oder nimm den 💡 Tipp.';
+    }
+
     function lockQuestion(resolutionText) {
         document.querySelectorAll('#answer-area input, #answer-area textarea').forEach(function(el) { el.disabled = true; });
         if (QuizInteractive.supports(questions[currentIdx].type)) {
@@ -478,6 +514,7 @@
             // exactly what the server just judged.
             lastSubmitted = answerKey(answer);
             showFeedback(data.correct);
+            if (data.unchanged) showResubmitNote(data.resubmit_count || 2);
             attemptsMade = data.attempts || (attemptsMade + 1);
             updateFlagReasons();
             var hintBtn = document.getElementById('hint-btn');

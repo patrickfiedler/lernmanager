@@ -3432,10 +3432,25 @@ def create_checkpoint_attempt(student_id, checkpoint_id, module_id, checkpoint_t
         return attempt_id
 
 
+def normalized_answer_text(text):
+    """Answer text reduced for comparison: lowercased, collapsed whitespace.
+    None for a row with no text at all (a give-up or a report).
+
+    Lives here rather than in the route because the write path below has to apply
+    exactly the same rule to a row it reads back inside its own transaction -- two
+    definitions of "the same answer" would let a duplicate through whenever they
+    drifted apart.
+    """
+    if text is None:
+        return None
+    return ' '.join(str(text).lower().split())
+
+
 def create_checkpoint_answer(student_id, checkpoint_id, session_uid, question_index,
                               attempt_no, answer_text, correct, feedback, grader,
                               llm_model=None, hints_used_before=0, gave_up=False,
-                              prompt_version=None, judgment_confidence=None):
+                              prompt_version=None, judgment_confidence=None,
+                              dedupe=False):
     """Log one graded attempt at one checkpoint question -- the per-question detail
     checkpoint_attempt never captured (see migrate_047). Written as answers happen,
     before checkpoint_attempt exists (checkpoint_attempt_id starts NULL and is
@@ -3451,8 +3466,41 @@ def create_checkpoint_answer(student_id, checkpoint_id, session_uid, question_in
     judgment_confidence: how sure the model was of its verdict (migrate_052), None
     when no LLM graded it or the provider returned no logprobs. Recorded only --
     nothing reads it to decide anything yet, on purpose. See the migration.
+
+    attempt_no: pass None to have it derived here as MAX+1 for this question. That is
+    the only race-free way to number it -- the route's own counter lives in the Flask
+    session cookie, which two overlapping requests both read before either writes, so
+    they stamp the same number (seen in production 2026-09-02).
+
+    dedupe: re-check inside this transaction whether the newest logged row is already
+    this same answer, graded. The route checks that too, before spending an LLM call,
+    but that read and this write are separate transactions with a slow grading call in
+    between -- long enough for a second request to pass the same check. SQLite
+    serialises writers, so re-checking here is what actually closes the window.
+
+    Returns {'created': bool, 'attempt_no': int, 'existing': row or None}. `created`
+    is False only when dedupe suppressed the insert; `existing` then carries the row
+    whose verdict the caller should hand back.
     """
     with db_session() as conn:
+        if dedupe:
+            previous = conn.execute('''
+                SELECT * FROM checkpoint_answer
+                WHERE session_uid = ? AND question_index = ? AND gave_up = 0
+                ORDER BY id DESC LIMIT 1
+            ''', (session_uid, question_index)).fetchone()
+            if (previous and previous['correct'] is not None
+                    and normalized_answer_text(previous['answer_text'])
+                    == normalized_answer_text(answer_text)):
+                return {'created': False, 'attempt_no': previous['attempt_no'],
+                        'existing': dict(previous)}
+
+        if attempt_no is None:
+            attempt_no = conn.execute(
+                'SELECT COALESCE(MAX(attempt_no), 0) + 1 FROM checkpoint_answer '
+                'WHERE session_uid = ? AND question_index = ?',
+                (session_uid, question_index)).fetchone()[0]
+
         conn.execute('''
             INSERT INTO checkpoint_answer
             (student_id, checkpoint_id, session_uid, question_index, attempt_no,
@@ -3462,6 +3510,7 @@ def create_checkpoint_answer(student_id, checkpoint_id, session_uid, question_in
         ''', (student_id, checkpoint_id, session_uid, question_index, attempt_no,
               answer_text, correct, feedback, grader, llm_model, hints_used_before,
               1 if gave_up else 0, now_local(), prompt_version, judgment_confidence))
+        return {'created': True, 'attempt_no': attempt_no, 'existing': None}
 
 
 def get_checkpoint_attempts_for_student(student_id, module_id=None, include_superseded=False):
