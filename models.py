@@ -3535,6 +3535,45 @@ def get_checkpoint_attempts_for_student(student_id, module_id=None, include_supe
         return [dict(r) for r in rows]
 
 
+def get_student_checkpoint_overview(student_id):
+    """Every checkpoint in the student's assigned Themen, with their own result.
+
+    One row per checkpoint, whether or not it was ever sat -- an unsat checkpoint is
+    exactly the open work the student needs to see, so it cannot be a join that drops
+    it. Newest Thema first, then the order the checkpoints sit in the Thema.
+
+    Carries the raw columns only; the route turns them into a status, because the
+    rules for that (override wins, provisional while a report is open, a rejected
+    report owes a redo) already live there and must not be restated in SQL.
+    """
+    with db_session() as conn:
+        rows = conn.execute("""
+            SELECT sub.id            AS checkpoint_id,
+                   sub.beschreibung  AS checkpoint_beschreibung,
+                   sub.reihenfolge   AS reihenfolge,
+                   sub.checkpoint_type,
+                   sub.kern_standard_tag,
+                   t.id              AS task_id,
+                   t.name            AS task_name,
+                   st.klasse_id      AS klasse_id,
+                   ca.id             AS attempt_id,
+                   ca.score, ca.teacher_score, ca.reviewed_at, ca.timestamp,
+                   ca.student_feedback, ca.question_scores_json
+            FROM student_task st
+            JOIN task t     ON t.id = st.task_id
+            JOIN subtask sub ON sub.task_id = t.id
+                            AND sub.checkpoint_type IS NOT NULL
+                            AND COALESCE(sub.hidden, 0) = 0
+            LEFT JOIN checkpoint_attempt ca
+                   ON ca.checkpoint_id = sub.id
+                  AND ca.student_id = st.student_id
+                  AND ca.superseded_at IS NULL
+            WHERE st.student_id = ?
+            ORDER BY t.id DESC, sub.reihenfolge
+        """, (student_id,)).fetchall()
+        return [dict(r) for r in rows]
+
+
 def get_latest_checkpoint_attempt(student_id, checkpoint_id):
     """The student's most recent live session for one checkpoint, or None.
 

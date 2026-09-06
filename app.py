@@ -4635,7 +4635,11 @@ def student_dashboard():
                            sidequests_by_klasse=sidequests_by_klasse,
                            completed_by_klasse=completed_by_klasse,
                            student_path=student.get('lernpfad'),
-                           has_warmup_pool=has_warmup_pool)
+                           has_warmup_pool=has_warmup_pool,
+                           # Cheap existence check, not the overview itself: the card
+                           # only needs to know whether the page has anything on it.
+                           has_checkpoints=bool(
+                               models.get_student_checkpoint_overview(student_id)))
 
 
 def _stufe_matches_klassenstufe(stufe, klassenstufe):
@@ -6058,6 +6062,90 @@ def _handle_checkpoint_quiz(student, task, slug, subtask, position, klasse):
                            flag_reasons=models.CHECKPOINT_FLAG_REASONS,
                            retry_flags=retry_flags,
                            llm_enabled=config.LLM_ENABLED)
+
+
+@app.route('/schueler/checkpoints')
+@student_required
+def student_checkpoints():
+    """One page listing every checkpoint in the student's Themen and how it went.
+
+    Why it exists: the score and its one-line reason are shown once, on the screen
+    that ends a session (chemie's agreed Option 1). After that the student has no way
+    back to it -- not the number, not which questions cost a point, not that a report
+    of theirs was rejected and now owes a redo. Everything here is already computed
+    somewhere; this is the only place it is all in one list.
+
+    Deliberately read-only. Nothing here changes a score or opens a checkpoint that
+    was not already open.
+    """
+    student_id = session['student_id']
+    student = models.get_student(student_id)
+    rows = models.get_student_checkpoint_overview(student_id)
+    retry_ids = models.get_checkpoints_awaiting_retry(student_id)
+    reopened_ids = {r['checkpoint_id'] for r in models.get_reopened_checkpoint_topics(student_id)}
+
+    # Position within the Thema, worked out per Thema with the same helper the Thema
+    # page uses -- the student-facing URL is a position among VISIBLE subtasks, which
+    # is not the stored reihenfolge and cannot be guessed from it.
+    positions, tasks_by_id = {}, {}
+    for row in rows:
+        key = (row['task_id'], row['klasse_id'])
+        if key in positions:
+            continue
+        visible = models.get_visible_subtasks_for_student(
+            student_id, row['klasse_id'], row['task_id'])
+        positions[key] = {sub['id']: index for index, sub in enumerate(visible, start=1)}
+
+    groups = []
+    for row in rows:
+        # The joined row aliases the attempt's id, so rebuild the shape the two
+        # score helpers expect -- both read attempt['id'], and passing the raw row
+        # fails on that key alone.
+        attempt = ({'id': row['attempt_id'], 'score': row['score'],
+                    'teacher_score': row['teacher_score']}
+                   if row['attempt_id'] else None)
+        if attempt:
+            score = models.effective_checkpoint_score(attempt)
+            provisional = models.checkpoint_score_is_provisional(attempt)
+        else:
+            score, provisional = None, False
+
+        if row['checkpoint_id'] in retry_ids:
+            status = 'wiederholen'
+        elif row['checkpoint_id'] in reopened_ids:
+            status = 'neu_geoeffnet'
+        elif not attempt:
+            status = 'offen'
+        elif provisional:
+            status = 'vorlaeufig'
+        else:
+            status = 'erledigt'
+
+        task = {'name': row['task_name']}
+        tasks_by_id.setdefault(row['task_id'], task)
+        entry = {
+            'checkpoint_id': row['checkpoint_id'],
+            'titel': aufgabe_titel(row['checkpoint_beschreibung']),
+            'task_name': row['task_name'],
+            'slug': topic_slug({'name': row['task_name']}),
+            'position': positions[(row['task_id'], row['klasse_id'])].get(row['checkpoint_id']),
+            'kern': row['kern_standard_tag'] == 'kern',
+            'score': score,
+            'status': status,
+            'feedback': row['student_feedback'],
+            'geprueft': bool(row['reviewed_at']),
+            'zeitpunkt': row['timestamp'],
+        }
+        if groups and groups[-1]['task_id'] == row['task_id']:
+            groups[-1]['checkpoints'].append(entry)
+        else:
+            groups.append({'task_id': row['task_id'], 'task_name': row['task_name'],
+                           'checkpoints': [entry]})
+
+    offen = sum(1 for g in groups for c in g['checkpoints']
+                if c['status'] in ('offen', 'wiederholen', 'neu_geoeffnet'))
+    return render_template('student/checkpoints.html', student=student,
+                           groups=groups, offen=offen)
 
 
 @app.route('/schueler/checkpoint/antwort', methods=['POST'])

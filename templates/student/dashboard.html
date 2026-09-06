@@ -143,6 +143,18 @@
 
 {% endfor %}
 
+{% if has_checkpoints %}
+{# Only for students who actually have checkpoints -- most Themen have none, and an
+   empty entry point is worse than no entry point. #}
+<div class="card task-card">
+    <div class="card-header">✅ Meine Checkpoints</div>
+    <p class="text-muted mb-1">Deine Punkte und was noch offen ist.</p>
+    <div class="text-right">
+        <a href="{{ url_for('student_checkpoints') }}" class="btn btn-secondary">Ansehen →</a>
+    </div>
+</div>
+{% endif %}
+
 {% if has_warmup_pool %}
 <div class="card task-card">
     <div class="card-header">🧠 Üben</div>
