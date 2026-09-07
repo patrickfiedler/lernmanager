@@ -288,6 +288,34 @@ def _resolve_subtask_by_position(subtasks, position):
     return None
 
 
+def _refresh_task_completion(student_id, task):
+    """Re-derive `abgeschlossen` for a student's topic on page load.
+
+    `abgeschlossen` is written as a side effect of whichever action finished the
+    last requirement (subtask toggle, quiz pass, gate pass). When the finish line
+    moves afterwards instead -- a teacher hides a subtask, changes the student's
+    lernpfad, turns subtask_quiz_required off, or a fork gets resolved -- no
+    student action follows, the flag stays 0, and the "Naechstes Thema" link
+    never appears. The student is done and stuck at the same time.
+
+    So the read path re-checks. Idempotent, and only ever writes 1 (a topic is
+    never un-completed here -- manual completion by a teacher must survive).
+    Mutates `task` in place so the caller's render sees the fresh value.
+    """
+    if not task or task.get('abgeschlossen'):
+        return
+    if not models.check_task_completion(task['id']):
+        return
+    models.mark_task_complete(task['id'])
+    task['abgeschlossen'] = 1
+    models.log_analytics_event(
+        event_type='task_complete',
+        user_id=student_id,
+        user_type='student',
+        metadata={'student_task_id': task['id'], 'source': 'refresh_on_view'}
+    )
+
+
 def _resolve_resume_subtask(subtasks, subtask_quiz_status):
     """Where a student should land on param-less re-entry to a topic.
 
@@ -4559,6 +4587,7 @@ def student_dashboard():
     tasks_by_klasse = {}
     for klasse in klassen:
         task = models.get_student_task(student_id, klasse['id'])
+        _refresh_task_completion(student_id, task)
         if task:
             # Get only VISIBLE subtasks for this student
             visible_subtasks = models.get_visible_subtasks_for_student(
@@ -4585,27 +4614,19 @@ def student_dashboard():
                 if next_subtask and next_subtask.get('beschreibung') else None)
         tasks_by_klasse[klasse['id']] = task
 
-    # Compute next queued topic per class
+    # Next queued topic per class. One lookup now covers both cases that used to be
+    # coded separately -- a finished active topic, and no active topic at all --
+    # because get_next_open_queued_topic asks "what is still open for this student"
+    # instead of "what sits at position+1".
     next_topics = {}
     for klasse in klassen:
         task = tasks_by_klasse.get(klasse['id'])
-        queue = models.get_topic_queue(klasse['id'])
-        if not queue:
-            continue
-
-        if task and task.get('abgeschlossen') and task.get('task_id'):
-            # Active completed topic → get next in queue
-            nxt = models.get_next_queued_topic(klasse['id'], task['task_id'])
-            if nxt:
-                next_topics[klasse['id']] = nxt
-        elif not task:
-            # No active topic → find first queue item not yet done
-            all_student_tasks = models.get_all_student_tasks(student_id, klasse['id'])
-            done_task_ids = {st['task_id'] for st in all_student_tasks}
-            for q in queue:
-                if q['task_id'] not in done_task_ids:
-                    next_topics[klasse['id']] = q
-                    break
+        if task and not task.get('abgeschlossen'):
+            continue  # still working on the current topic
+        nxt = models.get_next_open_queued_topic(
+            student_id, klasse['id'], task.get('task_id') if task else None)
+        if nxt:
+            next_topics[klasse['id']] = nxt
 
     # Fetch sidequests per class
     sidequests_by_klasse = {}
@@ -4746,6 +4767,8 @@ def student_klasse(slug):
         flash('Thema nicht gefunden.', 'danger')
         return redirect(url_for('student_dashboard'))
 
+    _refresh_task_completion(student_id, task)
+
     klasse_id = klasse['id']
     subtasks = []
     all_subtasks = []
@@ -4832,10 +4855,12 @@ def student_klasse(slug):
         if not pending_fork_remaining:
             pending_fork = fg
 
-    # Check for next queued topic (only when current is completed)
+    # Next queued topic -- only once the current one is done. _refresh_task_completion
+    # above re-derives `abgeschlossen` first, so a topic that quietly became complete
+    # (teacher edit, path change, resolved fork) still produces a link here.
     next_topic = None
     if task and task.get('abgeschlossen'):
-        next_topic = models.get_next_queued_topic(klasse_id, task['task_id'])
+        next_topic = models.get_next_open_queued_topic(student_id, klasse_id, task['task_id'])
 
     # Capstone gate: gate on the last visible subtask (bottom card, blocks quiz/next-topic)
     capstone_gate = None
@@ -6680,7 +6705,7 @@ def student_quiz_result(slug):
 
     next_topic = None
     if ever_passed and klasse:
-        next_topic = models.get_next_queued_topic(klasse['id'], task['task_id'])
+        next_topic = models.get_next_open_queued_topic(student_id, klasse['id'], task['task_id'])
 
     display_quiz, antworten = _apply_question_order(_build_display_quiz(quiz), antworten)
     transparency_mode = models.get_effective_transparency_mode(student_id, klasse['id'] if klasse else None)

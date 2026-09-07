@@ -72,8 +72,10 @@
                 {% if not loop.last and loop.index in pending_fork_dot_positions %}{{ fork_pending_dot() }}{% endif %}
                 {% endfor %}
                 {% if (subtasks|length) in pending_fork_dot_positions %}{{ fork_pending_dot() }}{% endif %}
-                {% if capstone_gate %}
+                {# Hoisted out of the capstone-gate branch: the quiz dot below needs it
+                   too, and a topic without a gate would otherwise read an undefined name. #}
                 {% set all_done = subtasks|selectattr('erledigt')|list|length == subtasks|length %}
+                {% if capstone_gate %}
                 <div class="dot dot-gate {% if capstone_gate_passed %}completed{% elif all_done %}available{% endif %}"
                      role="button"
                      tabindex="0"
@@ -83,7 +85,7 @@
                      onkeydown="handleDotKeydown(event)">📎</div>
                 {% endif %}
                 {% if task.quiz_json %}
-                <div class="dot dot-quiz {% if quiz_bestanden %}completed{% elif capstone_gate_passed or not capstone_gate %}available{% endif %}"
+                <div class="dot dot-quiz {% if quiz_bestanden %}completed{% elif all_done %}available{% endif %}"
                      role="button"
                      tabindex="0"
                      aria-label="Abschlussquiz{% if quiz_bestanden %} - Bestanden{% endif %}"
@@ -466,7 +468,7 @@
     <!-- Quiz Section (if all subtasks complete) -->
     {% if task.quiz_json %}
     {% set all_complete = (all_subtasks|selectattr('erledigt')|list|length == all_subtasks|length) %}
-    {% if all_complete and not task.abgeschlossen and (capstone_gate_passed or not capstone_gate) %}
+    {% if all_complete and not task.abgeschlossen %}
     <div class="quiz-card mt-2">
         <div class="quiz-header">❓ Quiz</div>
         {% if quiz_attempts %}
@@ -495,7 +497,7 @@
     {% endif %}
 
     <!-- Next topic from queue -->
-    {% if task.abgeschlossen and next_topic and (capstone_gate_passed or not capstone_gate) %}
+    {% if task.abgeschlossen and next_topic %}
     <div class="card mt-2" style="border-left: 4px solid #22c55e;">
         <div class="card-header">🎯 Nächstes Thema: {{ next_topic.name }}</div>
         <form method="POST" action="{{ url_for('student_start_next_topic') }}">

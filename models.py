@@ -2007,25 +2007,37 @@ def set_topic_queue(klasse_id, task_ids_ordered):
             )
 
 
-def get_next_queued_topic(klasse_id, current_task_id):
-    """Get the next topic in queue after current_task_id.
+def get_next_open_queued_topic(student_id, klasse_id, current_task_id=None):
+    """First queue entry the student has not been assigned yet -- the failsafe
+    behind every "Naechstes Thema" link.
 
-    Returns dict with task_id, name, fach, stufe or None.
+    It replaces an earlier position+1 lookup that stranded a student three ways:
+    the finished topic was assigned outside the queue (no position -> None), the
+    entry at position+1 was one they already did (a link backwards into a finished
+    topic), or the queue had a hole. This scans the
+    whole queue instead -- first open entry after the current topic, else the
+    first open entry at all -- so a queue with anything left in it always yields
+    a link.
+
+    "Open" means no student_task row exists for it: an already-assigned topic,
+    finished or not, is never offered as the next one.
     """
-    with db_session() as conn:
-        current = conn.execute(
-            "SELECT position FROM topic_queue WHERE klasse_id = ? AND task_id = ?",
-            (klasse_id, current_task_id)
-        ).fetchone()
-        if not current:
-            return None
-        row = conn.execute('''
-            SELECT tq.task_id, t.name, t.fach, t.stufe
-            FROM topic_queue tq
-            JOIN task t ON tq.task_id = t.id
-            WHERE tq.klasse_id = ? AND tq.position = ?
-        ''', (klasse_id, current['position'] + 1)).fetchone()
-        return dict(row) if row else None
+    queue = get_topic_queue(klasse_id)
+    if not queue:
+        return None
+
+    assigned_ids = {st['task_id'] for st in get_all_student_tasks(student_id, klasse_id)}
+    open_entries = [q for q in queue
+                    if q['task_id'] not in assigned_ids and q['task_id'] != current_task_id]
+    if not open_entries:
+        return None
+
+    current_position = next((q['position'] for q in queue if q['task_id'] == current_task_id), None)
+    if current_position is not None:
+        after = [q for q in open_entries if q['position'] > current_position]
+        if after:
+            return after[0]
+    return open_entries[0]
 
 
 def get_queue_position(klasse_id, task_id):
