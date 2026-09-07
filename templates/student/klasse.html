@@ -34,7 +34,7 @@
             <div class="progress-dots" role="group" aria-label="Aufgabenfortschritt">
                 {% macro fork_pending_dot() %}
                 {% set fork_hint = 'Verzweigung: noch ' ~ pending_fork_remaining ~ ' Aufgabe' ~ ('n' if pending_fork_remaining != 1 else '') ~ ' davor erledigen' if pending_fork_remaining else 'Verzweigung: du kannst jetzt wählen' %}
-                <div class="dot dot-fork-pending" role="img" aria-label="{{ fork_hint }}" title="{{ fork_hint }}"><img src="{{ url_for('static', filename='icons/fork.svg') }}" alt=""></div>
+                <div class="dot dot-fork-pending" role="img" aria-label="{{ fork_hint }}" title="{{ fork_hint }}">🔀</div>
                 {% endmacro %}
                 {% if 0 in pending_fork_dot_positions %}{{ fork_pending_dot() }}{% endif %}
                 {% for sub in subtasks %}

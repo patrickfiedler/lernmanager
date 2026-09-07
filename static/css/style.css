@@ -1446,13 +1446,15 @@ tr.unsaved-row td {
     background: #10b981;
 }
 
+/* Fork dot: 🔀 as text, same as the 📎 gate dot -- the fork cards below already
+   use that emoji, and the hand-drawn SVG it replaced was a second, different
+   glyph for the same idea. */
 .dot.dot-fork-pending {
     background: #f59e0b;
-}
-
-.dot.dot-fork-pending img {
-    width: 0.85rem;
-    height: 0.85rem;
+    font-size: 0.85rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 /* Zusatz task dots — circle with dashed border, ★ prefix in number */
