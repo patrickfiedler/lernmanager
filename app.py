@@ -1090,14 +1090,14 @@ def admin_grading_upload():
     browser parses the zip client-side and calls
     /admin/grading/match-logins to resolve whatever logins it finds against
     the global roster -- see that route and grading_upload.html.
-    """
-    tasks = models.list_tasks_with_graded_artifact()
-    for t in tasks:
-        t['grading_keyword'] = models.get_task_grading_keyword(t['id'])
-    tasks = [t for t in tasks if t['grading_keyword']]
 
+    The picker lists rubrics, not tasks (models.list_grading_units): a Seilbahn
+    twin and its regular topic share a keyword and a name, so one option per
+    task showed four identical-looking entries and made the teacher upload the
+    same zip once per variant.
+    """
     return render_template(
-        'admin/grading_upload.html', tasks=tasks,
+        'admin/grading_upload.html', units=models.list_grading_units(),
         service_online=_grading_service_health(),
     )
 
@@ -1186,7 +1186,9 @@ def admin_grading_run_detail(run_id):
     for r in reviewable:
         if r['status'] not in ('imported', 'under_review', 'corrected'):
             continue
-        active = models.get_active_grading_result(r['student_id'], run['task_id']) if r['student_id'] else None
+        # r['task_id'], not run['task_id']: one rubric spans several tasks, so
+        # each result carries the task its own student works on.
+        active = models.get_active_grading_result(r['student_id'], r['task_id']) if r['student_id'] else None
         if active and active['id'] != r['id']:
             needs_decision.append(r)
         else:
@@ -1347,7 +1349,7 @@ def admin_grading_result_review(result_id):
 
     supersede_conflict = None
     if result['student_id']:
-        active = models.get_active_grading_result(result['student_id'], run['task_id'])
+        active = models.get_active_grading_result(result['student_id'], result['task_id'])
         if active and active['id'] != result_id:
             supersede_conflict = active
 
@@ -1372,7 +1374,7 @@ def admin_grading_result_supersede(result_id):
         flash('Ergebnis nicht gefunden.', 'danger')
         return redirect(url_for('admin_klassen'))
     run = models.get_grading_run(challenger['grading_run_id'])
-    active = models.get_active_grading_result(challenger['student_id'], run['task_id']) if challenger['student_id'] else None
+    active = models.get_active_grading_result(challenger['student_id'], challenger['task_id']) if challenger['student_id'] else None
 
     if not active or active['id'] == result_id:
         flash('Kein Konflikt (mehr) für dieses Ergebnis.', 'warning')

@@ -62,13 +62,46 @@ def test_get_task_by_grading_keyword_none_when_no_match(db):
     assert models.get_task_by_grading_keyword("no-such-rubric") is None
 
 
-def test_get_task_by_grading_keyword_none_when_ambiguous(db):
-    """Two tasks sharing a rubric keyword must not be guessed at --
-    auto-create (import_grading_callback) would misroute grades onto the
-    wrong task otherwise."""
+def test_get_task_by_grading_keyword_representative_when_shared(db):
+    """Several tasks sharing a rubric keyword is normal, not an error: a
+    Seilbahn twin carries its regular topic's keyword by design, and the same
+    topic exists once per Klassenstufe. The keyword resolves to the group's
+    representative -- the run's task_id is only a fallback now, because each
+    result gets its task from the student's own student_task row."""
+    first = _task_with_graded_artifact(keyword="shared-keyword")
     _task_with_graded_artifact(keyword="shared-keyword")
-    _task_with_graded_artifact(keyword="shared-keyword")
-    assert models.get_task_by_grading_keyword("shared-keyword") is None
+    assert models.get_task_by_grading_keyword("shared-keyword") == first
+    assert models.get_task_by_grading_keyword("no-such-keyword") is None
+
+
+def test_list_grading_units_collapses_shared_keyword(db):
+    """The picker offers one entry per rubric. Before this, four tasks sharing
+    '1-startklar' produced four options nothing on screen could tell apart."""
+    a = _task_with_graded_artifact(keyword="shared-keyword")
+    b = _task_with_graded_artifact(keyword="shared-keyword")
+    c = _task_with_graded_artifact(keyword="other-keyword")
+
+    units = {u["keyword"]: u for u in models.list_grading_units()}
+    assert set(units) == {"shared-keyword", "other-keyword"}
+    assert units["shared-keyword"]["task_ids"] == sorted([a, b])
+    assert units["shared-keyword"]["task_id"] in (a, b)
+    assert units["other-keyword"]["task_ids"] == [c]
+
+
+def test_resolve_task_for_student_picks_the_students_own_task(db):
+    """Which of the tasks sharing a rubric a result belongs to is decided by
+    the student's assignment, not by the picker."""
+    a = _task_with_graded_artifact(keyword="shared-keyword")
+    b = _task_with_graded_artifact(keyword="shared-keyword")
+    klasse_id = models.create_klasse("6a")
+    student_id = models.create_student("Mueller", "Anna", "u-res", "pw")
+    models.add_student_to_klasse(student_id, klasse_id)
+    models.assign_task_to_student(student_id, klasse_id, b)
+
+    assert models.resolve_task_for_student(student_id, [a, b], fallback_task_id=a) == b
+    # Unknown student, or one on neither task, falls back rather than guessing.
+    assert models.resolve_task_for_student(None, [a, b], fallback_task_id=a) == a
+    assert models.resolve_task_for_student(student_id, [], fallback_task_id=a) == a
 
 
 def test_match_netzwerk_logins_returns_only_matches(db):

@@ -5917,30 +5917,115 @@ def get_task_grading_keyword(task_id):
 
 
 def list_tasks_with_graded_artifact():
-    """Tasks with at least one graded_artifact-bearing subtask -- the unit
-    picker on the grading-service upload page (sub-phase 2f)."""
+    """Tasks with at least one graded_artifact-bearing subtask -- the raw rows
+    behind list_grading_units(). Carries is_seilbahn so callers can tell a
+    Seilbahn twin from its regular topic, which the task columns alone cannot."""
     with db_session() as conn:
         rows = conn.execute(
-            "SELECT DISTINCT t.* FROM task t JOIN subtask s ON s.task_id = t.id "
+            f"SELECT DISTINCT t.*, {_IS_SEILBAHN_SQL} FROM task t JOIN subtask s ON s.task_id = t.id "
             "WHERE s.graded_artifact_json IS NOT NULL "
             "ORDER BY t.fach, t.stufe, t.number, t.name"
         ).fetchall()
     return [dict(r) for r in rows]
 
 
-def get_task_by_grading_keyword(rubric):
-    """Reverse of get_task_grading_keyword: find the task whose
-    graded_artifact keyword chain matches this rubric slug. Returns the task
-    id, or None if zero or more than one task matches -- callers must not
-    guess (used by import_grading_callback to auto-create a grading_run for
-    a job Lernmanager never registered itself; task_id is NOT NULL on both
-    grading_run and grading_result, so a wrong guess would misroute grades,
-    not just fail loudly)."""
-    matches = [
+def list_grading_units():
+    """One entry per rubric slug for the grading-upload picker.
+
+    What the grading service grades against is a rubric slug, not a task, and
+    several tasks legitimately share one. A Seilbahn twin carries its regular
+    topic's keyword by design (the twin exists to be indistinguishable in the
+    classroom), and "1 - Startklar im Fachraum" exists once per Klassenstufe.
+    Offering one option per task therefore produced four entries reading
+    "MBI (6): 1 - Startklar im Fachraum" / "MBI (7): ..." with nothing on screen
+    to tell the twins apart, and forced the same scan-folders zip -- which
+    routinely spans both tracks and both grades -- to be uploaded once per
+    variant.
+
+    Grouping by keyword collapses them into one option. Which task a given
+    result belongs to is decided per student at import time
+    (resolve_task_for_student), not by the picker.
+
+    Returns dicts with: keyword, task_id (representative, recorded on the
+    grading_run), task_ids, fach, name, stufen, has_seilbahn, has_regular.
+    """
+    by_keyword = {}
+    for t in list_tasks_with_graded_artifact():
+        keyword = get_task_grading_keyword(t['id'])
+        if not keyword:
+            continue
+        by_keyword.setdefault(keyword, []).append(t)
+
+    units = []
+    for keyword, tasks in by_keyword.items():
+        # The representative is a regular topic where one exists: a run's
+        # task_id is only a fallback now, but a fallback should not point at
+        # the track most students are not on.
+        regular = [t for t in tasks if not t.get('is_seilbahn')]
+        rep = min(regular or tasks, key=lambda t: t['id'])
+        stufen = sorted({str(t['stufe']) for t in tasks if t.get('stufe')})
+        units.append({
+            'keyword': keyword,
+            'task_id': rep['id'],
+            'task_ids': sorted(t['id'] for t in tasks),
+            'fach': rep['fach'],
+            'name': rep['name'],
+            'stufen': stufen,
+            'has_seilbahn': any(t.get('is_seilbahn') for t in tasks),
+            'has_regular': bool(regular),
+        })
+    units.sort(key=lambda u: (u['fach'] or '', u['stufen'], u['name'] or ''))
+    return units
+
+
+def get_tasks_by_grading_keyword(rubric):
+    """Every task id whose graded_artifact keyword chain matches this rubric
+    slug. More than one is normal (Seilbahn twin, per-Klassenstufe copies)."""
+    return sorted(
         t['id'] for t in list_tasks_with_graded_artifact()
         if get_task_grading_keyword(t['id']) == rubric
-    ]
-    return matches[0] if len(matches) == 1 else None
+    )
+
+
+def get_task_by_grading_keyword(rubric):
+    """Reverse of get_task_grading_keyword, for import_grading_callback's
+    auto-created runs. Returns the representative task id of the matching
+    rubric, or None when nothing matches.
+
+    This used to return None whenever several tasks shared a keyword, on the
+    grounds that a wrong task_id misroutes grades. That guard blocked every
+    rubric with a Seilbahn twin -- '1-startklar' matches four tasks -- so a
+    scan-folders job for it could not be imported at all. The guard is no
+    longer needed: the run's task_id is a fallback, and each result now gets
+    its task resolved from the student's own student_task row."""
+    matches = get_tasks_by_grading_keyword(rubric)
+    if not matches:
+        return None
+    units = [u for u in list_grading_units() if u['keyword'] == rubric]
+    return units[0]['task_id'] if units else matches[0]
+
+
+def resolve_task_for_student(student_id, task_ids, fallback_task_id=None):
+    """Which of these tasks is the one this student actually works on.
+
+    Several tasks share a rubric (Seilbahn twin, per-Klassenstufe copies), so a
+    grading run cannot know in advance which one a given student's artifact
+    belongs to -- but the student_task row does. Prefers an active assignment
+    over a finished one, and the most recent among equals.
+
+    Returns fallback_task_id when the student is unknown or has none of them
+    (an unmatched netzwerk_id, or an artifact handed in before assignment)."""
+    if student_id is None or not task_ids:
+        return fallback_task_id
+    placeholders = ','.join('?' * len(task_ids))
+    with db_session() as conn:
+        row = conn.execute(
+            f"SELECT task_id FROM student_task WHERE student_id = ? "
+            f"AND task_id IN ({placeholders}) "
+            "ORDER BY abgeschlossen ASC, id DESC LIMIT 1",
+            (student_id, *task_ids)
+        ).fetchone()
+    return row['task_id'] if row else fallback_task_id
 
 
 def create_grading_run(job_id, klasse_id, task_id, rubric, provider, model,
@@ -6218,6 +6303,12 @@ def import_grading_callback(job_id, provider, model, graded_at, students, rubric
             ).fetchall()
         }
 
+    # A rubric maps to several tasks (Seilbahn twin, per-Klassenstufe copies), so
+    # the run's task_id is only a fallback -- each result is filed against the
+    # task its own student actually works on. Resolved here rather than at upload
+    # time because that is the first point where a netzwerk_id names a student.
+    rubric_task_ids = get_tasks_by_grading_keyword(run['rubric']) if run['rubric'] else []
+
     flagged_count = 0
     zero_score_count = 0
     imported = 0
@@ -6226,6 +6317,8 @@ def import_grading_callback(job_id, provider, model, graded_at, students, rubric
         if netzwerk_id in already_imported:
             continue
         student_id = get_student_by_netzwerk_id(netzwerk_id)
+        result_task_id = resolve_task_for_student(
+            student_id, rubric_task_ids, fallback_task_id=run['task_id'])
         total_score = s.get('total_score')
         max_score = s.get('max_score')
         flagged = bool(s.get('flagged'))
@@ -6235,7 +6328,7 @@ def import_grading_callback(job_id, provider, model, graded_at, students, rubric
             zero_score_count += 1
         media = _copy_grading_media(run['id'], job_id, netzwerk_id, s.get('media') or [])
         create_grading_result(
-            grading_run_id=run['id'], task_id=run['task_id'], student_id=student_id,
+            grading_run_id=run['id'], task_id=result_task_id, student_id=student_id,
             netzwerk_id=netzwerk_id, criteria=s.get('criteria', []),
             llm_total_score=total_score, llm_max_score=max_score, flagged=flagged,
             confidence=s.get('confidence'), error=s.get('error'),

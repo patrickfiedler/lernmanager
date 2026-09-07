@@ -183,17 +183,51 @@ def test_import_grading_callback_does_not_guess_when_rubric_unknown(db):
     assert models.get_grading_run_by_job_id("scan-folders-job-2") is None
 
 
-def test_import_grading_callback_does_not_guess_when_rubric_ambiguous(db):
+def test_import_grading_callback_files_results_on_each_students_own_task(db):
+    """A rubric shared by several tasks (Seilbahn twin, per-Klassenstufe copies)
+    used to make auto-create refuse outright, so scan-folders jobs for
+    '1-startklar' could not be imported at all. Now the run is created against
+    the group's representative and every result is filed against the task its
+    own student actually works on."""
+    task_ids = []
     for i in range(2):
         task_id = models.create_task(f"Task {i}", "desc", "lz", "MBI", "6", "pflicht")
         models.create_subtask(
             task_id, "Aufgabe 1", reihenfolge=1,
             graded_artifact_json=json.dumps({"keyword": "shared-keyword"}),
         )
+        task_ids.append(task_id)
+
+    klasse_id = models.create_klasse("6a")
+    students = {}
+    for login, task_id in (("mueller.anna", task_ids[0]), ("schmidt.ben", task_ids[1])):
+        sid = models.create_student(login.split(".")[1], "X", f"u-{login}", "pw",
+                                    netzwerk_id=login)
+        models.add_student_to_klasse(sid, klasse_id)
+        models.assign_task_to_student(sid, klasse_id, task_id)
+        students[login] = sid
+
+    run_id = models.import_grading_callback(
+        job_id="scan-folders-job-3", provider="ollama", model=None,
+        graded_at=None, rubric="shared-keyword",
+        students=[
+            {"student_id": "mueller.anna", "criteria": [], "total_score": 3, "max_score": 4},
+            {"student_id": "schmidt.ben", "criteria": [], "total_score": 2, "max_score": 4},
+        ],
+    )
+
+    filed = {r["netzwerk_id"]: r["task_id"] for r in models.list_grading_results(run_id)}
+    assert filed["mueller.anna"] == task_ids[0]
+    assert filed["schmidt.ben"] == task_ids[1]
+
+
+def test_import_grading_callback_still_refuses_an_unknown_rubric(db):
+    """No task carries this keyword, so there is nothing to file against and
+    guessing would misroute grades -- task_id is NOT NULL on both tables."""
     try:
         models.import_grading_callback(
-            job_id="scan-folders-job-3", provider="ollama", model=None,
-            graded_at=None, students=[], rubric="shared-keyword",
+            job_id="scan-folders-job-4", provider="ollama", model=None,
+            graded_at=None, students=[], rubric="no-such-keyword",
         )
         assert False, "expected ValueError"
     except ValueError:

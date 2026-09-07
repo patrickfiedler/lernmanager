@@ -27,14 +27,18 @@
             <label for="task-select">Thema (Rubric)</label>
             <select id="task-select" class="form-control" required>
                 <option value="">-- Thema wählen --</option>
-                {% for task in tasks %}
-                <option value="{{ task.id }}" data-rubric="{{ task.grading_keyword }}">
-                    {{ task.fach }} ({{ task.stufe }}): {{ task.name }}
+                {% for unit in units %}
+                <option value="{{ unit.task_id }}" data-rubric="{{ unit.keyword }}">
+                    {{ unit.fach }}: {{ unit.name }}{% if unit.stufen %} (Stufe {{ unit.stufen|join(', ') }}{% if unit.has_seilbahn and unit.has_regular %} · Regulär + Seilbahn{% elif unit.has_seilbahn %} · nur Seilbahn{% endif %}){% endif %}
                 </option>
                 {% endfor %}
             </select>
-            {% if not tasks %}
+            {% if not units %}
             <small class="text-muted">Kein Thema mit KI-Bewertungskriterien gefunden.</small>
+            {% else %}
+            <small class="text-muted">Ein Eintrag pro Bewertungsraster: Regulär und Seilbahn,
+            und mehrere Klassenstufen desselben Themas, liegen zusammen. Welches Thema ein
+            Ergebnis betrifft, entscheidet die Netzwerk-ID des Schülers.</small>
             {% endif %}
         </div>
 
