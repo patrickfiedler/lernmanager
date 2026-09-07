@@ -6316,10 +6316,15 @@ def student_checkpoint_answer():
             hints_used_before=progress['hints_used'].get(qidx, 0),
             prompt_version=prompt_version, judgment_confidence=confidence
         )
+        # „Frage melden“, NOT „Ich weiß es nicht“. The two are opposites: give-up
+        # writes correct=False and reveals the answer, so it costs the student points
+        # for a failure that is ours. Reporting scores nothing, keeps the answer
+        # hidden, logs what they typed as evidence, and puts it in front of a teacher
+        # -- which is exactly what "we could not grade this" should do.
         return jsonify({
             'error': 'llm_unavailable',
             'message': ('Bewertung aktuell nicht möglich. Versuch es gleich nochmal — '
-                        'falls es weiter nicht klappt, nutze „Ich weiß es nicht“, '
+                        'falls es weiter nicht klappt, nutze „Frage melden“, '
                         'deine Lehrkraft prüft die Antwort dann von Hand.')
         }), 503
 
