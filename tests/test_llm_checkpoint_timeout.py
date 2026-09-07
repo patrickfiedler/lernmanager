@@ -24,6 +24,12 @@ def captured(monkeypatch):
     class _Client:
         chat = type("chat", (), {"completions": _Completions()})()
 
+        # _call_llm caps SDK-level retries per call (a timed-out request must not be
+        # repeated twice behind the caller's back). The double stands in for the real
+        # client's copy-with-options, which returns an equivalent client.
+        def with_options(self, **kwargs):
+            return self
+
     monkeypatch.setattr(llm_grading, "_get_client", lambda: _Client())
     monkeypatch.setattr(config, "LLM_ENABLED", True)
     monkeypatch.setattr(llm_grading.models, "check_llm_rate_limit", lambda *a, **k: True)

@@ -143,6 +143,24 @@ LLM_TIMEOUT = _env_int('LLM_TIMEOUT', 5)  # seconds (quiz grading — short answ
 # visible wait state, so a slower ceiling costs one spinner, not a stalled page.
 LLM_CHECKPOINT_TIMEOUT = _env_int('LLM_CHECKPOINT_TIMEOUT', 15)
 LLM_ARTIFACT_TIMEOUT = _env_int('LLM_ARTIFACT_TIMEOUT', 60)  # seconds (artifact checklist — up to 20 criteria)
+
+# Floor for the shortened retry after a logprobs timeout (llm_grading._call_llm).
+# The retry gets what is left of the budget, so a call that spent all of it would
+# otherwise hand the retry ~0s and turn a recoverable slow answer into a failed grade.
+LLM_RETRY_FLOOR = _env_int('LLM_RETRY_FLOOR', 3)
+
+# What the BROWSER waits before giving up (static/js/llm_button.js reads this from a
+# meta tag in base.html). Derived, not typed: on 2026-08-27 LLM_CHECKPOINT_TIMEOUT was
+# raised 5s -> 15s and the hardcoded 15s client window was not, so from that day the
+# browser gave up at exactly the moment the server was still allowed to be working.
+# Students saw "Das dauert zu lange" on answers that were graded and stored a second
+# later (2026-09-02 and 2026-09-07, 20 occurrences). Deriving it means the two numbers
+# cannot drift apart again without someone editing this line.
+#
+# Worst case server-side is one full budget plus the shortened retry; the margin
+# covers request/response transfer and a loaded server.
+LLM_CLIENT_MARGIN = _env_int('LLM_CLIENT_MARGIN', 5)
+LLM_CLIENT_TIMEOUT_MS = (LLM_CHECKPOINT_TIMEOUT + LLM_RETRY_FLOOR + LLM_CLIENT_MARGIN) * 1000
 # The artifact check must finish inside nginx's proxy_read_timeout, or nginx
 # hands the student a raw 504 instead of the app's own "KI-Feedback nicht
 # verfügbar" page. nginx is NOT configured from here -- it is edited by hand on

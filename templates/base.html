@@ -4,6 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="{{ csrf_token() }}">
+    {# How long the browser waits before giving up on a graded/AI call. Derived from
+       the server's own budget (config.LLM_CLIENT_TIMEOUT_MS) so the two can never
+       drift apart again -- see the comment on that constant. #}
+    <meta name="llm-timeout-ms" content="{{ llm_client_timeout_ms }}">
     <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
     <title>{% block title %}Lernmanager{% endblock %}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">

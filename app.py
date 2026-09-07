@@ -170,6 +170,23 @@ def inject_upload_accept():
 
 
 @app.context_processor
+def inject_llm_client_timeout():
+    """How long the browser waits for a graded/AI call, from the server's own budget.
+
+    Same failure as inject_upload_accept above, one layer out: the client window was
+    a hardcoded 15s in llm_button.js, and when LLM_CHECKPOINT_TIMEOUT went 5s -> 15s
+    on 2026-08-27 nobody changed it. From that day the browser gave up at the exact
+    moment the server was still allowed to be working, so students got "Das dauert
+    zu lange" for answers that were graded and stored a second later.
+
+    A context processor, not a route argument: every page with a graded button needs
+    it, and this codebase has already shipped base.html needing something a route
+    forgot to pass (see CLAUDE.md, "Template Context Requirements").
+    """
+    return {'llm_client_timeout_ms': config.LLM_CLIENT_TIMEOUT_MS}
+
+
+@app.context_processor
 def inject_student_display_name():
     """Make student_display_name available in all templates."""
     if 'student_id' in session:

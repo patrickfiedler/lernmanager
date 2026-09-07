@@ -18,10 +18,21 @@
 (function (global) {
     'use strict';
 
-    // Server-side budgets are 5s (quiz grading) and 60s (artifact checklist).
-    // The client windows sit above those so a slow-but-alive request is not cut
-    // off, while a truly hung one still resolves into a message.
-    var DEFAULT_TIMEOUT_MS = 15000;
+    /* How long to wait before giving up on a request.
+     *
+     * Read from a meta tag the server writes (config.LLM_CLIENT_TIMEOUT_MS), NOT
+     * hardcoded. The comment here used to say "the client windows sit above the
+     * server budgets" -- true when checkpoint grading had 5s, silently false from
+     * 2026-08-27, when that budget became 15s and this number stayed 15s. The two
+     * then expired together: students saw "Das dauert zu lange" on answers the
+     * server graded and stored a second later. A number that must stay in step with
+     * a server setting has to come from the server.
+     *
+     * The literal is a last resort for a page that renders without the meta tag; it
+     * is deliberately generous, because being early is the failure mode that hurts.
+     */
+    var META_TIMEOUT = document.querySelector('meta[name="llm-timeout-ms"]');
+    var DEFAULT_TIMEOUT_MS = (META_TIMEOUT && parseInt(META_TIMEOUT.content, 10)) || 30000;
 
     var WAITING_LABELS = {
         llm: '🤖 KI prüft deine Antwort …',

@@ -130,6 +130,19 @@ _client_cache = {}
 _client_lock = threading.Lock()
 
 
+# Set once if the endpoint answers the logprobs parameter with a 400. That verdict is
+# a property of the deployed model, not of one answer, so re-probing it on every
+# checkpoint would spend a full grading budget per student to relearn the same "no".
+# Deliberately not reset on LLM_MODEL change: a model swap restarts the service.
+_logprobs_unsupported = False
+
+
+def _remember_logprobs_unsupported():
+    global _logprobs_unsupported
+    with _client_lock:
+        _logprobs_unsupported = True
+
+
 def _get_client():
     """Return a cached OpenAI-compatible client for the configured endpoint."""
     from openai import OpenAI
@@ -240,6 +253,12 @@ def _call_llm(question_text, expected_or_rubric, student_answer, system_prompt=S
     .env knob, so binding grading to an optional parameter would repeat the
     reasoning_effort failure -- "dead on every call" instead of "slightly less data".
 
+    "Rejected" and "too slow" are opposite conditions and are handled apart. A 400 is
+    permanent, so it is remembered process-wide and never probed again. A timeout means
+    the parameter was accepted and the provider was merely slow -- retrying costs the
+    student a second wait, so it happens once and the budget is a total, not a fresh
+    one per attempt (2026-09-07: a 15s budget became ~90s of spinner this way).
+
     Returns parsed dict {"correct": bool, "feedback": str, "confidence": float|None}
     or None on failure.
     """
@@ -249,9 +268,17 @@ def _call_llm(question_text, expected_or_rubric, student_answer, system_prompt=S
         f"Schülerantwort: {student_answer}"
     )
 
-    client = _get_client()
+    from openai import APITimeoutError, BadRequestError
 
-    def _create(**extra):
+    # max_retries=0: the SDK retries a timed-out request twice on its own, and
+    # timeout= applies per attempt, so a 15s budget silently became ~45s before the
+    # call even raised -- then the fallback below paid it again. A student is watching
+    # a spinner while this runs; the retry that helps here is the explicit one below
+    # (ask again without logprobs), not three silent repeats of the same slow request.
+    client = _get_client().with_options(max_retries=0)
+    budget = config.LLM_TIMEOUT if timeout is None else timeout
+
+    def _create(attempt_timeout, **extra):
         return client.chat.completions.create(
             model=config.LLM_MODEL,
             max_tokens=150,
@@ -261,20 +288,33 @@ def _call_llm(question_text, expected_or_rubric, student_answer, system_prompt=S
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            timeout=config.LLM_TIMEOUT if timeout is None else timeout,
+            timeout=attempt_timeout,
             **_reasoning_kwargs(),
             **extra,
         )
 
-    if want_confidence:
+    if want_confidence and not _logprobs_unsupported:
+        started = time.monotonic()
         try:
-            response = _create(logprobs=True, top_logprobs=1)
-        except Exception as e:
-            print(f"LLM grading: logprobs rejected ({type(e).__name__}), "
-                  f"regrading without confidence", file=sys.stderr)
-            response = _create()
+            response = _create(budget, logprobs=True, top_logprobs=1)
+        except BadRequestError as e:
+            # Permanent: this endpoint does not know the parameter. Remembered so the
+            # next answer skips the probe instead of paying for the same 400 again.
+            _remember_logprobs_unsupported()
+            print(f"LLM grading: logprobs unsupported by this endpoint ({e}), "
+                  f"regrading without confidence and not asking again", file=sys.stderr)
+            response = _create(budget)
+        except APITimeoutError:
+            # Transient: the parameter was accepted, the provider was just slow. The
+            # retry gets what is LEFT of the budget, never a fresh one -- the student
+            # is already waiting, and a second full budget is what produced the 90s
+            # spinners. A floor keeps the retry from being born already expired.
+            remaining = max(config.LLM_RETRY_FLOOR, budget - (time.monotonic() - started))
+            print(f"LLM grading: logprobs call timed out after {budget}s, "
+                  f"regrading without confidence ({remaining:.0f}s left)", file=sys.stderr)
+            response = _create(remaining)
     else:
-        response = _create()
+        response = _create(budget)
 
     text = _message_text(response)
     if not text:
