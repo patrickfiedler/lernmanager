@@ -233,6 +233,8 @@
                             {% if student.queue_pos %}
                             <span class="text-muted">({{ student.queue_pos }}/{{ student.queue_total }})</span>
                             {% endif %}
+                        {% elif student.queue_erschoepft %}
+                            <span class="text-muted">Reihenfolge abgearbeitet</span>
                         {% else %}
                             <span class="text-muted">-</span>
                         {% endif %}

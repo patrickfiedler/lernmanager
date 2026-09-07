@@ -149,20 +149,49 @@
 </div>
 
 
-<!-- Manual Task Completion -->
+<!-- Aktuelles Thema je Klasse. Immer eine Zeile pro Klasse, auch ohne aktives
+     Thema: sonst verschwindet mit dem Thema auch jede Handhabe. -->
 <div class="card mt-2">
-    <div class="card-header">✅ Thema manuell abschließen</div>
-    <div class="flex gap-1">
+    <div class="card-header">📍 Aktuelles Thema</div>
+    <table class="table">
+        <tbody>
         {% for klasse in klassen %}
         {% set st = student_tasks.get(klasse.id) %}
-        {% if st and not st.abgeschlossen %}
-        <form method="POST" action="{{ url_for('admin_schueler_thema_abschliessen', student_id=student.id, klasse_id=klasse.id) }}" style="display: inline;">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button type="submit" class="btn btn-success">{{ st.name }} abschließen</button>
-        </form>
-        {% endif %}
+        {% set state = topic_state.get(klasse.id, {}) %}
+        <tr>
+            <td style="white-space: nowrap;"><strong>{{ klasse.name }}</strong></td>
+            <td>
+                {% if st %}
+                    {{ st.name }}
+                {% elif state.next_queued %}
+                    <span class="text-muted">Kein aktives Thema — nächstes aus der Reihe:
+                    <strong>{{ state.next_queued.name }}</strong></span>
+                {% elif state.has_queue %}
+                    <span class="text-muted">Kein aktives Thema — Themen-Reihenfolge abgearbeitet.</span>
+                {% else %}
+                    <span class="text-muted">Kein aktives Thema.</span>
+                {% endif %}
+            </td>
+            <td style="text-align: right; white-space: nowrap;">
+                {% if st %}
+                <form method="POST" action="{{ url_for('admin_schueler_thema_abschliessen', student_id=student.id, klasse_id=klasse.id) }}" style="display: inline;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-sm btn-success">Abschließen</button>
+                </form>
+                {% elif state.next_queued %}
+                <form method="POST" action="{{ url_for('admin_schueler_thema_zuweisen', student_id=student.id) }}" style="display: inline;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="klasse_id" value="{{ klasse.id }}">
+                    <input type="hidden" name="task_id" value="{{ state.next_queued.task_id }}">
+                    <input type="hidden" name="rolle" value="primary">
+                    <button type="submit" class="btn btn-sm btn-primary">Starten</button>
+                </form>
+                {% endif %}
+            </td>
+        </tr>
         {% endfor %}
-    </div>
+        </tbody>
+    </table>
 </div>
 {% endif %}
 

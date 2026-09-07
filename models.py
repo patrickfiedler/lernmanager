@@ -2040,6 +2040,24 @@ def get_next_open_queued_topic(student_id, klasse_id, current_task_id=None):
     return open_entries[0]
 
 
+def get_assigned_task_ids_by_student(klasse_id):
+    """{student_id: {task_id, ...}} for every student_task row in this class.
+
+    One query for the whole roster. The per-student equivalent
+    (get_next_open_queued_topic) is fine on a single page, but the class
+    overview needs it for thirty students at once.
+    """
+    with db_session() as conn:
+        rows = conn.execute(
+            "SELECT student_id, task_id FROM student_task WHERE klasse_id = ?",
+            (klasse_id,)
+        ).fetchall()
+    assigned = {}
+    for r in rows:
+        assigned.setdefault(r['student_id'], set()).add(r['task_id'])
+    return assigned
+
+
 def get_queue_position(klasse_id, task_id):
     """Get position and total count for a task in a class queue.
 
@@ -2838,41 +2856,80 @@ def set_material_subtask_assignments(material_id, subtask_ids):
 
 # ============ Student Task functions ============
 
-def assign_task_to_student(student_id, klasse_id, task_id, rolle='primary'):
+def assign_task_to_student(student_id, klasse_id, task_id, rolle='primary',
+                           on_existing='skip'):
     """Assign a topic to a student in a class.
 
-    History-preserving: completes existing active primary (if any) before inserting.
-    No auto-visibility — learning paths handle which tasks are required/optional.
+    History-preserving: completes the existing active primary (if any) before
+    inserting a *different* topic.
 
-    Args:
-        student_id: The student ID
-        klasse_id: The class ID
-        task_id: The task ID to assign
-        rolle: 'primary' (main topic) or 'sidequest'
+    on_existing decides what happens when this student already has a row for
+    this exact topic -- finished or not:
+
+      'skip'   (default) do nothing at all. Nothing is inserted and no other
+               topic is completed. This is what a class-wide assignment wants:
+               the teacher is picking up the stragglers, not resetting the
+               students who are already done.
+      'reopen' clear abgeschlossen on the existing row. Progress survives,
+               because student_subtask hangs off student_task.id -- inserting a
+               second row instead would silently zero it. This is what a
+               deliberate single-student assignment wants: an undo.
+
+    The old code had a duplicate guard here that could never fire. It completed
+    every active primary in step 1 and then, in step 2, counted rows with
+    abgeschlossen = 0 -- for rolle='primary' there were none left by
+    construction, so it always inserted. Reassigning a finished topic therefore
+    produced a second, empty student_task row and the student saw a topic they
+    had already completed sitting at 0 %.
+
+    Returns 'created', 'reopened' or 'skipped'.
     """
     with db_session() as conn:
-        # 1. Complete any existing active primary for this student+class
+        # 1. Look for an existing row for this exact topic BEFORE touching
+        #    anything -- checking after step 2 is what made the old guard dead.
+        #    Where several rows exist (the pre-fix duplicates), take the one
+        #    carrying the most work, so 'reopen' revives the real one.
+        existing = conn.execute(
+            """SELECT st.id, st.abgeschlossen,
+                      (SELECT COUNT(*) FROM student_subtask ss
+                        WHERE ss.student_task_id = st.id AND ss.erledigt = 1) AS done
+                 FROM student_task st
+                WHERE st.student_id = ? AND st.klasse_id = ? AND st.task_id = ? AND st.rolle = ?
+                ORDER BY done DESC, st.id DESC LIMIT 1""",
+            (student_id, klasse_id, task_id, rolle)
+        ).fetchone()
+
+        if existing:
+            if on_existing == 'reopen' and existing['abgeschlossen']:
+                # Reopening makes this the active primary, so the one it
+                # replaces has to be closed -- same rule as a fresh assignment.
+                if rolle == 'primary':
+                    conn.execute(
+                        "UPDATE student_task SET abgeschlossen = 1 WHERE student_id = ? AND klasse_id = ? AND abgeschlossen = 0 AND rolle = 'primary'",
+                        (student_id, klasse_id)
+                    )
+                conn.execute(
+                    "UPDATE student_task SET abgeschlossen = 0, manuell_abgeschlossen = 0 WHERE id = ?",
+                    (existing['id'],)
+                )
+                return 'reopened'
+            return 'skipped'
+
+        # 2. Complete any existing active primary for this student+class
         if rolle == 'primary':
             conn.execute(
                 "UPDATE student_task SET abgeschlossen = 1 WHERE student_id = ? AND klasse_id = ? AND abgeschlossen = 0 AND rolle = 'primary'",
                 (student_id, klasse_id)
             )
 
-        # 2. Skip if this exact topic is already active
-        duplicate = conn.execute(
-            "SELECT COUNT(*) as count FROM student_task WHERE student_id = ? AND klasse_id = ? AND task_id = ? AND rolle = ? AND abgeschlossen = 0",
-            (student_id, klasse_id, task_id, rolle)
-        ).fetchone()
-
-        if duplicate['count'] >= 1:
-            return
-
         # 3. Insert new assignment
         conn.execute(
             "INSERT INTO student_task (student_id, klasse_id, task_id, rolle, abgeschlossen, manuell_abgeschlossen) VALUES (?, ?, ?, ?, 0, 0)",
             (student_id, klasse_id, task_id, rolle)
         )
-        
+        return 'created'
+
+
 
 def get_practice_unlocked_task_ids(klasse_id):
     """Return set of task_ids unlocked for practice in this class."""
@@ -2902,7 +2959,12 @@ def set_practice_unlock_for_class(klasse_id, task_id, unlocked):
 def assign_task_to_klasse(klasse_id, task_id, rolle='primary'):
     """Assign a topic to all students in a class.
 
-    Delegates to assign_task_to_student() for each student (DRY).
+    Delegates to assign_task_to_student() for each student (DRY). Deliberately
+    on_existing='skip': a class-wide assignment is how a teacher picks up the
+    stragglers, and it must not reach back into students who already finished
+    the topic.
+
+    Returns a count per outcome: {'created': n, 'reopened': n, 'skipped': n}.
     """
     with db_session() as conn:
         students = conn.execute(
@@ -2910,8 +2972,12 @@ def assign_task_to_klasse(klasse_id, task_id, rolle='primary'):
             (klasse_id,)
         ).fetchall()
 
+    counts = {'created': 0, 'reopened': 0, 'skipped': 0}
     for s in students:
-        assign_task_to_student(s['student_id'], klasse_id, task_id, rolle)
+        outcome = assign_task_to_student(
+            s['student_id'], klasse_id, task_id, rolle, on_existing='skip')
+        counts[outcome] += 1
+    return counts
 
 
 # ============================================================================

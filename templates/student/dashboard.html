@@ -71,6 +71,16 @@
             <button type="submit" class="btn btn-primary">Nächstes Thema starten →</button>
         </form>
     </div>
+    {% elif task.abgeschlossen %}
+    <hr style="margin: 0.75rem 0; border-color: #e5e7eb;">
+    <p class="text-muted" style="margin: 0;">
+        {% if klasse.id in queue_finished %}
+        🎉 Du hast alles geschafft, was für deine Klasse eingeplant ist. Deine Lehrkraft
+        stellt das nächste Thema ein.
+        {% else %}
+        Zurzeit ist kein nächstes Thema für dich eingestellt. Deine Lehrkraft weist dir eins zu.
+        {% endif %}
+    </p>
     {% endif %}
 
     {% else %}
@@ -88,7 +98,14 @@
         </form>
     </div>
     {% else %}
-    <p class="text-muted">Kein Thema zugewiesen.</p>
+    <p class="text-muted">
+        {% if klasse.id in queue_finished %}
+        🎉 Du hast alles geschafft, was für deine Klasse eingeplant ist. Deine Lehrkraft
+        stellt das nächste Thema ein.
+        {% else %}
+        Kein Thema zugewiesen. Deine Lehrkraft weist dir eins zu.
+        {% endif %}
+    </p>
     {% endif %}
 
     {% endif %}

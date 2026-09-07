@@ -507,6 +507,14 @@
             <button type="submit" class="btn btn-success">Nächstes Thema starten →</button>
         </form>
     </div>
+    {% elif task.abgeschlossen and queue_finished %}
+    <div class="card mt-2" style="border-left: 4px solid #22c55e;">
+        <div class="card-header">🎉 Geschafft</div>
+        <p class="text-muted" style="padding: 0 1rem 0.75rem;">
+            Du hast alles bearbeitet, was für deine Klasse eingeplant ist.
+            Deine Lehrkraft stellt das nächste Thema ein.
+        </p>
+    </div>
     {% endif %}
 
     {% if task.why_learn_this %}

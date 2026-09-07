@@ -780,6 +780,19 @@ def admin_klasse_detail(klasse_id):
         if s.get('task_id') and s['task_id'] in queue_lookup:
             s['queue_pos'], s['queue_total'] = queue_lookup[s['task_id']]
 
+    # Mark students who have nothing left to start: no active topic, and every
+    # queued topic already assigned. Until now this only surfaced when a child
+    # said so -- the row simply showed "-" like a student nobody had started yet.
+    # One query for the whole roster, not get_next_open_queued_topic per student.
+    queue_task_ids = {q['task_id'] for q in queue}
+    if queue_task_ids:
+        assigned = models.get_assigned_task_ids_by_student(klasse_id)
+        for s in students:
+            s['queue_erschoepft'] = (
+                not s.get('task_id')
+                and not (queue_task_ids - assigned.get(s['id'], set()))
+            )
+
     sidequests = models.get_sidequests_for_klasse(klasse_id)
     practice_unlocked_ids = models.get_practice_unlocked_task_ids(klasse_id)
     andere_klassen = [k for k in models.get_all_klassen() if k['id'] != klasse_id]
@@ -1625,8 +1638,14 @@ def admin_klasse_schueler_hinzufuegen(klasse_id):
 def admin_klasse_thema_zuweisen(klasse_id):
     task_id = request.form['task_id']
     if task_id:
-        models.assign_task_to_klasse(klasse_id, int(task_id))
-        flash('Thema zugewiesen. ✅', 'success')
+        counts = models.assign_task_to_klasse(klasse_id, int(task_id))
+        # Naming the skipped ones matters: assigning a topic to the class is how
+        # stragglers get picked up, and the teacher needs to see that it left the
+        # students who already have it alone rather than resetting them.
+        msg = f"Thema zugewiesen: {counts['created']} neu."
+        if counts['skipped']:
+            msg += f" {counts['skipped']} hatten es schon (unverändert)."
+        flash(msg + ' ✅', 'success')
 
     return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id))
 
@@ -1712,6 +1731,20 @@ def admin_schueler_detail(student_id):
     for klasse in klassen:
         student_tasks[klasse['id']] = models.get_student_task(student_id, klasse['id'])
 
+    # One state row per class, present whether or not a topic is active. The
+    # only per-class control used to be the "abschließen" button, and it hung off
+    # get_student_task(), which returns nothing once the topic is finished -- so
+    # a student at the end of the queue had no active topic and, with it, no
+    # handle at all on this page.
+    topic_state = {}
+    for klasse in klassen:
+        st = student_tasks[klasse['id']]
+        topic_state[klasse['id']] = {
+            'next_queued': models.get_next_open_queued_topic(
+                student_id, klasse['id'], st['task_id'] if st else None),
+            'has_queue': bool(models.get_topic_queue(klasse['id'])),
+        }
+
     artifact_feedback = models.get_all_artifact_feedback_for_student(student_id)
     artifact_files = models.get_all_student_artifact_files_for_student(student_id)
     data_summary = models.get_student_data_summary(student_id)
@@ -1730,6 +1763,7 @@ def admin_schueler_detail(student_id):
                            themen_exact=themen_exact,
                            themen_other=themen_other,
                            student_tasks=student_tasks,
+                           topic_state=topic_state,
                            artifact_feedback=artifact_feedback,
                            artifact_files=artifact_files,
                            data_summary=data_summary,
@@ -1827,8 +1861,19 @@ def admin_schueler_thema_zuweisen(student_id):
     task_id = request.form['task_id']
     if klasse_id and task_id:
         rolle = request.form.get('rolle', 'primary')
-        models.assign_task_to_student(student_id, int(klasse_id), int(task_id), rolle)
-        flash('Thema zugewiesen. ✅', 'success')
+        # 'reopen', not 'skip': picking one student and one topic by hand is a
+        # deliberate act, and the useful reading of it is "make this current
+        # again". Reopening keeps the existing row, so every checkmark and quiz
+        # attempt survives -- inserting a second row would show the student a
+        # finished topic at 0 %.
+        outcome = models.assign_task_to_student(
+            student_id, int(klasse_id), int(task_id), rolle, on_existing='reopen')
+        if outcome == 'reopened':
+            flash('Thema wieder geöffnet -- der bisherige Fortschritt bleibt erhalten. ✅', 'success')
+        elif outcome == 'skipped':
+            flash('Dieses Thema ist für den Schüler bereits aktiv.', 'info')
+        else:
+            flash('Thema zugewiesen. ✅', 'success')
     return redirect(url_for('admin_schueler_detail', student_id=student_id))
 
 
@@ -4638,6 +4683,13 @@ def student_dashboard():
     # because get_next_open_queued_topic asks "what is still open for this student"
     # instead of "what sits at position+1".
     next_topics = {}
+    # Classes where the student has nothing left to start: every queued topic is
+    # already assigned. Without this the page said nothing at all -- a student who
+    # had worked through the whole queue got a finished topic with no way forward
+    # and no explanation, which is what "kein Knopf erschien" looked like from
+    # their side. The queue cannot pull anyone forward, so this is a state the
+    # teacher has to resolve; the page's job is to say so calmly.
+    queue_finished = set()
     for klasse in klassen:
         task = tasks_by_klasse.get(klasse['id'])
         if task and not task.get('abgeschlossen'):
@@ -4646,6 +4698,8 @@ def student_dashboard():
             student_id, klasse['id'], task.get('task_id') if task else None)
         if nxt:
             next_topics[klasse['id']] = nxt
+        elif models.get_topic_queue(klasse['id']):
+            queue_finished.add(klasse['id'])
 
     # Fetch sidequests per class
     sidequests_by_klasse = {}
@@ -4672,6 +4726,7 @@ def student_dashboard():
     return render_template('student/dashboard.html', student=student, klassen=klassen,
                            tasks_by_klasse=tasks_by_klasse,
                            next_topics=next_topics,
+                           queue_finished=queue_finished,
                            sidequests_by_klasse=sidequests_by_klasse,
                            completed_by_klasse=completed_by_klasse,
                            student_path=student.get('lernpfad'),
@@ -4878,8 +4933,12 @@ def student_klasse(slug):
     # above re-derives `abgeschlossen` first, so a topic that quietly became complete
     # (teacher edit, path change, resolved fork) still produces a link here.
     next_topic = None
+    # Nothing left in the queue is a state, not an absence -- say so rather than
+    # ending the finished topic on a blank space (see student_dashboard).
+    queue_finished = False
     if task and task.get('abgeschlossen'):
         next_topic = models.get_next_open_queued_topic(student_id, klasse_id, task['task_id'])
+        queue_finished = not next_topic and bool(models.get_topic_queue(klasse_id))
 
     # Capstone gate: gate on the last visible subtask (bottom card, blocks quiz/next-topic)
     capstone_gate = None
@@ -4975,6 +5034,7 @@ def student_klasse(slug):
                            subtask_quiz_status=subtask_quiz_status,
                            quiz_bestanden=quiz_bestanden,
                            next_topic=next_topic,
+                           queue_finished=queue_finished,
                            graded_artifact=graded_artifact,
                            capstone_gate=capstone_gate,
                            capstone_gate_passed=capstone_gate_passed,
@@ -6872,7 +6932,13 @@ def student_start_next_topic():
         flash('Da ist etwas schiefgelaufen. Bitte die Seite neu laden.', 'danger')
         return redirect(url_for('student_dashboard'))
 
-    models.assign_task_to_student(student_id, klasse_id, task_id)
+    # Default on_existing='skip' is the guard here: a stale page or a double
+    # click would otherwise create a second, empty row for a topic the student
+    # already has and drop them back to 0 %.
+    outcome = models.assign_task_to_student(student_id, klasse_id, task_id)
+    if outcome == 'skipped':
+        flash(f'Du bist schon bei „{task["name"]}".', 'info')
+        return redirect(url_for('student_klasse', slug=slugify(task['name'])))
 
     models.log_analytics_event(
         event_type='topic_progression',
