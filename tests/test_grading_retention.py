@@ -33,19 +33,26 @@ def test_is_grading_run_settled(db):
     assert models.is_grading_run_settled(run_id) is True
 
 
-def test_purge_grading_run_media_deletes_local_dir_and_marks(tmp_path, db):
+def test_purge_grading_run_media_deletes_local_media_and_marks(tmp_path, db):
+    """The run dir itself now survives -- it holds reports/, which the sweep
+    deliberately spares (see test_grading_reports.py). What must go is the
+    media: student work product is the whole point of the retention rule."""
     config.UPLOAD_FOLDER = str(tmp_path)
     config.GRADING_SERVICE_URL = ""
     klasse_id, task_id, run_id = _setup()
 
-    media_dir = os.path.join(str(tmp_path), "grading", str(run_id))
-    os.makedirs(media_dir, exist_ok=True)
-    with open(os.path.join(media_dir, "test.jpg"), "wb") as f:
+    run_dir = os.path.join(str(tmp_path), "grading", str(run_id))
+    student_dir = os.path.join(run_dir, "mueller.anna")
+    os.makedirs(student_dir, exist_ok=True)
+    with open(os.path.join(student_dir, "test.jpg"), "wb") as f:
+        f.write(b"data")
+    with open(os.path.join(run_dir, "stray.jpg"), "wb") as f:
         f.write(b"data")
 
     models.purge_grading_run_media(run_id)
 
-    assert not os.path.isdir(media_dir)
+    assert not os.path.isdir(student_dir)
+    assert not os.path.isfile(os.path.join(run_dir, "stray.jpg"))
     assert models.get_grading_run(run_id)["media_purged_at"] is not None
 
 

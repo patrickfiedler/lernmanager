@@ -6179,15 +6179,33 @@ def purge_grading_run_media(run_id):
     succeeds, succeeds; mark_grading_run_media_purged() records that the
     sweep ran regardless, so it isn't retried forever against a service
     that's simply offline.
+
+    "Media" is literal: the local reports/ subdirectory is kept, see below.
     """
     import shutil
     run = get_grading_run(run_id)
     if run is None:
         return
 
+    # Per-student media dirs only -- reports/ survives (Patrick, 2026-09-08).
+    # The media is student work product and is what this sweep exists for;
+    # the report files hold names, scores and feedback that grading_result
+    # already stores permanently anyway, so purging them would minimise
+    # nothing and would kill the download at exactly the moment a teacher
+    # wants to print slips.
     local_dir = os.path.join(_grading_upload_dir(), str(run_id))
     if os.path.isdir(local_dir):
-        shutil.rmtree(local_dir, ignore_errors=True)
+        for entry in os.listdir(local_dir):
+            if entry == 'reports':
+                continue
+            path = os.path.join(local_dir, entry)
+            if os.path.isdir(path):
+                shutil.rmtree(path, ignore_errors=True)
+            else:
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
 
     if config.GRADING_SERVICE_URL and run.get('job_id'):
         req = urllib.request.Request(
@@ -6319,6 +6337,125 @@ def _copy_grading_media(run_id, job_id, netzwerk_id, media_list):
     return copied
 
 
+def _grading_reports_dir(run_id):
+    """Sibling of the per-student media dirs, one level down so the purge can
+    tell them apart: instance/uploads/grading/<run_id>/reports/."""
+    return os.path.join(_grading_upload_dir(), str(run_id), 'reports')
+
+
+# Kept in step with service/app.py's REPORT_FILES on the grading host. Not
+# read from there -- the listing endpoint says which of these a given run
+# actually produced (teacher slips only exist for rubrics with
+# `teacher_slips`), so this is only a sanity bound on what we will store.
+# Ordered: the download buttons render in this order, notes before slips.
+_GRADING_REPORT_LABELS = (
+    ('grades.csv', '📊 Notenliste (CSV)'),
+    ('summary.md', '📈 Auswertung'),
+    ('print_slips.html', '✂️ Rückmeldezettel'),
+    ('print_slips_cutter.html', '✂️ Rückmeldezettel (Schneidemaschine)'),
+    ('print_slips_teacher.html', '👩‍🏫 Rückmeldezettel (Lehrkraft)'),
+)
+_GRADING_REPORT_FILES = frozenset(name for name, _ in _GRADING_REPORT_LABELS)
+
+
+def _copy_grading_reports(run_id, job_id):
+    """
+    Copy the run's derived report files (grades.csv, summary.md, print
+    slips) out of the grading service into
+    instance/uploads/grading/<run_id>/reports/.
+
+    Same reason as _copy_grading_media: this has to happen at import time.
+    DELETE /jobs/<id> takes the whole job dir, and purge_grading_run_media()
+    fires that as soon as a run settles -- which is *after* review, exactly
+    when a teacher wants to print slips. Copying also means a download no
+    longer depends on the M920x being awake.
+
+    Best-effort throughout: the reports are a convenience, and a run whose
+    grades imported fine must not fail because the service went offline
+    between the callback and this fetch. Returns the list of stored
+    filenames (empty when the service is unreachable or produced none).
+    """
+    if not config.GRADING_SERVICE_URL:
+        return []
+
+    def _get(url):
+        req = urllib.request.Request(url, headers={
+            'Authorization': f'Bearer {config.GRADING_SERVICE_TOKEN}',
+        })
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return resp.read()
+
+    try:
+        listing = json.loads(_get(f"{config.GRADING_SERVICE_URL}/jobs/{job_id}/files"))
+    except (urllib.error.URLError, OSError, TimeoutError, ValueError):
+        return []
+
+    dest_dir = _grading_reports_dir(run_id)
+    os.makedirs(dest_dir, exist_ok=True)
+
+    stored = []
+    for entry in listing.get('files', []):
+        # os.path.basename as well as the whitelist: the name is only as
+        # trustworthy as the host it came from, and it goes into a path.
+        name = os.path.basename(entry.get('name') or '')
+        if name not in _GRADING_REPORT_FILES:
+            continue
+        try:
+            data = _get(f"{config.GRADING_SERVICE_URL}/jobs/{job_id}/files/{name}")
+        except (urllib.error.URLError, OSError, TimeoutError):
+            continue
+        with open(os.path.join(dest_dir, name), 'wb') as f:
+            f.write(data)
+        stored.append(name)
+    return stored
+
+
+def list_grading_reports(run_id):
+    """Report files on disk for this run, in _GRADING_REPORT_LABELS order,
+    for the download section on grading_run_detail. Returns [] when the
+    service produced none or was unreachable at import time."""
+    dest_dir = _grading_reports_dir(run_id)
+    if not os.path.isdir(dest_dir):
+        return []
+    out = []
+    for name, label in _GRADING_REPORT_LABELS:
+        path = os.path.join(dest_dir, name)
+        if not os.path.isfile(path):
+            continue
+        st = os.stat(path)
+        out.append({
+            'name': name,
+            'label': label,
+            'size': st.st_size,
+            'copied_at': datetime.fromtimestamp(st.st_mtime).strftime('%d.%m.%Y, %H:%M'),
+        })
+    return out
+
+
+def count_grading_results_corrected(run_id):
+    """How many results in this run carry at least one teacher-overridden
+    criterion. Drives the staleness warning on the download section: the
+    report files hold the LLM's scores as imported, so once this is non-zero
+    a printed slip disagrees with what the student sees.
+
+    Reads the `overridden` flag rather than comparing totals -- raising one
+    criterion and lowering another nets to zero on the total but is still a
+    changed slip."""
+    with db_session() as conn:
+        rows = conn.execute(
+            "SELECT criteria_json FROM grading_result WHERE grading_run_id = ?", (run_id,)
+        ).fetchall()
+    corrected = 0
+    for row in rows:
+        try:
+            criteria = json.loads(row['criteria_json'])
+        except (ValueError, TypeError):
+            continue
+        if any(c.get('overridden') for c in criteria):
+            corrected += 1
+    return corrected
+
+
 def import_grading_callback(job_id, provider, model, graded_at, students, rubric=None):
     """
     Import the grading service's POST /internal/grading/results payload
@@ -6402,6 +6539,10 @@ def import_grading_callback(job_id, provider, model, graded_at, students, rubric
             media_skipped=s.get('media_skipped'),
         )
         imported += 1
+
+    # Once per callback, not per student: these are run-level files. Runs
+    # unconditionally so a retried delivery repairs a partial first copy.
+    _copy_grading_reports(run['id'], job_id)
 
     with db_session() as conn:
         conn.execute(

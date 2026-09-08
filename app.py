@@ -1217,6 +1217,8 @@ def admin_grading_run_detail(run_id):
         'admin/grading_run_detail.html', run=run, results=results, reviewable=reviewable,
         non_submitters=non_submitters, no_conflict=no_conflict, needs_decision=needs_decision,
         override_rate=models.get_grading_run_override_rate(run_id), job_status=job_status,
+        reports=models.list_grading_reports(run_id),
+        corrected_count=models.count_grading_results_corrected(run_id),
     )
 
 
@@ -1428,6 +1430,25 @@ def download_grading_media(relpath):
     if not os.path.isfile(os.path.join(full_dir, filename)):
         abort(404)
     return send_from_directory(full_dir, filename, as_attachment=False)
+
+
+@app.route('/admin/grading-run/<int:run_id>/bericht/<filename>')
+@admin_required
+def download_grading_report(run_id, filename):
+    """Serve one report file the grading service produced for this run,
+    copied locally at import time (models._copy_grading_reports).
+
+    Attachment, not inline: grades.csv belongs in a spreadsheet and the slip
+    files are meant to be printed, so a download beats a browser render. The
+    filename whitelist lives in models -- an arbitrary name must never reach
+    the path, and reports/ is the only part of the run's upload dir that
+    survives the media purge."""
+    if filename not in models._GRADING_REPORT_FILES:
+        abort(404)
+    reports_dir = models._grading_reports_dir(run_id)
+    if not os.path.isfile(os.path.join(reports_dir, filename)):
+        abort(404)
+    return send_from_directory(reports_dir, filename, as_attachment=True)
 
 
 @app.route('/admin/klasse/<int:klasse_id>/llm-feedback', methods=['POST'])

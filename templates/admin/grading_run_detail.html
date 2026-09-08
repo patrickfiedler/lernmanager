@@ -53,6 +53,33 @@
     </div>
 </div>
 
+{% if reports %}
+<div class="card mb-2">
+    <div class="card-header">📄 Bewertungsdateien</div>
+    <div style="padding: 0.75rem 1rem;">
+        <div style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
+            {% for r in reports %}
+            <a href="{{ url_for('download_grading_report', run_id=run.id, filename=r.name) }}"
+               class="btn btn-secondary btn-sm">{{ r.label }}</a>
+            {% endfor %}
+        </div>
+
+        {% if corrected_count %}
+        <p class="mt-1" style="color: var(--danger, #c0392b);">
+            ⚠️ {{ corrected_count }} Ergebnis{{ 'se' if corrected_count != 1 else '' }}
+            wurde{{ 'n' if corrected_count != 1 else '' }} seit dem Import korrigiert.
+            Diese Dateien zeigen die KI-Bewertung vor der Prüfung — die Zettel stimmen
+            nicht mehr mit dem überein, was die Schüler sehen.
+        </p>
+        {% endif %}
+
+        <p class="text-muted mt-1" style="font-size: 0.875rem;">
+            Erstellt: {{ reports[0].copied_at }}
+        </p>
+    </div>
+</div>
+{% endif %}
+
 {% if no_conflict or needs_decision %}
 <div class="card mb-2">
     <div class="card-header">✅ Freigeben</div>
