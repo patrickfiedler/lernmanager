@@ -67,21 +67,20 @@
         {% if corrected_count %}
         <p class="mt-1" style="color: var(--danger, #c0392b);">
             ⚠️ {{ corrected_count }} Ergebnis{{ 'se' if corrected_count != 1 else '' }}
-            wurde{{ 'n' if corrected_count != 1 else '' }} nach dem Erstellen der Zettel korrigiert —
-            die Zettel stimmen nicht mehr mit dem überein, was die Schüler sehen.
+            wurde{{ 'n' if corrected_count != 1 else '' }} nach dem Erstellen der Dateien korrigiert —
+            Zettel, Notenliste und Auswertung stimmen nicht mehr mit dem überein, was die Schüler sehen.
             Erst neu erzeugen, dann drucken.
         </p>
         {% endif %}
 
-        <form method="POST" action="{{ url_for('admin_grading_run_regenerate_slips', run_id=run.id) }}" class="mt-1">
+        <form method="POST" action="{{ url_for('admin_grading_run_regenerate_reports', run_id=run.id) }}" class="mt-1">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button type="submit" class="btn btn-primary btn-sm">🔄 Zettel mit geprüften Punkten neu erzeugen</button>
+            <button type="submit" class="btn btn-primary btn-sm">🔄 Dateien mit geprüften Punkten neu erzeugen</button>
         </form>
 
-        <p class="text-muted mt-1" style="font-size: 0.875rem;">
-            {% if reports %}Zuletzt geschrieben: {{ reports[-1].copied_at }} · {% endif %}
-            Notenliste und Auswertung bleiben auf dem Stand der KI-Bewertung.
-        </p>
+        {% if reports %}
+        <p class="text-muted mt-1" style="font-size: 0.875rem;">Zuletzt geschrieben: {{ reports[-1].copied_at }}</p>
+        {% endif %}
     </div>
 </div>
 {% endif %}

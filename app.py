@@ -1220,7 +1220,7 @@ def admin_grading_run_detail(run_id):
         override_rate=models.get_grading_run_override_rate(run_id), job_status=job_status,
         reports=models.list_grading_reports(run_id),
         corrected_count=models.count_grading_results_corrected(
-            run_id, since=models.grading_slips_written_at(run_id)),
+            run_id, since=models.grading_reports_written_at(run_id)),
     )
 
 
@@ -1275,11 +1275,12 @@ def admin_grading_run_purge_media(run_id):
     return redirect(url_for('admin_grading_run_detail', run_id=run_id))
 
 
-@app.route('/admin/grading-run/<int:run_id>/zettel-neu', methods=['POST'])
+@app.route('/admin/grading-run/<int:run_id>/berichte-neu', methods=['POST'])
 @admin_required
-def admin_grading_run_regenerate_slips(run_id):
-    """Print slips from the reviewed scores (models.regenerate_grading_slips)."""
-    ok, message = models.regenerate_grading_slips(run_id)
+def admin_grading_run_regenerate_reports(run_id):
+    """Slips, grades.csv and summary.md from the reviewed scores
+    (models.regenerate_grading_reports)."""
+    ok, message = models.regenerate_grading_reports(run_id)
     flash(message, 'success' if ok else 'danger')
     return redirect(url_for('admin_grading_run_detail', run_id=run_id))
 

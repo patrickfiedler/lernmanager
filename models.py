@@ -6521,7 +6521,7 @@ def count_grading_results_corrected(run_id, since=None):
     on the download section: once this is non-zero, a printed slip disagrees
     with what the student sees.
 
-    since: ISO timestamp the slip files were written (grading_slips_written_at);
+    since: ISO timestamp the report files were written (grading_reports_written_at);
     only results reviewed after it count, so regenerating clears the warning.
 
     Reads the `overridden` flag rather than comparing totals -- raising one
@@ -6546,9 +6546,9 @@ def count_grading_results_corrected(run_id, since=None):
     return corrected
 
 
-def grading_slips_written_at(run_id):
+def grading_reports_written_at(run_id):
     """When print_slips.html was last written for this run (import copy or
-    regenerate_grading_slips), as an ISO timestamp comparable with
+    regenerate_grading_reports), as an ISO timestamp comparable with
     grading_result.reviewed_at, or None if there is no slip file."""
     path = os.path.join(_grading_reports_dir(run_id), 'print_slips.html')
     if not os.path.isfile(path):
@@ -6556,8 +6556,8 @@ def grading_slips_written_at(run_id):
     return datetime.fromtimestamp(os.path.getmtime(path)).strftime('%Y-%m-%dT%H:%M:%S')
 
 
-def reviewed_slip_students(run_id):
-    """The run's results as grading-with-llm POST /slips entries: per
+def reviewed_grading_students(run_id):
+    """The run's results as grading-with-llm POST /reports entries: per
     criterion the reviewed score (teacher_score, else llm_score) and the
     teacher's own slip text; names, Klasse and Seilbahn from the roster, same
     lookup as the upload manifest. Discarded/superseded results are left out
@@ -6572,6 +6572,9 @@ def reviewed_slip_students(run_id):
             'display_name': ' '.join(n for n in (m.get('names') or []) if n),
             'klasse': m.get('klasse') or '',
             'seilbahn': m.get('lernpfad') == 'seilbahn',
+            'document_file': r.get('document_file') or '',
+            'flagged': r['flagged'],
+            'confidence': r.get('confidence') or '',
             'error': 'Keine passende Datei gefunden.' if is_non_submitter_result(r) else None,
             'criteria': [
                 {
@@ -6587,32 +6590,28 @@ def reviewed_slip_students(run_id):
     return students
 
 
-# What POST /slips may write into reports/ -- a subset of _GRADING_REPORT_FILES.
-_REVIEWED_SLIP_FILES = frozenset({'print_slips.html', 'print_slips_cutter.html', 'print_slips_teacher.html'})
-
-
-def regenerate_grading_slips(run_id):
+def regenerate_grading_reports(run_id):
     """
-    Rebuild this run's print slips from the reviewed scores: send them to the
-    grading service (POST /slips renders with the rubric's Textbausteine) and
-    overwrite the slip files in reports/. The service reads no job dir, so
-    this still works after the run's media purge. grades.csv/summary.md stay
-    as imported.
+    Rebuild this run's report files (print slips, grades.csv, summary.md) from
+    the reviewed scores: send them to the grading service (POST /reports
+    renders with the rubric's Textbausteine and Note scale) and overwrite the
+    files in reports/. The service reads no job dir, so this still works
+    after the run's media purge.
 
     Returns (ok, message) for a flash; never raises on a service problem --
-    the old slips then stay untouched.
+    the old files then stay untouched.
     """
     run = get_grading_run(run_id)
     if run is None:
         return False, 'Bewertungslauf nicht gefunden.'
     if not config.GRADING_SERVICE_URL:
         return False, 'Bewertungsdienst ist nicht konfiguriert.'
-    students = reviewed_slip_students(run_id)
+    students = reviewed_grading_students(run_id)
     if not students:
-        return False, 'Keine Ergebnisse, aus denen Zettel entstehen könnten.'
+        return False, 'Keine Ergebnisse, aus denen Dateien entstehen könnten.'
 
     req = urllib.request.Request(
-        f"{config.GRADING_SERVICE_URL}/slips",
+        f"{config.GRADING_SERVICE_URL}/reports",
         data=json.dumps({'rubric': run['rubric'], 'students': students}).encode('utf-8'),
         method='POST',
         headers={
@@ -6624,24 +6623,24 @@ def regenerate_grading_slips(run_id):
         with urllib.request.urlopen(req, timeout=60) as resp:
             files = json.loads(resp.read()).get('files') or {}
     except urllib.error.HTTPError as e:
-        return False, f'Bewertungsdienst hat abgelehnt (HTTP {e.code}) -- Zettel unverändert.'
+        return False, f'Bewertungsdienst hat abgelehnt (HTTP {e.code}) -- Dateien unverändert.'
     except (urllib.error.URLError, OSError, TimeoutError, ValueError):
-        return False, 'Bewertungsdienst nicht erreichbar -- Zettel unverändert.'
+        return False, 'Bewertungsdienst nicht erreichbar -- Dateien unverändert.'
 
     dest_dir = _grading_reports_dir(run_id)
     os.makedirs(dest_dir, exist_ok=True)
     written = []
-    for name, html in files.items():
+    for name, content in files.items():
         # Same distrust as _copy_grading_reports: the name goes into a path.
         name = os.path.basename(name or '')
-        if name not in _REVIEWED_SLIP_FILES or not isinstance(html, str):
+        if name not in _GRADING_REPORT_FILES or not isinstance(content, str):
             continue
         with open(os.path.join(dest_dir, name), 'w', encoding='utf-8') as f:
-            f.write(html)
+            f.write(content)
         written.append(name)
     if not written:
-        return False, 'Bewertungsdienst hat keine Zettel geliefert -- Zettel unverändert.'
-    return True, f'Zettel mit geprüften Punkten neu erzeugt ({len(written)} Dateien).'
+        return False, 'Bewertungsdienst hat keine Dateien geliefert -- Dateien unverändert.'
+    return True, f'Bewertungsdateien mit geprüften Punkten neu erzeugt ({len(written)} Dateien).'
 
 
 def import_grading_callback(job_id, provider, model, graded_at, students, rubric=None,

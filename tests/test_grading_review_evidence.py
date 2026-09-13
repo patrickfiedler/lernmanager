@@ -1,7 +1,7 @@
-"""Review evidence and reviewed print slips: the review page shows what the
+"""Review evidence and reviewed report files: the review page shows what the
 grader saw (document text, per-criterion source/evidence) next to the
-scores, and "Zettel neu erzeugen" sends the reviewed scores to the grading
-service's POST /slips. No live grading host -- urlopen is faked.
+scores, and "Dateien neu erzeugen" sends the reviewed scores to the grading
+service's POST /reports. No live grading host -- urlopen is faked.
 """
 import json
 import os
@@ -107,7 +107,7 @@ def test_purge_clears_document_text(db, tmp_path, monkeypatch):
     assert models.get_grading_result(result_id)["document_text"] is None
 
 
-def test_reviewed_slip_students_carry_teacher_values(db):
+def test_reviewed_grading_students_carry_teacher_values(db):
     klasse_id, task_id, run_id = _setup()
     sid = _student("Mueller", "Anna", "mueller.anna", klasse_id=klasse_id, lernpfad="seilbahn")
     gone = _student("Weg", "Wer", "weg.wer")
@@ -123,7 +123,7 @@ def test_reviewed_slip_students_carry_teacher_values(db):
     criteria[1]["teacher_feedback"] = "Dateiname passt, gut gemacht!"
     models.save_grading_result_review(result_id, criteria)
 
-    students = {s["student_id"]: s for s in models.reviewed_slip_students(run_id)}
+    students = {s["student_id"]: s for s in models.reviewed_grading_students(run_id)}
 
     assert set(students) == {"mueller.anna", "niemand.da"}
     anna = students["mueller.anna"]
@@ -137,23 +137,24 @@ def test_reviewed_slip_students_carry_teacher_values(db):
     assert students["niemand.da"]["error"] == "Keine passende Datei gefunden."
 
 
-def test_regenerate_writes_only_slip_files(db, tmp_path, monkeypatch):
+def test_regenerate_writes_only_report_files(db, tmp_path, monkeypatch):
     _, task_id, run_id = _setup()
     sid = _student("Mueller", "Anna", "mueller.anna")
     models.create_grading_result(run_id, task_id, sid, "mueller.anna", CRITERIA)
     fake = _FakeService({
         "print_slips.html": "<html>neu</html>",
-        "grades.csv": "not ours to overwrite",
+        "grades.csv": "Student_ID,Total_Score\n",
+        "run.log": "internal",
         "../../escape.html": "nope",
     })
     _patch_service(monkeypatch, tmp_path, fake)
 
-    ok, _ = models.regenerate_grading_slips(run_id)
+    ok, _ = models.regenerate_grading_reports(run_id)
 
     assert ok
     assert fake.body["rubric"] == "1-startklar"
     assert fake.body["students"][0]["student_id"] == "mueller.anna"
-    assert os.listdir(models._grading_reports_dir(run_id)) == ["print_slips.html"]
+    assert sorted(os.listdir(models._grading_reports_dir(run_id))) == ["grades.csv", "print_slips.html"]
     assert not os.path.exists(tmp_path / "escape.html")
 
 
@@ -167,7 +168,7 @@ def test_regenerate_keeps_old_slips_when_service_offline(db, tmp_path, monkeypat
     with open(old, "w") as f:
         f.write("<html>alt</html>")
 
-    ok, message = models.regenerate_grading_slips(run_id)
+    ok, message = models.regenerate_grading_reports(run_id)
 
     assert not ok and "nicht erreichbar" in message
     assert open(old).read() == "<html>alt</html>"
@@ -223,9 +224,9 @@ def test_review_save_persists_teacher_feedback(app, client, as_admin):
 
 def test_regenerate_route_flashes_result(app, client, as_admin, monkeypatch):
     _, _, run_id = _setup()
-    monkeypatch.setattr(models, "regenerate_grading_slips", lambda rid: (True, "Zettel neu erzeugt (3 Dateien)."))
+    monkeypatch.setattr(models, "regenerate_grading_reports", lambda rid: (True, "Zettel neu erzeugt (3 Dateien)."))
 
-    resp = as_admin.post(f'/admin/grading-run/{run_id}/zettel-neu',
+    resp = as_admin.post(f'/admin/grading-run/{run_id}/berichte-neu',
                          data={"csrf_token": _csrf_token(as_admin)}, follow_redirects=True)
 
     assert resp.status_code == 200
