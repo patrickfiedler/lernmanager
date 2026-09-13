@@ -2,6 +2,14 @@
 
 {% block title %}Prüfen: {{ result.nachname }}, {{ result.vorname }} - Lernmanager{% endblock %}
 
+{% set source_labels = {
+    'document': '📄 Dokumenttext (links)',
+    'vision': '🖼️ Dokumenttext + Bilder (links)',
+    'metadata': '🗂️ Nur Dateiangaben',
+    'filename': '🔤 Nur Dateiname, ohne KI geprüft',
+} %}
+{% set has_vision = result.criteria|selectattr('source', 'equalto', 'vision')|list|length > 0 %}
+
 {% block content %}
 <div class="flex flex-between flex-center mb-2">
     <h1>
@@ -24,29 +32,44 @@
 {% endif %}
 
 <div class="grid grid-2" style="align-items: start;">
-    <div class="card">
-        <div class="card-header">🖼️ Medien ({{ result.media|selectattr('graded')|list|length }} bewertet)</div>
-        <div style="padding: 0.75rem; display: flex; flex-wrap: wrap; gap: 0.5rem;">
-            {% for m in result.media %}
-            <a href="{{ url_for('download_grading_media', relpath=m.file) }}" target="_blank" style="display: block;">
-                <img src="{{ url_for('download_grading_media', relpath=m.file) }}" alt="{{ m.source }}"
-                     style="width: 100px; height: 100px; object-fit: cover; border-radius: 4px; border: 1px solid #d1d5db;">
-                <small class="text-muted" style="display: block; text-align: center;">{{ m.source }}</small>
-            </a>
+    <div style="position: sticky; top: 0.5rem;">
+        <div class="card mb-2">
+            <div class="card-header">📄 Was die KI gelesen hat</div>
+            {% if result.document_text %}
+            <pre style="margin: 0; padding: 0.75rem; white-space: pre-wrap; max-height: 60vh; overflow: auto; font-size: 0.85rem;">{{ result.document_text }}</pre>
             {% else %}
-            <p class="text-muted">Keine Medien für dieses Kriterium gefunden.</p>
-            {% endfor %}
-        </div>
-        {% if result.media_skipped %}
-        <div style="padding: 0 0.75rem 0.75rem;">
-            <p style="color: #92400e; font-size: 0.85rem; margin-bottom: 0.25rem;">
-                ⚠️ {{ result.media_skipped|length }} Bild(er) übersprungen — nicht bewertet:
+            <p class="text-muted" style="padding: 0.75rem; margin: 0;">
+                Kein Dokumenttext gespeichert — Lauf vor dem 13.09.2026 oder Medien bereits gelöscht.
             </p>
-            <ul style="margin: 0; padding-left: 1.25rem; font-size: 0.85rem; color: #92400e;">
-                {% for skip in result.media_skipped %}
-                <li>{{ skip.name }} ({{ skip.reason }})</li>
+            {% endif %}
+        </div>
+
+        {% if result.media or result.media_skipped or has_vision %}
+        <div class="card">
+            <div class="card-header">🖼️ Bilder ({{ result.media|selectattr('graded')|list|length }} an die KI gegeben)</div>
+            <div style="padding: 0.75rem; display: flex; flex-wrap: wrap; gap: 0.5rem;">
+                {% for m in result.media %}
+                <a href="{{ url_for('download_grading_media', relpath=m.file) }}" target="_blank" style="display: block;">
+                    <img src="{{ url_for('download_grading_media', relpath=m.file) }}" alt="{{ m.source }}"
+                         style="width: 100px; height: 100px; object-fit: cover; border-radius: 4px; border: 1px solid #d1d5db;">
+                    <small class="text-muted" style="display: block; text-align: center;">{{ m.source }}</small>
+                </a>
+                {% else %}
+                <p style="color: #92400e; margin: 0;">⚠️ 0 Bilder gefunden, obwohl ein Kriterium Bilder bewertet. Die KI hat nichts gesehen — ein 0-Punkte-Urteil kann trotzdem stimmen.</p>
                 {% endfor %}
-            </ul>
+            </div>
+            {% if result.media_skipped %}
+            <div style="padding: 0 0.75rem 0.75rem;">
+                <p style="color: #92400e; font-size: 0.85rem; margin-bottom: 0.25rem;">
+                    ⚠️ {{ result.media_skipped|length }} Bild(er) übersprungen — nicht bewertet:
+                </p>
+                <ul style="margin: 0; padding-left: 1.25rem; font-size: 0.85rem; color: #92400e;">
+                    {% for skip in result.media_skipped %}
+                    <li>{{ skip.name }} ({{ skip.reason }})</li>
+                    {% endfor %}
+                </ul>
+            </div>
+            {% endif %}
         </div>
         {% endif %}
     </div>
@@ -57,22 +80,31 @@
             <div class="card-header">📝 Kriterien</div>
             <table class="table" style="margin: 0;">
                 <thead>
-                    <tr><th>Kriterium</th><th style="width: 4rem;">LLM</th><th style="width: 6rem;">Korrigiert</th></tr>
+                    <tr><th>Kriterium</th><th style="width: 4rem;">KI</th><th style="width: 6rem;">Korrigiert</th></tr>
                 </thead>
                 <tbody>
                     {% for c in result.criteria %}
-                    <tr {% if c.review_required and not c.confirmed %}style="border-left: 3px solid #dc2626;"{% elif c.llm_score == 0 %}style="border-left: 3px solid #f59e0b;"{% endif %}>
+                    <tr class="criterion-row" {% if c.review_required and not c.confirmed %}style="border-left: 3px solid #dc2626;"{% elif c.llm_score == 0 %}style="border-left: 3px solid #f59e0b;"{% endif %}>
                         <td>
-                            {{ c.name }}
+                            <strong>{{ c.name }}</strong>
                             {% if c.review_required %}<span class="badge badge-warning" title="Kein Modell bewertet dieses Kriterium zuverlässig">⚠️ Prüfung nötig</span>{% endif %}
-                            {% if c.feedback %}<br><small class="text-muted">{{ c.feedback }}</small>{% endif %}
+                            {% if c.source %}<br><small class="text-muted">Grundlage: {{ source_labels.get(c.source, c.source) }}</small>{% endif %}
+                            {% if c.evidence %}<pre style="margin: 0.25rem 0; padding: 0.25rem 0.5rem; white-space: pre-wrap; font-size: 0.8rem; background: #f3f4f6; border-radius: 4px;">{{ c.evidence }}</pre>{% endif %}
+                            {% if c.feedback %}<br><small>KI: {{ c.feedback }}</small>{% endif %}
+                            <br><small class="slip-preview"></small>
+                            <details {% if c.teacher_feedback %}open{% endif %} style="margin-top: 0.25rem;">
+                                <summary style="font-size: 0.8rem; cursor: pointer;">Eigene Rückmeldung für den Zettel</summary>
+                                <textarea name="teacher_feedback_{{ loop.index0 }}" rows="2" maxlength="500"
+                                          class="form-control teacher-feedback" placeholder="leer = Textbaustein">{{ c.teacher_feedback or '' }}</textarea>
+                            </details>
                         </td>
                         <td>{{ c.llm_score }} / {{ c.max_score }}</td>
                         <td>
                             <input type="number" step="0.5" min="0" max="{{ c.max_score }}"
                                    name="teacher_score_{{ loop.index0 }}"
                                    value="{{ c.teacher_score if c.teacher_score is not none else c.llm_score }}"
-                                   class="form-control criteria-score" data-max="{{ c.max_score }}" style="width: 5rem;">
+                                   class="form-control criteria-score" style="width: 5rem;"
+                                   data-name="{{ c.name }}" data-max="{{ c.max_score }}" data-llm="{{ c.llm_score }}">
                             {% if c.review_required %}
                             <label style="display: block; font-size: 0.8rem; margin-top: 0.25rem;">
                                 <input type="checkbox" name="confirmed_{{ loop.index0 }}" {% if c.confirmed %}checked{% endif %}>
@@ -110,7 +142,38 @@
 {% endblock %}
 
 {% block scripts %}
-const llmTotal = {{ result.llm_total_score or 0 }};
+const textbausteine = {{ (run.textbausteine or {})|tojson }};
+
+// Same lookup as grading-with-llm's print_slip_generator._pick_phrase: exact
+// score first, then the full/partial/none band. Preview only -- the service
+// renders the real slip.
+function pickPhrase(name, score, max) {
+    const bank = textbausteine[name];
+    if (!bank) return null;
+    if (String(score) in bank) return bank[String(score)];
+    const band = score >= max ? 'full' : (score <= 0 ? 'none' : 'partial');
+    return bank[band] ?? null;
+}
+
+function updateRow(row) {
+    const input = row.querySelector('.criteria-score');
+    const own = row.querySelector('.teacher-feedback').value.trim();
+    const preview = row.querySelector('.slip-preview');
+    const score = parseFloat(input.value) || 0;
+    const phrase = pickPhrase(input.dataset.name, score, parseFloat(input.dataset.max));
+    preview.style.color = '';
+    if (own) {
+        preview.textContent = 'Zettel: eigene Rückmeldung';
+    } else if (phrase !== null) {
+        preview.textContent = 'Zettel: „' + phrase + '“';
+    } else if (score !== parseFloat(input.dataset.llm)) {
+        preview.textContent = '⚠️ Kein Textbaustein für diese Punktzahl — der Zettel zeigt sonst den KI-Text. Eigene Rückmeldung schreiben.';
+        preview.style.color = '#92400e';
+    } else {
+        preview.textContent = 'Zettel: KI-Text';
+    }
+}
+
 function recompute() {
     let total = 0;
     document.querySelectorAll('.criteria-score').forEach(input => {
@@ -118,7 +181,11 @@ function recompute() {
     });
     document.getElementById('live-total').textContent = total;
 }
-document.querySelectorAll('.criteria-score').forEach(input => {
-    input.addEventListener('input', recompute);
+
+document.querySelectorAll('.criterion-row').forEach(row => {
+    row.querySelectorAll('.criteria-score, .teacher-feedback').forEach(el => {
+        el.addEventListener('input', () => { updateRow(row); recompute(); });
+    });
+    updateRow(row);
 });
 {% endblock %}

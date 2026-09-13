@@ -672,6 +672,7 @@ def init_db():
                 flagged_count INTEGER NOT NULL DEFAULT 0,
                 zero_score_count INTEGER NOT NULL DEFAULT 0,
                 media_purged_at TEXT,
+                textbausteine_json TEXT,
                 UNIQUE(job_id),
                 FOREIGN KEY (klasse_id) REFERENCES klasse(id),
                 FOREIGN KEY (task_id) REFERENCES task(id)
@@ -707,6 +708,7 @@ def init_db():
                 document_file TEXT,
                 media_json TEXT,
                 media_skipped_json TEXT,
+                document_text TEXT,
                 reviewed_at TEXT,
                 released_at TEXT,
                 released_by INTEGER,
@@ -6168,7 +6170,11 @@ def get_grading_run(run_id):
             "WHERE gr.id = ?",
             (run_id,)
         ).fetchone()
-    return dict(row) if row else None
+    if row is None:
+        return None
+    run = dict(row)
+    run['textbausteine'] = json.loads(run.get('textbausteine_json') or '{}')
+    return run
 
 
 def list_grading_runs(klasse_id=None):
@@ -6248,6 +6254,10 @@ def purge_grading_run_media(run_id):
                     os.remove(path)
                 except OSError:
                     pass
+
+    # The document text is student work product too -- same rule as the media.
+    with db_session() as conn:
+        conn.execute("UPDATE grading_result SET document_text = NULL WHERE grading_run_id = ?", (run_id,))
 
     if config.GRADING_SERVICE_URL and run.get('job_id'):
         req = urllib.request.Request(
@@ -6505,31 +6515,137 @@ def list_grading_reports(run_id):
     return out
 
 
-def count_grading_results_corrected(run_id):
-    """How many results in this run carry at least one teacher-overridden
-    criterion. Drives the staleness warning on the download section: the
-    report files hold the LLM's scores as imported, so once this is non-zero
-    a printed slip disagrees with what the student sees.
+def count_grading_results_corrected(run_id, since=None):
+    """How many results in this run carry a teacher change that shows on a
+    slip -- an overridden score or own slip text. Drives the staleness warning
+    on the download section: once this is non-zero, a printed slip disagrees
+    with what the student sees.
+
+    since: ISO timestamp the slip files were written (grading_slips_written_at);
+    only results reviewed after it count, so regenerating clears the warning.
 
     Reads the `overridden` flag rather than comparing totals -- raising one
     criterion and lowering another nets to zero on the total but is still a
     changed slip."""
     with db_session() as conn:
         rows = conn.execute(
-            "SELECT criteria_json FROM grading_result WHERE grading_run_id = ?", (run_id,)
+            "SELECT criteria_json, reviewed_at FROM grading_result WHERE grading_run_id = ?", (run_id,)
         ).fetchall()
     corrected = 0
     for row in rows:
+        # Strictly older only: timestamps have one-second resolution, and a
+        # review in the same second as the slip file should warn, not hide.
+        if since and (row['reviewed_at'] or '') < since:
+            continue
         try:
             criteria = json.loads(row['criteria_json'])
         except (ValueError, TypeError):
             continue
-        if any(c.get('overridden') for c in criteria):
+        if any(c.get('overridden') or c.get('teacher_feedback') for c in criteria):
             corrected += 1
     return corrected
 
 
-def import_grading_callback(job_id, provider, model, graded_at, students, rubric=None):
+def grading_slips_written_at(run_id):
+    """When print_slips.html was last written for this run (import copy or
+    regenerate_grading_slips), as an ISO timestamp comparable with
+    grading_result.reviewed_at, or None if there is no slip file."""
+    path = os.path.join(_grading_reports_dir(run_id), 'print_slips.html')
+    if not os.path.isfile(path):
+        return None
+    return datetime.fromtimestamp(os.path.getmtime(path)).strftime('%Y-%m-%dT%H:%M:%S')
+
+
+def reviewed_slip_students(run_id):
+    """The run's results as grading-with-llm POST /slips entries: per
+    criterion the reviewed score (teacher_score, else llm_score) and the
+    teacher's own slip text; names, Klasse and Seilbahn from the roster, same
+    lookup as the upload manifest. Discarded/superseded results are left out
+    -- they are not what the student sees."""
+    results = [r for r in list_grading_results(run_id) if r['status'] not in ('discarded', 'superseded')]
+    roster = {m['login']: m for m in match_netzwerk_logins([r['netzwerk_id'] for r in results])}
+    students = []
+    for r in results:
+        m = roster.get(r['netzwerk_id'], {})
+        students.append({
+            'student_id': r['netzwerk_id'],
+            'display_name': ' '.join(n for n in (m.get('names') or []) if n),
+            'klasse': m.get('klasse') or '',
+            'seilbahn': m.get('lernpfad') == 'seilbahn',
+            'error': 'Keine passende Datei gefunden.' if is_non_submitter_result(r) else None,
+            'criteria': [
+                {
+                    'name': c.get('name'),
+                    'points': c['teacher_score'] if c.get('teacher_score') is not None else c.get('llm_score'),
+                    'max_points': c.get('max_score'),
+                    'feedback': c.get('feedback') or '',
+                    'teacher_feedback': c.get('teacher_feedback') or '',
+                }
+                for c in r['criteria']
+            ],
+        })
+    return students
+
+
+# What POST /slips may write into reports/ -- a subset of _GRADING_REPORT_FILES.
+_REVIEWED_SLIP_FILES = frozenset({'print_slips.html', 'print_slips_cutter.html', 'print_slips_teacher.html'})
+
+
+def regenerate_grading_slips(run_id):
+    """
+    Rebuild this run's print slips from the reviewed scores: send them to the
+    grading service (POST /slips renders with the rubric's Textbausteine) and
+    overwrite the slip files in reports/. The service reads no job dir, so
+    this still works after the run's media purge. grades.csv/summary.md stay
+    as imported.
+
+    Returns (ok, message) for a flash; never raises on a service problem --
+    the old slips then stay untouched.
+    """
+    run = get_grading_run(run_id)
+    if run is None:
+        return False, 'Bewertungslauf nicht gefunden.'
+    if not config.GRADING_SERVICE_URL:
+        return False, 'Bewertungsdienst ist nicht konfiguriert.'
+    students = reviewed_slip_students(run_id)
+    if not students:
+        return False, 'Keine Ergebnisse, aus denen Zettel entstehen könnten.'
+
+    req = urllib.request.Request(
+        f"{config.GRADING_SERVICE_URL}/slips",
+        data=json.dumps({'rubric': run['rubric'], 'students': students}).encode('utf-8'),
+        method='POST',
+        headers={
+            'Authorization': f'Bearer {config.GRADING_SERVICE_TOKEN}',
+            'Content-Type': 'application/json',
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            files = json.loads(resp.read()).get('files') or {}
+    except urllib.error.HTTPError as e:
+        return False, f'Bewertungsdienst hat abgelehnt (HTTP {e.code}) -- Zettel unverändert.'
+    except (urllib.error.URLError, OSError, TimeoutError, ValueError):
+        return False, 'Bewertungsdienst nicht erreichbar -- Zettel unverändert.'
+
+    dest_dir = _grading_reports_dir(run_id)
+    os.makedirs(dest_dir, exist_ok=True)
+    written = []
+    for name, html in files.items():
+        # Same distrust as _copy_grading_reports: the name goes into a path.
+        name = os.path.basename(name or '')
+        if name not in _REVIEWED_SLIP_FILES or not isinstance(html, str):
+            continue
+        with open(os.path.join(dest_dir, name), 'w', encoding='utf-8') as f:
+            f.write(html)
+        written.append(name)
+    if not written:
+        return False, 'Bewertungsdienst hat keine Zettel geliefert -- Zettel unverändert.'
+    return True, f'Zettel mit geprüften Punkten neu erzeugt ({len(written)} Dateien).'
+
+
+def import_grading_callback(job_id, provider, model, graded_at, students, rubric=None,
+                            textbausteine=None):
     """
     Import the grading service's POST /internal/grading/results payload
     (worker.fire_callback's shape) into grading_result rows under the
@@ -6609,7 +6725,7 @@ def import_grading_callback(job_id, provider, model, graded_at, students, rubric
             llm_total_score=total_score, llm_max_score=max_score, flagged=flagged,
             confidence=s.get('confidence'), error=s.get('error'),
             document_file=s.get('document_file'), media=media,
-            media_skipped=s.get('media_skipped'),
+            media_skipped=s.get('media_skipped'), document_text=s.get('document_text'),
         )
         imported += 1
 
@@ -6621,8 +6737,11 @@ def import_grading_callback(job_id, provider, model, graded_at, students, rubric
         conn.execute(
             "UPDATE grading_run SET provider = ?, model = ?, graded_at = ?, "
             "total_students = total_students + ?, flagged_count = flagged_count + ?, "
-            "zero_score_count = zero_score_count + ? WHERE id = ?",
-            (provider, model, graded_at, imported, flagged_count, zero_score_count, run['id'])
+            "zero_score_count = zero_score_count + ?, "
+            "textbausteine_json = COALESCE(?, textbausteine_json) WHERE id = ?",
+            (provider, model, graded_at, imported, flagged_count, zero_score_count,
+             json.dumps(textbausteine) if isinstance(textbausteine, dict) and textbausteine else None,
+             run['id'])
         )
     return run['id']
 
@@ -6630,13 +6749,16 @@ def import_grading_callback(job_id, provider, model, graded_at, students, rubric
 def create_grading_result(grading_run_id, task_id, student_id, netzwerk_id, criteria,
                            llm_total_score=None, llm_max_score=None, flagged=False,
                            confidence=None, error=None, document_file=None,
-                           media=None, media_skipped=None):
+                           media=None, media_skipped=None, document_text=None):
     """
     Create one grading_result row (status='imported'). `criteria` is the list
     of per-criterion dicts from students/*.json, reshaped into the review-UI
     contract (teacher-review-ui.md §5): each gets teacher_score=None,
     overridden=False, reviewed_at=None added, plus review_required/confirmed
     if the rubric criterion carries review_required (sub-phase 2d).
+    source/evidence say what the grader was shown (document text, images,
+    metadata or just the filename); teacher_feedback is the teacher's own
+    slip text, empty = the rubric's Textbaustein.
     """
     created_at = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
     criteria_json = json.dumps([
@@ -6650,6 +6772,9 @@ def create_grading_result(grading_run_id, task_id, student_id, netzwerk_id, crit
             'reviewed_at': None,
             'review_required': bool(c.get('review_required')),
             'confirmed': not bool(c.get('review_required')),
+            'source': c.get('source'),
+            'evidence': c.get('evidence'),
+            'teacher_feedback': '',
         }
         for c in criteria
     ])
@@ -6657,11 +6782,11 @@ def create_grading_result(grading_run_id, task_id, student_id, netzwerk_id, crit
         cursor = conn.execute(
             "INSERT INTO grading_result (grading_run_id, task_id, student_id, netzwerk_id, status, "
             "llm_total_score, llm_max_score, flagged, confidence, error, criteria_json, document_file, "
-            "media_json, media_skipped_json, created_at) "
-            "VALUES (?, ?, ?, ?, 'imported', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "media_json, media_skipped_json, document_text, created_at) "
+            "VALUES (?, ?, ?, ?, 'imported', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (grading_run_id, task_id, student_id, netzwerk_id, llm_total_score, llm_max_score,
              1 if flagged else 0, confidence, error, criteria_json, document_file,
-             json.dumps(media or []), json.dumps(media_skipped or []), created_at)
+             json.dumps(media or []), json.dumps(media_skipped or []), document_text, created_at)
         )
         return cursor.lastrowid
 

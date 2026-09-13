@@ -229,4 +229,4 @@ def test_detail_page_renders_downloads_and_warns_only_when_corrected(as_admin, t
     models.save_grading_result_review(result_id, criteria)
 
     page = _text(as_admin.get(f"/admin/grading-run/{run_id}"))
-    assert "1 Ergebnis wurde seit dem Import korrigiert" in page
+    assert "1 Ergebnis wurde nach dem Erstellen der Zettel korrigiert" in page

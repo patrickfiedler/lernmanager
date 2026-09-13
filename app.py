@@ -473,6 +473,7 @@ def internal_grading_results():
             graded_at=payload.get('graded_at'),
             students=payload.get('students', []),
             rubric=payload.get('rubric'),
+            textbausteine=payload.get('textbausteine'),
         )
     except ValueError as e:
         # Logged, not 500'd -- a callback for an unknown/deleted run shouldn't
@@ -1218,7 +1219,8 @@ def admin_grading_run_detail(run_id):
         non_submitters=non_submitters, no_conflict=no_conflict, needs_decision=needs_decision,
         override_rate=models.get_grading_run_override_rate(run_id), job_status=job_status,
         reports=models.list_grading_reports(run_id),
-        corrected_count=models.count_grading_results_corrected(run_id),
+        corrected_count=models.count_grading_results_corrected(
+            run_id, since=models.grading_slips_written_at(run_id)),
     )
 
 
@@ -1270,6 +1272,15 @@ def admin_grading_run_purge_media(run_id):
     the run is fully settled yet -- a teacher may want to force cleanup."""
     models.purge_grading_run_media(run_id)
     flash('Medien gelöscht.', 'success')
+    return redirect(url_for('admin_grading_run_detail', run_id=run_id))
+
+
+@app.route('/admin/grading-run/<int:run_id>/zettel-neu', methods=['POST'])
+@admin_required
+def admin_grading_run_regenerate_slips(run_id):
+    """Print slips from the reviewed scores (models.regenerate_grading_slips)."""
+    ok, message = models.regenerate_grading_slips(run_id)
+    flash(message, 'success' if ok else 'danger')
     return redirect(url_for('admin_grading_run_detail', run_id=run_id))
 
 
@@ -1335,6 +1346,8 @@ def admin_grading_result_review(result_id):
                 teacher_score = c.get('llm_score')
             entry = dict(c)
             entry['teacher_score'] = teacher_score
+            if f'teacher_feedback_{i}' in request.form:
+                entry['teacher_feedback'] = request.form[f'teacher_feedback_{i}'].strip()[:500]
             if c.get('review_required'):
                 entry['confirmed'] = request.form.get(f'confirmed_{i}') == 'on'
             criteria.append(entry)

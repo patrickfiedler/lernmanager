@@ -53,7 +53,7 @@
     </div>
 </div>
 
-{% if reports %}
+{% if reports or run.graded_at %}
 <div class="card mb-2">
     <div class="card-header">📄 Bewertungsdateien</div>
     <div style="padding: 0.75rem 1rem;">
@@ -67,14 +67,20 @@
         {% if corrected_count %}
         <p class="mt-1" style="color: var(--danger, #c0392b);">
             ⚠️ {{ corrected_count }} Ergebnis{{ 'se' if corrected_count != 1 else '' }}
-            wurde{{ 'n' if corrected_count != 1 else '' }} seit dem Import korrigiert.
-            Diese Dateien zeigen die KI-Bewertung vor der Prüfung — die Zettel stimmen
-            nicht mehr mit dem überein, was die Schüler sehen.
+            wurde{{ 'n' if corrected_count != 1 else '' }} nach dem Erstellen der Zettel korrigiert —
+            die Zettel stimmen nicht mehr mit dem überein, was die Schüler sehen.
+            Erst neu erzeugen, dann drucken.
         </p>
         {% endif %}
 
+        <form method="POST" action="{{ url_for('admin_grading_run_regenerate_slips', run_id=run.id) }}" class="mt-1">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-primary btn-sm">🔄 Zettel mit geprüften Punkten neu erzeugen</button>
+        </form>
+
         <p class="text-muted mt-1" style="font-size: 0.875rem;">
-            Erstellt: {{ reports[0].copied_at }}
+            {% if reports %}Zuletzt geschrieben: {{ reports[-1].copied_at }} · {% endif %}
+            Notenliste und Auswertung bleiben auf dem Stand der KI-Bewertung.
         </p>
     </div>
 </div>
