@@ -323,6 +323,30 @@ def _validate_quiz(quiz, prefix="Quiz"):
     return errors
 
 
+# Per-question checkpoint hints and the two-option flag (relay "Tipps je Frage",
+# 2026-09-13). Both live inside quiz_json, which is stored as-is -- without these
+# checks a malformed value or a misspelled key would import silently and do nothing.
+MAX_QUESTION_HINTS = 3
+_NEAR_MISS_KEY_PREFIXES = ('hint', 'tip', 'zweiwert')
+
+
+def _validate_checkpoint_question_extras(question, label, errors, warnings):
+    if 'hints' in question:
+        hints = question['hints']
+        if not (isinstance(hints, list) and 1 <= len(hints) <= MAX_QUESTION_HINTS
+                and all(isinstance(h, str) and h.strip() for h in hints)):
+            errors.append(f"{label}: 'hints' must be a list of 1-{MAX_QUESTION_HINTS} non-empty strings")
+    if 'zweiwertig' in question:
+        if not isinstance(question['zweiwertig'], bool):
+            errors.append(f"{label}: 'zweiwertig' must be true or false")
+        elif question['zweiwertig'] and question.get('type', 'multiple_choice') != 'short_answer':
+            errors.append(f"{label}: 'zweiwertig' only applies to short_answer questions")
+    if warnings is not None:
+        for key in question:
+            if key not in ('hints', 'zweiwertig') and key.lower().startswith(_NEAR_MISS_KEY_PREFIXES):
+                warnings.append(f"{label}: unknown key '{key}' is ignored -- did you mean 'hints' or 'zweiwertig'?")
+
+
 def validate_task_structure(data, warnings=None):
     """Validate required fields are present and valid.
 
@@ -408,8 +432,12 @@ def validate_task_structure(data, warnings=None):
                 # only) - a multi-correct MC question there could never be answered right.
                 if sub.get('checkpoint_type') == 'quiz' and sub.get('quiz'):
                     for qi, question in enumerate(sub['quiz'].get('questions', [])):
+                        if not isinstance(question, dict):
+                            continue  # reported by _validate_quiz below
+                        label = f"Subtask {i+1} quiz question {qi+1}"
                         if question.get('type', 'multiple_choice') == 'multiple_choice' and len(question.get('correct', [])) != 1:
-                            errors.append(f"Subtask {i+1} quiz question {qi+1}: checkpoint_type 'quiz' requires exactly one correct answer (Checkpoint-UI zeigt nur Einfachauswahl)")
+                            errors.append(f"{label}: checkpoint_type 'quiz' requires exactly one correct answer (Checkpoint-UI zeigt nur Einfachauswahl)")
+                        _validate_checkpoint_question_extras(question, label, errors, warnings)
                 # graded_artifact is optional
                 if 'graded_artifact' in sub and sub['graded_artifact']:
                     ga = sub['graded_artifact']
