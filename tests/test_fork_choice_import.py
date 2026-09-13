@@ -48,6 +48,20 @@ def test_import_rejects_missing_branch_label(db):
         assert "fork_branch_label" in str(e)
 
 
+def test_import_rejects_branch_label_not_on_first_subtask(db):
+    data = {"task": {"name": "X", "beschreibung": "x", "fach": "MBI", "stufe": "5",
+                      "subtasks": [
+                          _base_subtask("A1", fork_group="g1", fork_branch="a"),
+                          _base_subtask("A2", fork_group="g1", fork_branch="a", fork_branch_label="A"),
+                          _base_subtask("B1", fork_group="g1", fork_branch="b", fork_branch_label="B"),
+                      ]}}
+    try:
+        import_task.validate_task_structure(data)
+        assert False, "should have raised"
+    except import_task.ValidationError as e:
+        assert "first subtask" in str(e)
+
+
 def test_import_rejects_noncontiguous_branch(db):
     data = {"task": {"name": "X", "beschreibung": "x", "fach": "MBI", "stufe": "5",
                       "subtasks": [

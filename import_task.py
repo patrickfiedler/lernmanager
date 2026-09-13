@@ -169,7 +169,8 @@ def _validate_fork_groups(subtasks, errors):
     Design: docs/shared/lernmanager/fork-choice-artifact-model.md decision 5.
     fork_group/fork_branch validity per-subtask is checked by the caller;
     this handles checks that need the whole subtask list: at least 2 branches
-    per fork_group, exactly one fork_branch_label per branch, and each
+    per fork_group, exactly one fork_branch_label per branch (on its first
+    subtask), and each
     branch's subtasks contiguous in list order.
     """
     groups = {}
@@ -187,13 +188,18 @@ def _validate_fork_groups(subtasks, errors):
             errors.append(f"fork_group '{fork_group}' has only {len(branches)} branch(es); a fork needs at least 2")
 
         for branch, indices in branches.items():
-            label_count = sum(1 for i, sub in members if sub.get('fork_branch') == branch and sub.get('fork_branch_label'))
-            if label_count != 1:
+            indices.sort()
+            labelled = [i for i, sub in members if sub.get('fork_branch') == branch and sub.get('fork_branch_label')]
+            if len(labelled) != 1:
                 errors.append(
                     f"fork_group '{fork_group}' branch '{branch}': exactly one subtask must carry "
-                    f"'fork_branch_label' (found {label_count})"
+                    f"'fork_branch_label' (found {len(labelled)})"
                 )
-            indices.sort()
+            elif labelled[0] != indices[0]:
+                errors.append(
+                    f"fork_group '{fork_group}' branch '{branch}': 'fork_branch_label' must be on the "
+                    f"branch's first subtask (position {indices[0] + 1}, found on {labelled[0] + 1})"
+                )
             if indices != list(range(indices[0], indices[0] + len(indices))):
                 positions = [i + 1 for i in indices]
                 errors.append(f"fork_group '{fork_group}' branch '{branch}': subtasks must be contiguous (positions {positions})")
