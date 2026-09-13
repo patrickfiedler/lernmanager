@@ -111,7 +111,39 @@ def test_match_netzwerk_logins_returns_only_matches(db):
 
     matches = models.match_netzwerk_logins(["mueller.anna", "unknown.folder"])
 
-    assert matches == [{"login": "mueller.anna", "names": ["Anna", "Mueller"], "lernpfad": "bergweg"}]
+    assert matches == [{"login": "mueller.anna", "names": ["Anna", "Mueller"], "lernpfad": "bergweg",
+                        "klasse": "6a", "klassenstufe": None}]
+
+
+def test_match_netzwerk_logins_student_without_class(db):
+    models.create_student("Mueller", "Anna", "u1", "pw", netzwerk_id="mueller.anna")
+
+    [match] = models.match_netzwerk_logins(["mueller.anna"])
+
+    assert match["klasse"] is None and match["klassenstufe"] is None
+
+
+def test_match_netzwerk_logins_one_entry_per_student_in_several_classes(db):
+    """student_klasse is many-to-many; the join must not duplicate the student."""
+    k1 = models.create_klasse("6a")
+    k2 = models.create_klasse("Chemie 11")
+    s1 = models.create_student("Mueller", "Anna", "u1", "pw", netzwerk_id="mueller.anna")
+    models.add_student_to_klasse(s1, k1)
+    models.add_student_to_klasse(s1, k2)
+
+    [match] = models.match_netzwerk_logins(["mueller.anna"])
+
+    assert match["klasse"] in {"6a", "Chemie 11"}
+
+
+def test_pick_grading_klasse_prefers_klassenstufe_then_oldest():
+    gruppe = {"id": 1, "name": "Seilbahn-Gruppe", "klassenstufe": None}
+    neu = {"id": 3, "name": "6b", "klassenstufe": 6}
+    alt = {"id": 2, "name": "6a", "klassenstufe": 6}
+
+    assert models._pick_grading_klasse([gruppe, neu, alt]) == alt
+    assert models._pick_grading_klasse([gruppe]) == gruppe
+    assert models._pick_grading_klasse([]) is None
 
 
 def test_match_netzwerk_logins_spans_multiple_classes(db):
@@ -184,7 +216,8 @@ def test_match_logins_route_returns_matches_and_unmatched(app, client, as_admin)
     )
     assert resp.status_code == 200
     data = resp.get_json()
-    assert data["matches"] == [{"login": "mueller.anna", "names": ["Anna", "Mueller"], "lernpfad": "bergweg"}]
+    assert data["matches"] == [{"login": "mueller.anna", "names": ["Anna", "Mueller"], "lernpfad": "bergweg",
+                                "klasse": "6a", "klassenstufe": None}]
     assert data["unmatched"] == ["unknown.folder"]
 
 

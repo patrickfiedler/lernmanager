@@ -210,7 +210,7 @@ function parseZipStreaming(file, onProgress) {
 
 // --- Wiring: parse on file select, resolve logins, enable submit ---------
 let parsedStudents = null; // Map<login, {files}> from the zip
-let matchedRoster = null;  // [{login, names, lernpfad}] resolved by the server
+let matchedRoster = null;  // [{login, names, lernpfad, klasse, klassenstufe}] resolved by the server
 
 function updateSubmitEnabled() {
     const taskOk = document.getElementById('task-select').value !== '';
@@ -326,7 +326,8 @@ document.getElementById('grading-upload-form').addEventListener('submit', async 
         // Step 1: open the job -- manifest only, no archive (chunked mode,
         // mirrors Invoke-GradingUpload's -Fields-only POST /jobs call).
         const manifestStudents = matchedRoster.map(m => ({
-            login: m.login, names: m.names, lernpfad: m.lernpfad || undefined, files: [],
+            login: m.login, names: m.names, lernpfad: m.lernpfad || undefined,
+            klasse: m.klasse || undefined, klassenstufe: m.klassenstufe ?? undefined, files: [],
         }));
         const manifest = { rubric, collected_at: new Date().toISOString(), students: manifestStudents };
 

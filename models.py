@@ -6247,7 +6247,10 @@ def match_netzwerk_logins(logins):
     same way ConvertTo-NormalizedLogin does in grading-upload.psm1) against
     the *global* student roster -- not one class's, since a single upload can
     now span several classes. Returns only matches, as
-    {login, names: [vorname, nachname], lernpfad}, one per input login found.
+    {login, names: [vorname, nachname], lernpfad, klasse, klassenstufe}, one
+    per input login found. klasse/klassenstufe are per student, not per job,
+    for the same reason: grading-with-llm fills student_mapping.csv's Klasse
+    column from them (request 2026-09-13). Both None for a student in no class.
     Deliberately not "return the whole roster and let the browser filter" --
     keeps the admin-only upload page from carrying every enrolled student's
     real name on every page load, only the ones actually present in this zip
@@ -6257,15 +6260,43 @@ def match_netzwerk_logins(logins):
     with db_session() as conn:
         placeholders = ','.join('?' * len(logins))
         rows = conn.execute(
-            f"SELECT netzwerk_id, vorname, nachname, lernpfad FROM student "
-            f"WHERE netzwerk_id IN ({placeholders})",
+            f"SELECT s.netzwerk_id, s.vorname, s.nachname, s.lernpfad, "
+            f"k.id AS klasse_id, k.name AS klasse_name, k.klassenstufe "
+            f"FROM student s "
+            f"LEFT JOIN student_klasse sk ON sk.student_id = s.id "
+            f"LEFT JOIN klasse k ON k.id = sk.klasse_id "
+            f"WHERE s.netzwerk_id IN ({placeholders})",
             logins
         ).fetchall()
-    return [
-        {'login': r['netzwerk_id'], 'names': [r['vorname'], r['nachname']],
-         'lernpfad': r['lernpfad'] or ''}
-        for r in rows
-    ]
+
+    students = {}
+    for r in rows:
+        entry = students.setdefault(r['netzwerk_id'], {
+            'login': r['netzwerk_id'], 'names': [r['vorname'], r['nachname']],
+            'lernpfad': r['lernpfad'] or '', 'klassen': [],
+        })
+        if r['klasse_id'] is not None:
+            entry['klassen'].append({'id': r['klasse_id'], 'name': r['klasse_name'],
+                                     'klassenstufe': r['klassenstufe']})
+
+    matches = []
+    for entry in students.values():
+        klasse = _pick_grading_klasse(entry.pop('klassen'))
+        entry['klasse'] = klasse['name'] if klasse else None
+        entry['klassenstufe'] = klasse['klassenstufe'] if klasse else None
+        matches.append(entry)
+    return matches
+
+
+def _pick_grading_klasse(klassen):
+    """The one class that travels in the grading manifest for this student.
+
+    klassen: list of {id, name, klassenstufe}, one per student_klasse row, in
+    no particular order; empty when the student is in no class.
+    Returns one of those dicts, or None. Prefers a real Klassenstufe over an
+    ad-hoc group without one, then the oldest class -- stable across runs, so
+    print slips sort the same way every time."""
+    return min(klassen, key=lambda k: (k['klassenstufe'] is None, k['id']), default=None)
 
 
 def get_student_by_netzwerk_id(netzwerk_id):
