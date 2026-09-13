@@ -320,7 +320,9 @@ def test_checkpoint_answer_response_carries_no_llm_feedback(app, client, monkeyp
         "question_index": 0, "answer": "Weil es ein Element ist.",
     })
 
-    assert set(resp.get_json()) == {"correct", "attempts"}
+    # answer_id is the logged row's number, which the page sends back to ask for the AI
+    # hint to exactly this answer -- an id, not feedback, so it leaks nothing.
+    assert set(resp.get_json()) == {"correct", "attempts", "answer_id"}
     assert "Elektronegativitaet" not in resp.get_data(as_text=True)
 
     # ... but it was produced and kept -- this is a transport-level rule, not the
@@ -347,5 +349,7 @@ def test_wrong_multiple_choice_response_carries_no_option_text(app, client):
     })
 
     body = resp.get_data(as_text=True)
-    assert set(resp.get_json()) == {"correct", "attempts"}
+    # answer_id is the logged row's number, which the page sends back to ask for the AI
+    # hint to exactly this answer -- an id, not feedback, so it leaks nothing.
+    assert set(resp.get_json()) == {"correct", "attempts", "answer_id"}
     assert "Richtig war" not in body

@@ -372,6 +372,12 @@ def init_db():
                 teacher_note TEXT,
                 prompt_version TEXT,  -- which system prompt graded this (llm_grading.prompt_version_for) -- without it, a prompt change makes old/new rows incomparable
                 judgment_confidence REAL,  -- migrate_052: model probability of the judgment token. Recorded only; nothing gates on it yet (threshold unvalidated, and acting on it changes the Kern-Sperre contract). NULL whenever no LLM graded the row or the provider returns no logprobs -- never 0.0, "not measured" must not read as "certainly wrong"
+                hint_text TEXT,  -- migrate_059: AI hint shown after this wrong answer (see there for all hint_* columns)
+                hint_gap TEXT,  -- the gap the model named, teacher-only
+                hint_basis INTEGER,  -- 1-based authored hint it adapted, NULL = own wording
+                hint_source TEXT,  -- 'frage' | 'checkpoint': which hint list the model got
+                hint_status TEXT,  -- pending | ok | melden | error | limit; NULL = never requested
+                hint_prompt_version TEXT,
                 FOREIGN KEY (student_id) REFERENCES student(id) ON DELETE CASCADE
             );
 
@@ -3556,9 +3562,10 @@ def create_checkpoint_answer(student_id, checkpoint_id, session_uid, question_in
     between -- long enough for a second request to pass the same check. SQLite
     serialises writers, so re-checking here is what actually closes the window.
 
-    Returns {'created': bool, 'attempt_no': int, 'existing': row or None}. `created`
-    is False only when dedupe suppressed the insert; `existing` then carries the row
-    whose verdict the caller should hand back.
+    Returns {'created': bool, 'attempt_no': int, 'existing': row or None, 'id': int}.
+    `created` is False only when dedupe suppressed the insert; `existing` then carries
+    the row whose verdict the caller should hand back, and `id` is that row's. The id
+    is what the page sends back when it asks for a hint to exactly this answer.
     """
     with db_session() as conn:
         if dedupe:
@@ -3571,7 +3578,7 @@ def create_checkpoint_answer(student_id, checkpoint_id, session_uid, question_in
                     and normalized_answer_text(previous['answer_text'])
                     == normalized_answer_text(answer_text)):
                 return {'created': False, 'attempt_no': previous['attempt_no'],
-                        'existing': dict(previous)}
+                        'existing': dict(previous), 'id': previous['id']}
 
         if attempt_no is None:
             attempt_no = conn.execute(
@@ -3579,7 +3586,7 @@ def create_checkpoint_answer(student_id, checkpoint_id, session_uid, question_in
                 'WHERE session_uid = ? AND question_index = ?',
                 (session_uid, question_index)).fetchone()[0]
 
-        conn.execute('''
+        cursor = conn.execute('''
             INSERT INTO checkpoint_answer
             (student_id, checkpoint_id, session_uid, question_index, attempt_no,
              answer_text, correct, feedback, grader, llm_model, hints_used_before,
@@ -3588,7 +3595,8 @@ def create_checkpoint_answer(student_id, checkpoint_id, session_uid, question_in
         ''', (student_id, checkpoint_id, session_uid, question_index, attempt_no,
               answer_text, correct, feedback, grader, llm_model, hints_used_before,
               1 if gave_up else 0, now_local(), prompt_version, judgment_confidence))
-        return {'created': True, 'attempt_no': attempt_no, 'existing': None}
+        return {'created': True, 'attempt_no': attempt_no, 'existing': None,
+                'id': cursor.lastrowid}
 
 
 def get_checkpoint_attempts_for_student(student_id, module_id=None, include_superseded=False):
@@ -3739,6 +3747,37 @@ def get_last_checkpoint_answer(session_uid, question_index):
             ORDER BY id DESC LIMIT 1
         ''', (session_uid, question_index)).fetchone()
         return dict(row) if row else None
+
+
+def claim_checkpoint_answer_hint(answer_id):
+    """Reserve the AI hint for one wrong answer. False if it was already requested.
+
+    The page asks once per wrong answer, but a reload or a double fire can ask twice,
+    and each ask is an LLM call. The conditional UPDATE is the lock: SQLite serialises
+    writers, so exactly one request sees rowcount 1. A claim that never completes (the
+    process died mid-call) stays 'pending' and simply shows no hint -- the button hints
+    still work, and no second call is ever made for that answer.
+    """
+    with db_session() as conn:
+        cursor = conn.execute(
+            "UPDATE checkpoint_answer SET hint_status = 'pending' "
+            "WHERE id = ? AND hint_status IS NULL", (answer_id,))
+        return cursor.rowcount == 1
+
+
+def set_checkpoint_answer_hint(answer_id, status, text=None, gap=None, basis=None,
+                               source=None, prompt_version=None):
+    """Store the outcome of a claimed hint request (migrate_059 columns).
+
+    status: 'ok' (hint shown), 'melden' (pointer to Frage melden shown), 'error' (call
+    failed or returned nothing usable), 'limit' (hourly budget spent). A failure is
+    logged too: "no hint" and "never asked" must stay apart when the log is read.
+    """
+    with db_session() as conn:
+        conn.execute(
+            "UPDATE checkpoint_answer SET hint_status = ?, hint_text = ?, hint_gap = ?, "
+            "hint_basis = ?, hint_source = ?, hint_prompt_version = ? WHERE id = ?",
+            (status, text, gap, basis, source, prompt_version, answer_id))
 
 
 def effective_checkpoint_score(attempt):
@@ -5699,7 +5738,10 @@ def check_llm_rate_limit(student_id, usage_tag='llm_grading'):
 
     Returns True if calls are allowed, False if rate limit exceeded.
     """
-    limit = (config.LLM_MAX_CHECKPOINT_CALLS_PER_STUDENT_PER_HOUR if usage_tag == 'checkpoint_quiz'
+    # checkpoint_hint gets the checkpoint ceiling but its own counter: a student working
+    # through a hard checkpoint must not lose grading calls to the hints that came with it.
+    limit = (config.LLM_MAX_CHECKPOINT_CALLS_PER_STUDENT_PER_HOUR
+             if usage_tag in ('checkpoint_quiz', 'checkpoint_hint')
              else config.LLM_MAX_CALLS_PER_STUDENT_PER_HOUR)
     with db_session() as conn:
         row = conn.execute(

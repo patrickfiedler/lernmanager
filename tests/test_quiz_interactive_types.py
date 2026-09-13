@@ -156,7 +156,10 @@ def test_checkpoint_payload_carries_no_answer_key():
     assert "pairs" not in result and "distractors" not in result
     # The exact key set is pinned on purpose: a new key has to be admitted here
     # deliberately, so an answer-carrying field cannot slip into the payload.
-    assert set(result) == {"type", "text", "left", "right", "index"}
+    # has_hints / adaptive_hint are booleans only: whether a hint exists and whether
+    # the AI hint is offered, never the hint text (fetched after a wrong attempt).
+    assert set(result) == {"type", "text", "left", "right", "index",
+                           "has_hints", "adaptive_hint"}
     assert result["index"] == 1
 
 

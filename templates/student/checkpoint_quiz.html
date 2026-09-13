@@ -93,6 +93,9 @@
     <div class="card mb-2" id="question-card">
         <h4 id="question-text"></h4>
         <div id="question-image-container"></div>
+        {# Last graded wrong answer + the AI hint to it, above the field the student
+           revises in. Only the newest attempt: a new wrong answer replaces it. #}
+        <div id="last-attempt-area" style="display: none;"></div>
         <div id="answer-area"></div>
         <div id="transparency-area" style="display: none;"></div>
         <div id="feedback-area" style="display: none;"></div>
@@ -100,9 +103,9 @@
         <div class="mt-2 flex gap-1">
             <button class="btn btn-primary" id="check-btn" onclick="checkAnswer()">Prüfen</button>
             <button class="btn btn-primary" id="next-btn" onclick="nextQuestion()" style="display: none;">Weiter →</button>
-            {% if has_hints %}
+            {# Always rendered: whether a question has hints is per question now
+               (its own `hints` or the checkpoint's), so JS decides. #}
             <button class="btn btn-secondary" id="hint-btn" onclick="requestHint()" style="display: none;">💡 Tipp</button>
-            {% endif %}
             <button class="btn btn-secondary" id="giveup-btn" onclick="giveUp()">Ich weiß es nicht</button>
             <button class="btn btn-secondary" id="flag-btn" onclick="openFlagPanel()">⚠️ Frage melden</button>
         </div>
@@ -169,6 +172,16 @@
 .checkpoint-flag-lead { margin: 0 0 0.5rem 0; font-weight: 600; }
 .checkpoint-flag-reason { display: block; margin-bottom: 0.25rem; background: #fff; }
 .checkpoint-flag-note { font-size: 0.85rem; margin: 0.5rem 0 0 0; }
+/* Grey, not red: the verdict above already said "not yet". This box is the working
+   state -- what was sent, and what to look at next. */
+.checkpoint-last-attempt { border-left: 4px solid #9ca3af; background: #f9fafb;
+                           border-radius: 4px; padding: 0.6rem 0.9rem; margin-bottom: 0.75rem; }
+.checkpoint-last-label { font-size: 0.85rem; color: #6b7280; margin-bottom: 0.2rem; }
+.checkpoint-last-answer { white-space: pre-wrap; }
+.checkpoint-last-answer.clamped { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.checkpoint-last-more { background: none; border: none; padding: 0; color: #2563eb; cursor: pointer; font: inherit; font-size: 0.85rem; }
+.checkpoint-last-hint { margin-top: 0.5rem; }
+.checkpoint-last-hint.pending { color: #6b7280; font-style: italic; }
 </style>
 {% endblock %}
 
@@ -190,6 +203,9 @@
     // whether "Die KI erkennt meine Antwort nicht an" may be offered -- the server
     // checks the same thing again, this only keeps a dead option off the list.
     let attemptsMade = 0;
+    // The answer row the AI hint on screen belongs to. A hint arriving for any other
+    // row is stale -- the student has answered again, solved, given up or reported.
+    let hintAnswerId = null;
 
     // The question's index in the STORED quiz, which is what every route validates
     // against -- never our position in `questions`. The two differ whenever the
@@ -315,14 +331,105 @@
         document.getElementById('feedback-area').innerHTML = '';
         document.getElementById('hint-area').style.display = 'none';
         document.getElementById('hint-area').innerHTML = '';
+        clearLastAttempt();
         document.getElementById('check-btn').style.display = '';
         document.getElementById('next-btn').style.display = 'none';
         document.getElementById('giveup-btn').style.display = '';
         var hintBtn = document.getElementById('hint-btn');
         if (hintBtn) hintBtn.style.display = 'none';
         document.querySelectorAll('#answer-area input, #answer-area textarea').forEach(function(el) { el.disabled = false; });
+
+        // A reload mid-question: put the student back where they were -- old answer
+        // in the field to revise, and above it that answer with its hint.
+        if (q.last_attempt && q.type === 'short_answer') {
+            const la = q.last_attempt;
+            document.getElementById('short-answer-input').value = la.answer_text;
+            lastSubmitted = answerKey(la.answer_text);
+            attemptsMade = Math.max(attemptsMade, 1);
+            if (hintBtn && q.has_hints) hintBtn.style.display = '';
+            showLastAttempt(la.answer_text, la.answer_id);
+            if (la.hint) {
+                setHintText(la.hint, la.report);
+            } else if (la.hint_status === null) {
+                fetchAiHint(la.answer_id);
+            } else {
+                removePendingHint();
+            }
+        }
         updateCheckBtnState();
         updateTransparencyBlock();
+    }
+
+    function clearLastAttempt() {
+        hintAnswerId = null;
+        const box = document.getElementById('last-attempt-area');
+        box.innerHTML = '';
+        box.style.display = 'none';
+    }
+
+    // The answer as graded, clamped to three lines -- long explanations would push
+    // the field out of view. textContent throughout: it is the student's own text.
+    function showLastAttempt(answerText, answerId) {
+        clearLastAttempt();
+        hintAnswerId = answerId;
+        const box = document.getElementById('last-attempt-area');
+        const wrap = document.createElement('div');
+        wrap.className = 'checkpoint-last-attempt';
+        const label = document.createElement('div');
+        label.className = 'checkpoint-last-label';
+        label.textContent = 'Deine zuletzt geprüfte Antwort';
+        const text = document.createElement('div');
+        text.className = 'checkpoint-last-answer clamped';
+        text.textContent = answerText;
+        wrap.appendChild(label);
+        wrap.appendChild(text);
+        const hint = document.createElement('div');
+        hint.className = 'checkpoint-last-hint pending';
+        hint.id = 'ai-hint';
+        hint.textContent = '💡 Hinweis wird verfasst …';
+        box.appendChild(wrap);
+        box.style.display = 'block';
+        // Measured after it is on screen: a hidden element has no height to compare.
+        if (text.scrollHeight > text.clientHeight + 1) {
+            const more = document.createElement('button');
+            more.type = 'button';
+            more.className = 'checkpoint-last-more';
+            more.textContent = 'mehr anzeigen';
+            more.addEventListener('click', function() {
+                const clamped = text.classList.toggle('clamped');
+                more.textContent = clamped ? 'mehr anzeigen' : 'weniger anzeigen';
+            });
+            wrap.appendChild(more);
+        }
+        wrap.appendChild(hint);
+    }
+
+    function setHintText(hintText, report) {
+        const hint = document.getElementById('ai-hint');
+        if (!hint) return;
+        hint.classList.remove('pending');
+        // The report pointer names its own button with ⚠️; a bulb in front would
+        // dress it up as a content hint.
+        hint.textContent = report ? hintText : '💡 ' + hintText;
+    }
+
+    // No hint (call failed, budget spent, nothing usable): the line goes, the verdict
+    // and the Tipp button stay -- exactly the page as it was before hints existed.
+    function removePendingHint() {
+        const hint = document.getElementById('ai-hint');
+        if (hint) hint.remove();
+    }
+
+    // Not through `guarded`: nothing to lock (no button), and a failure is not an
+    // error to show -- it only means this attempt gets no adapted hint.
+    function fetchAiHint(answerId) {
+        post('{{ url_for("student_checkpoint_ai_hint") }}', {
+            slug: slug, subtask_id: subtaskId, question_index: questionIndex(), answer_id: answerId
+        }).then(function(data) {
+            if (answered || hintAnswerId !== answerId) return;
+            if (!data.ok || !data.hint) { removePendingHint(); return; }
+            setHintText(data.hint, data.report);
+        });
     }
 
     // Proactive AI transparency: shows what would be sent to the LLM (question +
@@ -473,6 +580,7 @@
     }
 
     function lockQuestion(resolutionText) {
+        clearLastAttempt();
         document.querySelectorAll('#answer-area input, #answer-area textarea').forEach(function(el) { el.disabled = true; });
         if (QuizInteractive.supports(questions[currentIdx].type)) {
             QuizInteractive.lock(document.getElementById('answer-area'));
@@ -518,11 +626,18 @@
             attemptsMade = data.attempts || (attemptsMade + 1);
             updateFlagReasons();
             var hintBtn = document.getElementById('hint-btn');
-            if (hintBtn) hintBtn.style.display = '';
+            const q = questions[currentIdx];
+            if (hintBtn && q.has_hints) hintBtn.style.display = '';
             if (data.correct) {
                 answered = true;
                 lockQuestion(null);
             } else {
+                // A fresh wrong verdict (not an unchanged resubmit, which carries no
+                // row id): its answer goes above the field and the hint is fetched.
+                if (q.adaptive_hint && data.answer_id) {
+                    showLastAttempt(answer, data.answer_id);
+                    fetchAiHint(data.answer_id);
+                }
                 // Re-lock Prüfen until something actually changes. withBusy has just
                 // restored the button to its pre-click enabled state, which is the one
                 // path that would otherwise let the same text straight back through.

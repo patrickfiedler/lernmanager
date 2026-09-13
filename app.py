@@ -3994,6 +3994,33 @@ def admin_checkpoint_answer_verdict(answer_id):
     return jsonify({'ok': True, 'teacher_verdict': verdict})
 
 
+def _hint_export_columns(answers, position):
+    """The AI hint on one answer row (migrate_059) and whether the attempt after it was
+    right -- the pairing chemie asked for. Derived from the next logged row rather than
+    stored: it IS that row, and a stored copy could disagree with it after a repair.
+    A give-up counts as not right; no next row (the student stopped) stays NULL.
+
+    answers: the question's logged answers in order; position: the row to describe.
+    A position past the end describes no row -- the report-only line in the CSV."""
+    answer = answers[position] if position < len(answers) else {}
+    next_answer = answers[position + 1] if position + 1 < len(answers) else None
+    if next_answer is None:
+        next_correct = None
+    elif next_answer.get('gave_up'):
+        next_correct = 0
+    else:
+        next_correct = next_answer.get('correct')
+    return {
+        'ki_hinweis': answer.get('hint_text'),
+        'ki_hinweis_luecke': answer.get('hint_gap'),
+        'ki_hinweis_tipp_nr': answer.get('hint_basis'),
+        'ki_hinweis_quelle': answer.get('hint_source'),
+        'ki_hinweis_status': answer.get('hint_status'),
+        'ki_hinweis_prompt_version': answer.get('hint_prompt_version'),
+        'naechster_versuch_richtig': next_correct,
+    }
+
+
 def _checkpoint_export_rows(sessions):
     """Flatten the review model to one row per logged answer -- the shape both
     exports share, so CSV and JSON can never drift apart in what they contain."""
@@ -4042,9 +4069,10 @@ def _checkpoint_export_rows(sessions):
                     'lehrer_score': attempt.get('teacher_score'),
                     'score_gueltig': attempt['effective_score'],
                     'lehrer_notiz_session': attempt.get('teacher_note'),
+                    **_hint_export_columns([], 0),
                     **flag_columns,
                 })
-            for answer in question['answers']:
+            for position, answer in enumerate(question['answers']):
                 rows.append({
                     'zeitpunkt': answer['timestamp'],
                     'schueler': attempt['student_name'],
@@ -4103,6 +4131,7 @@ def _checkpoint_export_rows(sessions):
                     'lehrer_score': attempt.get('teacher_score'),
                     'score_gueltig': attempt['effective_score'],
                     'lehrer_notiz_session': attempt.get('teacher_note'),
+                    **_hint_export_columns(question['answers'], position),
                     **flag_columns,
                 })
     return rows
@@ -4249,7 +4278,8 @@ def admin_checkpoint_export_json():
                                                   else 1 - int(answer['correct']))),
                     'lehrer_notiz': answer.get('teacher_note'),
                     'doppelklick_verdacht': answer['id'] in question['duplicate_ids'],
-                } for answer in question['answers']],
+                    **_hint_export_columns(question['answers'], position),
+                } for position, answer in enumerate(question['answers'])],
             } for question in entry['questions']],
         } for entry in sessions],
     }
@@ -5878,7 +5908,39 @@ def student_quiz_subtask(slug, position):
 # to checkpoint_attempt instead of quiz_attempt. See
 # docs/shared/lernmanager/chemie-data-contract.md §3-4.
 
-def _serialize_checkpoint_question(q, index):
+def _checkpoint_hints(subtask):
+    """The checkpoint-wide hints (`checkpoint_hints` in the content JSON)."""
+    raw = subtask.get('checkpoint_hints_json')
+    return json.loads(raw) if raw else []
+
+
+def _question_hints(question, checkpoint_hints):
+    """The hints for one question and where they came from: its own `hints` first,
+    the checkpoint's as the fallback (relay "Tipps je Frage", 2026-09-13). The source
+    is logged with every AI hint -- a weak checkpoint hint and a weak question hint
+    are different content fixes."""
+    if question.get('hints'):
+        return list(question['hints']), 'frage'
+    if checkpoint_hints:
+        return list(checkpoint_hints), 'checkpoint'
+    return [], None
+
+
+def _adaptive_hint_allowed(question):
+    """Whether a wrong answer to this question gets an AI hint after the verdict.
+
+    Only free text: every other type grades deterministically and has nothing to
+    adapt to. Not for `zweiwertig` questions (two possible answers -- any hint is the
+    solution, chemie 2026-09-13) and not for `bewertungsart: begriff` (chemie
+    2026-09-06: no targeted feedback on term questions). Both keep the button hints.
+    """
+    return (config.LLM_ENABLED
+            and question.get('type', 'multiple_choice') == 'short_answer'
+            and not question.get('zweiwertig')
+            and question.get('bewertungsart') != 'begriff')
+
+
+def _serialize_checkpoint_question(q, index, checkpoint_hints=(), last_attempt=None):
     """Question payload for the client. Same visibility rule as warmup
     (_serialize_question_for_js): MC options go to the client, fill_blank
     answers don't. Never include 'correct' - unlike warmup this is a
@@ -5899,6 +5961,12 @@ def _serialize_checkpoint_question(q, index):
         result['options'] = q.get('options', [])
     if q.get('image'):
         result['image'] = q['image']
+    # Flags only, never the hints themselves: they are fetched one at a time after a
+    # wrong attempt, which is what keeps them from being read ahead.
+    result['has_hints'] = bool(_question_hints(q, checkpoint_hints)[0])
+    result['adaptive_hint'] = _adaptive_hint_allowed(q)
+    if last_attempt:
+        result['last_attempt'] = last_attempt
     return result
 
 
@@ -6111,7 +6179,7 @@ def _handle_checkpoint_quiz(student, task, slug, subtask, position, klasse):
         flash('Für diesen Checkpoint sind aktuell keine Fragen verfügbar. Versuche es später erneut.', 'warning')
         return redirect(url_for('student_klasse', slug=slug))
 
-    hints = json.loads(subtask['checkpoint_hints_json']) if subtask.get('checkpoint_hints_json') else []
+    checkpoint_hints = _checkpoint_hints(subtask)
 
     progress = _checkpoint_progress(subtask['id'])
     # Entering or leaving retry mode starts a clean session: the two score
@@ -6152,7 +6220,21 @@ def _handle_checkpoint_quiz(student, task, slug, subtask, position, klasse):
 
     # enumerate over the STORED quiz, then filter -- so each question keeps the index
     # every route validates against even when the rendered list is a subset.
-    questions_json = json.dumps([_serialize_checkpoint_question(q, i) for i, q in open_questions])
+    def last_wrong_attempt(index, question):
+        """The newest wrong answer with its hint, so a reload lands where the student
+        was: old answer above the field, the hint under it, the field to revise."""
+        if not _adaptive_hint_allowed(question):
+            return None
+        row = models.get_last_checkpoint_answer(progress['session_uid'], index)
+        if not row or row['correct'] != 0:
+            return None
+        return {'answer_id': row['id'], 'answer_text': row['answer_text'],
+                'hint': row['hint_text'], 'hint_status': row['hint_status'],
+                'report': row['hint_status'] == 'melden'}
+
+    questions_json = json.dumps([
+        _serialize_checkpoint_question(q, i, checkpoint_hints, last_wrong_attempt(i, q))
+        for i, q in open_questions])
     transparency_mode = models.get_effective_transparency_mode(student['id'], klasse['id'] if klasse else None)
 
     # A student who already finished this checkpoint sees the standing result and
@@ -6182,7 +6264,7 @@ def _handle_checkpoint_quiz(student, task, slug, subtask, position, klasse):
     return render_template('student/checkpoint_quiz.html',
                            student=student, task=task, slug=slug, position=position,
                            subtask_id=subtask['id'], questions_json=questions_json,
-                           has_hints=bool(hints), transparency_mode=transparency_mode,
+                           transparency_mode=transparency_mode,
                            review=review, reopened=reopened, resume=resume,
                            flag_reasons=models.CHECKPOINT_FLAG_REASONS,
                            retry_flags=retry_flags,
@@ -6433,7 +6515,8 @@ def student_checkpoint_answer():
         progress['solved'][qidx] = True
     _save_checkpoint_progress(subtask_id, progress)
 
-    return jsonify({'correct': correct, 'attempts': progress['attempts'][qidx]})
+    return jsonify({'correct': correct, 'attempts': progress['attempts'][qidx],
+                    'answer_id': logged['id']})
 
 
 @app.route('/schueler/checkpoint/hinweis', methods=['POST'])
@@ -6448,15 +6531,20 @@ def student_checkpoint_hint():
     if not subtask:
         return jsonify({'error': 'Not found'}), 404
 
+    questions = json.loads(subtask['quiz_json']).get('questions', [])
+    question_index = data.get('question_index')
+    if not isinstance(question_index, int) or not (0 <= question_index < len(questions)):
+        return jsonify({'error': 'Invalid question'}), 400
+
     subtask_id = subtask['id']
-    qidx = str(data.get('question_index'))
+    qidx = str(question_index)
     progress = _checkpoint_progress(subtask_id)
     if progress['flagged'].get(qidx):
         return jsonify({'error': 'flagged', 'message': CHECKPOINT_FLAGGED_LOCK_MESSAGE}), 403
     if progress['attempts'].get(qidx, 0) < 1:
         return jsonify({'error': 'Erst nach dem ersten Versuch verfügbar.'}), 403
 
-    hints = json.loads(subtask['checkpoint_hints_json']) if subtask.get('checkpoint_hints_json') else []
+    hints, _ = _question_hints(questions[question_index], _checkpoint_hints(subtask))
     hint_index = progress['hints_used'].get(qidx, 0)
     if hint_index >= len(hints):
         return jsonify({'hint': None})
@@ -6464,6 +6552,74 @@ def student_checkpoint_hint():
     progress['hints_used'][qidx] = hint_index + 1
     _save_checkpoint_progress(subtask_id, progress)
     return jsonify({'hint': hints[hint_index], 'hints_remaining': len(hints) - hint_index - 1})
+
+
+@app.route('/schueler/checkpoint/ki-hinweis', methods=['POST'])
+@student_required
+def student_checkpoint_ai_hint():
+    """AJAX: an adapted hint for the student's latest wrong answer (step 4 of the chemie
+    agreement, docs/shared/requests/2026-09-13-...-tipps-je-frage-...). The page calls
+    it right after showing the verdict, so the verdict never waits for the hint.
+
+    Works on the logged row, never on text from the client: the hint has to fit what
+    was graded. `answer_id` from the client is only a staleness guard -- if a newer
+    attempt was logged in between, this hint is no longer wanted and none is made.
+
+    Never touches the score. After a wrong attempt the question can reach 2 at most
+    anyway, and hints_used stays what it always counted: button hints.
+
+    Every outcome is logged on the answer row (migrate_059), failures included --
+    chemie needs "which hint went with which failed attempt" to tell a weak hint from
+    a hard question. Returns {'hint': str|None, 'report': bool, 'answer_id': int|None}.
+    """
+    student_id = session['student_id']
+    data = request.get_json() or {}
+    task, subtask = _resolve_checkpoint_subtask(student_id, data.get('slug'), data.get('subtask_id'))
+    if not subtask:
+        return jsonify({'error': 'Not found'}), 404
+
+    questions = json.loads(subtask['quiz_json']).get('questions', [])
+    question_index = data.get('question_index')
+    if not isinstance(question_index, int) or not (0 <= question_index < len(questions)):
+        return jsonify({'error': 'Invalid question'}), 400
+    question = questions[question_index]
+    no_hint = {'hint': None, 'report': False, 'answer_id': None}
+    if not _adaptive_hint_allowed(question):
+        return jsonify(no_hint)
+
+    progress = _checkpoint_progress(subtask['id'])
+    qidx = str(question_index)
+    if progress['flagged'].get(qidx) or progress['solved'].get(qidx):
+        return jsonify(no_hint)
+
+    answer = models.get_last_checkpoint_answer(progress['session_uid'], question_index)
+    if not answer or answer['correct'] != 0 or answer['id'] != data.get('answer_id'):
+        return jsonify(no_hint)
+    if answer['hint_status'] is not None:
+        # Asked before for this very answer (a reload, a second tab): hand back what
+        # was shown then. Never a second call -- and a still-pending one shows nothing.
+        return jsonify({'hint': answer['hint_text'], 'answer_id': answer['id'],
+                        'report': answer['hint_status'] == 'melden'})
+    if not models.claim_checkpoint_answer_hint(answer['id']):
+        return jsonify(no_hint)
+
+    hints, source = _question_hints(question, _checkpoint_hints(subtask))
+    if not models.check_llm_rate_limit(student_id, usage_tag='checkpoint_hint'):
+        models.set_checkpoint_answer_hint(answer['id'], 'limit', source=source)
+        return jsonify(no_hint)
+
+    result = llm_grading.generate_checkpoint_hint(
+        question['text'], question.get('rubric', ''), answer['answer_text'], hints, student_id)
+    if result is None:
+        models.set_checkpoint_answer_hint(answer['id'], 'error', source=source)
+        return jsonify(no_hint)
+
+    models.set_checkpoint_answer_hint(
+        answer['id'], 'melden' if result['report'] else 'ok', text=result['text'],
+        gap=result['gap'], basis=result['basis'], source=source,
+        prompt_version=result['prompt_version'])
+    return jsonify({'hint': result['text'], 'report': result['report'],
+                    'answer_id': answer['id']})
 
 
 @app.route('/schueler/checkpoint/aufgeben', methods=['POST'])
