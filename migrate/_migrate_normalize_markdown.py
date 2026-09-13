@@ -20,31 +20,11 @@ import models
 def normalize_markdown(beschreibung):
     """Normalize markdown formatting for consistent rendering."""
 
-    # === YOUR PART ===
-    # TODO(human): Two tasks:
-    #
-    # 1. Replace \r\n with \n (one re.sub or str.replace call)
-    #
-    # 2. Make section markers bold. These appear at the START of a line:
-    #      🎯 Ziel:    →  **🎯 Ziel:**
-    #      📋 Aufgabe:  →  **📋 Aufgabe:**
-    #      💡 Tipp:     →  **💡 Tipp:**
-    #      ✅ Fertig wenn:  →  **✅ Fertig wenn:**
-    #
-    #    Hint: Use re.sub with a pattern that matches the emoji + label + colon
-    #    at the start of a line. The flag re.MULTILINE makes ^ match every
-    #    line start, not just the string start.
-    #    Example: re.sub(r'^(🎯 Ziel:)', r'**\1**', text, flags=re.MULTILINE)
-    #    But that's 4 separate calls. Can you do it in one?
-    #    Hint: (A|B|C) matches A or B or C.
-    #
-    # Don't touch anything below this line.
+    # Windows line endings, and bold section markers at line start
     beschreibung = beschreibung.replace('\r\n', '\n')
     beschreibung = re.sub(r'^(🎯 Ziel:|📋 Aufgabe:|💡 Tipp:|✅ Fertig wenn:)', r'**\1**', beschreibung, flags=re.MULTILINE)
-    
-    # === END YOUR PART ===
 
-    # === MY PART: Clean up inconsistent title formatting ===
+    # Clean up inconsistent title formatting
     lines = beschreibung.split('\n')
 
     # Strip stray markdown from title line (line 0)

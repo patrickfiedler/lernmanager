@@ -19,18 +19,10 @@ import models
 
 
 def clean_title(beschreibung):
-    """Clean the first line of a subtask description.
-
-    TODO(human): Use re.sub() to remove these patterns from the first line:
-        - "TEILAUFGABE <number>: " (e.g. "TEILAUFGABE 1: ", "TEILAUFGABE 10: ")
-        - "BONUS <number>: " but keep the word "BONUS" (e.g. "BONUS 1: " → "BONUS: ")
-
-    Hint: Only modify the FIRST line. Split on '\n', clean lines[0], rejoin.
-    Hint: re.sub(r'pattern', 'replacement', string) returns the cleaned string.
-    Hint: \d+ matches one or more digits, \s* matches optional whitespace.
+    """Clean the first line of a subtask description: drop "TEILAUFGABE n: "
+    and "(FREIWILLIG)", turn "BONUS n: " into "Bonus: ", "PFLICHT" into "Pflicht".
     """
     lines = beschreibung.split('\n')
-    # TODO(human): Clean lines[0] using two re.sub() calls
     lines[0] = re.sub(r'TEILAUFGABE \d+:\s*', '', lines[0])
     lines[0] = re.sub(r'(BONUS) \d+:\s*', r'Bonus: ', lines[0])
     lines[0] = re.sub(r'PFLICHT', 'Pflicht', lines[0])
