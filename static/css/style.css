@@ -1352,8 +1352,8 @@ tr.unsaved-row td {
 }
 
 .dot {
-    width: 1.5rem;
-    height: 1.5rem;
+    width: 1.875rem;
+    height: 1.875rem;
     border-radius: 50%;
     background: #d1d5db;  /* Gray for incomplete */
     transition: all 0.2s;
@@ -1365,7 +1365,7 @@ tr.unsaved-row td {
 }
 
 .dot-num {
-    font-size: 0.6rem;
+    font-size: 0.75rem;
     font-weight: 600;
     color: rgba(255, 255, 255, 0.85);
     line-height: 1;
@@ -1412,13 +1412,13 @@ tr.unsaved-row td {
 .dot.dot-quiz {
     background: #f59e0b;
     color: white;
-    font-size: 0.875rem;
+    font-size: 1rem;
     font-weight: 700;
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 1.75rem;
-    height: 1.75rem;
+    width: 2.125rem;
+    height: 2.125rem;
 }
 
 .dot.dot-quiz.completed {
@@ -1427,11 +1427,11 @@ tr.unsaved-row td {
 
 /* Subtask quiz dot (smaller than task dots) */
 .dot.dot-subtask-quiz {
-    width: 1.25rem;
-    height: 1.25rem;
+    width: 1.5rem;
+    height: 1.5rem;
     background: #d1d5db;
     color: white;
-    font-size: 0.7rem;
+    font-size: 0.85rem;
     font-weight: 700;
     display: flex;
     align-items: center;
@@ -1450,7 +1450,7 @@ tr.unsaved-row td {
    use that emoji, and the hand-drawn SVG it replaced was a second, different
    glyph for the same idea. */
 .dot.dot-fork {
-    font-size: 0.85rem;
+    font-size: 1rem;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1945,12 +1945,12 @@ body.easy-reading-mode .step-box {
 .dot.dot-gate {
     background: #d1d5db;
     color: white;
-    font-size: 0.85rem;
+    font-size: 1rem;
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 1.75rem;
-    height: 1.75rem;
+    width: 2.125rem;
+    height: 2.125rem;
 }
 .dot.dot-gate.available { background: #f59e0b; }
 .dot.dot-gate.completed { background: #10b981; }
@@ -2579,28 +2579,27 @@ body.split-pane-active .container {
         font-size: 1rem;
     }
 
-    /* UX Tier 1: Mobile touch targets (WCAG 2.1 AA - minimum 44x44px) */
-    .dot {
-        width: 44px;
-        height: 44px;
+    /* Mobile touch targets: 36px with a 12px gap. WCAG 2.2 AA (2.5.8) asks for
+       24px; the 44px used before is the AAA level and crowded the row on phones. */
+    .dot,
+    .dot.dot-quiz,
+    .dot.dot-gate {
+        width: 36px;
+        height: 36px;
     }
 
     .progress-dots {
-        gap: 16px;  /* Increased from 8px to prevent accidental taps */
-    }
-
-    .dot.dot-quiz {
-        font-size: 1rem;  /* Scale quiz text with dot size */
+        gap: 12px;
     }
 
     .dot-num {
-        font-size: 0.8rem;  /* Scale number with larger mobile dot */
+        font-size: 0.7rem;
     }
 
     .dot.dot-subtask-quiz {
-        width: 36px;
-        height: 36px;
-        font-size: 0.85rem;
+        width: 30px;
+        height: 30px;
+        font-size: 0.8rem;
     }
 }
 
