@@ -2251,11 +2251,20 @@ def is_question_visible_for_path(question, student_path):
 def get_pending_fork_groups(task_id, student_id):
     """Fork groups on this task with no stored choice yet for this student.
 
+    Used to block premature topic completion (any pending group blocks it).
+    Same dict shape as get_fork_groups.
+    """
+    return [g for g in get_fork_groups(task_id, student_id) if g['chosen'] is None]
+
+
+def get_fork_groups(task_id, student_id):
+    """Every fork group on this task, chosen or not.
+
     Returns an ordered list (by min reihenfolge) of dicts:
-    {fork_group, min_reihenfolge, branches: [{branch, label, note}, ...]},
-    branches ordered by their first subtask's reihenfolge. Used both to block
-    premature topic completion (any pending group blocks it) and to render
-    the branch-selection card + placeholder progress dot.
+    {fork_group, min_reihenfolge, chosen, branches: [{branch, label, note}, ...]},
+    branches ordered by their first subtask's reihenfolge; `chosen` is the
+    student's branch or None. The fork page stays a stop in the Thema after the
+    pick, so the topic page needs resolved groups too, not only pending ones.
     """
     with db_session() as conn:
         rows = conn.execute('''
@@ -2267,16 +2276,14 @@ def get_pending_fork_groups(task_id, student_id):
         if not rows:
             return []
         chosen = {
-            row['fork_group'] for row in conn.execute(
-                "SELECT fork_group FROM student_fork_choice WHERE student_id = ?", (student_id,)
+            row['fork_group']: row['fork_branch'] for row in conn.execute(
+                "SELECT fork_group, fork_branch FROM student_fork_choice WHERE student_id = ?", (student_id,)
             ).fetchall()
         }
 
     groups = {}
     for r in rows:
         group = r['fork_group']
-        if group in chosen:
-            continue
         entry = groups.setdefault(group, {'fork_group': group, 'min_reihenfolge': r['reihenfolge'], 'branches': {}})
         entry['min_reihenfolge'] = min(entry['min_reihenfolge'], r['reihenfolge'])
         branch = entry['branches'].setdefault(r['fork_branch'], {
@@ -2296,6 +2303,7 @@ def get_pending_fork_groups(task_id, student_id):
         result.append({
             'fork_group': group['fork_group'],
             'min_reihenfolge': group['min_reihenfolge'],
+            'chosen': chosen.get(group['fork_group']),
             'branches': branches,
         })
     return result

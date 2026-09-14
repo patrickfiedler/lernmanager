@@ -1449,12 +1449,18 @@ tr.unsaved-row td {
 /* Fork dot: 🔀 as text, same as the 📎 gate dot -- the fork cards below already
    use that emoji, and the hand-drawn SVG it replaced was a second, different
    glyph for the same idea. */
-.dot.dot-fork-pending {
-    background: #f59e0b;
+.dot.dot-fork {
     font-size: 0.85rem;
     display: flex;
     align-items: center;
     justify-content: center;
+}
+
+/* Before the pick: orange, also when it is the page on screen -- the blue
+   "current" fill would hide the one colour that says a choice is waiting. */
+.dot.dot-fork-pending,
+.dot.dot-fork-pending.current {
+    background: #f59e0b;
 }
 
 /* Zusatz task dots — circle with dashed border, ★ prefix in number */

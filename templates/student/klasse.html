@@ -22,7 +22,7 @@
     {% endif %}{% endfor %}
 
     <!-- Progress Section with Dots -->
-    {% if subtasks or pending_fork_dot_positions %}
+    {% if subtasks or fork_dot_positions %}
     <div class="progress-section">
         <div class="progress-header">
             <div class="progress-text" id="progress-text">
@@ -32,21 +32,32 @@
             </div>
             <div class="progress-dots-column">
             <div class="progress-dots" role="group" aria-label="Aufgabenfortschritt">
-                {% macro fork_pending_dot() %}
-                {% set fork_hint = 'Verzweigung: noch ' ~ pending_fork_remaining ~ ' Aufgabe' ~ ('n' if pending_fork_remaining != 1 else '') ~ ' davor erledigen' if pending_fork_remaining else 'Verzweigung: du kannst jetzt wählen' %}
-                <div class="dot dot-fork-pending" role="img" aria-label="{{ fork_hint }}" title="{{ fork_hint }}">🔀</div>
+                {% macro fork_dot(fg) %}
+                {% if fg.chosen %}{% set fork_hint = 'Verzweigung: dein gewählter Weg' %}
+                {% elif fg.remaining %}{% set fork_hint = 'Verzweigung: noch ' ~ fg.remaining ~ ' Aufgabe' ~ ('n' if fg.remaining != 1 else '') ~ ' davor erledigen' %}
+                {% else %}{% set fork_hint = 'Verzweigung: du kannst jetzt wählen' %}{% endif %}
+                <div class="dot dot-fork {% if fg.chosen %}completed{% else %}dot-fork-pending{% endif %}{% if shown_fork and shown_fork.fork_group == fg.fork_group %} current{% endif %}"
+                     role="button"
+                     tabindex="0"
+                     aria-label="{{ fork_hint }}"
+                     title="{{ fork_hint }}"
+                     data-fork-group="{{ fg.fork_group }}"
+                     onclick="navigateToFork(this.dataset.forkGroup)"
+                     {% if shown_fork and shown_fork.fork_group == fg.fork_group %}aria-current="true"{% endif %}
+                     onkeydown="handleDotKeydown(event)">🔀</div>
                 {% endmacro %}
-                {% if 0 in pending_fork_dot_positions %}{{ fork_pending_dot() }}{% endif %}
+                {% if 0 in fork_dot_positions %}{{ fork_dot(fork_dot_positions[0]) }}{% endif %}
                 {% for sub in subtasks %}
                 {% set has_quiz = sub.quiz_json %}
                 {% set quiz_passed = subtask_quiz_status.get(sub.id, false) %}
                 {% set quiz_available = true if sub.checkpoint_type == 'quiz' else sub.erledigt %}
                 {% set disp = loop.index | aufgabe_label(subtasks) %}
-                <div class="dot dot-subtask {% if sub.erledigt %}completed {% endif %}{% if current_subtask and sub.id == current_subtask.id %}current{% endif %}{% if not sub.get('required', true) %} optional{% endif %}"
+                {% set is_current = current_subtask and sub.id == current_subtask.id and not shown_fork %}
+                <div class="dot dot-subtask {% if sub.erledigt %}completed {% endif %}{% if is_current %}current{% endif %}{% if not sub.get('required', true) %} optional{% endif %}"
                      role="button"
                      tabindex="0"
                      aria-label="Aufgabe {{ disp }}: {{ sub.beschreibung[:50] }}{% if sub.beschreibung|length > 50 %}...{% endif %}{% if sub.erledigt %} - Erledigt{% endif %}{% if not sub.get('required', true) %} (Zusatz){% endif %}"
-                     {% if current_subtask and sub.id == current_subtask.id %}aria-current="true"{% endif %}
+                     {% if is_current %}aria-current="true"{% endif %}
                      data-subtask-position="{{ loop.index }}"
                      data-required="{{ 'true' if sub.get('required', true) else 'false' }}"
                      data-is-intro="{{ 'true' if sub.get('is_intro') else 'false' }}"
@@ -69,9 +80,9 @@
                    the very condition the line after the loop tests. A fork that sits
                    after every visible subtask -- the normal shape when the branches end
                    the Thema -- otherwise drew its dot twice. #}
-                {% if not loop.last and loop.index in pending_fork_dot_positions %}{{ fork_pending_dot() }}{% endif %}
+                {% if not loop.last and loop.index in fork_dot_positions %}{{ fork_dot(fork_dot_positions[loop.index]) }}{% endif %}
                 {% endfor %}
-                {% if (subtasks|length) in pending_fork_dot_positions %}{{ fork_pending_dot() }}{% endif %}
+                {% if (subtasks|length) in fork_dot_positions %}{{ fork_dot(fork_dot_positions[subtasks|length]) }}{% endif %}
                 {# Hoisted out of the capstone-gate branch: the quiz dot below needs it
                    too, and a topic without a gate would otherwise read an undefined name. #}
                 {% set all_done = subtasks|selectattr('erledigt')|list|length == subtasks|length %}
@@ -109,12 +120,12 @@
     {% endif %}
 
     <!-- Current Task/Subtask with Side Navigation -->
-    {% if current_subtask or subtasks or pending_fork %}
+    {% if current_subtask or subtasks or shown_fork %}
     {% set active_subtask = current_subtask or (subtasks|rejectattr('erledigt')|list|first) %}
     {% set current_index = subtasks.index(active_subtask) if active_subtask and active_subtask in subtasks else 0 %}
-    {% set has_prev = current_index > 0 %}
+    {% set has_prev = current_index > 0 or current_index in fork_dot_positions %}
     {% set current_has_unpassed_quiz = active_subtask.quiz_json and not subtask_quiz_status.get(active_subtask.id, false) %}
-    {% set has_next = current_has_unpassed_quiz or current_index < (subtasks|length - 1) or (current_index == (subtasks|length - 1) and task.quiz_json) %}
+    {% set has_next = current_has_unpassed_quiz or current_index < (subtasks|length - 1) or (current_index + 1) in fork_dot_positions or (current_index == (subtasks|length - 1) and task.quiz_json) %}
 
     {# An artifact check never withholds the completion checkbox (2026-09-03). Every
        result is a hint; the student decides when to move on, and the attempt log
@@ -135,23 +146,46 @@
     </div>
     {% endif %}
 
-    {% if pending_fork %}
-    <div id="fork-picker-card" class="card mt-2" style="border-left: 4px solid #f59e0b;">
+    {% if shown_fork %}
+    {% set chosen_branch = shown_fork.branches|selectattr('branch', 'equalto', shown_fork.chosen)|first %}
+    <div id="fork-picker-card" class="card mt-2" style="border-left: 4px solid {{ '#10b981' if shown_fork.chosen else '#f59e0b' }};">
+        {% if shown_fork.chosen %}
+        <div class="card-header">🔀 Dein Weg</div>
+        <p style="padding: 0 1rem;">
+            Du hast <strong>{{ chosen_branch.label or chosen_branch.branch }}</strong> gewählt.
+            {% if shown_fork.locked %}Deine Wahl ist festgelegt, weil du darin schon eine Aufgabe erledigt hast.
+            {% else %}Du kannst noch wechseln, bis du die erste Aufgabe darin abgeschlossen hast. Danach ist deine Wahl festgelegt.{% endif %}
+        </p>
+        {% else %}
         <div class="card-header">🔀 Wähle deinen Weg</div>
         <p style="padding: 0 1rem;">Ab hier geht es in verschiedene Richtungen weiter. Wähle einen der folgenden Wege — du kannst deine Wahl noch ändern, bis du die erste Aufgabe darin abgeschlossen hast. Danach ist sie festgelegt.</p>
-        {% for branch in pending_fork.branches %}
-        <div class="card mt-1" style="margin: 0 1rem 1rem;">
-            <div class="card-header">{{ branch.label or branch.branch }}</div>
+        {% endif %}
+        {% for branch in shown_fork.branches %}
+        {% set is_chosen = branch.branch == shown_fork.chosen %}
+        <div class="card mt-1" style="margin: 0 1rem 1rem;{% if is_chosen %} border: 2px solid #10b981;{% endif %}">
+            <div class="card-header">{{ branch.label or branch.branch }}{% if is_chosen %} ✅ Deine Wahl{% endif %}</div>
             {% if branch.note %}
             <div class="markdown-content" style="padding: 0 1rem;">{{ branch.note | markdown }}</div>
             {% endif %}
-            <form method="POST" action="{{ url_for('student_fork_choice', slug=task|topic_slug, fork_group=pending_fork.fork_group) }}" style="padding: 0.5rem 1rem 1rem;">
+            {# No button on the pick itself, on a locked pick, or while tasks before
+               the fork are still open (the card above says which). #}
+            {% if not is_chosen and not shown_fork.locked and not shown_fork.remaining %}
+            <form method="POST" action="{{ url_for('student_fork_choice', slug=task|topic_slug, fork_group=shown_fork.fork_group) }}" style="padding: 0.5rem 1rem 1rem;">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <input type="hidden" name="branch" value="{{ branch.branch }}">
-                <button type="submit" class="btn btn-primary">{{ branch.label or branch.branch }} wählen</button>
+                <button type="submit" class="btn {{ 'btn-secondary' if shown_fork.chosen else 'btn-primary' }}">{{ branch.label or branch.branch }} wählen</button>
             </form>
+            {% endif %}
         </div>
         {% endfor %}
+        <div style="display: flex; justify-content: space-between; padding: 0 1rem 1rem;">
+            {% if shown_fork.position > 0 %}
+            <button type="button" class="btn btn-secondary" onclick="navigateToSubtask({{ shown_fork.position }})">← Zurück</button>
+            {% else %}<span></span>{% endif %}
+            {% if shown_fork.chosen and shown_fork.position < subtasks|length %}
+            <button type="button" class="btn btn-secondary" onclick="navigateToSubtask({{ shown_fork.position + 1 }})">Weiter →</button>
+            {% endif %}
+        </div>
     </div>
     {% else %}
     <div class="task-navigation-wrapper">
@@ -590,6 +624,8 @@
 {% set current_index = subtasks.index(_active) if _active and _active in subtasks else 0 %}
 const topicSlug = '{{ task|topic_slug }}';
 const subtaskCount = {{ subtasks|length }};
+// Fork stops by position: a fork at N sits right after Aufgabe N (0 = before the first).
+const forkAtPosition = { {% for pos, fg in fork_dot_positions.items() %}{{ pos }}: {{ fg.fork_group|tojson }}, {% endfor %} };
 const gatePosition = {{ capstone_gate_position or 'null' }};
 const gatePassed = {{ 'true' if capstone_gate_passed else 'false' }};
 const artifactKeyword = {{ (graded_artifact.keyword if graded_artifact and graded_artifact.keyword else None) | tojson }};
@@ -676,10 +712,11 @@ function goToNextSubtask(currentIndex) {
         navigateToSubtaskQuiz(position, false, true);
         return;
     }
-    if (currentIndex < subtaskCount - 1) {
-        const url = new URL(window.location);
-        url.searchParams.set('aufgabe', currentIndex + 2);
-        window.location.href = url.toString();
+    // A fork right after this task is the next stop, before the task behind it.
+    if (forkAtPosition[position]) {
+        navigateToFork(forkAtPosition[position]);
+    } else if (currentIndex < subtaskCount - 1) {
+        navigateToSubtask(currentIndex + 2);
     } else {
         const topicQuizDot = document.querySelector('.dot-quiz');
         if (topicQuizDot) {
@@ -689,16 +726,25 @@ function goToNextSubtask(currentIndex) {
 }
 
 function goToPrevSubtask(currentIndex) {
-    if (currentIndex > 0) {
-        const url = new URL(window.location);
-        url.searchParams.set('aufgabe', currentIndex);
-        window.location.href = url.toString();
+    if (forkAtPosition[currentIndex]) {
+        navigateToFork(forkAtPosition[currentIndex]);
+    } else if (currentIndex > 0) {
+        navigateToSubtask(currentIndex);
     }
 }
 
+// `aufgabe` and `weg` address the two kinds of stop; a URL carries one of them.
 function navigateToSubtask(position) {
     const url = new URL(window.location);
+    url.searchParams.delete('weg');
     url.searchParams.set('aufgabe', position);
+    window.location.href = url.toString();
+}
+
+function navigateToFork(forkGroup) {
+    const url = new URL(window.location);
+    url.searchParams.delete('aufgabe');
+    url.searchParams.set('weg', forkGroup);
     window.location.href = url.toString();
 }
 

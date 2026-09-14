@@ -4967,32 +4967,38 @@ def student_klasse(slug):
         else:
             materials = models.get_materials(task['task_id'])
 
-    # Fork/Choice: pending (unresolved) fork_groups on this task, excluded from
-    # `subtasks` above. One placeholder dot per pending group, positioned by
-    # where it sits among the currently-visible subtasks (see
-    # docs/shared/lernmanager/fork-choice-artifact-model.md).
-    pending_fork_groups = models.get_pending_fork_groups(task['task_id'], student_id) if task else []
-    pending_fork_dot_positions = {}
-    for fg in pending_fork_groups:
-        idx = sum(1 for s in subtasks if s['reihenfolge'] < fg['min_reihenfolge'])
-        pending_fork_dot_positions[idx] = fg
-
-    # The selection screen replaces the normal subtask content once every
-    # subtask before the fork is done -- checked directly against completion
-    # status, not against `current_subtask` (which defaults to position 1 on
-    # a fresh page load, not "first incomplete" -- see todo.md § Bugs).
-    pending_fork = None
-    # How many subtasks still stand between the student and the choice. The dot alone
-    # said nothing: a production screenshot (Kl.6, 2026-09-06) shows a student parked
-    # in front of an orange fork icon with no way to act on it and no statement of
-    # what would unlock it. 0 means the picker is showing.
-    pending_fork_remaining = 0
-    if pending_fork_groups:
-        fg = pending_fork_groups[0]
+    # Fork/Choice: every fork_group is a stop of its own in the Thema -- a dot and a
+    # page at ?weg=<fork_group> -- before the pick (the picker) and after it (the pick,
+    # changeable until locked). Kl.6 „Mein digitaler Alltag", 2026-09-14: the picker
+    # used to replace every page once E/1/2 were done, so those tasks were
+    # unreachable until the student chose. Placed by where the group sits among the
+    # visible subtasks; its branches stay out of `subtasks` until chosen
+    # (docs/shared/lernmanager/fork-choice-artifact-model.md).
+    fork_groups = models.get_fork_groups(task['task_id'], student_id)
+    fork_dot_positions = {}
+    for fg in fork_groups:
         before = [s for s in subtasks if s['reihenfolge'] < fg['min_reihenfolge']]
-        pending_fork_remaining = sum(1 for s in before if not s['erledigt'])
-        if not pending_fork_remaining:
-            pending_fork = fg
+        fg['position'] = len(before)
+        # Tasks still between the student and the choice; the picker waits for 0.
+        fg['remaining'] = sum(1 for s in before if not s['erledigt'])
+        fg['locked'] = bool(fg['chosen']) and models.is_fork_choice_locked(
+            student_id, fg['fork_group'], fg['chosen'])
+        fork_dot_positions[fg['position']] = fg
+    pending_fork_groups = [fg for fg in fork_groups if fg['chosen'] is None]
+    # The dot alone said nothing (production screenshot, Kl.6, 2026-09-06): the page
+    # has to state what unlocks the choice.
+    pending_fork_remaining = pending_fork_groups[0]['remaining'] if pending_fork_groups else 0
+
+    # Which fork page, if any, takes the place of the task content: the one the URL
+    # names, else -- only on a plain return to the Thema, never when ?aufgabe asks
+    # for a task -- the first open fork the student has reached.
+    requested_fork = request.args.get('weg')
+    if requested_fork:
+        shown_fork = next((fg for fg in fork_groups if fg['fork_group'] == requested_fork), None)
+    elif not requested_position and pending_fork_groups and not pending_fork_remaining:
+        shown_fork = pending_fork_groups[0]
+    else:
+        shown_fork = None
 
     # Next queued topic -- only once the current one is done. _refresh_task_completion
     # above re-derives `abgeschlossen` first, so a topic that quietly became complete
@@ -5117,9 +5123,9 @@ def student_klasse(slug):
                            artifact_criteria=artifact_criteria,
                            artifact_llm_feedback=artifact_llm_feedback,
                            artifact_last_position=artifact_last_position,
-                           pending_fork=pending_fork,
+                           shown_fork=shown_fork,
                            pending_fork_remaining=pending_fork_remaining,
-                           pending_fork_dot_positions=pending_fork_dot_positions)
+                           fork_dot_positions=fork_dot_positions)
 
 
 @app.route('/schueler/thema/<slug>/aufgabe/<int:position>', methods=['POST'])
