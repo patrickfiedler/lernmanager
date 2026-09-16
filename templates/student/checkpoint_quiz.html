@@ -103,14 +103,34 @@
         <div id="transparency-area" style="display: none;"></div>
         <div id="feedback-area" style="display: none;"></div>
         <div id="hint-area" style="display: none;"></div>
-        <div class="mt-2 flex gap-1">
-            <button class="btn btn-primary" id="check-btn" onclick="checkAnswer()">Prüfen</button>
-            <button class="btn btn-primary" id="next-btn" onclick="nextQuestion()" style="display: none;">Weiter →</button>
+        {# Prüfen sits right and well below the field, so a tap aimed at the text
+           does not send it. Tipp stays left in the same row: it helps, it costs
+           nothing irreversible. #}
+        <div class="checkpoint-actions">
             {# Always rendered: whether a question has hints is per question now
                (its own `hints` or the checkpoint's), so JS decides. #}
             <button class="btn btn-secondary" id="hint-btn" onclick="requestHint()" style="display: none;">💡 Tipp</button>
-            <button class="btn btn-secondary" id="giveup-btn" onclick="giveUp()">Ich weiß es nicht</button>
-            <button class="btn btn-secondary" id="flag-btn" onclick="openFlagPanel()">⚠️ Frage melden</button>
+            <button class="btn btn-primary" id="check-btn" onclick="checkAnswer()">Prüfen</button>
+            <button class="btn btn-primary" id="next-btn" onclick="nextQuestion()" style="display: none;">Weiter →</button>
+        </div>
+        {# Own row, further down: giving up is 0 points and cannot be undone. #}
+        <div class="checkpoint-secondary-actions">
+            <button class="btn btn-secondary btn-sm" id="giveup-btn" onclick="giveUp()">Ich weiß es nicht</button>
+            <button class="btn btn-secondary btn-sm" id="flag-btn" onclick="openFlagPanel()">⚠️ Frage melden</button>
+        </div>
+
+        {# Inline, never confirm(): same reason as the flag panel below. #}
+        <div id="giveup-panel" class="checkpoint-flag-panel" style="display: none;">
+            <p class="checkpoint-flag-lead">Aufgeben ist nur eine Option unter vielen.</p>
+            <p>
+                Die Frage wird mit 0 Punkten bewertet und du kannst weitermachen.
+                Du kannst es aber auch einfach versuchen<span id="giveup-tipp-text">, oder dir einen Tipp holen</span>.
+                In diesem Fall könntest du etwas lernen und 2 Punkte holen.
+            </p>
+            <div class="mt-1 flex gap-1">
+                <button class="btn btn-primary" id="giveup-confirm-btn" onclick="confirmGiveUp()">Ja, aufgeben</button>
+                <button class="btn btn-secondary" onclick="closeGiveUpPanel()">Abbrechen</button>
+            </div>
         </div>
 
         {# Inline, never a confirm() dialog: a browser modal blocks the page and
@@ -170,6 +190,9 @@
 .checkpoint-reopened-banner p { margin: 0.15rem 0; }
 .checkpoint-reopened-lead { font-size: 1.05rem; }
 .checkpoint-reopened-feedback { margin-top: 0.4rem !important; font-size: 0.9rem; }
+.checkpoint-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1.5rem; justify-content: flex-end; }
+.checkpoint-actions #hint-btn { margin-right: auto; }
+.checkpoint-secondary-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 2rem; }
 .checkpoint-flag-panel { border-left: 4px solid #d97706; background: #fffbeb;
                          border-radius: 4px; padding: 0.75rem 0.9rem; margin-top: 1rem; }
 .checkpoint-flag-lead { margin: 0 0 0.5rem 0; font-weight: 600; }
@@ -252,6 +275,7 @@
         attemptsMade = 0;
         lastSubmitted = null;   // a new question has nothing submitted against it yet
         closeFlagPanel();
+        closeGiveUpPanel();
         document.getElementById('flag-btn').style.display = '';
 
         document.getElementById('progress-text').textContent =
@@ -296,7 +320,7 @@
             const textarea = document.createElement('textarea');
             textarea.className = 'form-control';
             textarea.id = 'short-answer-input';
-            textarea.rows = 4;
+            textarea.rows = 6;
             textarea.enterKeyHint = 'enter';   // a plain Return key, never "Go"/"Send"
             textarea.placeholder = 'Antwort eingeben...';
             textarea.addEventListener('input', function() { updateCheckBtnState(); updateTransparencyBlock(); });
@@ -597,6 +621,7 @@
         document.getElementById('giveup-btn').style.display = 'none';
         document.getElementById('flag-btn').style.display = 'none';
         closeFlagPanel();
+        closeGiveUpPanel();
         var hintBtn = document.getElementById('hint-btn');
         if (hintBtn) hintBtn.style.display = 'none';
         document.getElementById('next-btn').style.display = '';
@@ -693,6 +718,7 @@
     // Reporting a question: no grading, no solution, no score until a teacher has
     // ruled. The draft the student had typed goes along as evidence.
     window.openFlagPanel = function() {
+        closeGiveUpPanel();
         updateFlagReasons();
         document.getElementById('flag-panel').style.display = 'block';
         document.getElementById('flag-btn').style.display = 'none';
@@ -740,7 +766,22 @@
     };
 
     window.giveUp = function() {
-        var btn = document.getElementById('giveup-btn');
+        if (answered) return;
+        closeFlagPanel();
+        // Not every question has a Tipp: only offer one the student can actually press.
+        document.getElementById('giveup-tipp-text').style.display =
+            document.getElementById('hint-btn').style.display === 'none' ? 'none' : '';
+        document.getElementById('giveup-panel').style.display = 'block';
+        document.getElementById('giveup-btn').style.display = 'none';
+    };
+
+    window.closeGiveUpPanel = function() {
+        document.getElementById('giveup-panel').style.display = 'none';
+        if (!answered) document.getElementById('giveup-btn').style.display = '';
+    };
+
+    window.confirmGiveUp = function() {
+        var btn = document.getElementById('giveup-confirm-btn');
         if (answered || LLMButton.isBusy(btn)) return;
         guarded(btn, LLMButton.WAITING_LABELS.generic, '{{ url_for("student_checkpoint_give_up") }}', {
             slug: slug, subtask_id: subtaskId, question_index: questionIndex()
