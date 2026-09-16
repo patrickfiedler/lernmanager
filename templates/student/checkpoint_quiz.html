@@ -1,10 +1,13 @@
 {% extends 'base.html' %}
 
-{% block title %}Checkpoint - {{ task.name }} - Lernmanager{% endblock %}
+{% block title %}{{ checkpoint_titel or 'Checkpoint' }} - {{ task.name }} - Lernmanager{% endblock %}
 
 {% block content %}
 <div class="flex flex-between flex-center mb-2">
-    <h1>🧠 Checkpoint</h1>
+    <div>
+        <p class="text-muted" style="margin: 0;">{{ task.name }}</p>
+        <h1 style="margin: 0;">🧠 {{ checkpoint_titel or 'Checkpoint' }}</h1>
+    </div>
     <a href="{{ url_for('student_klasse', slug=slug) }}" class="btn btn-secondary">← Zurück</a>
 </div>
 

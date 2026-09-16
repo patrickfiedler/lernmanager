@@ -6284,6 +6284,7 @@ def _handle_checkpoint_quiz(student, task, slug, subtask, position, klasse):
     return render_template('student/checkpoint_quiz.html',
                            student=student, task=task, slug=slug, position=position,
                            subtask_id=subtask['id'], questions_json=questions_json,
+                           checkpoint_titel=aufgabe_titel(subtask['beschreibung']),
                            transparency_mode=transparency_mode,
                            review=review, reopened=reopened, resume=resume,
                            flag_reasons=models.CHECKPOINT_FLAG_REASONS,
