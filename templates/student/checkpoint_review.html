@@ -1,0 +1,121 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ checkpoint_titel or 'Checkpoint' }} - {{ task.name }} - Lernmanager{% endblock %}
+
+{% block content %}
+{# Read-only review of a finished checkpoint (2026-09-16). No Prüfen, no retake: only a
+   teacher reset or an owed question opens the checkpoint again. Points per question,
+   never a total; no model answer, no criteria -- see app._checkpoint_review. #}
+<div class="flex flex-between flex-center mb-2">
+    <div>
+        <p class="text-muted" style="margin: 0;">{{ task.name }}</p>
+        <h1 style="margin: 0;">🧠 {{ checkpoint_titel or 'Checkpoint' }}</h1>
+    </div>
+    <a href="{{ url_for('student_klasse', slug=slug) }}" class="btn btn-secondary">← Zurück</a>
+</div>
+
+<div class="checkpoint-review-banner checkpoint-review-{{ 'unreviewed' if review.provisional else review.status }}">
+    <p class="checkpoint-review-lead">
+        {% if review.provisional %}
+        ⏳ Abgeschlossen, aber noch nicht endgültig: du hast eine Frage gemeldet, und
+        deine Lehrkraft schaut sie sich noch an.
+        {% elif review.status == 'unreviewed' %}
+        ✅ Abgeschlossen. Deine Lehrkraft hat das noch nicht geprüft, die Punkte können
+        sich noch ändern.
+        {% elif review.status == 'confirmed' %}
+        ✅ Abgeschlossen, von deiner Lehrkraft geprüft und bestätigt.
+        {% else %}
+        ✏️ Abgeschlossen, von deiner Lehrkraft geprüft und geändert.
+        {% endif %}
+    </p>
+
+    {% if review.questions and review.legacy_score is none %}
+    <p class="checkpoint-review-points" aria-label="Punkte je Frage">
+        {% for q in review.questions %}<span class="cp-point">F{{ q.nr }}&nbsp;<strong>{{ '–' if q.points is none else q.points }}</strong></span>{% if not loop.last %} · {% endif %}{% endfor %}
+    </p>
+    <p class="text-muted checkpoint-review-note">Punkte je Frage: 3 = im ersten Versuch ohne Tipp, 2 = mit Tipp oder mehreren Versuchen, 0 = nicht gelöst, – = zählt (noch) nicht.</p>
+    {% elif review.legacy_score is not none %}
+    <p class="checkpoint-review-points">
+        Für diesen Checkpoint sind keine Punkte je Frage gespeichert. Die schwächste
+        Frage hatte {{ review.legacy_score }} von 3 Punkten.
+    </p>
+    {% endif %}
+
+    {% if review.kern %}
+    <p class="checkpoint-review-note">
+        {% if review.kern == 'erfuellt' %}Kern-Checkpoint: jede Frage ist gelöst.
+        {% elif review.kern == 'nicht_erfuellt' %}Kern-Checkpoint: noch nicht jede Frage ist gelöst.
+        {% else %}Kern-Checkpoint: steht erst fest, wenn deine Lehrkraft die gemeldete Frage angeschaut hat.
+        {% endif %}
+    </p>
+    {% endif %}
+
+    {% if review.feedback %}
+    <p class="checkpoint-review-feedback">💬 {{ review.feedback }}</p>
+    {% endif %}
+</div>
+
+{% for q in review.questions %}
+<details class="card mb-1 cp-question">
+    <summary>
+        <strong>Frage {{ q.nr }}</strong>
+        {% if review.legacy_score is none %}
+        · {{ 'zählt nicht' if q.points is none else q.points ~ (' Punkt' if q.points == 1 else ' Punkte') }}
+        {% if q.why %}<span class="text-muted">· {{ q.why }}</span>{% endif %}
+        {% endif %}
+    </summary>
+    <div class="cp-question-body">
+        <p class="cp-question-text">{{ q.text }}</p>
+        {% if q.final_answer %}
+        <p class="cp-label">Deine Antwort</p>
+        <div class="cp-answer">{{ q.final_answer }}</div>
+        {% endif %}
+
+        {% if q.attempts or q.hints_seen %}
+        <details class="cp-attempts">
+            <summary>Alle Versuche ({{ q.attempts|length }}){% if q.hints_seen %} und Tipps{% endif %}</summary>
+            {% for a in q.attempts %}
+            <div class="cp-attempt cp-attempt-{{ 'ok' if a.verdict == 'richtig' else 'no' if a.verdict == 'noch nicht richtig' else 'other' }}">
+                <p class="cp-label">Versuch {{ loop.index }}: {{ a.verdict }}</p>
+                {% if a.answer %}<div class="cp-answer">{{ a.answer }}</div>{% endif %}
+                {% if a.hint %}<p class="cp-hint">💡 {{ a.hint }}</p>{% endif %}
+            </div>
+            {% endfor %}
+            {% if q.hints_seen %}
+            <p class="cp-label">Tipps, die du dir geholt hast</p>
+            <ol class="cp-hints">
+                {% for h in q.hints_seen %}<li>{{ h }}</li>{% endfor %}
+            </ol>
+            {% endif %}
+        </details>
+        {% endif %}
+    </div>
+</details>
+{% endfor %}
+
+<style>
+/* Same vocabulary as the checkpoint page and quiz_result.html: coloured left border
+   for the state, ✅/⏳/✏️ for what happened. */
+.checkpoint-review-banner { border-left: 4px solid #9ca3af; background: #f9fafb;
+                            border-radius: 4px; padding: 0.6rem 0.9rem; margin-bottom: 1rem; }
+.checkpoint-review-banner p { margin: 0.25rem 0; }
+.checkpoint-review-confirmed { border-left-color: #16a34a; background: #f0fdf4; }
+.checkpoint-review-changed   { border-left-color: #2563eb; background: #eff6ff; }
+.checkpoint-review-points { font-size: 1.1rem; }
+.checkpoint-review-note { font-size: 0.85rem; }
+.checkpoint-review-feedback { margin-top: 0.5rem !important; }
+.cp-point { white-space: nowrap; }
+.cp-question.card { padding: 0; }
+.cp-question > summary { cursor: pointer; padding: 0.75rem 1rem; }
+.cp-question-body { padding: 0 1rem 0.75rem; }
+.cp-question-text { font-weight: 600; }
+.cp-label { font-size: 0.85rem; color: #6b7280; margin: 0.5rem 0 0.15rem; }
+.cp-answer { white-space: pre-wrap; background: #f9fafb; border-radius: 4px; padding: 0.4rem 0.6rem; }
+.cp-attempts > summary { cursor: pointer; margin-top: 0.75rem; color: #2563eb; }
+.cp-attempt { border-left: 4px solid #9ca3af; padding-left: 0.75rem; margin-top: 0.5rem; }
+.cp-attempt-ok { border-left-color: #16a34a; }
+.cp-attempt-no { border-left-color: #dc2626; }
+.cp-hint { margin: 0.3rem 0 0; }
+.cp-hints { margin: 0.25rem 0 0 1.25rem; }
+</style>
+{% endblock %}

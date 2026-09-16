@@ -66,6 +66,18 @@ def test_a_sat_checkpoint_shows_its_points(data, client):
     assert "3 von 3 Punkten" in _get(client, data)
 
 
+def test_per_question_points_replace_the_session_minimum(data, client):
+    """Patrick 2026-09-16: 3, 3, 0 used to read "0 von 3 Punkten" -- the min() that feeds
+    the Kern gate, not what the questions scored."""
+    models.create_checkpoint_attempt(
+        data["student_id"], data["checkpoint_id"], data["task_id"], "quiz", "kern",
+        score=0, attempt_count=3, hint_count=0, quiz_snapshot_json=json.dumps(QUIZ),
+        session_uid="sess-q", question_scores_json=json.dumps({"0": 3, "1": 3, "2": 0}))
+    body = " ".join(_get(client, data).split())
+    assert "Punkte je Frage: F1 3 · F2 3 · F3 0" in body
+    assert "0 von 3 Punkten" not in body
+
+
 def test_the_teacher_override_is_what_the_student_reads(data, client):
     """effective_checkpoint_score, not the computed one -- a student must never be
     shown a number their teacher has already corrected away."""
@@ -86,7 +98,21 @@ def test_a_rejected_report_asks_for_the_redo(data, client):
     models.resolve_checkpoint_flag(flag_id, "abgelehnt", "Antwort war unvollständig.", 1)
 
     body = _get(client, data)
-    assert "noch einmal beantworten" in body
+    assert "Frage 1 wartet noch auf dich" in " ".join(body.split())
+
+
+def test_a_question_the_teacher_sent_back_asks_for_the_redo(data, client):
+    """Chemie request 2026-09-13: 'nachbesserung' used to send nobody back -- only a
+    rejected report did. Both are owed questions, and the notice names the question."""
+    attempt_id = _sit(data, score=2)
+    models.create_checkpoint_flag(
+        data["checkpoint_id"], 0, source="teacher", student_id=data["student_id"],
+        status="nachbesserung", checkpoint_attempt_id=attempt_id, resolved_by=1)
+
+    body = " ".join(_get(client, data).split())
+    assert "Frage 1 wartet noch auf dich" in body
+    assert "Nachholen" in body
+    assert "2 von 3 Punkten" not in body
 
 
 def test_an_open_report_says_the_points_are_not_final(data, client):

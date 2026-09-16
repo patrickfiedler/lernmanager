@@ -29,13 +29,16 @@
                     {% if cp.status == 'offen' %}
                         Noch nicht bearbeitet.
                     {% elif cp.status == 'wiederholen' %}
-                        Deine Meldung wurde geprüft — diese Frage sollst du noch einmal beantworten.
+                        {{ 'Frage' if cp.owed|length == 1 else 'Fragen' }}
+                        {% for o in cp.owed %}{{ o.nr }}{% if not loop.last %}, {% endif %}{% endfor %}
+                        {{ 'wartet' if cp.owed|length == 1 else 'warten' }} noch auf dich — deine Lehrkraft hat
+                        sie dir zurückgegeben.
                     {% elif cp.status == 'neu_geoeffnet' %}
                         Deine Lehrkraft hat diesen Checkpoint noch einmal geöffnet.
                     {% elif cp.status == 'vorlaeufig' %}
                         Deine Meldung wird noch geprüft — die Punkte stehen erst danach fest.
                     {% else %}
-                        {{ cp.score }} von 3 Punkten{% if cp.geprueft %}, von deiner Lehrkraft angesehen{% endif %}.
+                        {% if cp.points %}Punkte je Frage: {% for p in cp.points %}F{{ p.nr }} {{ '–' if p.points is none else p.points }}{% if not loop.last %} · {% endif %}{% endfor %}{% else %}Schwächste Frage: {{ cp.score }} von 3 Punkten{% endif %}{% if cp.geprueft %}, von deiner Lehrkraft angesehen{% endif %}.
                     {% endif %}
                     {% if cp.feedback %}<br>💬 {{ cp.feedback }}{% endif %}
                 </div>
@@ -44,7 +47,7 @@
                 {% if cp.position %}
                 <a class="btn {% if cp.status in ('offen', 'wiederholen', 'neu_geoeffnet') %}btn-primary{% else %}btn-secondary{% endif %}"
                    href="{{ url_for('student_quiz_subtask', slug=cp.slug, position=cp.position) }}">
-                    {% if cp.status == 'offen' %}Starten →{% elif cp.status in ('wiederholen', 'neu_geoeffnet') %}Weiter →{% else %}Ansehen →{% endif %}
+                    {% if cp.status == 'offen' %}Starten →{% elif cp.status == 'wiederholen' %}Nachholen →{% elif cp.status == 'neu_geoeffnet' %}Weiter →{% else %}Ansehen →{% endif %}
                 </a>
                 {% endif %}
             </div>

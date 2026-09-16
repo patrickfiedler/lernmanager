@@ -4455,18 +4455,30 @@ def resume_unfinished_checkpoint_session(student_id, checkpoint_id):
 
 
 def get_checkpoints_awaiting_retry(student_id):
-    """Checkpoint ids (= subtask.id) where a rejected report is still owed a redo.
+    """Checkpoint id (= subtask.id) -> the questions this student still owes there.
 
-    Drives the notice on the Thema page. Without it a rejected report is invisible
-    to the student: the Aufgabe is already ticked off, so nothing would send them
-    back to the checkpoint that is now waiting for them.
+    Both directions count: a report the teacher rejected ('abgelehnt') and a question
+    the teacher sent back on their own ('nachbesserung', chemie request 2026-09-13 --
+    this used to read 'abgelehnt' only, so a returned question sent nobody back).
+    Drives the notices on the Thema page and the checkpoint overview. Without them an
+    owed question is invisible: the Aufgabe is already ticked off.
+
+    Each value is a list of {'nr' (1-based), 'status', 'reason_text',
+    'resolution_note'}, ordered by question, so a notice can name the question.
     """
     with db_session() as conn:
         rows = conn.execute("""
-            SELECT DISTINCT checkpoint_id FROM checkpoint_flag
-            WHERE student_id = ? AND status = 'abgelehnt'
+            SELECT checkpoint_id, question_index, status, reason_text, resolution_note
+            FROM checkpoint_flag
+            WHERE student_id = ? AND status IN ('abgelehnt', 'nachbesserung')
+            ORDER BY checkpoint_id, question_index
         """, (student_id,)).fetchall()
-        return {r['checkpoint_id'] for r in rows}
+    owed = {}
+    for r in rows:
+        owed.setdefault(r['checkpoint_id'], []).append({
+            'nr': r['question_index'] + 1, 'status': r['status'],
+            'reason_text': r['reason_text'], 'resolution_note': r['resolution_note']})
+    return owed
 
 
 def resolve_checkpoint_flag(flag_id, status, resolution_note, admin_id):

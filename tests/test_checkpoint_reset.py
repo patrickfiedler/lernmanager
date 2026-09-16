@@ -312,7 +312,7 @@ def test_student_reads_the_feedback_on_the_reopened_checkpoint(data, client):
     assert "noch einmal geöffnet" in page
     assert "Schau dir die Reaktionsgleichung nochmal an." in page
     # The annulled score stays off the page -- it does not count any more.
-    assert "Dein letztes Ergebnis" not in page
+    assert "Abgeschlossen" not in page
 
 
 def test_notice_gives_way_to_the_retake(data, client):
@@ -327,7 +327,7 @@ def test_notice_gives_way_to_the_retake(data, client):
         _checkpoint_url(data, student)).get_data(as_text=True)
 
     assert "noch einmal geöffnet" not in page
-    assert "Dein letztes Ergebnis" in page
+    assert "Abgeschlossen" in page  # read-only review since 2026-09-16
 
 
 def test_feedback_written_after_the_reset_still_reaches_the_student(data, client):

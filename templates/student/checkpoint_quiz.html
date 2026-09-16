@@ -14,45 +14,21 @@
 <p class="text-muted mb-2">Du hast so viele Versuche wie du brauchst — nimm dir Zeit.</p>
 <p class="text-muted mb-2">Die KI prüft hier live, ob deine Antwort passt, damit du direkt weitermachen kannst. Die Note für diesen Checkpoint vergibt deine Lehrkraft danach.</p>
 
-{% if review %}
-{# The standing result of the last completed session, plus whether a teacher has
-   looked at it. Deliberately says THAT it was checked, never when. #}
-<div class="checkpoint-review-banner checkpoint-review-{{ review.status }}">
-    <p class="checkpoint-review-score">
-        Dein letztes Ergebnis: <strong>{{ review.score }} von 3 Punkten</strong>
-        {% if review.status == 'changed' %}
-        <span class="checkpoint-review-was">(die KI hatte {{ review.llm_score }} gezählt)</span>
-        {% endif %}
-    </p>
-    <p class="checkpoint-review-status">
-        {% if review.status == 'unreviewed' %}
-        ⏳ Deine Lehrkraft hat das noch nicht geprüft. Die Punktzahl kann sich noch ändern.
-        {% elif review.status == 'confirmed' %}
-        ✅ Von deiner Lehrkraft geprüft und bestätigt.
-        {% else %}
-        ✏️ Von deiner Lehrkraft geprüft und geändert.
-        {% endif %}
-    </p>
-    {% if review.provisional %}
-    <p class="checkpoint-review-status">
-        ⚠️ Du hast in diesem Checkpoint eine Frage gemeldet. Solange deine Lehrkraft
-        sie nicht angeschaut hat, ist diese Punktzahl noch nicht endgültig.
-    </p>
-    {% endif %}
-    {% if review.feedback %}
-    <p class="checkpoint-review-feedback">💬 {{ review.feedback }}</p>
-    {% endif %}
-</div>
-{% endif %}
-
 {% if retry_flags %}
-{# A rejected report: the question comes back, and only that question. Says why,
-   because from the student's side this looks like the checkpoint reopening. #}
+{# Owed questions, from either direction: a rejected report or a question the teacher
+   sent back. Names them, because from the student's side this looks like the
+   checkpoint reopening. #}
 <div class="checkpoint-reopened-banner">
     <p class="checkpoint-reopened-lead">
-        📝 Deine Lehrkraft hat sich deine Meldung angeschaut und die Frage in Ordnung
-        gefunden. Du holst sie jetzt nach — {{ retry_flags|length }} von den Fragen
-        dieses Checkpoints, mehr nicht.
+        📝 Du holst hier {{ 'Frage' if retry_flags|length == 1 else 'die Fragen' }}
+        {% for flag in retry_flags %}{{ flag.question_index + 1 }}{% if not loop.last %}, {% endif %}{% endfor %}
+        nach, mehr nicht.
+        {% if retry_flags|selectattr('status', 'equalto', 'abgelehnt')|list %}
+        Deine Lehrkraft hat sich deine Meldung angeschaut und die Frage in Ordnung gefunden.
+        {% endif %}
+        {% if retry_flags|selectattr('status', 'equalto', 'nachbesserung')|list %}
+        Deine Lehrkraft gibt dir die Frage noch einmal, ohne Punktabzug fürs Nachholen.
+        {% endif %}
     </p>
     {% for flag in retry_flags if flag.resolution_note %}
     <p class="checkpoint-reopened-feedback">💬 {{ flag.resolution_note }}</p>
@@ -166,18 +142,6 @@
     </div>
 </div>
 <style>
-/* Reuses the quiz_result.html vocabulary (coloured left border + emoji) so the
-   states read the same way students already know from their quiz feedback. */
-.checkpoint-review-banner { border-left: 4px solid #9ca3af; background: #f9fafb;
-                            border-radius: 4px; padding: 0.6rem 0.9rem; margin-bottom: 1rem; }
-.checkpoint-review-banner p { margin: 0.15rem 0; }
-.checkpoint-review-score { font-size: 1.05rem; }
-.checkpoint-review-was { color: #6b7280; font-size: 0.85rem; }
-.checkpoint-review-status { font-size: 0.9rem; }
-.checkpoint-review-feedback { margin-top: 0.4rem !important; font-size: 0.9rem; }
-.checkpoint-review-unreviewed { border-left-color: #9ca3af; }
-.checkpoint-review-confirmed { border-left-color: #16a34a; background: #f0fdf4; }
-.checkpoint-review-changed   { border-left-color: #2563eb; background: #eff6ff; }
 /* Green, not the amber of "reopened"/"reported": continuing is the normal, good
    case -- nothing went wrong and nothing needs the student's attention. */
 .checkpoint-resume-banner { border-left: 4px solid #16a34a; background: #f0fdf4;
@@ -827,10 +791,14 @@
             var summary = document.getElementById('summary-card');
             summary.style.display = '';
             document.getElementById('summary-title').textContent = '✅ Checkpoint abgeschlossen';
+            // Points per question, never the session min(): that number feeds the Kern
+            // gate, and read as a grade it is wrong (Patrick, 2026-09-16).
             var scoreLine = document.createElement('p');
             scoreLine.className = 'text-center';
             scoreLine.style.fontSize = '1.25rem';
-            scoreLine.textContent = 'Deine Punktzahl: ' + data.score + ' von 3';
+            scoreLine.textContent = 'Punkte je Frage: ' + (data.question_points || []).map(function (p) {
+                return 'F' + p.nr + ' ' + (p.points === null ? '–' : p.points);
+            }).join(' · ');
             document.getElementById('summary-title').insertAdjacentElement('afterend', scoreLine);
             var reasonLine = document.createElement('p');
             reasonLine.className = 'text-muted text-center';

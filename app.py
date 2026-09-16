@@ -16,7 +16,7 @@ import urllib.request
 import urllib.error
 from functools import wraps
 from datetime import date, datetime
-from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify, send_from_directory, abort, Response
+from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify, send_from_directory, abort, Response, make_response
 from flask_wtf.csrf import CSRFProtect
 from flask_compress import Compress
 from werkzeug.utils import secure_filename
@@ -6006,6 +6006,16 @@ def _resolve_checkpoint_subtask(student_id, slug, subtask_id):
     subtask = dict(row)
     if not _school_gate_ok(subtask):
         return None, None
+    # A finished checkpoint with nothing owed is closed. The GET shows the review page
+    # instead of questions; this covers a tab left open from before finishing, so no
+    # route can grade, reveal or write a second attempt there. One place for all six
+    # POST routes -- abort() leaves each route's own error handling untouched.
+    if (models.get_latest_checkpoint_attempt(student_id, subtask['id'])
+            and not models.get_flags_for_retry(student_id, subtask['id'])):
+        abort(make_response(jsonify({
+            'error': 'closed',
+            'message': ('Diesen Checkpoint hast du schon abgeschlossen. Lade die Seite '
+                        'neu, dann siehst du dein Ergebnis.')}), 409))
     return task, subtask
 
 
@@ -6175,13 +6185,129 @@ def _checkpoint_score_reason(question_results):
             'der Rest mit Tipp oder mehreren Versuchen.')
 
 
-def _handle_checkpoint_quiz(student, task, slug, subtask, position, klasse):
-    """GET: render a Chemie Quiz-checkpoint as an immediate-retry session."""
-    quiz = json.loads(subtask['quiz_json'])
-    llm_available = models.check_llm_rate_limit(student['id'], usage_tag='checkpoint_quiz')
-    questions = [(i, q) for i, q in enumerate(quiz.get('questions', []))
-                 if llm_available or q.get('type', 'multiple_choice') != 'short_answer']
+def _checkpoint_question_points_text(score, manual, answers, flag, capped):
+    """Why one question scored what it did, in the student's words.
 
+    Built from what is stored, never re-derived from the 0/2/3 rule: a teacher may
+    have set the number by hand, and the text must then say so rather than invent a
+    reason that fits the number.
+    """
+    if manual:
+        return 'von deiner Lehrkraft gesetzt'
+    if score is None:
+        if flag and flag['status'] == 'offen':
+            return 'gemeldet — deine Lehrkraft schaut sich die Frage an'
+        return 'zählt nicht mit — die Frage war fehlerhaft'
+    if score == 3:
+        return 'im ersten Versuch richtig'
+    if score == 0:
+        return 'aufgegeben' if any(a['gave_up'] for a in answers) else 'nicht gelöst'
+    graded = [a for a in answers if a['correct'] is not None]
+    parts = []
+    if len(graded) > 1:
+        parts.append(f'im {len(graded)}. Versuch richtig')
+    if any(a['hints_used_before'] for a in answers):
+        parts.append('mit Tipp')
+    if capped:
+        parts.append('nachgeholt')
+    return ', '.join(parts) or 'richtig'
+
+
+def _checkpoint_review(subtask, attempt):
+    """Everything the read-only review page shows about one finished session.
+
+    Decided 2026-09-16: points per question, no total -- the stored session score is
+    a min() for the Kern gate, and chemie's grade averages over questions, so one
+    number would be read as the grade and be wrong. No model answer and no criteria:
+    the rubric stays with the teacher. That is also why a give-up row's `feedback` is
+    never used here -- it holds the revealed solution (student_checkpoint_give_up) --
+    and why the grader's own feedback sentence is left out: it was never shown live
+    and can name the missing content. Never teacher_note or teacher_verdict either.
+    """
+    quiz = json.loads(attempt.get('quiz_snapshot_json') or subtask['quiz_json'])
+    questions = quiz.get('questions', [])
+    scores = json.loads(attempt['question_scores_json']) if attempt.get('question_scores_json') else None
+    manual = (json.loads(attempt['question_scores_manual_json'])
+              if attempt.get('question_scores_manual_json') else {})
+    hints_for = _checkpoint_hints(subtask)
+
+    by_question = {}
+    for a in sorted(models.get_checkpoint_answers_for_attempt(attempt['id']),
+                    key=lambda a: (a['timestamp'], a['id'])):
+        by_question.setdefault(a['question_index'], []).append(a)
+    flags = {}
+    for f in models.get_checkpoint_flags(attempt_ids=[attempt['id']]):
+        flags.setdefault(f['question_index'], f)   # newest first -> keep the newest
+    capped = {f['question_index'] for f in flags.values() if f['status'] == 'nachgeholt'
+              and f.get('source') != 'teacher'}
+
+    rows = []
+    for index, question in enumerate(questions):
+        key = str(index)
+        if scores is not None and key not in scores:
+            continue            # not part of this sitting (e.g. LLM budget was spent)
+        answers = by_question.get(index, [])
+        score = scores.get(key) if scores is not None else None
+        hints_seen = max((a['hints_used_before'] for a in answers), default=0)
+        question_hints, _ = _question_hints(question, hints_for)
+        rows.append({
+            'nr': index + 1,
+            'text': question.get('text', ''),
+            'points': score,
+            'why': (_checkpoint_question_points_text(score, key in manual, answers,
+                                                     flags.get(index), index in capped)
+                    if scores is not None else None),
+            'final_answer': next((_checkpoint_answer_display(question, a['answer_text'])
+                                  for a in reversed(answers) if a['answer_text']), None),
+            'attempts': [{
+                'answer': _checkpoint_answer_display(question, a['answer_text']),
+                'verdict': ('aufgegeben' if a['gave_up'] else
+                            'gemeldet' if a['grader'] == 'flagged' else
+                            'richtig' if a['correct'] == 1 else
+                            'noch nicht richtig' if a['correct'] == 0 else 'nicht bewertet'),
+                'hint': a['hint_text'] if a.get('hint_status') in ('ok', 'melden') else None,
+            } for a in answers],
+            'hints_seen': question_hints[:hints_seen],
+        })
+
+    provisional = models.checkpoint_score_is_provisional(attempt)
+    effective = models.effective_checkpoint_score(attempt)
+    kern = None
+    if attempt.get('kern_standard_tag') == 'kern':
+        kern = 'offen' if provisional else ('erfuellt' if effective >= 2 else 'nicht_erfuellt')
+    return {
+        'questions': rows,
+        'legacy_score': effective if scores is None else None,
+        'provisional': provisional,
+        'status': models.checkpoint_review_status(attempt),
+        'feedback': attempt.get('student_feedback'),
+        'kern': kern,
+    }
+
+
+def _checkpoint_answer_display(question, answer_text):
+    """Stored answer text as a student reads it. Choice and drag questions are logged
+    as JSON (option indices, a list, a mapping); the student chose words."""
+    if answer_text is None:
+        return None
+    qtype = question.get('type', 'multiple_choice')
+    if qtype in ('fill_blank', 'short_answer'):
+        return answer_text
+    try:
+        answer = json.loads(answer_text)
+    except (ValueError, TypeError):
+        return answer_text
+    if quiz_grading.is_interactive(qtype):
+        return quiz_grading.answer_text(question, answer) or answer_text
+    options = question.get('options', [])
+    picked = answer if isinstance(answer, list) else [answer]
+    return ', '.join((options[i]['text'] if isinstance(options[i], dict) else str(options[i]))
+                     for i in picked if isinstance(i, int) and 0 <= i < len(options))
+
+
+def _handle_checkpoint_quiz(student, task, slug, subtask, position, klasse):
+    """GET: render a Chemie Quiz-checkpoint as an immediate-retry session -- or, once
+    it is finished and nothing is owed, the read-only review of that session."""
     # A rejected report puts exactly those questions back in front of the student,
     # and nothing else. Not a second sitting: the existing attempt is rescored on
     # finish, so the Aufgabe is not re-ticked and no second checkpoint_attempt
@@ -6191,6 +6317,21 @@ def _handle_checkpoint_quiz(student, task, slug, subtask, position, klasse):
     standing_attempt = models.get_latest_checkpoint_attempt(student['id'], subtask['id'])
     retry_flags = (models.get_flags_for_retry(student['id'], subtask['id'])
                    if standing_attempt else [])
+
+    # Finished and nothing owed: look, don't retake (Patrick, 2026-09-16). "Ansehen"
+    # used to start a full new sitting under the old banner, and finishing it wrote a
+    # second attempt -- a student could retake until 3. Only a teacher reset (which
+    # supersedes the attempt) or an owed question opens it again. The POST routes
+    # refuse the same state, see _resolve_checkpoint_subtask.
+    if standing_attempt and not retry_flags:
+        return render_template('student/checkpoint_review.html', student=student, task=task,
+                               slug=slug, checkpoint_titel=aufgabe_titel(subtask['beschreibung']),
+                               review=_checkpoint_review(subtask, standing_attempt))
+
+    quiz = json.loads(subtask['quiz_json'])
+    llm_available = models.check_llm_rate_limit(student['id'], usage_tag='checkpoint_quiz')
+    questions = [(i, q) for i, q in enumerate(quiz.get('questions', []))
+                 if llm_available or q.get('type', 'multiple_choice') != 'short_answer']
     retry_indices = {f['question_index'] for f in retry_flags}
     if retry_indices:
         questions = [(i, q) for i, q in questions if i in retry_indices]
@@ -6257,28 +6398,13 @@ def _handle_checkpoint_quiz(student, task, slug, subtask, position, klasse):
         for i, q in open_questions])
     transparency_mode = models.get_effective_transparency_mode(student['id'], klasse['id'] if klasse else None)
 
-    # A student who already finished this checkpoint sees the standing result and
-    # whether a teacher has checked it (migrate_049). Without this the review was
-    # invisible to them: the score appeared once on the completion screen and there
-    # was nowhere to look afterwards.
-    last_attempt = standing_attempt
-    review = None
+    # Only a retry of owed questions gets here with a standing attempt, and its banner
+    # (retry_flags) says what is going on. Without one, a reset may have reopened it.
     reopened = None
-    if last_attempt:
-        review = {
-            'status': models.checkpoint_review_status(last_attempt),
-            'score': models.effective_checkpoint_score(last_attempt),
-            'llm_score': last_attempt['score'],
-            'feedback': last_attempt.get('student_feedback'),
-            # A score with a reported question still open is not the final number --
-            # saying so here is the only place the student would ever find out.
-            'provisional': models.checkpoint_score_is_provisional(last_attempt),
-        }
-    else:
+    if not standing_attempt:
         # No live session, but there may be a superseded one -- a reset. Saying so
         # is the whole point: the teacher writes the Rueckmeldung, resets, and the
-        # student reads it here on the way into the retake. The else is what keeps
-        # it from lingering: once they retake, `review` above takes over.
+        # student reads it here on the way into the retake.
         reopened = models.get_reopened_checkpoint_notice(student['id'], subtask['id'])
 
     return render_template('student/checkpoint_quiz.html',
@@ -6286,7 +6412,7 @@ def _handle_checkpoint_quiz(student, task, slug, subtask, position, klasse):
                            subtask_id=subtask['id'], questions_json=questions_json,
                            checkpoint_titel=aufgabe_titel(subtask['beschreibung']),
                            transparency_mode=transparency_mode,
-                           review=review, reopened=reopened, resume=resume,
+                           reopened=reopened, resume=resume,
                            flag_reasons=models.CHECKPOINT_FLAG_REASONS,
                            retry_flags=retry_flags,
                            llm_enabled=config.LLM_ENABLED)
@@ -6309,7 +6435,7 @@ def student_checkpoints():
     student_id = session['student_id']
     student = models.get_student(student_id)
     rows = models.get_student_checkpoint_overview(student_id)
-    retry_ids = models.get_checkpoints_awaiting_retry(student_id)
+    owed = models.get_checkpoints_awaiting_retry(student_id)
     reopened_ids = {r['checkpoint_id'] for r in models.get_reopened_checkpoint_topics(student_id)}
 
     # Position within the Thema, worked out per Thema with the same helper the Thema
@@ -6338,7 +6464,7 @@ def student_checkpoints():
         else:
             score, provisional = None, False
 
-        if row['checkpoint_id'] in retry_ids:
+        if row['checkpoint_id'] in owed:
             status = 'wiederholen'
         elif row['checkpoint_id'] in reopened_ids:
             status = 'neu_geoeffnet'
@@ -6359,6 +6485,11 @@ def student_checkpoints():
             'position': positions[(row['task_id'], row['klasse_id'])].get(row['checkpoint_id']),
             'kern': row['kern_standard_tag'] == 'kern',
             'score': score,
+            # Points per question, not the session min() (2026-09-16); None for an
+            # attempt from before question scores were stored.
+            'points': (_question_points(json.loads(row['question_scores_json']))
+                       if row['attempt_id'] and row['question_scores_json'] else None),
+            'owed': owed.get(row['checkpoint_id'], []),
             'status': status,
             'feedback': row['student_feedback'],
             'geprueft': bool(row['reviewed_at']),
@@ -6844,12 +6975,24 @@ def _finish_checkpoint_retry(student_id, subtask_id, slug, progress, question_re
     total = len(question_results)
     return jsonify({
         'score': score,
-        'score_reason': (f'{solved} von {total} nachgeholten Fragen gelöst. '
-                         'Nachgeholte Fragen zählen höchstens '
-                         f'{REJECTED_FLAG_RETRY_CAP} Punkte.'),
+        'question_points': _question_points(scores),
+        # The cap applies only to a rejected report -- a question the teacher sent
+        # back is redone without it, and saying otherwise would be wrong.
+        'score_reason': (f'{solved} von {total} nachgeholten Fragen gelöst.'
+                         + (f' Eine nachgeholte gemeldete Frage zählt höchstens '
+                            f'{REJECTED_FLAG_RETRY_CAP} Punkte.'
+                            if progress.get('retry_capped') else '')),
         'needs_review': False, 'flagged_count': 0, 'retry': True,
         'redirect_url': url_for('student_klasse', slug=slug)
     })
+
+
+def _question_points(scores):
+    """Stored breakdown {"<index>": 0|2|3|None} -> [{'nr', 'points'}] in question order,
+    for the finish screen. The legacy 'vorher' key is not a question and is skipped."""
+    return [{'nr': int(k) + 1, 'points': v}
+            for k, v in sorted(((k, v) for k, v in scores.items() if k.isdigit()),
+                               key=lambda kv: int(kv[0]))]
 
 
 @app.route('/schueler/checkpoint/fertig', methods=['POST'])
@@ -6959,6 +7102,7 @@ def student_checkpoint_finish():
     return jsonify({
         'score': score, 'score_reason': score_reason, 'needs_review': needs_review,
         'flagged_count': flagged_count,
+        'question_points': _question_points(json.loads(question_scores)),
         'redirect_url': url_for('student_klasse', slug=slug)
     })
 
