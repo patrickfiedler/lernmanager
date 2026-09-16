@@ -276,10 +276,14 @@
             input.placeholder = 'Antwort eingeben...';
             input.autocomplete = 'off';
             input.addEventListener('input', function() { updateCheckBtnState(); updateTransparencyBlock(); });
+            // Enter only closes the on-screen keyboard, it never sends: a scored
+            // attempt should take a deliberate tap on Prüfen (log 2026-09: answers
+            // sent half-typed). "done" labels the key accordingly on tablets.
+            input.enterKeyHint = 'done';
             input.addEventListener('keydown', function(e) {
-                if (e.key === 'Enter' && !answered && !document.getElementById('check-btn').disabled) {
+                if (e.key === 'Enter') {
                     e.preventDefault();
-                    checkAnswer();
+                    input.blur();
                 }
             });
             area.appendChild(input);
@@ -290,6 +294,7 @@
             textarea.className = 'form-control';
             textarea.id = 'short-answer-input';
             textarea.rows = 4;
+            textarea.enterKeyHint = 'enter';   // a plain Return key, never "Go"/"Send"
             textarea.placeholder = 'Antwort eingeben...';
             textarea.addEventListener('input', function() { updateCheckBtnState(); updateTransparencyBlock(); });
             area.appendChild(textarea);
@@ -751,7 +756,10 @@
         }
     };
 
+    // Enter = Weiter, but not while typing: a Return meant for a text field
+    // must never skip the feedback the student has not read yet.
     document.addEventListener('keydown', function(e) {
+        if (e.target.matches('input, textarea')) return;
         if (e.key === 'Enter' && document.getElementById('next-btn').style.display !== 'none') {
             e.preventDefault();
             nextQuestion();
