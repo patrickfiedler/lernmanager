@@ -20,8 +20,9 @@ from pathlib import Path
 
 import artifact_checker
 import config
+import inline_images
 import models
-from utils import allowed_file, material_pfad, is_reserved_material_folder
+from utils import allowed_file, material_filename, material_pfad, is_reserved_material_folder
 
 
 class ValidationError(Exception):
@@ -347,6 +348,31 @@ def _validate_checkpoint_question_extras(question, label, errors, warnings):
                 warnings.append(f"{label}: unknown key '{key}' is ignored -- did you mean 'hints' or 'zweiwertig'?")
 
 
+def _inline_image_errors(task):
+    """`![..](material:<datei>)` in an Aufgabe must name an image file material
+    of this topic. Otherwise the student silently sees alt text instead."""
+    materials = task.get('materials') if isinstance(task.get('materials'), list) else []
+    image_files = {
+        material_filename(m['pfad']) for m in materials
+        if isinstance(m, dict) and m.get('typ') == 'datei' and m.get('pfad')
+        and inline_images.is_image_name(m['pfad'])
+    }
+    subtasks = task.get('subtasks') if isinstance(task.get('subtasks'), list) else []
+    errors = []
+    for i, sub in enumerate(subtasks):
+        if not isinstance(sub, dict):
+            continue
+        for field in ('beschreibung', 'tipps', 'fertig_wenn'):
+            value = sub.get(field)
+            for name in inline_images.material_refs(value if isinstance(value, str) else ''):
+                if name not in image_files:
+                    errors.append(
+                        f"Subtask {i+1} {field}: Bild 'material:{name}' ist kein Bild-Material "
+                        f"dieses Themas (typ datei, Endung {', '.join(sorted(inline_images.IMAGE_EXTENSIONS))})"
+                    )
+    return errors
+
+
 def validate_task_structure(data, warnings=None):
     """Validate required fields are present and valid.
 
@@ -485,6 +511,8 @@ def validate_task_structure(data, warnings=None):
                         f"Material {i+1} ('{mat['pfad']}'): Dateityp nicht erlaubt. "
                         f"Erlaubt: {', '.join(sorted(config.ALLOWED_EXTENSIONS))}"
                     )
+
+    errors.extend(_inline_image_errors(task))
 
     # Validate topic-level quiz
     if 'quiz' in task and task['quiz']:

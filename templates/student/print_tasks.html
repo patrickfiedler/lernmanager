@@ -57,6 +57,10 @@
         .task-content p { margin: 0.4rem 0; }
         .task-content ul, .task-content ol { margin: 0.4rem 0; padding-left: 1.25rem; }
         .task-content code { background: #f3f4f6; padding: 0.1rem 0.3rem; border-radius: 3px; font-size: 0.85em; }
+        .task-content img { display: block; max-width: 100%; max-height: 12cm; margin: 0.4rem 0; }
+        .task-content td img, .task-content th img { display: inline-block; max-height: 1.2cm; margin: 0; vertical-align: middle; }
+        .task-content table { border-collapse: collapse; }
+        .task-content th, .task-content td { border: 1px solid #d1d5db; padding: 0.2rem 0.4rem; }
         .task-materials {
             margin-left: 1.75rem;
             margin-top: 0.5rem;
@@ -96,7 +100,7 @@
             {% endif %}
         </div>
         <div class="task-content">
-            {{ sub.beschreibung | markdown }}
+            {{ sub.beschreibung | markdown(topic_materials) }}
         </div>
         {% if sub.get('materials') %}
         <div class="task-materials">

@@ -79,3 +79,17 @@ def test_accel_redirect_marks_documents_as_attachment(as_admin, app, tmp_path):
         assert "attachment" not in (r.headers.get("Content-Disposition") or "")
     finally:
         app.debug = True
+
+
+def test_embedded_image_is_served_but_not_counted_as_download(as_admin, app, tmp_path, monkeypatch):
+    """An image in an Aufgabe text loads on every page view; that is not a
+    student choosing to open a file."""
+    task_id = _setup(app, tmp_path)
+    mat = _upload(as_admin, task_id, "bild.png")
+    logged = []
+    monkeypatch.setattr(models, "log_analytics_event", lambda **kw: logged.append(kw["event_type"]))
+
+    assert as_admin.get(f"/material/{mat['id']}/download?eingebettet=1").status_code == 200
+    assert logged == []
+    as_admin.get(f"/material/{mat['id']}/download")
+    assert logged == ["file_download"]

@@ -219,7 +219,7 @@
 
             <div class="task-content markdown-content">
                 {% if active_subtask %}
-                {{ active_subtask.beschreibung | markdown }}
+                {{ active_subtask.beschreibung | markdown(topic_materials) }}
                 {% endif %}
             </div>
 
@@ -305,7 +305,7 @@
             {% if active_subtask and active_subtask.tipps %}
             <details class="tipps-toggle" open>
                 <summary>💡 Hilfe</summary>
-                <div class="tipps-content markdown-content">{{ active_subtask.tipps | markdown }}</div>
+                <div class="tipps-content markdown-content">{{ active_subtask.tipps | markdown(topic_materials) }}</div>
             </details>
             {% endif %}
 
@@ -375,7 +375,7 @@
 
             {% if active_subtask and active_subtask.fertig_wenn %}
             <div class="fertig-wenn-callout {% if task.abgeschlossen %}fertig-wenn-callout--standalone{% endif %}">
-                {{ active_subtask.fertig_wenn | markdown }}
+                {{ active_subtask.fertig_wenn | markdown(topic_materials) }}
             </div>
             {% endif %}
 

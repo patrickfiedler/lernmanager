@@ -16,7 +16,7 @@ import urllib.request
 import urllib.error
 from functools import wraps
 from datetime import date, datetime
-from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify, send_from_directory, abort, Response, make_response
+from flask import Flask, has_request_context, render_template, request, redirect, url_for, session, flash, jsonify, send_from_directory, abort, Response, make_response
 from flask_wtf.csrf import CSRFProtect
 from flask_compress import Compress
 from werkzeug.utils import secure_filename
@@ -29,6 +29,7 @@ import llm_grading
 import quiz_grading
 import artifact_processor
 import artifact_checker
+import inline_images
 import checkpoint_questions
 from utils import generate_username, generate_password, allowed_file, file_extension, material_pfad, material_filename, content_matches_extension, generate_credentials_pdf, generate_credentials_pdf_grouped, generate_name_username_pdf, generate_student_self_report_pdf, generate_class_report_pdf, generate_student_report_pdf, slugify, format_bytes, is_ip_allowed, is_within_time_window, parse_netzwerk_csv, split_tasks_by_stufe, stufe_sort_key, normalize_markdown_lists
 from import_task import validate_task_structure, check_duplicate, import_task as do_import_task, overwrite_task_from_import, ValidationError
@@ -56,13 +57,52 @@ compress = Compress(app)
 # ============ Template Filters ============
 
 @app.template_filter('markdown')
-def markdown_filter(text):
-    """Convert markdown text to HTML."""
+def markdown_filter(text, materials=None):
+    """Convert markdown text to HTML.
+
+    `materials`: the topic's materials, so `![alt](material:<datei>)` can
+    resolve. Without them such an image shows as its alt text.
+    """
     if not text:
         return ''
     text = normalize_markdown_lists(text)
-    html = md.markdown(text, extensions=['nl2br', 'fenced_code', 'tables', 'sane_lists'], tab_length=3)
+    extensions = ['nl2br', 'fenced_code', 'tables', 'sane_lists',
+                  inline_images.InlineImageExtension(_inline_image_resolver(materials))]
+    html = md.markdown(text, extensions=extensions, tab_length=3)
     return Markup(html)
+
+
+def _inline_image_resolver(materials):
+    """Decide what each image in authored Markdown becomes (see inline_images).
+
+    Students get the alt text for anything that cannot be shown; admins get a
+    visible warning instead, so a broken reference is caught when looking at
+    the page rather than by a student not seeing a picture.
+    """
+    by_name = {material_filename(m['pfad']): m for m in (materials or []) if m['typ'] == 'datei'}
+    is_admin = has_request_context() and 'admin_id' in session
+
+    def problem(warning, alt):
+        if is_admin:
+            return inline_images.Placeholder(f'⚠️ {warning}', 'md-image-problem')
+        return inline_images.Placeholder(alt, None)
+
+    def resolve(src, alt):
+        kind = inline_images.image_src_kind(src)
+        if kind == 'local':
+            return src
+        if kind == 'blocked':
+            return problem(f'Externes Bild nicht erlaubt: {src}', alt)
+        name = src.strip()[len(inline_images.MATERIAL_PREFIX):]
+        mat = by_name.get(name)
+        if not mat or not inline_images.is_image_name(name):
+            return problem(f'Bild „{name}" ist kein Bild-Material dieses Themas', alt)
+        if not _school_gate_ok(mat):
+            label = f': {alt}' if alt else ''
+            return inline_images.Placeholder(f'🔒 Bild nur im Schulnetz sichtbar{label}', 'md-image-locked')
+        return url_for('download_material', material_id=mat['id'], eingebettet=1)
+
+    return resolve
 
 
 @app.template_filter('slugify')
@@ -2033,7 +2073,8 @@ def admin_thema_drucken(task_id):
     subtasks = [s for s in models.get_subtasks(task_id) if not s.get('hidden')]
     for sub in subtasks:
         sub['materials'] = models.get_materials_for_subtask(task_id, sub['id'])
-    return render_template('student/print_tasks.html', task=task, subtasks=subtasks, single=False)
+    return render_template('student/print_tasks.html', task=task, subtasks=subtasks, single=False,
+                           topic_materials=models.get_materials(task_id))
 
 
 @app.route('/admin/thema/<int:task_id>/export')
@@ -2760,19 +2801,21 @@ def download_material(material_id):
         abort(404)
 
     try:
-        # Log file download
+        # Log file download -- not for images embedded in a text, which the
+        # browser fetches on every page view without the student choosing to.
         user_id = session.get('admin_id') or session.get('student_id')
         user_type = 'admin' if 'admin_id' in session else 'student'
-        models.log_analytics_event(
-            event_type='file_download',
-            user_id=user_id,
-            user_type=user_type,
-            metadata={
-                'material_id': material_id,
-                'filename': material_filename(material['pfad']),
-                'typ': material['typ']
-            }
-        )
+        if not request.args.get('eingebettet'):
+            models.log_analytics_event(
+                event_type='file_download',
+                user_id=user_id,
+                user_type=user_type,
+                metadata={
+                    'material_id': material_id,
+                    'filename': material_filename(material['pfad']),
+                    'typ': material['typ']
+                }
+            )
 
         # Only formats a browser is meant to display are served inline. Anything
         # else is handed over as a download, so a file type we never render
@@ -5124,6 +5167,7 @@ def student_klasse(slug):
                            all_subtasks=all_subtasks,
                            current_subtask=current_subtask,
                            materials=materials,
+                           topic_materials=models.get_materials(task['task_id']),
                            client_school_ok=_client_in_school_network(),
                            quiz_attempts=quiz_attempts,
                            subtask_quiz_status=subtask_quiz_status,
@@ -7238,7 +7282,8 @@ def student_print_topic(slug):
     subtasks = models.get_visible_subtasks_for_student(student_id, klasse['id'], task['task_id'])
     for sub in subtasks:
         sub['materials'] = models.get_materials_for_subtask(task['task_id'], sub['id'])
-    return render_template('student/print_tasks.html', task=task, subtasks=subtasks, single=False)
+    return render_template('student/print_tasks.html', task=task, subtasks=subtasks, single=False,
+                           topic_materials=models.get_materials(task['task_id']))
 
 
 @app.route('/schueler/thema/<slug>/aufgabe-<int:position>/drucken')
@@ -7253,7 +7298,8 @@ def student_print_subtask(slug, position):
     if not subtask:
         return redirect(url_for('student_klasse', slug=slug))
     subtask['materials'] = models.get_materials_for_subtask(task['task_id'], subtask['id'])
-    return render_template('student/print_tasks.html', task=task, subtasks=[subtask], single=True)
+    return render_template('student/print_tasks.html', task=task, subtasks=[subtask], single=True,
+                           topic_materials=models.get_materials(task['task_id']))
 
 
 @app.route('/schueler/unterricht/<int:unterricht_id>/selbstbewertung', methods=['POST'])

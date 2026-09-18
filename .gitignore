@@ -38,6 +38,7 @@
 !/checkpoint_questions.py
 !/analytics_queue.py
 !/import_task.py
+!/inline_images.py
 !/list_students.py
 !/generate_weekly_reports.py
 
