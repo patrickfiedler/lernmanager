@@ -187,7 +187,7 @@ PRIVACY_AUTHORITY=[Landesbeauftragter für Datenschutz]
 # LLM_PROVIDER=ovhcloud
 # LLM_API_KEY=
 # LLM_BASE_URL=https://oai.endpoints.kepler.ai.cloud.ovh.net/v1
-# LLM_MODEL=Mistral-Nemo-Instruct-2407
+# LLM_MODEL=Qwen3.5-397B-A17B
 EOF
 
     chmod 600 "$ENV_FILE"

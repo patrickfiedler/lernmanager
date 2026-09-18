@@ -134,7 +134,8 @@ TIMEZONE = os.environ.get('TIMEZONE', 'Europe/Berlin')
 LLM_PROVIDER = os.environ.get('LLM_PROVIDER', 'ovhcloud')
 LLM_API_KEY = os.environ.get('LLM_API_KEY', '')
 LLM_BASE_URL = os.environ.get('LLM_BASE_URL', None)
-LLM_MODEL = os.environ.get('LLM_MODEL', 'Qwen/Qwen3-32B-FP8')
+# Model choice and switching: docs/2026-09-10-llm-modellwechsel-lehren.md
+LLM_MODEL = os.environ.get('LLM_MODEL', 'Qwen3.5-397B-A17B')
 LLM_TIMEOUT = _env_int('LLM_TIMEOUT', 5)  # seconds (quiz grading — short answers)
 # Checkpoint answers are longer, multi-sentence explanations graded against the
 # stricter CHECKPOINT_SYSTEM_PROMPT, and they feed a real grade -- a timeout there
