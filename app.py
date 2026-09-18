@@ -474,6 +474,7 @@ def internal_grading_results():
             students=payload.get('students', []),
             rubric=payload.get('rubric'),
             textbausteine=payload.get('textbausteine'),
+            scan_log=payload.get('scan_log'),
         )
     except ValueError as e:
         # Logged, not 500'd -- a callback for an unknown/deleted run shouldn't
@@ -1165,6 +1166,7 @@ def admin_grading_upload_complete():
     run_id = models.create_grading_run(
         job_id=job_id, klasse_id=None, task_id=task_id, rubric=rubric,
         provider=provider, model=None, total_students=total_students,
+        collection=models.parse_scan_log(payload.get('scan_log')),
     )
     return jsonify({'grading_run_id': run_id}), 201
 
@@ -1176,6 +1178,16 @@ def admin_grading_runs():
     grading_run_detail, which previously had no link pointing at it from
     anywhere in the nav (found while building the multi-class redesign)."""
     return render_template('admin/grading_runs.html', runs=models.list_grading_runs())
+
+
+@app.route('/admin/grading-run/<int:run_id>/name', methods=['POST'])
+@admin_required
+def admin_grading_run_rename(run_id):
+    if not models.get_grading_run(run_id):
+        flash('Bewertungslauf nicht gefunden.', 'danger')
+        return redirect(url_for('admin_grading_runs'))
+    models.rename_grading_run(run_id, request.form.get('name'))
+    return redirect(url_for('admin_grading_run_detail', run_id=run_id))
 
 
 # --- Page A: grading_run_detail (teacher-review-ui.md §2 -- class-level view) ---

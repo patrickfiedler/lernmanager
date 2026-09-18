@@ -152,7 +152,28 @@ function parseZipStreaming(file, onProgress) {
         uz.onfile = (entry) => {
             const isDir = entry.name.endsWith('/');
             const parts = entry.name.split('/').filter(p => p.length > 0);
-            if (parts.length < 2) return; // root-level entry (e.g. logfile.log.md), not a student's
+            if (parts.length < 2) {
+                // Root-level entry, not a student's. The scan-folders log
+                // names how the batch was collected (pattern, class, ...);
+                // keep its text for the run -- the server reads the header.
+                if (!isDir && entry.name.endsWith('-log.md')) {
+                    const chunks = [];
+                    pending++;
+                    entry.ondata = (err, chunk, final) => {
+                        if (err) { pending--; reject(err); return; }
+                        if (chunk) chunks.push(chunk);
+                        if (final) {
+                            new Blob(chunks).text().then(text => {
+                                parsedScanLog = text.slice(0, 4000);
+                                pending--;
+                                maybeResolve();
+                            }, reject);
+                        }
+                    };
+                    entry.start();
+                }
+                return;
+            }
 
             let login;
             if (parts[0] === '0 results') {
@@ -210,6 +231,7 @@ function parseZipStreaming(file, onProgress) {
 
 // --- Wiring: parse on file select, resolve logins, enable submit ---------
 let parsedStudents = null; // Map<login, {files}> from the zip
+let parsedScanLog = null;  // text of the zip's scan-folders *-log.md, if any
 let matchedRoster = null;  // [{login, names, lernpfad, klasse, klassenstufe}] resolved by the server
 
 function updateSubmitEnabled() {
@@ -225,6 +247,7 @@ document.getElementById('archive-input').addEventListener('change', async functi
     const summaryDiv = document.getElementById('match-summary');
     const file = this.files[0];
     parsedStudents = null;
+    parsedScanLog = null;
     matchedRoster = null;
     summaryDiv.style.display = 'none';
     summaryDiv.innerHTML = '';
@@ -393,6 +416,7 @@ document.getElementById('grading-upload-form').addEventListener('submit', async 
             body: JSON.stringify({
                 job_id: jobId, task_id: parseInt(taskId, 10),
                 rubric: rubric, provider: provider, students: completeData.students,
+                scan_log: parsedScanLog,
             }),
         });
         const registerData = await registerResp.json();

@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 
-{% block title %}Bewertungslauf {{ run.task_name }} - Lernmanager{% endblock %}
+{% block title %}Bewertungslauf {{ run.display_name }} - Lernmanager{% endblock %}
 
 {% block content %}
 <div class="flex flex-between flex-center mb-2">
@@ -12,11 +12,21 @@
     {% endif %}
 </div>
 
+<form method="POST" action="{{ url_for('admin_grading_run_rename', run_id=run.id) }}" class="flex flex-center mb-2" style="gap: 0.5rem;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label for="run-name">Name</label>
+    <input type="text" id="run-name" name="name" value="{{ run.name or '' }}" placeholder="{{ run.display_name }}" maxlength="200" style="flex: 1; max-width: 28rem;">
+    <button type="submit" class="btn btn-sm btn-secondary">Speichern</button>
+</form>
+
 <div class="card mb-2">
     <div class="card-header">📋 Import-Übersicht</div>
     <div style="padding: 0.75rem 1rem;">
         <table class="table" style="margin: 0;">
             <tbody>
+                {% for label, value in run.collection.items() %}
+                <tr><td>{{ label }}</td><td>{{ value }}</td></tr>
+                {% endfor %}
                 <tr><td>Rubric</td><td><code>{{ run.rubric }}</code></td></tr>
                 <tr><td>Anbieter / Modell</td><td>{{ run.provider }}{% if run.model %} / {{ run.model }}{% endif %}</td></tr>
                 <tr><td>Importiert</td><td>{{ run.imported_at }}</td></tr>

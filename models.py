@@ -673,6 +673,8 @@ def init_db():
                 zero_score_count INTEGER NOT NULL DEFAULT 0,
                 media_purged_at TEXT,
                 textbausteine_json TEXT,
+                name TEXT,
+                collection_json TEXT,
                 UNIQUE(job_id),
                 FOREIGN KEY (klasse_id) REFERENCES klasse(id),
                 FOREIGN KEY (task_id) REFERENCES task(id)
@@ -6159,21 +6161,84 @@ def resolve_task_for_student(student_id, task_ids, fallback_task_id=None):
 
 
 def create_grading_run(job_id, klasse_id, task_id, rubric, provider, model,
-                        total_students=0, flagged_count=0, zero_score_count=0, graded_at=None):
+                        total_students=0, flagged_count=0, zero_score_count=0, graded_at=None,
+                        collection=None):
     """Create a grading_run row for one imported batch. klasse_id may be None
     -- a single upload can span students from several classes, or none known
     yet (a scan-folders-originated run auto-created from a results callback,
-    see import_grading_callback). Returns the new id."""
+    see import_grading_callback). collection is parse_scan_log()'s dict, or
+    None when the zip had no scan-folders log. Returns the new id."""
     imported_at = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
+    collection_json = json.dumps(collection, ensure_ascii=False) if collection else None
     with db_session() as conn:
         cursor = conn.execute(
             "INSERT INTO grading_run (job_id, klasse_id, task_id, rubric, provider, model, "
-            "imported_at, graded_at, total_students, flagged_count, zero_score_count) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "imported_at, graded_at, total_students, flagged_count, zero_score_count, "
+            "collection_json) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (job_id, klasse_id, task_id, rubric, provider, model, imported_at, graded_at,
-             total_students, flagged_count, zero_score_count)
+             total_students, flagged_count, zero_score_count, collection_json)
         )
         return cursor.lastrowid
+
+
+# The scan-folders log (*-log.md at the zip root) opens with the settings the
+# batch was collected with, one "**Label**: value" line each, e.g.
+#     # Scan Log - 2026-09-11
+#
+#     **Date**: 2026-09-11 13:45:23
+#     **Pattern(s)**: startklar
+#     **Class**: 7
+#     **Search Type**: file
+#     **File Selection**: newest
+#
+#     ## Results
+#     ...
+# Only the header is read -- the table below it names students.
+SCAN_LOG_MAX_CHARS = 4000
+
+
+def parse_scan_log(text):
+    """Return the scan-folders log header as {label: value}, or {} when text
+    is not such a log."""
+    lines = (text or '')[:SCAN_LOG_MAX_CHARS].lstrip('\ufeff').splitlines()
+    if not lines or not lines[0].startswith('# Scan Log'):
+        return {}
+    settings = {}
+    for line in lines[1:]:
+        if line.startswith('## '):
+            break
+        match = re.match(r'\*\*(.+?)\*\*:\s*(.*)', line)
+        if match:
+            settings[match.group(1).strip()] = match.group(2).strip()
+    return settings
+
+
+def grading_run_display_name(run):
+    """The run's own name, else one built from how it was collected
+    ("7 · startklar · 2026-09-11"), else Thema + import date."""
+    if run.get('name'):
+        return run['name']
+    c = run.get('collection') or {}
+    parts = [c.get('Class'), c.get('Pattern(s)'), (c.get('Date') or '')[:10]]
+    if any(parts):
+        return ' · '.join(p for p in parts if p)
+    return f"{run.get('task_name')} · {(run.get('imported_at') or '')[:10]}"
+
+
+def _enrich_grading_run(row):
+    run = dict(row)
+    run['textbausteine'] = json.loads(run.get('textbausteine_json') or '{}')
+    run['collection'] = json.loads(run.get('collection_json') or '{}')
+    run['display_name'] = grading_run_display_name(run)
+    return run
+
+
+def rename_grading_run(run_id, name):
+    """Set the run's name; blank clears it (back to the built default)."""
+    with db_session() as conn:
+        conn.execute("UPDATE grading_run SET name = ? WHERE id = ?",
+                     ((name or '').strip()[:200] or None, run_id))
 
 
 def get_grading_run(run_id):
@@ -6192,9 +6257,7 @@ def get_grading_run(run_id):
         ).fetchone()
     if row is None:
         return None
-    run = dict(row)
-    run['textbausteine'] = json.loads(run.get('textbausteine_json') or '{}')
-    return run
+    return _enrich_grading_run(row)
 
 
 def list_grading_runs(klasse_id=None):
@@ -6214,7 +6277,7 @@ def list_grading_runs(klasse_id=None):
                 "FROM grading_run gr LEFT JOIN klasse k ON k.id = gr.klasse_id JOIN task t ON t.id = gr.task_id "
                 "ORDER BY gr.id DESC"
             ).fetchall()
-    return [dict(r) for r in rows]
+    return [_enrich_grading_run(r) for r in rows]
 
 
 def mark_grading_run_media_purged(run_id):
@@ -6664,7 +6727,7 @@ def regenerate_grading_reports(run_id):
 
 
 def import_grading_callback(job_id, provider, model, graded_at, students, rubric=None,
-                            textbausteine=None):
+                            textbausteine=None, scan_log=None):
     """
     Import the grading service's POST /internal/grading/results payload
     (worker.fire_callback's shape) into grading_result rows under the
@@ -6685,6 +6748,9 @@ def import_grading_callback(job_id, provider, model, graded_at, students, rubric
     ValueError instead of guessing -- see todo.md § Graded Artifacts for the
     manual "import by job ID" recovery path for that case.
 
+    scan_log is the scan-folders log text, if the service forwards it; it
+    only matters for an auto-created run (an uploaded run got it at upload).
+
     Returns the grading_run id, or raises ValueError if no grading_run
     matches job_id and none could be safely auto-created.
     """
@@ -6700,6 +6766,7 @@ def import_grading_callback(job_id, provider, model, graded_at, students, rubric
             run_id = create_grading_run(
                 job_id=job_id, klasse_id=None, task_id=task_id, rubric=rubric,
                 provider=provider or 'unknown', model=model,
+                collection=parse_scan_log(scan_log),
             )
             run = get_grading_run(run_id)
         except sqlite3.IntegrityError:
