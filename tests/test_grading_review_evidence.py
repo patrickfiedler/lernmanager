@@ -52,7 +52,7 @@ class _FakeService:
         if self.fail:
             raise OSError("wireguard down")
         self.body = json.loads(req.data)
-        payload = json.dumps({"files": self.files}).encode()
+        payload = json.dumps({"files": self.files, "corrections_stored": 2}).encode()
 
         class _Resp:
             def read(self_inner):
@@ -149,10 +149,12 @@ def test_regenerate_writes_only_report_files(db, tmp_path, monkeypatch):
     })
     _patch_service(monkeypatch, tmp_path, fake)
 
-    ok, _ = models.regenerate_grading_reports(run_id)
+    ok, message = models.regenerate_grading_reports(run_id)
 
     assert ok
+    assert "2 Korrektur(en)" in message
     assert fake.body["rubric"] == "1-startklar"
+    assert fake.body["job_id"] == models.get_grading_run(run_id)["job_id"]
     assert fake.body["students"][0]["student_id"] == "mueller.anna"
     assert sorted(os.listdir(models._grading_reports_dir(run_id))) == ["grades.csv", "print_slips.html"]
     assert not os.path.exists(tmp_path / "escape.html")

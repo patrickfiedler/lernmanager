@@ -6681,6 +6681,11 @@ def regenerate_grading_reports(run_id):
     files in reports/. The service reads no job dir, so this still works
     after the run's media purge.
 
+    It also teaches the service's result store: job_id tells it which graded
+    text each score belongs to, and it keeps every criterion the teacher
+    changed or commented, so the same text in a later run comes back
+    pre-reviewed. Called from the "regenerate" button and on release.
+
     Returns (ok, message) for a flash; never raises on a service problem --
     the old files then stay untouched.
     """
@@ -6695,7 +6700,8 @@ def regenerate_grading_reports(run_id):
 
     req = urllib.request.Request(
         f"{config.GRADING_SERVICE_URL}/reports",
-        data=json.dumps({'rubric': run['rubric'], 'students': students}).encode('utf-8'),
+        data=json.dumps({'rubric': run['rubric'], 'job_id': run['job_id'],
+                         'students': students}).encode('utf-8'),
         method='POST',
         headers={
             'Authorization': f'Bearer {config.GRADING_SERVICE_TOKEN}',
@@ -6704,7 +6710,8 @@ def regenerate_grading_reports(run_id):
     )
     try:
         with urllib.request.urlopen(req, timeout=60) as resp:
-            files = json.loads(resp.read()).get('files') or {}
+            body = json.loads(resp.read())
+        files = body.get('files') or {}
     except urllib.error.HTTPError as e:
         return False, f'Bewertungsdienst hat abgelehnt (HTTP {e.code}) -- Dateien unverändert.'
     except (urllib.error.URLError, OSError, TimeoutError, ValueError):
@@ -6723,7 +6730,10 @@ def regenerate_grading_reports(run_id):
         written.append(name)
     if not written:
         return False, 'Bewertungsdienst hat keine Dateien geliefert -- Dateien unverändert.'
-    return True, f'Bewertungsdateien mit geprüften Punkten neu erzeugt ({len(written)} Dateien).'
+    message = f'Bewertungsdateien mit geprüften Punkten neu erzeugt ({len(written)} Dateien).'
+    if body.get('corrections_stored'):
+        message += f" {body['corrections_stored']} Korrektur(en) für spätere Läufe gemerkt."
+    return True, message
 
 
 def import_grading_callback(job_id, provider, model, graded_at, students, rubric=None,

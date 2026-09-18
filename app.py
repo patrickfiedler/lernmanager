@@ -1273,6 +1273,8 @@ def admin_grading_run_release_bulk(run_id):
             skipped += 1
     flash(f'{released} Ergebnis(se) freigegeben. {skipped} übersprungen (Konflikt oder offene Prüfung).',
           'success' if released else 'warning')
+    if released:
+        _sync_grading_reports(run_id)
     models.maybe_auto_purge_grading_run(run_id)
     return redirect(url_for('admin_grading_run_detail', run_id=run_id))
 
@@ -1285,6 +1287,15 @@ def admin_grading_run_purge_media(run_id):
     models.purge_grading_run_media(run_id)
     flash('Medien gelöscht.', 'success')
     return redirect(url_for('admin_grading_run_detail', run_id=run_id))
+
+
+def _sync_grading_reports(run_id):
+    """After a release: slips with the released scores, and the grading
+    service learns the corrections (models.regenerate_grading_reports). A
+    service problem only warns -- the release itself already happened.
+    Not after the non-submitter confirm: there is nothing to correct there."""
+    ok, message = models.regenerate_grading_reports(run_id)
+    flash(message, 'success' if ok else 'warning')
 
 
 @app.route('/admin/grading-run/<int:run_id>/berichte-neu', methods=['POST'])
@@ -1428,6 +1439,7 @@ def admin_grading_result_supersede(result_id):
             models.supersede_grading_result(active['id'], result_id)
             models.release_grading_result(result_id, session['admin_id'])
             flash('Neue Bewertung übernommen.', 'success')
+            _sync_grading_reports(run['id'])
         else:
             models.discard_grading_result(result_id)
             flash('Bestehende Bewertung behalten.', 'success')

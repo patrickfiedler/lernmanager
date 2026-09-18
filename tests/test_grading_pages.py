@@ -75,6 +75,26 @@ def test_page_a_release_bulk_action(app, client, as_admin):
     assert models.get_grading_result(result_id)["status"] == "active"
 
 
+def test_release_bulk_sends_corrections_to_the_service(app, client, as_admin, monkeypatch):
+    """A correction released without "regenerate" must still reach the
+    grading service's result store (grading-with-llm request 2026-09-18)."""
+    klasse_id, task_id, run_id = _setup()
+    s1 = _student("Mueller", "Anna", "mueller.anna")
+    models.create_grading_result(run_id, task_id, s1, "mueller.anna",
+                                 [{"name": "X", "score": 1, "max_score": 1}])
+    synced = []
+    monkeypatch.setattr(models, "regenerate_grading_reports",
+                        lambda rid: synced.append(rid) or (True, "ok"))
+
+    as_admin.post(f'/admin/grading-run/{run_id}/release-bulk',
+                  data={"csrf_token": _csrf_token(as_admin)})
+    assert synced == [run_id]
+
+    as_admin.post(f'/admin/grading-run/{run_id}/release-bulk',  # nothing left to release
+                  data={"csrf_token": _csrf_token(as_admin)})
+    assert synced == [run_id]
+
+
 def test_page_a_confirm_non_submitter(app, client, as_admin):
     klasse_id, task_id, run_id = _setup()
     s1 = _student("Niemand", "Da", "niemand.da")
