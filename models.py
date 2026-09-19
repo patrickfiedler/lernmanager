@@ -67,6 +67,29 @@ def now_local(fmt='%Y-%m-%d %H:%M:%S'):
         return datetime.now().strftime(fmt)
 
 
+def to_local(timestamp, fmt='%Y-%m-%dT%H:%M:%S'):
+    """An ISO timestamp from another system, converted to now_local()'s clock.
+
+    The grading service sends UTC with an offset ("...+00:00"); stored verbatim it
+    showed up two hours behind the local columns beside it. Naive input carries no
+    zone to convert from and is assumed local already; unparseable input is kept
+    as-is rather than dropped.
+    """
+    if not timestamp:
+        return timestamp
+    try:
+        parsed = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+    except (TypeError, ValueError):
+        return timestamp
+    if parsed.tzinfo is None:
+        return parsed.strftime(fmt)
+    try:
+        from zoneinfo import ZoneInfo
+        return parsed.astimezone(ZoneInfo(config.TIMEZONE)).strftime(fmt)
+    except Exception:
+        return parsed.astimezone().strftime(fmt)
+
+
 def local_cutoff(**delta):
     """A past instant on the same basis as now_local(), for time-window queries.
 
@@ -5875,7 +5898,7 @@ def get_artifact_gate_attempts_for_student(student_id):
 
 def save_student_artifact_file(student_id, task_id, subtask_id, original_filename, disk_filename, timezone='Europe/Berlin'):
     """Store/replace the latest uploaded file record for a student+task. subtask_id records which checkpoint triggered this upload."""
-    uploaded_at = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
+    uploaded_at = now_local('%Y-%m-%dT%H:%M:%S')
     with db_session() as conn:
         conn.execute(
             "INSERT INTO student_artifact_file (student_id, task_id, last_subtask_id, original_filename, disk_filename, uploaded_at) "
@@ -6168,7 +6191,7 @@ def create_grading_run(job_id, klasse_id, task_id, rubric, provider, model,
     yet (a scan-folders-originated run auto-created from a results callback,
     see import_grading_callback). collection is parse_scan_log()'s dict, or
     None when the zip had no scan-folders log. Returns the new id."""
-    imported_at = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
+    imported_at = now_local('%Y-%m-%dT%H:%M:%S')
     collection_json = json.dumps(collection, ensure_ascii=False) if collection else None
     with db_session() as conn:
         cursor = conn.execute(
@@ -6282,7 +6305,7 @@ def list_grading_runs(klasse_id=None):
 
 def mark_grading_run_media_purged(run_id):
     """Record that this run's media directory has been deleted (retention, spec §7)."""
-    purged_at = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
+    purged_at = now_local('%Y-%m-%dT%H:%M:%S')
     with db_session() as conn:
         conn.execute("UPDATE grading_run SET media_purged_at = ? WHERE id = ?", (purged_at, run_id))
 
@@ -6835,7 +6858,7 @@ def import_grading_callback(job_id, provider, model, graded_at, students, rubric
             "total_students = total_students + ?, flagged_count = flagged_count + ?, "
             "zero_score_count = zero_score_count + ?, "
             "textbausteine_json = COALESCE(?, textbausteine_json) WHERE id = ?",
-            (provider, model, graded_at, imported, flagged_count, zero_score_count,
+            (provider, model, to_local(graded_at), imported, flagged_count, zero_score_count,
              json.dumps(textbausteine) if isinstance(textbausteine, dict) and textbausteine else None,
              run['id'])
         )

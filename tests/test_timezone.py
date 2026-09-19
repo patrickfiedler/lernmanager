@@ -128,3 +128,31 @@ def test_no_sql_string_still_uses_sqlite_current_timestamp():
         and id(node) not in docstrings and 'CURRENT_TIMESTAMP' in node.value
     ]
     assert not offenders, f"SQL reintroduced UTC clock: {offenders}"
+
+
+@pytest.mark.parametrize("incoming, expected", [
+    # The grading service's own format (worker.fire_callback): summer, CEST = UTC+2.
+    ("2026-09-18T21:35:00.134995+00:00", "2026-09-18T23:35:00"),
+    ("2026-01-15T12:00:00Z", "2026-01-15T13:00:00"),  # winter, CET = UTC+1
+    ("2026-09-18T23:35:00", "2026-09-18T23:35:00"),   # naive: already local
+    ("not a date", "not a date"),
+    (None, None),
+])
+def test_to_local_converts_offset_timestamps(monkeypatch, incoming, expected):
+    monkeypatch.setattr(config, "TIMEZONE", "Europe/Berlin")
+    assert models.to_local(incoming) == expected
+
+
+def test_grading_callback_stores_graded_at_on_the_local_clock(db, monkeypatch):
+    """Reported 2026-09-19: the run page showed Bewertet (UTC from the grading
+    service) earlier than Importiert (local), for a run graded after import."""
+    monkeypatch.setattr(config, "TIMEZONE", "Europe/Berlin")
+    task_id = models.create_task("unit-tz", "desc", "lz", "MBI", "6", "pflicht")
+    run_id = models.create_grading_run("job-tz", None, task_id, "unit-tz", "ollama", None)
+
+    models.import_grading_callback(
+        job_id="job-tz", provider="ollama", model="m",
+        graded_at="2026-09-18T21:35:00.134995+00:00", students=[],
+    )
+
+    assert models.get_grading_run(run_id)["graded_at"] == "2026-09-18T23:35:00"
