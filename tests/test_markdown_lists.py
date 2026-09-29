@@ -77,3 +77,21 @@ def test_normalizing_never_removes_list_items(text):
     the normalizer may add list items, never drop one."""
     before = md.markdown(text, extensions=EXT, tab_length=3).count('<li>')
     assert render(text).count('<li>') >= before
+
+
+def test_indented_follow_up_line_stays_in_its_step():
+    """Content contract with MBI (request 2026-09-23): Seilbahn writes one
+    sentence per line, and a second sentence goes on a line indented by
+    3 spaces inside the same numbered step. Checked against the app's own
+    filter, since tab_length and the extensions are what could break it."""
+    from app import markdown_filter
+    html = str(markdown_filter(
+        "1. Öffne die Datei.\n"
+        "2. Hol dir den Zettel bei den Materialien.\n"
+        "   Darauf schreibst du jeden Tag.\n"
+        "3. Speichere die Datei."
+    ))
+    assert html.count('<ol>') == 1
+    assert html.count('<li>') == 3
+    flat = ' '.join(html.split())
+    assert '<li>Hol dir den Zettel bei den Materialien.<br /> Darauf schreibst du jeden Tag.</li>' in flat
