@@ -2758,9 +2758,21 @@ def get_materials(task_id):
         return [dict(r) for r in rows]
 
 
+# A domain whitelist blocks every request a page makes, not only the page itself.
+# An embedded YouTube video loads its player, thumbnails and the video stream from
+# other Google domains; with only youtube.com allowed the embed stays black.
+COMPANION_DOMAINS = {
+    'youtube.com': ['ytimg.com', 'googlevideo.com', 'ggpht.com'],
+    'youtu.be': ['youtube.com', 'ytimg.com', 'googlevideo.com', 'ggpht.com'],
+}
+
+
 def get_external_link_domains():
     """Distinct domains referenced by material links, with usage count and the
-    topic names that use them — for building a school-firewall whitelist."""
+    topic names that use them — for building a school-firewall whitelist.
+
+    Domains a linked site needs to work (COMPANION_DOMAINS) are added with
+    count 0 and 'needed_by' naming the domain that pulls them in."""
     with db_session() as conn:
         rows = conn.execute('''
             SELECT m.pfad, t.name AS task_name
@@ -2783,9 +2795,19 @@ def get_external_link_domains():
         entry['themen'].add(row['task_name'])
 
     result = [
-        {'domain': domain, 'count': data['count'], 'themen': sorted(data['themen'])}
+        {'domain': domain, 'count': data['count'], 'themen': sorted(data['themen']),
+         'needed_by': []}
         for domain, data in domains.items()
     ]
+    by_domain = {d['domain']: d for d in result}
+    for domain in list(domains):
+        for companion in COMPANION_DOMAINS.get(domain, []):
+            entry = by_domain.get(companion)
+            if entry is None:
+                entry = {'domain': companion, 'count': 0, 'themen': [], 'needed_by': []}
+                by_domain[companion] = entry
+                result.append(entry)
+            entry['needed_by'].append(domain)
     result.sort(key=lambda d: d['domain'])
     return result
 

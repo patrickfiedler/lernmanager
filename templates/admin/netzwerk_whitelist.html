@@ -10,7 +10,9 @@
     statt des ganzen Internets öffnen können. Wird live aus den aktuellen Materialien berechnet —
     bei neuen Links hier einfach neu laden. Domains ohne "www." eingetragen (UCS@school empfiehlt das so,
     deckt Subdomains automatisch mit ab). Die eigene Domain (<code>{{ own_domain }}</code>) steht
-    immer mit drin, sonst sperrt die Firewall Lernmanager selbst.
+    immer mit drin, sonst sperrt die Firewall Lernmanager selbst. Manche Seiten laden Inhalte von
+    weiteren Domains nach (YouTube-Videos z.B. von <code>googlevideo.com</code>); die werden
+    automatisch ergänzt.
 </p>
 
 <div class="card mb-2">
@@ -96,7 +98,7 @@
                 <tr>
                     <td><code>{{ d.domain }}</code></td>
                     <td>{{ d.count }}</td>
-                    <td>{{ d.themen|join(', ') }}</td>
+                    <td>{{ d.themen|join(', ') }}{% if d.needed_by %}{{ '; ' if d.themen }}<span class="text-muted">benötigt von {{ d.needed_by|join(', ') }}</span>{% endif %}</td>
                 </tr>
                 {% else %}
                 <tr>
