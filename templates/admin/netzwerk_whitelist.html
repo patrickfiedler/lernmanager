@@ -9,7 +9,8 @@
     schul-Firewall-Whitelist (z.B. UCS@school Internetregeln), damit Schüler nur diese Seiten
     statt des ganzen Internets öffnen können. Wird live aus den aktuellen Materialien berechnet —
     bei neuen Links hier einfach neu laden. Domains ohne "www." eingetragen (UCS@school empfiehlt das so,
-    deckt Subdomains automatisch mit ab).
+    deckt Subdomains automatisch mit ab). Die eigene Domain (<code>{{ own_domain }}</code>) steht
+    immer mit drin, sonst sperrt die Firewall Lernmanager selbst.
 </p>
 
 <div class="card mb-2">
@@ -109,7 +110,7 @@
 {% endblock %}
 
 {% block scripts %}
-const baseDomains = {{ domains|map(attribute='domain')|list|tojson }};
+const baseDomains = [{{ own_domain|tojson }}].concat({{ domains|map(attribute='domain')|list|tojson }});
 
 function updateWhitelist() {
     const extras = Array.from(document.querySelectorAll('.extra-domain:checked')).map(cb => cb.value);

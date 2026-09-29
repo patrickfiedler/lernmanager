@@ -4489,7 +4489,11 @@ def admin_netzwerk_whitelist():
     """Live-computed list of external domains referenced by material links,
     for pasting into a school-firewall whitelist (e.g. UCS@school Internetregeln)."""
     domains = models.get_external_link_domains()
-    return render_template('admin/netzwerk_whitelist.html', domains=domains)
+    # Our own host belongs on the list too, or the firewall blocks Lernmanager
+    # itself. nginx forwards the Host header, so this is the public name.
+    own_domain = request.host.split(':')[0]
+    return render_template('admin/netzwerk_whitelist.html', domains=domains,
+                           own_domain=own_domain)
 
 
 # ============ Admin: Error Logs ============
