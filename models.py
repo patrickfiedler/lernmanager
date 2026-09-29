@@ -207,7 +207,8 @@ def init_db():
                 subtask_quiz_required INTEGER DEFAULT 1,  -- 1=must pass subtask quizzes, 0=optional
                 module_tier TEXT NOT NULL DEFAULT 'kern_standard',  -- kern_standard/hero (Chemie swap-rule tier)
                 unit_slug TEXT,  -- stable author-chosen ID (e.g. "modul_01"), referenced by other units' connections.building_on
-                connections_json TEXT  -- JSON: {building_on: [...], arriving_at: [...]} (Clayden-style unit connections)
+                connections_json TEXT,  -- JSON: {building_on: [...], arriving_at: [...]} (Clayden-style unit connections)
+                material_variants_json TEXT  -- migrate_063: [{key, assignment, sets: [[datei, ...], ...]}], see assign_material_variants()
             );
 
             CREATE UNIQUE INDEX IF NOT EXISTS idx_task_unit_slug ON task(unit_slug) WHERE unit_slug IS NOT NULL;
@@ -267,6 +268,7 @@ def init_db():
                 beschreibung TEXT,
                 attribution TEXT,  -- photographer/source credit
                 school_only INTEGER NOT NULL DEFAULT 0,  -- 1=only downloadable from school network (network gate)
+                label TEXT,  -- migrate_063: short name ("Bild A") that replaces {key.N} placeholders
                 FOREIGN KEY (task_id) REFERENCES task(id) ON DELETE CASCADE
             );
 
@@ -506,6 +508,23 @@ def init_db():
                 timestamp TEXT NOT NULL,
                 UNIQUE(student_id, fork_group),
                 FOREIGN KEY (student_id) REFERENCES student(id) ON DELETE CASCADE
+            );
+
+            -- Material variants (migrate_063): which combination from a topic's
+            -- material_variants_json a student works on. files_json is the combination
+            -- itself (bare filenames), not an index into `sets`, so a re-import that
+            -- reorders or edits the sets cannot silently swap a student's pictures.
+            CREATE TABLE IF NOT EXISTS student_material_variant (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_id INTEGER NOT NULL,
+                task_id INTEGER NOT NULL,
+                klasse_id INTEGER,
+                variant_key TEXT NOT NULL,
+                files_json TEXT NOT NULL,
+                assigned_at TEXT NOT NULL,
+                UNIQUE(student_id, task_id, variant_key),
+                FOREIGN KEY (student_id) REFERENCES student(id) ON DELETE CASCADE,
+                FOREIGN KEY (task_id) REFERENCES task(id) ON DELETE CASCADE
             );
 
             -- Lessons (Unterricht)
@@ -2178,6 +2197,8 @@ def export_task_to_dict(task_id):
                 'beschreibung': material['beschreibung'],
                 'attribution': material.get('attribution')
             }
+            if material.get('label'):
+                mat_data['label'] = material['label']
             # Include subtask_indices if material has specific assignments
             assigned_subtask_ids = material_assignments.get(material['id'])
             if assigned_subtask_ids:
@@ -2208,6 +2229,8 @@ def export_task_to_dict(task_id):
             'materials': materials_data,
             'quiz': quiz_data,
         }
+        if get_material_variants(task):
+            data['material_variants'] = get_material_variants(task)
         return data
           
         
@@ -2822,14 +2845,172 @@ def get_material(material_id):
         return dict(row) if row else None
 
 
-def create_material(task_id, typ, pfad, beschreibung='', attribution=None, school_only=False):
+def create_material(task_id, typ, pfad, beschreibung='', attribution=None, school_only=False, label=None):
     """Create a material."""
     with db_session() as conn:
         cursor = conn.execute(
-            "INSERT INTO material (task_id, typ, pfad, beschreibung, attribution, school_only) VALUES (?, ?, ?, ?, ?, ?)",
-            (task_id, typ, pfad, beschreibung, attribution, 1 if school_only else 0)
+            "INSERT INTO material (task_id, typ, pfad, beschreibung, attribution, school_only, label) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (task_id, typ, pfad, beschreibung, attribution, 1 if school_only else 0, label or None)
         )
         return cursor.lastrowid
+
+
+# ============ Material variants (MBI request 2026-09-24) ============
+#
+# A topic can list allowed combinations from its material pool; each student
+# gets one, and {key.N} in the task text becomes the label of the N-th material
+# of their combination. Nothing is hidden -- every student still sees every
+# material; the combination only says which ones they work on in depth.
+
+VARIANT_PLACEHOLDER_RE = re.compile(r'\{([a-z_][a-z0-9_]*)\.(\d+)\}')
+
+
+def get_material_variants(task):
+    """The topic's material_variants as a list of {key, assignment, sets}, [] if none."""
+    try:
+        return json.loads((task or {}).get('material_variants_json') or '[]') or []
+    except (ValueError, TypeError):
+        return []
+
+
+def set_task_material_variants(task_id, variants):
+    """Store (or clear, with an empty list) a topic's material_variants."""
+    with db_session() as conn:
+        conn.execute("UPDATE task SET material_variants_json = ? WHERE id = ?",
+                     (json.dumps(variants, ensure_ascii=False) if variants else None, task_id))
+
+
+def assign_material_variants(student_id, klasse_id, task):
+    """The student's combination per variant key, as {key: [datei, ...]}.
+
+    Assigned on first call (the first time the student opens the topic), then
+    stable. A new assignment takes the combination fewest classmates have,
+    ties broken at random, so neighbours rarely share one. A stored combination
+    that a re-import removed from `sets` is replaced the same way.
+    """
+    import random
+    variants = get_material_variants(task)
+    if not variants:
+        return {}
+    task_id = task['id']
+    now = now_local()
+    result = {}
+    with db_session() as conn:
+        for v in variants:
+            key, sets = v['key'], [list(s) for s in v['sets']]
+            row = conn.execute(
+                "SELECT files_json FROM student_material_variant "
+                "WHERE student_id = ? AND task_id = ? AND variant_key = ?",
+                (student_id, task_id, key)).fetchone()
+            current = json.loads(row['files_json']) if row else None
+            if current in sets:
+                result[key] = current
+                continue
+            used = [json.loads(r['files_json']) for r in conn.execute(
+                "SELECT files_json FROM student_material_variant "
+                "WHERE task_id = ? AND variant_key = ? AND klasse_id IS ? AND student_id != ?",
+                (task_id, key, klasse_id, student_id))]
+            counts = [used.count(s) for s in sets]
+            choice = random.choice([s for s, c in zip(sets, counts) if c == min(counts)])
+            conn.execute(
+                "INSERT INTO student_material_variant "
+                "(student_id, task_id, klasse_id, variant_key, files_json, assigned_at) "
+                "VALUES (?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(student_id, task_id, variant_key) DO UPDATE SET "
+                "files_json = excluded.files_json, klasse_id = excluded.klasse_id, "
+                "assigned_at = excluded.assigned_at",
+                (student_id, task_id, klasse_id, key, json.dumps(choice, ensure_ascii=False), now))
+            result[key] = choice
+    return result
+
+
+def set_student_material_variant(student_id, task_id, key, files):
+    """Teacher override of one student's combination. The caller checks that
+    `files` is one of the topic's sets; klasse_id is kept from the existing row
+    (the balance count is per class), or left NULL before the first opening."""
+    with db_session() as conn:
+        conn.execute(
+            "INSERT INTO student_material_variant "
+            "(student_id, task_id, klasse_id, variant_key, files_json, assigned_at) "
+            "VALUES (?, ?, (SELECT klasse_id FROM student_task WHERE student_id = ? AND task_id = ? LIMIT 1), ?, ?, ?) "
+            "ON CONFLICT(student_id, task_id, variant_key) DO UPDATE SET "
+            "files_json = excluded.files_json, assigned_at = excluded.assigned_at",
+            (student_id, task_id, student_id, task_id, key, json.dumps(files, ensure_ascii=False), now_local()))
+
+
+def material_variant_labels(materials, assignment):
+    """{key: [label, ...]} for an assignment from assign_material_variants().
+    Import guarantees every file in a set has a label; the filename is only a
+    fallback for a material edited away since."""
+    by_file = {material_filename(m['pfad']): m for m in materials if m.get('typ') == 'datei'}
+    return {
+        key: [(by_file.get(f) or {}).get('label') or f for f in files]
+        for key, files in assignment.items()
+    }
+
+
+def fill_material_variants(text, labels):
+    """Replace {key.N} placeholders with the student's labels. A placeholder
+    without a matching assignment is left as it is -- import rejects those,
+    so seeing one means the data changed underneath, not a normal case."""
+    if not text or not labels:
+        return text
+
+    def sub(m):
+        values = labels.get(m.group(1))
+        n = int(m.group(2))
+        return values[n - 1] if values and 1 <= n <= len(values) else m.group(0)
+    return VARIANT_PLACEHOLDER_RE.sub(sub, text)
+
+
+def apply_material_variants(student_id, klasse_id, task, subtasks, topic_materials, *shown_materials):
+    """Fill the placeholders in the subtasks' beschreibung/fertig_wenn/tipps
+    (in place) and tag materials with `variant_tags` (["Fall 1"]): the topic's
+    full list, whose labels are used, and any filtered list a page shows.
+    Returns the labels, {} for a topic without variants."""
+    assignment = assign_material_variants(student_id, klasse_id, task)
+    if not assignment:
+        return {}
+    labels = material_variant_labels(topic_materials, assignment)
+    for sub in subtasks:
+        for field in ('beschreibung', 'fertig_wenn', 'tipps'):
+            sub[field] = fill_material_variants(sub.get(field), labels)
+    tags = {}
+    for key, files in assignment.items():
+        for i, f in enumerate(files, 1):
+            tags.setdefault(f, []).append(f"{key.replace('_', ' ').capitalize()} {i}")
+    for m in [m for lst in (topic_materials, *shown_materials) for m in lst]:
+        if m.get('typ') == 'datei':
+            m['variant_tags'] = tags.get(material_filename(m['pfad']), [])
+    return labels
+
+
+def get_student_material_variant_overview(student_id):
+    """For the admin student page: every topic of the student that has
+    material_variants, with the current combination per key (None before the
+    student first opened it) and the allowed sets, both as labels."""
+    with db_session() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT t.* FROM task t JOIN student_task st ON st.task_id = t.id "
+            "WHERE st.student_id = ? AND t.material_variants_json IS NOT NULL ORDER BY t.name",
+            (student_id,)).fetchall()
+        stored = {(r['task_id'], r['variant_key']): json.loads(r['files_json']) for r in conn.execute(
+            "SELECT task_id, variant_key, files_json FROM student_material_variant WHERE student_id = ?",
+            (student_id,))}
+    overview = []
+    for task in map(dict, rows):
+        materials = get_materials(task['id'])
+        for v in get_material_variants(task):
+            sets = [list(s) for s in v['sets']]
+            current = stored.get((task['id'], v['key']))
+            overview.append({
+                'task_id': task['id'], 'task_name': task['name'], 'key': v['key'],
+                'current': current if current in sets else None,
+                'sets': [{'files': s, 'label': ' + '.join(material_variant_labels(materials, {'k': s})['k'])}
+                         for s in sets],
+            })
+    return overview
 
 
 def update_material_attribution(material_id, attribution):

@@ -94,6 +94,28 @@
 </div>
 {% endif %}
 
+{% if material_variants %}
+<!-- Material variants: which combination from the pool this student works on -->
+<div class="card mt-2">
+    <div class="card-header">🖼️ Material-Kombination</div>
+    {% for mv in material_variants %}
+    <form method="POST" action="{{ url_for('admin_schueler_material_variante', student_id=student.id) }}" class="flex gap-1 flex-center mt-1">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="task_id" value="{{ mv.task_id }}">
+        <input type="hidden" name="key" value="{{ mv.key }}">
+        <span style="min-width: 160px;">{{ mv.task_name }} <code>{{ mv.key }}</code></span>
+        <select name="set_index" class="form-control" style="width: auto;">
+            {% if not mv.current %}<option value="" selected disabled>noch nicht zugeteilt (beim ersten Öffnen)</option>{% endif %}
+            {% for st in mv.sets %}
+            <option value="{{ loop.index0 }}" {% if st.files == mv.current %}selected{% endif %}>{{ st.label }}</option>
+            {% endfor %}
+        </select>
+        <button type="submit" class="btn btn-secondary">Ändern</button>
+    </form>
+    {% endfor %}
+</div>
+{% endif %}
+
 <!-- Move Student -->
 {% if klassen %}
 <div class="card mt-2">

@@ -1848,6 +1848,7 @@ def admin_schueler_detail(student_id):
     artifact_files = models.get_all_student_artifact_files_for_student(student_id)
     data_summary = models.get_student_data_summary(student_id)
     fork_choices = models.get_student_fork_choices(student_id)
+    material_variants = models.get_student_material_variant_overview(student_id)
 
     # The topic dropdown is not tied to one class, so match against every
     # grade level this student sits in.
@@ -1866,7 +1867,8 @@ def admin_schueler_detail(student_id):
                            artifact_feedback=artifact_feedback,
                            artifact_files=artifact_files,
                            data_summary=data_summary,
-                           fork_choices=fork_choices)
+                           fork_choices=fork_choices,
+                           material_variants=material_variants)
 
 
 @app.route('/admin/schueler/<int:student_id>/loeschen', methods=['POST'])
@@ -1939,6 +1941,25 @@ def admin_schueler_fork_zweig(student_id):
         return redirect(url_for('admin_schueler_detail', student_id=student_id))
     models.set_student_fork_choice(student_id, fork_group, branch)
     flash('Zweig-Wahl aktualisiert. ✅', 'success')
+    return redirect(url_for('admin_schueler_detail', student_id=student_id))
+
+
+@app.route('/admin/schueler/<int:student_id>/material-variante', methods=['POST'])
+@admin_required
+def admin_schueler_material_variante(student_id):
+    """Teacher override of a student's material combination (MBI request
+    2026-09-24). `set_index` points into the topic's current sets; what gets
+    stored is the combination itself, like the automatic assignment."""
+    task_id = request.form.get('task_id', type=int)
+    key = request.form.get('key')
+    set_index = request.form.get('set_index', type=int)
+    variants = {v['key']: v for v in models.get_material_variants(models.get_task(task_id) if task_id else None)}
+    sets = variants.get(key, {}).get('sets') or []
+    if set_index is None or not 0 <= set_index < len(sets):
+        flash('Ungültige Material-Kombination.', 'danger')
+        return redirect(url_for('admin_schueler_detail', student_id=student_id))
+    models.set_student_material_variant(student_id, task_id, key, list(sets[set_index]))
+    flash('Material-Kombination aktualisiert. ✅', 'success')
     return redirect(url_for('admin_schueler_detail', student_id=student_id))
 
 
@@ -5038,6 +5059,12 @@ def student_klasse(slug):
         else:
             materials = models.get_materials(task['task_id'])
 
+    # Material variants: {fall.1} in the texts becomes this student's picture, and
+    # the list marks it. `task` here is the student_task row, hence get_task().
+    topic_materials = models.get_materials(task['task_id'])
+    models.apply_material_variants(student_id, klasse_id, models.get_task(task['task_id']),
+                                   all_subtasks, topic_materials, materials)
+
     # Fork/Choice: every fork_group is a stop of its own in the Thema -- a dot and a
     # page at ?weg=<fork_group> -- before the pick (the picker) and after it (the pick,
     # changeable until locked). Kl.6 „Mein digitaler Alltag", 2026-09-14: the picker
@@ -5171,7 +5198,7 @@ def student_klasse(slug):
                            all_subtasks=all_subtasks,
                            current_subtask=current_subtask,
                            materials=materials,
-                           topic_materials=models.get_materials(task['task_id']),
+                           topic_materials=topic_materials,
                            client_school_ok=_client_in_school_network(),
                            quiz_attempts=quiz_attempts,
                            subtask_quiz_status=subtask_quiz_status,
@@ -7286,8 +7313,11 @@ def student_print_topic(slug):
     subtasks = models.get_visible_subtasks_for_student(student_id, klasse['id'], task['task_id'])
     for sub in subtasks:
         sub['materials'] = models.get_materials_for_subtask(task['task_id'], sub['id'])
+    topic_materials = models.get_materials(task['task_id'])
+    models.apply_material_variants(student_id, klasse['id'], models.get_task(task['task_id']),
+                                   subtasks, topic_materials, *(sub['materials'] for sub in subtasks))
     return render_template('student/print_tasks.html', task=task, subtasks=subtasks, single=False,
-                           topic_materials=models.get_materials(task['task_id']))
+                           topic_materials=topic_materials)
 
 
 @app.route('/schueler/thema/<slug>/aufgabe-<int:position>/drucken')
@@ -7302,8 +7332,11 @@ def student_print_subtask(slug, position):
     if not subtask:
         return redirect(url_for('student_klasse', slug=slug))
     subtask['materials'] = models.get_materials_for_subtask(task['task_id'], subtask['id'])
+    topic_materials = models.get_materials(task['task_id'])
+    models.apply_material_variants(student_id, klasse['id'], models.get_task(task['task_id']),
+                                   [subtask], topic_materials, subtask['materials'])
     return render_template('student/print_tasks.html', task=task, subtasks=[subtask], single=True,
-                           topic_materials=models.get_materials(task['task_id']))
+                           topic_materials=topic_materials)
 
 
 @app.route('/schueler/unterricht/<int:unterricht_id>/selbstbewertung', methods=['POST'])

@@ -513,6 +513,7 @@ def validate_task_structure(data, warnings=None):
                     )
 
     errors.extend(_inline_image_errors(task))
+    _validate_material_variants(task, errors)
 
     # Validate topic-level quiz
     if 'quiz' in task and task['quiz']:
@@ -522,6 +523,56 @@ def validate_task_structure(data, warnings=None):
         raise ValidationError("\n".join(errors))
 
     return True
+
+
+def _validate_material_variants(task, errors):
+    """material_variants (MBI request 2026-09-24) against the topic's own
+    materials and texts. A placeholder must never reach a student raw, so every
+    {key.N} in an Aufgabe needs a key here and an N within the set length, and
+    every file in a set needs a `label` to put in its place."""
+    variants = task.get('material_variants') or []
+    if not isinstance(variants, list):
+        errors.append("material_variants must be a list")
+        return
+    labelled = {m.get('pfad'): bool(m.get('label')) for m in task.get('materials') or []
+                if isinstance(m, dict) and m.get('typ') == 'datei'}
+    lengths = {}
+    for i, v in enumerate(variants):
+        where = f"material_variants {i+1}"
+        if not isinstance(v, dict):
+            errors.append(f"{where} must be an object")
+            continue
+        key = v.get('key')
+        if not isinstance(key, str) or not re.fullmatch(r'[a-z_][a-z0-9_]*', key):
+            errors.append(f"{where}: 'key' must be lowercase letters, digits, underscore (e.g. 'fall')")
+            continue
+        if key in lengths:
+            errors.append(f"{where}: key '{key}' is used twice")
+        if v.get('assignment', 'balanced') != 'balanced':
+            errors.append(f"{where}: assignment must be 'balanced' (the only mode so far)")
+        sets = v.get('sets')
+        if not isinstance(sets, list) or not sets or not all(isinstance(x, list) and x for x in sets):
+            errors.append(f"{where}: 'sets' must be a non-empty list of non-empty lists of filenames")
+            continue
+        if len({len(x) for x in sets}) != 1:
+            errors.append(f"{where}: all sets must have the same length")
+        for f in sorted({f for x in sets for f in x}):
+            if f not in labelled:
+                errors.append(f"{where}: '{f}' is not a 'datei' material of this topic")
+            elif not labelled[f]:
+                errors.append(f"{where}: material '{f}' needs a 'label' (the text that replaces {{{key}.N}})")
+        lengths[key] = max(len(x) for x in sets)
+
+    for i, sub in enumerate(task.get('subtasks') or []):
+        if not isinstance(sub, dict):
+            continue
+        for field in ('beschreibung', 'fertig_wenn', 'tipps'):
+            for m in models.VARIANT_PLACEHOLDER_RE.finditer(sub.get(field) or ''):
+                key, n = m.group(1), int(m.group(2))
+                if key not in lengths:
+                    errors.append(f"Subtask {i+1} {field}: placeholder {m.group(0)} has no material_variants entry '{key}'")
+                elif not 1 <= n <= lengths[key]:
+                    errors.append(f"Subtask {i+1} {field}: placeholder {m.group(0)} is out of range (1-{lengths[key]})")
 
 
 def _is_seilbahn_topic(subtasks):
@@ -667,6 +718,7 @@ def import_task(task_data, dry_run=False, warnings=None):
 
     # Create materials and restore subtask assignments
     _create_materials(task_id, task.get('materials', []), subtask_id_by_position)
+    models.set_task_material_variants(task_id, task.get('material_variants') or [])
 
     return task_id
 
@@ -697,7 +749,8 @@ def _create_materials(task_id, materials_data, subtask_id_by_position):
             pfad,
             mat.get('beschreibung', ''),
             mat.get('attribution'),
-            mat.get('school_only', False)
+            mat.get('school_only', False),
+            mat.get('label'),
         )
         if mat.get('subtask_indices'):
             assigned_ids = [
@@ -778,6 +831,9 @@ def overwrite_task_from_import(existing_task_id, task_data, reset_progress=False
 
     # Replace all materials (no student-side progress to preserve)
     removed_files = _replace_materials(existing_task_id, task.get('materials', []), subtask_id_by_position)
+    # Student assignments are kept: assign_material_variants() re-checks each
+    # one against the new sets on the next opening.
+    models.set_task_material_variants(existing_task_id, task.get('material_variants') or [])
     if removed_files and warnings is not None:
         warnings.append(
             f"{len(removed_files)} nicht mehr verwendete Datei(en) gelöscht: "

@@ -293,6 +293,9 @@
                             {# Non-viewable files: download/new tab only #}
                             <a href="{{ url_for('download_material', material_id=mat.id) }}" target="_blank">{{ label }}</a>
                             {% endif %}
+                            {% for tag in mat.variant_tags or [] %}
+                            <span class="badge" style="background: #fef3c7; color: #92400e;">für dich: {{ tag }}</span>
+                            {% endfor %}
                             {% if mat.attribution %}
                             <span class="material-attribution text-muted">© {{ mat.attribution }}</span>
                             {% endif %}
