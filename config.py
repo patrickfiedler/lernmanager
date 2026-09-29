@@ -99,25 +99,10 @@ CHARACTER_SETS = {
 }
 
 
-def _env_int(name, default, minimum=1):
-    """Read a positive int from the environment, falling back to `default`.
-
-    A typo in .env must not take the app down -- students losing access to the
-    whole platform is a worse outcome than one mistuned limit -- so a bad value
-    warns on stderr and uses the default rather than raising at import time.
-    """
-    raw = os.environ.get(name)
-    if raw is None or not raw.strip():
-        return default
-    try:
-        value = int(raw)
-    except ValueError:
-        print(f"WARNING: {name}={raw!r} is not an integer -- using {default}.", file=sys.stderr)
-        return default
-    if value < minimum:
-        print(f"WARNING: {name}={value} is below {minimum} -- using {default}.", file=sys.stderr)
-        return default
-    return value
+# Rules (limits, timeouts) are plain values here, not .env overrides: one source,
+# visible in git. .env holds only secrets and machine-specific values (keys, URLs,
+# model choice). Decided 2026-09-29 after nobody could tell which limit production
+# actually ran with.
 
 
 # Local timezone for every timestamp written to the DB.
@@ -136,19 +121,19 @@ LLM_API_KEY = os.environ.get('LLM_API_KEY', '')
 LLM_BASE_URL = os.environ.get('LLM_BASE_URL', None)
 # Model choice and switching: docs/2026-09-10-llm-modellwechsel-lehren.md
 LLM_MODEL = os.environ.get('LLM_MODEL', 'Qwen3.5-397B-A17B')
-LLM_TIMEOUT = _env_int('LLM_TIMEOUT', 5)  # seconds (quiz grading — short answers)
+LLM_TIMEOUT = 5  # seconds (quiz grading — short answers)
 # Checkpoint answers are longer, multi-sentence explanations graded against the
 # stricter CHECKPOINT_SYSTEM_PROMPT, and they feed a real grade -- a timeout there
 # costs an attempt rather than a practice retry, so they get more room than the 5s
 # formative-quiz budget. Checkpoints are answered one at a time over AJAX behind a
 # visible wait state, so a slower ceiling costs one spinner, not a stalled page.
-LLM_CHECKPOINT_TIMEOUT = _env_int('LLM_CHECKPOINT_TIMEOUT', 15)
-LLM_ARTIFACT_TIMEOUT = _env_int('LLM_ARTIFACT_TIMEOUT', 60)  # seconds (artifact checklist — up to 20 criteria)
+LLM_CHECKPOINT_TIMEOUT = 15
+LLM_ARTIFACT_TIMEOUT = 60  # seconds (artifact checklist — up to 20 criteria)
 
 # Floor for the shortened retry after a logprobs timeout (llm_grading._call_llm).
 # The retry gets what is left of the budget, so a call that spent all of it would
 # otherwise hand the retry ~0s and turn a recoverable slow answer into a failed grade.
-LLM_RETRY_FLOOR = _env_int('LLM_RETRY_FLOOR', 3)
+LLM_RETRY_FLOOR = 3
 
 # What the BROWSER waits before giving up (static/js/llm_button.js reads this from a
 # meta tag in base.html). Derived, not typed: on 2026-08-27 LLM_CHECKPOINT_TIMEOUT was
@@ -160,35 +145,23 @@ LLM_RETRY_FLOOR = _env_int('LLM_RETRY_FLOOR', 3)
 #
 # Worst case server-side is one full budget plus the shortened retry; the margin
 # covers request/response transfer and a loaded server.
-LLM_CLIENT_MARGIN = _env_int('LLM_CLIENT_MARGIN', 5)
+LLM_CLIENT_MARGIN = 5
 LLM_CLIENT_TIMEOUT_MS = (LLM_CHECKPOINT_TIMEOUT + LLM_RETRY_FLOOR + LLM_CLIENT_MARGIN) * 1000
-# The artifact check must finish inside nginx's proxy_read_timeout, or nginx
-# hands the student a raw 504 instead of the app's own "KI-Feedback nicht
-# verfügbar" page. nginx is NOT configured from here -- it is edited by hand on
-# the server (deploy/lernmanager.nginx.conf is only a template, and certbot
-# rewrites that server block) -- so raising this knob alone silently reintroduces
-# the timeout. Warn rather than clamp: the ceiling is a deployment fact this
-# process cannot read.
-NGINX_PROXY_READ_TIMEOUT = _env_int('NGINX_PROXY_READ_TIMEOUT', 90)
-if LLM_ARTIFACT_TIMEOUT >= NGINX_PROXY_READ_TIMEOUT:
-    print(
-        f"WARNING: LLM_ARTIFACT_TIMEOUT={LLM_ARTIFACT_TIMEOUT}s is not below "
-        f"nginx proxy_read_timeout ({NGINX_PROXY_READ_TIMEOUT}s). Slow artifact "
-        f"checks will fail as 504 Gateway Timeout instead of a readable message. "
-        f"Raise proxy_read_timeout/proxy_send_timeout on the server too.",
-        file=sys.stderr,
-    )
+# LLM_ARTIFACT_TIMEOUT must stay below nginx's proxy_read_timeout, or nginx hands
+# the student a raw 504 instead of the app's own "KI-Feedback nicht verfügbar"
+# page. The nginx value lives only in deploy/lernmanager.nginx.conf;
+# tests/test_timeout_chain.py checks the order LLM < nginx < waitress.
 # Raised 2026-09-29 (20 -> 60, checkpoints 60 -> 120): cost has not been an
 # issue, and a used-up pool now blocks a quiz instead of shortening it. The
 # ceilings stay as a guard against loops and abuse, not as a budget.
-LLM_MAX_CALLS_PER_STUDENT_PER_HOUR = _env_int('LLM_MAX_CALLS_PER_STUDENT_PER_HOUR', 60)          # quiz/warmup answers
-LLM_MAX_ARTIFACT_CHECKS_PER_STUDENT_PER_HOUR = _env_int('LLM_MAX_ARTIFACT_CHECKS_PER_STUDENT_PER_HOUR', 10)  # artifact KI-Check uploads
+LLM_MAX_CALLS_PER_STUDENT_PER_HOUR = 60          # quiz/warmup answers
+LLM_MAX_ARTIFACT_CHECKS_PER_STUDENT_PER_HOUR = 10  # artifact KI-Check uploads
 # Chemie Checkpoint-Punktekonto: graded checkpoint quizzes must not run out of
 # budget mid-session just because the same student also did warmup/practice
 # earlier that hour -- own pool, own (higher) ceiling. A module has up to ~8
 # quiz-checkpoints, majority short_answer, plus retries -- 60 gives headroom
 # for a full lesson without being effectively unlimited.
-LLM_MAX_CHECKPOINT_CALLS_PER_STUDENT_PER_HOUR = _env_int('LLM_MAX_CHECKPOINT_CALLS_PER_STUDENT_PER_HOUR', 120)
+LLM_MAX_CHECKPOINT_CALLS_PER_STUDENT_PER_HOUR = 120
 LLM_ENABLED = bool(LLM_API_KEY)
 # OVHcloud Qwen3-32B fp8 pricing (per 1M tokens, as of 2026-03):
 #   input: €0.09 | output: €0.27
