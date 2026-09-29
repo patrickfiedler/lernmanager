@@ -6003,6 +6003,26 @@ def check_llm_rate_limit(student_id, usage_tag='llm_grading'):
         return row['cnt'] < limit
 
 
+def llm_rate_limit_free_at(student_id, usage_tag='llm_grading'):
+    """When the student's hourly pool for usage_tag has room again, as 'HH:MM',
+    or None if it has room now. That is one hour after the call whose expiry
+    brings the count below the limit -- the (count - limit + 1)-th oldest in
+    the window."""
+    limit = (config.LLM_MAX_CHECKPOINT_CALLS_PER_STUDENT_PER_HOUR
+             if usage_tag in ('checkpoint_quiz', 'checkpoint_hint')
+             else config.LLM_MAX_CALLS_PER_STUDENT_PER_HOUR)
+    with db_session() as conn:
+        rows = conn.execute(
+            "SELECT timestamp FROM llm_usage WHERE student_id = ? AND question_type = ? "
+            "AND timestamp > ? ORDER BY timestamp",
+            (student_id, usage_tag, local_cutoff(hours=1))
+        ).fetchall()
+    if len(rows) < limit:
+        return None
+    expiring = datetime.strptime(rows[len(rows) - limit]['timestamp'][:19], '%Y-%m-%d %H:%M:%S')
+    return (expiring + timedelta(hours=1, minutes=1)).strftime('%H:%M')
+
+
 def get_artifact_checks_remaining(student_id):
     """Return how many artifact KI-Checks the student can still do this hour."""
     with db_session() as conn:

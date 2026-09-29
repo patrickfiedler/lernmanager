@@ -5766,16 +5766,20 @@ def _handle_quiz(student_id, student, task, slug, quiz_json_str, subtask_id=None
     student_task_id = task['id']
     quiz = _filter_quiz_for_path(json.loads(quiz_json_str), student)
 
-    # Filter out short_answer (LLM-required) if rate limit exceeded. Must run
-    # before the POST/GET split so grading indices always match what was
-    # displayed - fill_blank is kept, it grades via exact match with LLM only
-    # as fallback.
-    llm_available = models.check_llm_rate_limit(student_id)
-    if not llm_available:
-        quiz['questions'] = [q for q in quiz['questions'] if q.get('type', 'multiple_choice') != 'short_answer']
+    # A quiz with short_answer questions waits while the student's LLM pool is
+    # used up. It used to drop them silently, and the shortened quiz was then
+    # graded against 70 % of the easier questions left (chemie request
+    # 2026-08-25). fill_blank does not count: exact match first, LLM only as
+    # fallback.
+    if (any(q.get('type', 'multiple_choice') == 'short_answer' for q in quiz['questions'])
+            and not models.check_llm_rate_limit(student_id)):
+        free_at = models.llm_rate_limit_free_at(student_id)
+        flash('Die KI-Bewertung ist für diese Stunde aufgebraucht. '
+              f'Das Quiz geht ab {free_at} Uhr wieder.', 'warning')
+        return redirect(url_for('student_klasse', slug=slug))
 
     # Guard against a quiz left with no questions for this student (all
-    # path-restricted away, or all short_answer while rate-limited).
+    # path-restricted away).
     if not quiz['questions']:
         flash('Für dich sind aktuell keine Fragen in diesem Quiz verfügbar. Versuche es später erneut.', 'warning')
         return redirect(url_for('student_klasse', slug=slug))
@@ -6424,11 +6428,21 @@ def _handle_checkpoint_quiz(student, task, slug, subtask, position, klasse):
 
     quiz = json.loads(subtask['quiz_json'])
     llm_available = models.check_llm_rate_limit(student['id'], usage_tag='checkpoint_quiz')
-    questions = [(i, q) for i, q in enumerate(quiz.get('questions', []))
+    all_questions = list(enumerate(quiz.get('questions', [])))
+    questions = [(i, q) for i, q in all_questions
                  if llm_available or q.get('type', 'multiple_choice') != 'short_answer']
     retry_indices = {f['question_index'] for f in retry_flags}
     if retry_indices:
+        all_questions = [(i, q) for i, q in all_questions if i in retry_indices]
         questions = [(i, q) for i, q in questions if i in retry_indices]
+    # Unlike a quiz, a checkpoint may go on without them: a question not asked
+    # has no score and comes back on the next opening. But the student has to
+    # know why some are missing (chemie request 2026-08-25).
+    held_back = len(all_questions) - len(questions)
+    if held_back and questions:
+        free_at = models.llm_rate_limit_free_at(student['id'], usage_tag='checkpoint_quiz')
+        flash(f'{held_back} Frage(n) brauchen die KI-Bewertung, die für diese Stunde aufgebraucht ist. '
+              f'Sie kommen ab {free_at} Uhr wieder, wenn du den Checkpoint erneut öffnest.', 'info')
 
     if not questions:
         flash('Für diesen Checkpoint sind aktuell keine Fragen verfügbar. Versuche es später erneut.', 'warning')

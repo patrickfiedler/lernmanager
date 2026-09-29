@@ -69,3 +69,13 @@ def test_finish_scores_only_the_questions_that_were_rendered(app, client):
     })
     assert finish.status_code == 200
     assert finish.get_json()["score"] == 3
+
+
+def test_held_back_questions_are_announced(app, client):
+    student_id, _ = _checkpoint_student(app)
+    _exhaust_checkpoint_budget(student_id)
+    _login(client, student_id)
+
+    body = client.get("/schueler/thema/redoxreaktionen/aufgabe-1/quiz").get_data(as_text=True)
+    assert "1 Frage(n) brauchen die KI-Bewertung" in body
+    assert "Uhr wieder" in body
