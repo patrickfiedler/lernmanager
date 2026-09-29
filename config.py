@@ -100,9 +100,9 @@ CHARACTER_SETS = {
 
 
 # Rules (limits, timeouts) are plain values here, not .env overrides: one source,
-# visible in git. .env holds only secrets and machine-specific values (keys, URLs,
-# model choice). Decided 2026-09-29 after nobody could tell which limit production
-# actually ran with.
+# visible in git. .env holds secrets and deployment choices (keys, URLs, school
+# data, LLM_PROVIDER/LLM_MODEL, TIMEZONE -- the last three by Patrick's choice,
+# 2026-09-29). Decided after nobody could tell which limit production ran with.
 
 
 # Local timezone for every timestamp written to the DB.
