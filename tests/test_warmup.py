@@ -293,3 +293,72 @@ def test_questions_tagged_above_the_students_path_are_dropped(db):
     pool = models.get_warmup_question_pool(student_id)
 
     assert [i["question"]["text"] for i in pool] == ["Für alle?"]
+
+
+# ---- Checkpoints: finished checkpoint_attempt admits its questions ----
+
+def _checkpoint(student_id, quiz=MIXED_QUIZ):
+    """Chemie topic with one quiz checkpoint, assigned to the student."""
+    klasse_id = models.create_klasse("11c")
+    models.add_student_to_klasse(student_id, klasse_id)
+    task_id = models.create_task("1 - Atommodelle", "", "", "Chemie", "11s", "")
+    subtask_id = models.create_subtask(
+        task_id, "### Checkpoint", reihenfolge=0, quiz_json=json.dumps(quiz),
+        checkpoint_type="quiz", kern_standard_tag="kern")
+    models.assign_task_to_student(student_id, klasse_id, task_id)
+    return task_id, subtask_id
+
+
+def _finish_checkpoint(student_id, task_id, subtask_id):
+    return models.create_checkpoint_attempt(
+        student_id, subtask_id, task_id, "quiz", "kern", 3)
+
+
+def test_unfinished_checkpoint_stays_out(db):
+    student_id = models.create_student("Test", "Schüler", "cpopen", "pw123")
+    _checkpoint(student_id)
+    assert models.get_warmup_question_pool(student_id, include_short_answer=True) == []
+
+
+def test_finished_checkpoint_short_answer_only_for_practice(db):
+    """Warm-up gets the quick questions; practice also gets the free text."""
+    student_id = models.create_student("Test", "Schüler", "cpdone", "pw123")
+    task_id, subtask_id = _checkpoint(student_id)
+    _finish_checkpoint(student_id, task_id, subtask_id)
+
+    warmup_types = {i["question"].get("type") for i in models.get_warmup_question_pool(student_id)}
+    assert warmup_types == {None, "fill_blank"}
+
+    practice = models.get_warmup_question_pool(student_id, include_short_answer=True)
+    assert {i["question"].get("type") for i in practice} == {None, "fill_blank", "short_answer"}
+    assert {i["subtask_id"] for i in practice} == {subtask_id}
+
+
+def test_superseded_checkpoint_attempt_stays_out(db):
+    """A reopened checkpoint ("Fortschritte zurücksetzen") is not finished anymore."""
+    student_id = models.create_student("Test", "Schüler", "cpreset", "pw123")
+    task_id, subtask_id = _checkpoint(student_id)
+    attempt_id = _finish_checkpoint(student_id, task_id, subtask_id)
+    models.supersede_checkpoint_attempts([attempt_id])
+    assert models.get_warmup_question_pool(student_id, include_short_answer=True) == []
+
+
+def test_practice_answer_grades_checkpoint_short_answer(app, client, monkeypatch):
+    """/aufwaermen/antwort finds the free-text question only for phase=practice."""
+    app.config["WTF_CSRF_ENABLED"] = False
+    import llm_grading
+    student_id = models.create_student("Test", "Schüler", "cpanswer", "pw123")
+    task_id, subtask_id = _checkpoint(student_id)
+    _finish_checkpoint(student_id, task_id, subtask_id)
+    monkeypatch.setattr(llm_grading, "grade_answer",
+                        lambda *a, **k: {"correct": True, "feedback": "Gut.", "source": "llm"})
+    with client.session_transaction() as sess:
+        sess["student_id"] = student_id
+
+    body = {"task_id": task_id, "subtask_id": subtask_id, "question_index": 2,
+            "answer": "Viren vermehren sich selbst."}
+    assert client.post("/schueler/aufwaermen/antwort", json=body).status_code == 404
+
+    resp = client.post("/schueler/aufwaermen/antwort", json={**body, "phase": "practice"})
+    assert resp.status_code == 200
+    assert resp.get_json()["correct"] is True

@@ -144,6 +144,18 @@
             area.appendChild(input);
             if (window.Zeichenleiste) window.Zeichenleiste.attach(input, q.fach);
             setTimeout(() => input.focus(), 50);
+        } else if (q.type === 'short_answer') {
+            // Free-text checkpoint question. Same id as fill_blank so answer
+            // collection and feedback share one path; Enter makes a new line.
+            const textarea = document.createElement('textarea');
+            textarea.className = 'form-control';
+            textarea.id = 'fill-input';
+            textarea.rows = 6;
+            textarea.placeholder = 'Antwort in ganzen Sätzen...';
+            textarea.setAttribute('enterkeyhint', 'enter');
+            area.appendChild(textarea);
+            if (window.Zeichenleiste) window.Zeichenleiste.attach(textarea, q.fach);
+            setTimeout(() => textarea.focus(), 50);
         } else if (QuizInteractive.supports(q.type)) {
             // Drag-or-tap renderer, shared with the quiz form and the checkpoint
             // (static/js/quiz_interactive.js).
@@ -218,7 +230,7 @@
                 fbBox.appendChild(solutionLine);
             }
             fbBox.style.display = 'block';
-        } else if (q.type === 'fill_blank') {
+        } else if (q.type === 'fill_blank' || q.type === 'short_answer') {
             // Fill-blank: show answer with colored left border + emoji (matches quiz_result.html)
             var inputEl = document.getElementById('fill-input');
             var studentText = inputEl ? inputEl.value : '';
@@ -228,7 +240,7 @@
                 (data.correct ? 'var(--success-color, #28a745)' : 'var(--danger-color, #dc3545)') +
                 '; padding-left: 1rem;';
             answerDiv.innerHTML = (data.correct ? '✅' : '❌') +
-                ' <strong>Deine Antwort:</strong> ' + (studentText || '(keine Antwort)');
+                ' <strong>Deine Antwort:</strong> ' + (studentText ? escapeHtml(studentText) : '(keine Antwort)');
 
             var fb = document.getElementById('feedback-area');
             fb.innerHTML = '';
@@ -315,7 +327,7 @@
         const q = questions[currentIdx];
         let answer;
 
-        if (q.type === 'fill_blank') {
+        if (q.type === 'fill_blank' || q.type === 'short_answer') {
             answer = document.getElementById('fill-input').value;
         } else if (QuizInteractive.supports(q.type)) {
             answer = QuizInteractive.getAnswer(document.getElementById('answer-area'), q);

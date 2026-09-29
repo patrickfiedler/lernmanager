@@ -7378,10 +7378,14 @@ def get_grading_run_override_rate(run_id):
 # ============ Warmup / Spaced Repetition ============
 
 def _quiz_json_to_pool_entries(task_id, subtask_id, quiz_json, topic_name, completed_at=None,
-                               student_path=None, fach=None):
+                               student_path=None, fach=None, allow_short_answer=False):
     """Parse one quiz_json blob into warmup pool entries, filtering out
     question types too slow for a quick warm-up (short_answer, long_answer)
     and questions tagged for a path above the student's own.
+
+    allow_short_answer lets short_answer through (long_answer never): set only
+    for checkpoint questions in practice mode, where the student chose to
+    practise and an LLM wait is acceptable.
 
     ordering and matching stay in: both grade deterministically in
     quiz_grading.py, so neither costs an LLM call or a noticeable wait."""
@@ -7392,7 +7396,8 @@ def _quiz_json_to_pool_entries(task_id, subtask_id, quiz_json, topic_name, compl
 
     entries = []
     for i, q in enumerate(quiz.get('questions', [])):
-        if q.get('type') in ('short_answer', 'long_answer'):
+        qtype = q.get('type')
+        if qtype == 'long_answer' or (qtype == 'short_answer' and not allow_short_answer):
             continue
         if not is_question_visible_for_path(q, student_path):
             continue
@@ -7414,7 +7419,7 @@ def _quiz_json_to_pool_entries(task_id, subtask_id, quiz_json, topic_name, compl
     return entries
 
 
-def get_warmup_question_pool(student_id):
+def get_warmup_question_pool(student_id, include_short_answer=False):
     """Build the warm-up/practice question pool for one student.
 
     A question only enters the pool if the student actually sat the quiz it
@@ -7427,6 +7432,11 @@ def get_warmup_question_pool(student_id):
     exception -- the teacher opted the whole class in, so no attempt is
     required there. Those get filtered by learning path and fork branch
     instead, since there is no attempt to prove the student ever did the task.
+
+    Checkpoint quizzes write checkpoint_attempt, never quiz_attempt, so they
+    get their own source: a finished, non-superseded checkpoint_attempt admits
+    its questions. include_short_answer (practice mode only) lets their
+    free-text questions in too -- most Chemie checkpoint questions are free text.
 
     Returns list of dicts: [{task_id, subtask_id, question_index, question, topic_name}, ...]
     Filters out short_answer/long_answer questions (too slow for quick warm-up)
@@ -7477,6 +7487,24 @@ def get_warmup_question_pool(student_id):
                 sub['task_id'], sub['subtask_id'], sub['quiz_json'], sub['topic_name'],
                 completed_at=sub['completed_at'], student_path=student_path,
                 fach=sub['fach']))
+
+        # 2b. Checkpoints the student has finished
+        finished_checkpoints = conn.execute('''
+            SELECT DISTINCT sub.id as subtask_id, sub.task_id, sub.quiz_json,
+                   t.name as topic_name, t.fach
+            FROM checkpoint_attempt ca
+            JOIN subtask sub ON sub.id = ca.checkpoint_id
+            JOIN task t ON t.id = sub.task_id
+            WHERE ca.student_id = ?
+              AND ca.superseded_at IS NULL
+              AND sub.quiz_json IS NOT NULL AND sub.quiz_json != ''
+        ''', (student_id,)).fetchall()
+
+        for sub in finished_checkpoints:
+            pool.extend(_quiz_json_to_pool_entries(
+                sub['task_id'], sub['subtask_id'], sub['quiz_json'], sub['topic_name'],
+                student_path=student_path, fach=sub['fach'],
+                allow_short_answer=include_short_answer))
 
         # 3. Class-unlocked topics → questions for students in that class,
         #    regardless of whether the topic was ever assigned to the student.

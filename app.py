@@ -4873,7 +4873,7 @@ def student_dashboard():
         )
 
     # Check if practice mode has questions available
-    has_warmup_pool = bool(models.get_warmup_question_pool(student_id))
+    has_warmup_pool = bool(models.get_warmup_question_pool(student_id, include_short_answer=True))
 
     return render_template('student/dashboard.html', student=student, klassen=klassen,
                            tasks_by_klasse=tasks_by_klasse,
@@ -7526,8 +7526,8 @@ def _serialize_question_for_js(item):
         'type': q.get('type', 'multiple_choice'),
         'text': q['text'],
     }
-    if result['type'] == 'fill_blank':
-        # Don't send answers to client
+    if result['type'] in ('fill_blank', 'short_answer'):
+        # Don't send answers (or the rubric) to client
         pass
     elif quiz_grading.is_interactive(result['type']):
         # Shuffled pieces only. For ordering the authored order *is* the answer,
@@ -7586,8 +7586,10 @@ def student_warmup_answer():
     question_index = data.get('question_index')
     answer = data.get('answer')
 
-    # Rebuild the question from source to prevent client-side tampering
-    pool = models.get_warmup_question_pool(student_id)
+    # Rebuild the question from source to prevent client-side tampering.
+    # Practice admits free-text checkpoint questions, the warm-up does not.
+    pool = models.get_warmup_question_pool(
+        student_id, include_short_answer=data.get('phase') == 'practice')
     matched = None
     for item in pool:
         if (item['task_id'] == task_id and
@@ -7614,6 +7616,12 @@ def student_warmup_answer():
     elif quiz_grading.is_interactive(qtype):
         if not correct:
             correct_answer = quiz_grading.correct_answer_text(question)
+    elif qtype == 'short_answer':
+        # Free-text checkpoint question in practice: the LLM feedback is shown,
+        # unlike in the checkpoint itself -- the checkpoint is finished and nothing
+        # is graded, so feedback teaches more than a bare right/wrong. The rubric
+        # stays hidden: it is teacher wording, not a model answer.
+        pass
     else:
         correct_answer = question.get('correct', [])
 
@@ -7656,7 +7664,7 @@ def student_practice():
     mode = request.args.get('mode', 'random')
     topic_slug = request.args.get('thema')
 
-    pool = models.get_warmup_question_pool(student_id)
+    pool = models.get_warmup_question_pool(student_id, include_short_answer=True)
     if not pool:
         flash('Noch keine Fragen zum Üben verfügbar.', 'info')
         return redirect(url_for('student_dashboard'))
