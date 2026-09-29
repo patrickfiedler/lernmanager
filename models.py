@@ -7081,6 +7081,11 @@ def create_grading_result(grading_run_id, task_id, student_id, netzwerk_id, crit
     source/evidence say what the grader was shown (document text, images,
     metadata or just the filename); teacher_feedback is the teacher's own
     slip text, empty = the rubric's Textbaustein.
+
+    reused (grading-with-llm result store, request 2026-09-18): 'teacher' =
+    the service reused an earlier teacher correction for the same text, so the
+    score and teacher_feedback are already the teacher's and the criterion
+    counts as confirmed; 'llm' = an earlier model answer; None = graded now.
     """
     created_at = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
     criteria_json = json.dumps([
@@ -7093,10 +7098,11 @@ def create_grading_result(grading_run_id, task_id, student_id, netzwerk_id, crit
             'overridden': False,
             'reviewed_at': None,
             'review_required': bool(c.get('review_required')),
-            'confirmed': not bool(c.get('review_required')),
+            'confirmed': not c.get('review_required') or c.get('reused') == 'teacher',
             'source': c.get('source'),
             'evidence': c.get('evidence'),
-            'teacher_feedback': '',
+            'teacher_feedback': c.get('teacher_feedback') or '',
+            'reused': c.get('reused'),
         }
         for c in criteria
     ])
@@ -7269,10 +7275,28 @@ def is_non_submitter_result(result):
     return result.get('document_file') is None and bool(result.get('error'))
 
 
+def criterion_needs_attention(c):
+    """An always-review criterion not yet confirmed, or a zero score -- unless
+    the zero is an earlier teacher correction the result store reused."""
+    if c.get('review_required') and not c.get('confirmed'):
+        return True
+    return c.get('llm_score') == 0 and c.get('reused') != 'teacher'
+
+
+def result_needs_attention(result):
+    return any(criterion_needs_attention(c) for c in result['criteria'])
+
+
+def is_pre_reviewed_result(result):
+    """Every criterion carries an earlier teacher correction (reused: teacher)."""
+    return bool(result['criteria']) and all(c.get('reused') == 'teacher' for c in result['criteria'])
+
+
 def _review_queue_sort_key(result):
     """Flagged-first ordering for Page B (teacher-review-ui.md §4): (1) error
     rows on a real submission, (2) unconfirmed always-review criteria or any
-    zero-score criterion, (3) alphabetical. Recomputed per page load rather
+    zero-score criterion, (3) alphabetical, (4) results the result store
+    returned entirely pre-reviewed (every criterion reused: teacher). Recomputed per page load rather
     than frozen at queue start (spec's stated ideal) -- see task_plan.md's
     2g/2h known-gaps note for why that's an acceptable MVP simplification
     here: the only input that changes mid-review is 'confirmed', and a
@@ -7280,11 +7304,14 @@ def _review_queue_sort_key(result):
     reshuffle, not the "queue points at a gone/superseded row" hazard the
     freeze was really guarding against (R3)."""
     is_real_error = bool(result.get('error')) and not is_non_submitter_result(result)
-    needs_attention = any(
-        (c.get('review_required') and not c.get('confirmed')) or c.get('llm_score') == 0
-        for c in result['criteria']
-    )
-    bucket = 0 if is_real_error else (1 if needs_attention else 2)
+    if is_real_error:
+        bucket = 0
+    elif result_needs_attention(result):
+        bucket = 1
+    elif is_pre_reviewed_result(result):
+        bucket = 3  # Patrick 2026-09-29: stays in the queue, last
+    else:
+        bucket = 2
     name = f"{result.get('nachname') or ''}, {result.get('vorname') or ''}"
     return (bucket, name)
 

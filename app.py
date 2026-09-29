@@ -1431,12 +1431,7 @@ def admin_grading_result_review(result_id):
     queue = models.get_grading_run_review_queue(run['id'])
     queue_ids = [r['id'] for r in queue]
     position = queue_ids.index(result_id) + 1 if result_id in queue_ids else None
-    remaining_flagged = sum(
-        1 for r in queue if r['id'] != result_id and any(
-            (c.get('review_required') and not c.get('confirmed')) or c.get('llm_score') == 0
-            for c in r['criteria']
-        )
-    )
+    remaining_flagged = sum(1 for r in queue if r['id'] != result_id and models.result_needs_attention(r))
     prev_result = queue[queue_ids.index(result_id) - 1] if position and position > 1 else None
 
     supersede_conflict = None

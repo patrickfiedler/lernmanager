@@ -84,10 +84,11 @@
                 </thead>
                 <tbody>
                     {% for c in result.criteria %}
-                    <tr class="criterion-row" {% if c.review_required and not c.confirmed %}style="border-left: 3px solid #dc2626;"{% elif c.llm_score == 0 %}style="border-left: 3px solid #f59e0b;"{% endif %}>
+                    <tr class="criterion-row" {% if c.review_required and not c.confirmed %}style="border-left: 3px solid #dc2626;"{% elif c.llm_score == 0 and c.reused != 'teacher' %}style="border-left: 3px solid #f59e0b;"{% endif %}>
                         <td>
                             <strong>{{ c.name }}</strong>
                             {% if c.review_required %}<span class="badge badge-warning" title="Kein Modell bewertet dieses Kriterium zuverlässig">⚠️ Prüfung nötig</span>{% endif %}
+                            {% if c.reused == 'teacher' %}<span class="badge badge-success" title="Derselbe Text wurde in einem früheren Lauf schon von dir korrigiert; Punkte und Rückmeldung sind von dort übernommen">♻ frühere Korrektur übernommen</span>{% endif %}
                             {% if c.source %}<br><small class="text-muted">Grundlage: {{ source_labels.get(c.source, c.source) }}</small>{% endif %}
                             {% if c.evidence %}<pre style="margin: 0.25rem 0; padding: 0.25rem 0.5rem; white-space: pre-wrap; font-size: 0.8rem; background: #f3f4f6; border-radius: 4px;">{{ c.evidence }}</pre>{% endif %}
                             {% if c.feedback %}<br><small>KI: {{ c.feedback }}</small>{% endif %}
