@@ -7512,7 +7512,8 @@ def get_grading_run_override_rate(run_id):
 # ============ Warmup / Spaced Repetition ============
 
 def _quiz_json_to_pool_entries(task_id, subtask_id, quiz_json, topic_name, completed_at=None,
-                               student_path=None, fach=None, allow_short_answer=False):
+                               student_path=None, fach=None, allow_short_answer=False,
+                               only_indices=None):
     """Parse one quiz_json blob into warmup pool entries, filtering out
     question types too slow for a quick warm-up (short_answer, long_answer)
     and questions tagged for a path above the student's own.
@@ -7520,6 +7521,9 @@ def _quiz_json_to_pool_entries(task_id, subtask_id, quiz_json, topic_name, compl
     allow_short_answer lets short_answer through (long_answer never): set only
     for checkpoint questions in practice mode, where the student chose to
     practise and an LLM wait is acceptable.
+
+    only_indices, if given, admits just those question positions (checkpoints:
+    the questions whose score is final, see get_warmup_question_pool).
 
     ordering and matching stay in: both grade deterministically in
     quiz_grading.py, so neither costs an LLM call or a noticeable wait."""
@@ -7531,6 +7535,8 @@ def _quiz_json_to_pool_entries(task_id, subtask_id, quiz_json, topic_name, compl
     entries = []
     for i, q in enumerate(quiz.get('questions', [])):
         qtype = q.get('type')
+        if only_indices is not None and i not in only_indices:
+            continue
         if qtype == 'long_answer' or (qtype == 'short_answer' and not allow_short_answer):
             continue
         if not is_question_visible_for_path(q, student_path):
@@ -7622,23 +7628,52 @@ def get_warmup_question_pool(student_id, include_short_answer=False):
                 completed_at=sub['completed_at'], student_path=student_path,
                 fach=sub['fach']))
 
-        # 2b. Checkpoints the student has finished
+        # 2b. Checkpoints the student has finished -- question by question.
+        #
+        # Practice shows the solution (and, for free text, the grader's sentence), so
+        # a question may only come in once nothing can be earned on it any more:
+        # its score in the standing attempt is a number, and no report or returned
+        # question hangs on it. Still open are a reported question (score null), one
+        # the teacher sent back (flag 'abgelehnt'/'nachbesserung') and one that was
+        # never asked because the LLM budget was spent (no key in the scores).
+        # Before 2026-10-01 the whole checkpoint came in with the first attempt, and
+        # a student could practise an owed question, read the answer, and go back.
         finished_checkpoints = conn.execute('''
-            SELECT DISTINCT sub.id as subtask_id, sub.task_id, sub.quiz_json,
-                   t.name as topic_name, t.fach
+            SELECT sub.id as subtask_id, sub.task_id, sub.quiz_json,
+                   t.name as topic_name, t.fach, ca.question_scores_json
             FROM checkpoint_attempt ca
             JOIN subtask sub ON sub.id = ca.checkpoint_id
             JOIN task t ON t.id = sub.task_id
             WHERE ca.student_id = ?
               AND ca.superseded_at IS NULL
               AND sub.quiz_json IS NOT NULL AND sub.quiz_json != ''
+            ORDER BY ca.id
         ''', (student_id,)).fetchall()
+        standing = {sub['subtask_id']: sub for sub in finished_checkpoints}  # newest wins
 
-        for sub in finished_checkpoints:
+        open_flags = {}
+        for f in conn.execute(f'''
+            SELECT checkpoint_id, question_index FROM checkpoint_flag
+            WHERE student_id = ? AND status IN ({','.join('?' * len(PROVISIONAL_FLAG_STATUSES))})
+        ''', (student_id, *PROVISIONAL_FLAG_STATUSES)).fetchall():
+            open_flags.setdefault(f['checkpoint_id'], set()).add(f['question_index'])
+
+        for sub in standing.values():
+            try:
+                scores = json.loads(sub['question_scores_json'] or 'null')
+            except (json.JSONDecodeError, TypeError):
+                scores = None
+            if isinstance(scores, dict):
+                settled = {int(k) for k, v in scores.items() if v is not None and str(k).isdigit()}
+            else:
+                # Sittings from before migrate_055 carry no per-question scores:
+                # every question counts as settled, minus the flagged ones below.
+                settled = set(range(len(json.loads(sub['quiz_json']).get('questions', []))))
+            settled -= open_flags.get(sub['subtask_id'], set())
             pool.extend(_quiz_json_to_pool_entries(
                 sub['task_id'], sub['subtask_id'], sub['quiz_json'], sub['topic_name'],
                 student_path=student_path, fach=sub['fach'],
-                allow_short_answer=include_short_answer))
+                allow_short_answer=include_short_answer, only_indices=settled))
 
         # 3. Class-unlocked topics → questions for students in that class,
         #    regardless of whether the topic was ever assigned to the student.
@@ -7671,6 +7706,7 @@ def get_warmup_question_pool(student_id, include_short_answer=False):
             WHERE sk.student_id = ?
               AND sub.quiz_json IS NOT NULL AND sub.quiz_json != ''
               AND COALESCE(sub.is_intro, 0) = 0
+              AND sub.checkpoint_type IS NULL  -- graded: only via 2b, once settled
         ''', (student_id,)).fetchall()
 
         for sub in unlocked_subtasks:

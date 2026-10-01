@@ -334,6 +334,59 @@ def test_finished_checkpoint_short_answer_only_for_practice(db):
     assert {i["subtask_id"] for i in practice} == {subtask_id}
 
 
+def _pool_indices(student_id):
+    return sorted(i["question_index"]
+                  for i in models.get_warmup_question_pool(student_id, include_short_answer=True))
+
+
+def test_only_settled_checkpoint_questions_can_be_practised(db):
+    """Practice shows the solution, so a question with points still to earn stays out:
+    reported (score null) and never asked (no key, LLM budget was spent)."""
+    student_id = models.create_student("Test", "Schüler", "cpsettled", "pw123")
+    task_id, subtask_id = _checkpoint(student_id)
+    all_indices = list(range(len(MIXED_QUIZ["questions"])))
+    scores = {str(i): 3 for i in all_indices}
+    scores["1"] = None            # reported, no score yet
+    del scores[str(all_indices[-1])]   # held back, not part of the sitting
+    models.create_checkpoint_attempt(student_id, subtask_id, task_id, "quiz", "kern", 3,
+                                     question_scores_json=json.dumps(scores))
+    assert _pool_indices(student_id) == [i for i in all_indices if i not in (1, all_indices[-1])]
+
+
+def test_question_the_teacher_sent_back_leaves_the_practice_pool(db):
+    """A scored question the teacher returns ('nachbesserung') is owed again -- and
+    comes back to the pool once it is redone ('nachgeholt')."""
+    student_id = models.create_student("Test", "Schüler", "cpowed", "pw123")
+    task_id, subtask_id = _checkpoint(student_id)
+    all_indices = list(range(len(MIXED_QUIZ["questions"])))
+    attempt_id = models.create_checkpoint_attempt(
+        student_id, subtask_id, task_id, "quiz", "kern", 2,
+        question_scores_json=json.dumps({str(i): 2 for i in all_indices}))
+    assert _pool_indices(student_id) == all_indices
+
+    flag_id = models.create_checkpoint_flag(
+        subtask_id, 0, 'teacher', student_id=student_id, status='nachbesserung',
+        checkpoint_attempt_id=attempt_id)
+    assert _pool_indices(student_id) == all_indices[1:]
+
+    with models.db_session() as conn:
+        conn.execute("UPDATE checkpoint_flag SET status = 'nachgeholt' WHERE id = ?", (flag_id,))
+    assert _pool_indices(student_id) == all_indices
+
+
+def test_practice_unlock_does_not_admit_checkpoint_questions(db):
+    """Unlocking a Thema for class practice must not hand out a graded checkpoint's
+    questions before the student has sat it."""
+    student_id = models.create_student("Test", "Schüler", "cpunlock", "pw123")
+    task_id, _ = _checkpoint(student_id)
+    with models.db_session() as conn:
+        klasse_id = conn.execute("SELECT klasse_id FROM student_klasse WHERE student_id = ?",
+                                 (student_id,)).fetchone()["klasse_id"]
+        conn.execute("INSERT INTO class_practice_unlock (klasse_id, task_id) VALUES (?, ?)",
+                     (klasse_id, task_id))
+    assert models.get_warmup_question_pool(student_id, include_short_answer=True) == []
+
+
 def test_superseded_checkpoint_attempt_stays_out(db):
     """A reopened checkpoint ("Fortschritte zurücksetzen") is not finished anymore."""
     student_id = models.create_student("Test", "Schüler", "cpreset", "pw123")
