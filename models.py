@@ -1700,6 +1700,8 @@ def get_students_in_klasse(klasse_id):
     seilbahn_regulaer: a Seilbahn student whose active topic has no Seilbahn task,
     i.e. they sit at the regular topic instead of its twin. It works (see
     effective_path_for_topic: measured like Wanderweg), but the teacher should know.
+    zwilling_id: the Seilbahn twin of the active topic, if one is linked -- where such
+    a student can be moved to (move_seilbahn_students_to_twin).
     """
     with db_session() as conn:
         rows = conn.execute('''
@@ -1708,7 +1710,9 @@ def get_students_in_klasse(klasse_id):
                           AND NOT EXISTS (SELECT 1 FROM subtask
                                           WHERE task_id = st.task_id AND path = 'seilbahn'
                                             AND COALESCE(hidden, 0) = 0)
-                THEN 1 ELSE 0 END as seilbahn_regulaer
+                THEN 1 ELSE 0 END as seilbahn_regulaer,
+                (SELECT tw.id FROM task tw WHERE tw.seilbahn_of = t.unit_slug
+                  ORDER BY tw.id LIMIT 1) as zwilling_id
             FROM student s
             JOIN student_klasse sk ON s.id = sk.student_id
             LEFT JOIN student_task st ON st.id = (
@@ -2089,7 +2093,12 @@ def get_next_open_queued_topic(student_id, klasse_id, current_task_id=None):
     if not queue:
         return None
 
+    # A student on the twin has had the regular topic's queue entry: the queue lists
+    # the regular topic, the Seilbahn student holds its twin.
+    regular_of = {twin: regular for regular, twin in get_seilbahn_twin_map().items()}
     assigned_ids = {st['task_id'] for st in get_all_student_tasks(student_id, klasse_id)}
+    assigned_ids |= {regular_of[t] for t in assigned_ids if t in regular_of}
+    current_task_id = regular_of.get(current_task_id, current_task_id)
     open_entries = [q for q in queue
                     if q['task_id'] not in assigned_ids and q['task_id'] != current_task_id]
     if not open_entries:
@@ -2115,9 +2124,13 @@ def get_assigned_task_ids_by_student(klasse_id):
             "SELECT student_id, task_id FROM student_task WHERE klasse_id = ?",
             (klasse_id,)
         ).fetchall()
+    regular_of = {twin: regular for regular, twin in get_seilbahn_twin_map().items()}
     assigned = {}
     for r in rows:
-        assigned.setdefault(r['student_id'], set()).add(r['task_id'])
+        ids = assigned.setdefault(r['student_id'], set())
+        ids.add(r['task_id'])
+        if r['task_id'] in regular_of:  # the twin stands for its regular topic's queue entry
+            ids.add(regular_of[r['task_id']])
     return assigned
 
 
@@ -2925,6 +2938,36 @@ def set_task_seilbahn_of(task_id, unit_slug):
         conn.execute("UPDATE task SET seilbahn_of = ? WHERE id = ?", (unit_slug or None, task_id))
 
 
+def get_seilbahn_twin_map():
+    """{regular task_id: twin task_id} for every linked pair (task.seilbahn_of).
+
+    One small query; callers that walk a queue or a roster need all pairs at once.
+    Two twins naming the same regular topic: the older one wins.
+    """
+    with db_session() as conn:
+        rows = conn.execute('''
+            SELECT r.id as regular_id, tw.id as twin_id
+            FROM task tw JOIN task r ON r.unit_slug = tw.seilbahn_of
+            ORDER BY tw.id DESC
+        ''').fetchall()
+    return {r['regular_id']: r['twin_id'] for r in rows}
+
+
+def topic_for_student(student_id, task_id):
+    """The topic this student gets when `task_id` is assigned: its Seilbahn twin for
+    a Seilbahn student, if one is linked, else `task_id` itself.
+
+    The single place where "assignment follows the link" is decided
+    (assign_task_to_student calls it), so class assignment, single assignment and
+    the queue's "Nächstes Thema" cannot disagree.
+    """
+    twin_id = get_seilbahn_twin_map().get(task_id)
+    if not twin_id:
+        return task_id
+    student = get_student(student_id)
+    return twin_id if student and student.get('lernpfad') == 'seilbahn' else task_id
+
+
 def get_material_variants(task):
     """The topic's material_variants as a list of {key, assignment, sets}, [] if none."""
     try:
@@ -3185,9 +3228,24 @@ def assign_task_to_student(student_id, klasse_id, task_id, rolle='primary',
     produced a second, empty student_task row and the student saw a topic they
     had already completed sitting at 0 %.
 
+    A Seilbahn student gets the topic's twin instead, if one is linked
+    (topic_for_student). With 'skip', a Seilbahn student who already has a row for
+    the regular topic is left there: a class-wide assignment must not quietly move
+    someone off a topic they are working on. Moving is a deliberate act -- the
+    single-student assignment ('reopen') or the class page's "umhängen".
+
     Returns 'created', 'reopened' or 'skipped'.
     """
+    target_id = topic_for_student(student_id, task_id)
     with db_session() as conn:
+        if target_id != task_id:
+            has_regular = conn.execute(
+                "SELECT 1 FROM student_task WHERE student_id = ? AND klasse_id = ? AND task_id = ? AND rolle = ?",
+                (student_id, klasse_id, task_id, rolle)).fetchone()
+            if has_regular and on_existing == 'skip':
+                return 'skipped'
+            task_id = target_id
+
         # 1. Look for an existing row for this exact topic BEFORE touching
         #    anything -- checking after step 2 is what made the old guard dead.
         #    Where several rows exist (the pre-fix duplicates), take the one
@@ -3275,12 +3333,32 @@ def assign_task_to_klasse(klasse_id, task_id, rolle='primary'):
             (klasse_id,)
         ).fetchall()
 
-    counts = {'created': 0, 'reopened': 0, 'skipped': 0}
+    counts = {'created': 0, 'reopened': 0, 'skipped': 0, 'zwilling': 0}
     for s in students:
         outcome = assign_task_to_student(
             s['student_id'], klasse_id, task_id, rolle, on_existing='skip')
         counts[outcome] += 1
+        if outcome == 'created' and topic_for_student(s['student_id'], task_id) != task_id:
+            counts['zwilling'] += 1
     return counts
+
+
+def move_seilbahn_students_to_twin(klasse_id):
+    """Move every Seilbahn student of this class who sits at a regular topic to its twin.
+
+    For students assigned before the pair was linked. It is an ordinary reassignment:
+    the regular topic is closed and stays in the student's history, the twin becomes
+    the active topic and starts empty -- progress hangs off student_task and the twin
+    has other tasks, so nothing can be carried over.
+
+    Returns the number of students moved.
+    """
+    moved = 0
+    for s in get_students_in_klasse(klasse_id):
+        if s['seilbahn_regulaer'] and s['zwilling_id']:
+            outcome = assign_task_to_student(s['id'], klasse_id, s['task_id'], on_existing='reopen')
+            moved += outcome in ('created', 'reopened')
+    return moved
 
 
 # ============================================================================

@@ -819,6 +819,9 @@ def admin_klasse_detail(klasse_id):
     # Enrich students with queue position (avoids N+1 queries)
     queue = models.get_topic_queue(klasse_id)
     queue_lookup = {q['task_id']: (q['position'], len(queue)) for q in queue}
+    for regular_id, twin_id in models.get_seilbahn_twin_map().items():
+        if regular_id in queue_lookup:  # a twin stands at its regular topic's position
+            queue_lookup.setdefault(twin_id, queue_lookup[regular_id])
     for s in students:
         if s.get('task_id') and s['task_id'] in queue_lookup:
             s['queue_pos'], s['queue_total'] = queue_lookup[s['task_id']]
@@ -1738,10 +1741,22 @@ def admin_klasse_thema_zuweisen(klasse_id):
         # stragglers get picked up, and the teacher needs to see that it left the
         # students who already have it alone rather than resetting them.
         msg = f"Thema zugewiesen: {counts['created']} neu."
+        if counts['zwilling']:
+            msg += f" Davon {counts['zwilling']} Seilbahn-Schüler mit dem Seilbahn-Zwilling."
         if counts['skipped']:
             msg += f" {counts['skipped']} hatten es schon (unverändert)."
         flash(msg + ' ✅', 'success')
 
+    return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id))
+
+
+@app.route('/admin/klasse/<int:klasse_id>/seilbahn-umhaengen', methods=['POST'])
+@admin_required
+def admin_klasse_seilbahn_umhaengen(klasse_id):
+    """Move the class's Seilbahn students from a regular topic to its twin."""
+    moved = models.move_seilbahn_students_to_twin(klasse_id)
+    flash(f'{moved} Seilbahn-Schüler auf den Seilbahn-Zwilling umgehängt. ✅' if moved
+          else 'Niemand umzuhängen.', 'success' if moved else 'info')
     return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id))
 
 
@@ -7395,6 +7410,11 @@ def student_start_next_topic():
     # click would otherwise create a second, empty row for a topic the student
     # already has and drop them back to 0 %.
     outcome = models.assign_task_to_student(student_id, klasse_id, task_id)
+    # A Seilbahn student got the twin, not the queued topic: name and link what
+    # they actually have. topic_slug, because a Seilbahn topic's slug differs.
+    started = models.get_student_task(student_id, klasse_id)
+    if outcome != 'skipped' and started:
+        task, task_id = started, started['task_id']
     if outcome == 'skipped':
         flash(f'Du bist schon bei „{task["name"]}".', 'info')
         return redirect(url_for('student_klasse', slug=slugify(task['name'])))
@@ -7407,7 +7427,7 @@ def student_start_next_topic():
     )
 
     flash(f'Neues Thema gestartet: {task["name"]} 🎉', 'success')
-    return redirect(url_for('student_klasse', slug=slugify(task['name'])))
+    return redirect(url_for('student_klasse', slug=topic_slug(task)))
 
 
 @app.route('/schueler/einstellungen', methods=['GET', 'POST'])

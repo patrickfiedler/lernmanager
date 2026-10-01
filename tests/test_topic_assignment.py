@@ -105,7 +105,7 @@ def test_assigning_to_a_class_picks_up_stragglers_without_resetting_the_rest(db)
 
     counts = models.assign_task_to_klasse(klasse_id, task_id)
 
-    assert counts == {'created': 1, 'reopened': 0, 'skipped': 1}
+    assert counts == {'created': 1, 'reopened': 0, 'skipped': 1, 'zwilling': 0}
     assert len(_rows(done_student, klasse_id, task_id)) == 1
     assert models.get_student_task(fresh_student, klasse_id)['task_id'] == task_id
 

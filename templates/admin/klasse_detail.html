@@ -204,11 +204,20 @@
     <div class="card-header">👥 Schüler ({{ students|length }})</div>
     {% set seilbahn_regulaer = students|selectattr('seilbahn_regulaer')|list %}
     {% if seilbahn_regulaer %}
-    <p class="text-muted" style="margin: 0 0 0.75rem;">
+    {% set mit_zwilling = seilbahn_regulaer|selectattr('zwilling_id')|list %}
+    <div class="text-muted" style="margin: 0 0 0.75rem;">
         ⚠️ <strong>{{ seilbahn_regulaer|length }} Seilbahn-Schüler an einem regulären Thema:</strong>
-        {% for s in seilbahn_regulaer %}{{ s.vorname }} {{ s.nachname }} ({{ s.task_name }}){{ ", " if not loop.last }}{% endfor %}.
-        Pflicht sind dort die Wanderweg-Aufgaben, die Texte sind nicht vereinfacht. Gibt es einen Seilbahn-Zwilling, weise ihn zu.
-    </p>
+        {% for s in seilbahn_regulaer %}{{ s.vorname }} {{ s.nachname }} ({{ s.task_name }}{{ '' if s.zwilling_id else ', kein Zwilling' }}){{ ", " if not loop.last }}{% endfor %}.
+        Pflicht sind dort die Wanderweg-Aufgaben, die Texte sind nicht vereinfacht.
+        {% if mit_zwilling %}
+        <form method="POST" action="{{ url_for('admin_klasse_seilbahn_umhaengen', klasse_id=klasse.id) }}" style="margin-top: 0.5rem;"
+              onsubmit="return confirm('{{ mit_zwilling|length }} Schüler auf den Seilbahn-Zwilling umhängen? Der Zwilling beginnt leer, das reguläre Thema wird geschlossen.');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-secondary">{{ mit_zwilling|length }} auf den Seilbahn-Zwilling umhängen</button>
+            <span>Der Zwilling beginnt leer. Das reguläre Thema wird geschlossen und bleibt in der Historie.</span>
+        </form>
+        {% endif %}
+    </div>
     {% endif %}
     {% if students %}
     <form method="POST" action="{{ url_for('admin_klasse_schueler_verschieben_batch', klasse_id=klasse.id) }}"
