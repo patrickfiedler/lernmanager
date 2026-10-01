@@ -203,3 +203,17 @@ def test_the_student_is_told_how_often_they_resent_the_same_text(app, client):
     # Counted per question, and never at the cost of an attempt.
     assert _answer(client, subtask_id, [1])["attempts"] == 1
     assert len(_logged(subtask_id)) == 1
+
+
+def test_resubmission_does_not_send_the_graders_sentence(app, client, graded_wrong):
+    """Same transport rule as a fresh verdict (test_checkpoint_quiz): the grader's
+    sentence says what the answer lacks. The page never rendered it on this path, but
+    it travelled in the response, readable in the browser's network tab."""
+    student_id, subtask_id = _checkpoint_student(app)
+    _login(client, student_id)
+    _answer(client, subtask_id, "falsch")
+    second = _answer(client, subtask_id, "falsch")
+
+    assert second["unchanged"] is True
+    assert "feedback" not in second
+    assert set(second) == {"correct", "attempts", "unchanged", "resubmit_count"}

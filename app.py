@@ -2990,9 +2990,12 @@ def _checkpoint_resubmitted(progress, subtask_id, qidx, previous):
     repeats = progress.setdefault('resubmits', {}).get(qidx, 0) + 1
     progress['resubmits'][qidx] = repeats
     _save_checkpoint_progress(subtask_id, progress)
+    # No `feedback`: the grader's sentence says what the answer lacks, and in a
+    # retry-until-correct sitting that hands over the solution. The fresh-verdict
+    # response already drops it (test_checkpoint_quiz); this path sent it along
+    # unrendered until 2026-10-01 -- readable in the browser's network tab.
     return {
         'correct': bool(previous['correct']),
-        'feedback': previous['feedback'],
         'attempts': progress['attempts'].get(qidx, 1),
         'unchanged': True,
         # How often this exact text has now been SENT, not how often it repeated:
