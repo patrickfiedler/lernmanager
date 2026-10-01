@@ -429,6 +429,7 @@ def validate_task_structure(data, warnings=None):
         errors.append(f"Invalid unit_slug '{task['unit_slug']}'. Must match ^[a-z0-9_]+$")
     if task.get('connections'):
         errors.extend(_validate_connections(task['connections'], warnings=warnings))
+    _validate_seilbahn_of(task, errors, warnings)
 
     # Validate subtasks
     VALID_PATHS = ('wanderweg', 'bergweg', 'gipfeltour', 'seilbahn')
@@ -582,6 +583,25 @@ def _validate_material_variants(task, errors):
                     errors.append(f"Subtask {i+1} {field}: placeholder {m.group(0)} is out of range (1-{lengths[key]})")
 
 
+def _validate_seilbahn_of(task, errors, warnings=None):
+    """seilbahn_of (MBI request 2026-08-31): the unit_slug of the regular topic this
+    one is the Seilbahn twin of. An unresolved slug is a soft warning, like
+    connections.building_on -- the regular topic may arrive later in the same batch.
+    """
+    target = task.get('seilbahn_of')
+    if target is None:
+        return
+    if not isinstance(target, str) or not re.match(r'^[a-z0-9_]+$', target):
+        errors.append(f"Invalid seilbahn_of '{target}'. Must be a unit_slug (^[a-z0-9_]+$)")
+        return
+    if target == task.get('unit_slug'):
+        errors.append("seilbahn_of points to the topic itself")
+    if not _is_seilbahn_topic(task.get('subtasks') or []):
+        errors.append("seilbahn_of is set, but not every subtask has path 'seilbahn' -- only a pure Seilbahn topic can be a twin")
+    if not models.get_task_by_unit_slug(target) and warnings is not None:
+        warnings.append(f"seilbahn_of references unresolved unit_slug '{target}' (ok if it's part of the same batch import)")
+
+
 def _is_seilbahn_topic(subtasks):
     """True if topic is a pure Seilbahn topic (all subtasks have path='seilbahn')."""
     return bool(subtasks) and all(s.get('path') == 'seilbahn' for s in subtasks)
@@ -726,6 +746,7 @@ def import_task(task_data, dry_run=False, warnings=None):
     # Create materials and restore subtask assignments
     _create_materials(task_id, task.get('materials', []), subtask_id_by_position)
     models.set_task_material_variants(task_id, task.get('material_variants') or [])
+    models.set_task_seilbahn_of(task_id, task.get('seilbahn_of'))
 
     return task_id
 
@@ -841,6 +862,7 @@ def overwrite_task_from_import(existing_task_id, task_data, reset_progress=False
     # Student assignments are kept: assign_material_variants() re-checks each
     # one against the new sets on the next opening.
     models.set_task_material_variants(existing_task_id, task.get('material_variants') or [])
+    models.set_task_seilbahn_of(existing_task_id, task.get('seilbahn_of'))
     if removed_files and warnings is not None:
         warnings.append(
             f"{len(removed_files)} nicht mehr verwendete Datei(en) gelöscht: "

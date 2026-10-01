@@ -208,7 +208,8 @@ def init_db():
                 module_tier TEXT NOT NULL DEFAULT 'kern_standard',  -- kern_standard/hero (Chemie swap-rule tier)
                 unit_slug TEXT,  -- stable author-chosen ID (e.g. "modul_01"), referenced by other units' connections.building_on
                 connections_json TEXT,  -- JSON: {building_on: [...], arriving_at: [...]} (Clayden-style unit connections)
-                material_variants_json TEXT  -- migrate_063: [{key, assignment, sets: [[datei, ...], ...]}], see assign_material_variants()
+                material_variants_json TEXT,  -- migrate_063: [{key, assignment, sets: [[datei, ...], ...]}], see assign_material_variants()
+                seilbahn_of TEXT  -- migrate_064: unit_slug of the regular topic this one is the Seilbahn twin of
             );
 
             CREATE UNIQUE INDEX IF NOT EXISTS idx_task_unit_slug ON task(unit_slug) WHERE unit_slug IS NOT NULL;
@@ -2250,6 +2251,8 @@ def export_task_to_dict(task_id):
         }
         if get_material_variants(task):
             data['material_variants'] = get_material_variants(task)
+        if task.get('seilbahn_of'):
+            data['seilbahn_of'] = task['seilbahn_of']
         return data
           
         
@@ -2933,6 +2936,16 @@ def create_material(task_id, typ, pfad, beschreibung='', attribution=None, schoo
 # material; the combination only says which ones they work on in depth.
 
 VARIANT_PLACEHOLDER_RE = re.compile(r'\{([a-z_][a-z0-9_]*)\.(\d+)\}')
+
+
+def set_task_seilbahn_of(task_id, unit_slug):
+    """Store (or clear, with None) the link from a Seilbahn twin to its regular topic.
+
+    Kept as the regular topic's unit_slug, not its id: a batch import may bring the
+    twin before the topic it points to, and a slug survives a re-import.
+    """
+    with db_session() as conn:
+        conn.execute("UPDATE task SET seilbahn_of = ? WHERE id = ?", (unit_slug or None, task_id))
 
 
 def get_material_variants(task):
