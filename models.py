@@ -2274,6 +2274,28 @@ def is_subtask_required_for_path(subtask, student_path):
     return PATH_ORDER[subtask_path] <= PATH_ORDER[student_path]
 
 
+def effective_path_for_topic(student_path, subtasks):
+    """The path a student is measured against in ONE topic, given its subtasks.
+
+    The student's own lernpfad, with two overrides that look at the topic as a whole:
+      - pure Seilbahn topic -> 'seilbahn' for everyone: they were assigned this topic,
+        so all its tasks are required regardless of their global lernpfad.
+      - topic without a single Seilbahn task, Seilbahn student -> 'wanderweg'. Without
+        this nothing in the topic is required and it completes at once (the mirror
+        case: a Seilbahn student sitting at the regular topic instead of its twin).
+        The text is harder than intended for them, but the work counts.
+    A mixed topic (some Seilbahn tasks) keeps the plain rule.
+    """
+    if not subtasks:
+        return student_path
+    seilbahn_count = sum(1 for s in subtasks if s.get('path') == 'seilbahn')
+    if seilbahn_count == len(subtasks):
+        return 'seilbahn'
+    if student_path == 'seilbahn' and seilbahn_count == 0:
+        return 'wanderweg'
+    return student_path
+
+
 def is_question_visible_for_path(question, student_path):
     """Whether a quiz question should be shown to a student on student_path.
 
@@ -3260,10 +3282,7 @@ def get_visible_subtasks_for_student(student_id, klasse_id, task_id):
                 ORDER BY reihenfolge
             ''', (task_id,)).fetchall()
             subtasks = [dict(r) for r in rows]
-            # If the topic is a pure Seilbahn topic, treat all its tasks as required
-            # regardless of the student's global lernpfad — they were assigned this topic.
-            all_seilbahn = subtasks and all(s.get('path') == 'seilbahn' for s in subtasks)
-            effective_path = 'seilbahn' if all_seilbahn else student_path
+            effective_path = effective_path_for_topic(student_path, subtasks)
             result = []
             for d in subtasks:
                 d['required'] = is_subtask_required_for_path(d, effective_path)
