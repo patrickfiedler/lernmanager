@@ -309,9 +309,13 @@ def _checkpoint(student_id, quiz=MIXED_QUIZ):
     return task_id, subtask_id
 
 
-def _finish_checkpoint(student_id, task_id, subtask_id):
+# Older than config.CHECKPOINT_PRACTICE_DELAY_DAYS: the sitting has settled.
+LONG_AGO = "2026-01-01 10:00:00"
+
+
+def _finish_checkpoint(student_id, task_id, subtask_id, timestamp=LONG_AGO):
     return models.create_checkpoint_attempt(
-        student_id, subtask_id, task_id, "quiz", "kern", 3)
+        student_id, subtask_id, task_id, "quiz", "kern", 3, timestamp=timestamp)
 
 
 def test_unfinished_checkpoint_stays_out(db):
@@ -349,7 +353,7 @@ def test_only_settled_checkpoint_questions_can_be_practised(db):
     scores["1"] = None            # reported, no score yet
     del scores[str(all_indices[-1])]   # held back, not part of the sitting
     models.create_checkpoint_attempt(student_id, subtask_id, task_id, "quiz", "kern", 3,
-                                     question_scores_json=json.dumps(scores))
+                                     timestamp=LONG_AGO, question_scores_json=json.dumps(scores))
     assert _pool_indices(student_id) == [i for i in all_indices if i not in (1, all_indices[-1])]
 
 
@@ -360,7 +364,7 @@ def test_question_the_teacher_sent_back_leaves_the_practice_pool(db):
     task_id, subtask_id = _checkpoint(student_id)
     all_indices = list(range(len(MIXED_QUIZ["questions"])))
     attempt_id = models.create_checkpoint_attempt(
-        student_id, subtask_id, task_id, "quiz", "kern", 2,
+        student_id, subtask_id, task_id, "quiz", "kern", 2, timestamp=LONG_AGO,
         question_scores_json=json.dumps({str(i): 2 for i in all_indices}))
     assert _pool_indices(student_id) == all_indices
 
@@ -372,6 +376,40 @@ def test_question_the_teacher_sent_back_leaves_the_practice_pool(db):
     with models.db_session() as conn:
         conn.execute("UPDATE checkpoint_flag SET status = 'nachgeholt' WHERE id = ?", (flag_id,))
     assert _pool_indices(student_id) == all_indices
+
+
+def test_fresh_checkpoint_waits_until_reviewed_or_a_week_old(db):
+    """The score of a fresh sitting can still change: the teacher sends a question
+    back when looking at it. So practice waits for that look, or for the delay."""
+    student_id = models.create_student("Test", "Schüler", "cpfresh", "pw123")
+    task_id, subtask_id = _checkpoint(student_id)
+    attempt_id = _finish_checkpoint(student_id, task_id, subtask_id, timestamp=None)  # now
+    assert _pool_indices(student_id) == []
+
+    with models.db_session() as conn:
+        conn.execute("UPDATE checkpoint_attempt SET reviewed_at = ? WHERE id = ?",
+                     (models.now_local(), attempt_id))
+    assert _pool_indices(student_id) == list(range(len(MIXED_QUIZ["questions"])))
+
+
+def test_delay_boundary(db):
+    from datetime import datetime, timedelta
+    import config
+    student_id = models.create_student("Test", "Schüler", "cpdelay", "pw123")
+    task_id, subtask_id = _checkpoint(student_id)
+    now = datetime.strptime(models.now_local(), '%Y-%m-%d %H:%M:%S')
+    days = config.CHECKPOINT_PRACTICE_DELAY_DAYS
+
+    def stamp(delta):
+        return (now - delta).strftime('%Y-%m-%d %H:%M:%S')
+
+    attempt_id = _finish_checkpoint(student_id, task_id, subtask_id,
+                                    timestamp=stamp(timedelta(days=days) - timedelta(hours=1)))
+    assert _pool_indices(student_id) == []
+    with models.db_session() as conn:
+        conn.execute("UPDATE checkpoint_attempt SET timestamp = ? WHERE id = ?",
+                     (stamp(timedelta(days=days, hours=1)), attempt_id))
+    assert _pool_indices(student_id) != []
 
 
 def test_practice_unlock_does_not_admit_checkpoint_questions(db):
