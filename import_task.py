@@ -279,6 +279,13 @@ def _validate_quiz(quiz, prefix="Quiz"):
                 continue
             if 'text' not in q or not q['text']:
                 errors.append(f"{label} missing 'text'")
+            # Stored as-is inside quiz_json, so a wrong shape or a misspelled key
+            # (the umlaut is the likely one) would import silently and show nothing.
+            if 'rueckverweis' in q and not (isinstance(q['rueckverweis'], str) and q['rueckverweis'].strip()):
+                errors.append(f"{label}: 'rueckverweis' must be a non-empty string")
+            for key in q:
+                if key != 'rueckverweis' and key.lower().startswith(('rueckverw', 'rückverw', 'ruckverw')):
+                    errors.append(f"{label}: unknown key '{key}' -- did you mean 'rueckverweis'?")
 
             qtype = q.get('type', 'multiple_choice')
             if qtype == 'fill_blank':

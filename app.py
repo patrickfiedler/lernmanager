@@ -428,6 +428,7 @@ def _build_display_quiz(quiz):
                 # quiz_grading.presentation(), which carries no key.
                 'solution': quiz_grading.correct_answer_text(q)
                             if quiz_grading.is_interactive(q.get('type')) else '',
+                'rueckverweis': q.get('rueckverweis', ''),  # where to read it up, shown on a wrong answer
             }
             for q in quiz['questions']
         ]

@@ -117,6 +117,17 @@ Deine Antwort: {{ user_answer.text }}</div>
             💬 {% if is_correct %}Richtig!{% else %}Leider falsch.{% endif %}
         </div>
         {% endif %}
+        {# Rückverweis: where to read it up, next to the solution, not instead of it
+           (Patrick, 2026-10-01). Only on a wrong answer. #}
+        {% if question.rueckverweis %}
+        {% if user_answer is mapping %}{% set q_wrong = not user_answer.correct %}
+        {% else %}{% set q_wrong = question.type == 'multiple_choice' and user_answer|sort != question.correct|sort %}{% endif %}
+        {% if q_wrong %}
+        <div class="quiz-option" style="border-left: 4px solid var(--info-color, #17a2b8); padding-left: 1rem; background: #e8f4fd;">
+            📖 <strong>Zum Nachlesen:</strong> {{ question.rueckverweis }}
+        </div>
+        {% endif %}
+        {% endif %}
     </div>
     {% endfor %}
 </div>
