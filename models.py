@@ -1699,6 +1699,8 @@ def get_students_in_klasse(klasse_id):
     seilbahn_regulaer: a Seilbahn student whose active topic has no Seilbahn task,
     i.e. they sit at the regular topic instead of its twin. It works (see
     effective_path_for_topic: measured like Wanderweg), but the teacher should know.
+    zweig_fehlt: a Seilbahn student whose active topic has a fork with no branch set.
+    Only the teacher can set it (is_fork_teacher_choice); until then the student waits.
     """
     with db_session() as conn:
         rows = conn.execute('''
@@ -1707,7 +1709,14 @@ def get_students_in_klasse(klasse_id):
                           AND NOT EXISTS (SELECT 1 FROM subtask
                                           WHERE task_id = st.task_id AND path = 'seilbahn'
                                             AND COALESCE(hidden, 0) = 0)
-                THEN 1 ELSE 0 END as seilbahn_regulaer
+                THEN 1 ELSE 0 END as seilbahn_regulaer,
+                CASE WHEN s.lernpfad = 'seilbahn' AND EXISTS (
+                        SELECT 1 FROM subtask sub
+                        WHERE sub.task_id = st.task_id AND sub.fork_group IS NOT NULL
+                          AND COALESCE(sub.hidden, 0) = 0
+                          AND NOT EXISTS (SELECT 1 FROM student_fork_choice fc
+                                          WHERE fc.student_id = s.id AND fc.fork_group = sub.fork_group))
+                THEN 1 ELSE 0 END as zweig_fehlt
             FROM student s
             JOIN student_klasse sk ON s.id = sk.student_id
             LEFT JOIN student_task st ON st.id = (
@@ -2413,6 +2422,19 @@ def get_student_fork_choice(student_id, fork_group):
         return row['fork_branch'] if row else None
 
 
+def is_fork_teacher_choice(student_path):
+    """Whether the teacher, not the student, picks this student's fork branches.
+
+    True for Seilbahn (MBI request 2026-08-31, point 5): these students see no
+    picker. With no branch set the page says the teacher will choose; a set branch
+    is fixed at once, not only after the first finished task. So it never matters
+    who stored a Seilbahn student's choice -- the student cannot change it either way.
+    Keyed on the student, not the topic: it also covers a Seilbahn student sitting
+    at a regular topic.
+    """
+    return student_path == 'seilbahn'
+
+
 def is_fork_choice_locked(student_id, fork_group, fork_branch):
     """True once the student has completed a subtask in the chosen branch.
 
@@ -2442,26 +2464,41 @@ def set_student_fork_choice(student_id, fork_group, fork_branch):
 
 
 def get_student_fork_choices(student_id):
-    """All of a student's fork choices, across all their tasks, with reassignment metadata.
+    """A student's fork groups with reassignment metadata: every branch they picked,
+    plus the still open groups of their active topics.
 
     Returns a list of dicts: {fork_group, fork_branch, task_id, task_name,
-    branches: [{branch, label}, ...]} — one row per (task, fork_group) the
-    student has picked a branch for. Used by the admin student-detail page
-    to let a teacher reassign a pick (bypasses the student-side lock — see
-    docs/shared/lernmanager/fork-choice-artifact-model.md decision 1).
+    branches: [{branch, label}, ...]}; `fork_branch` is None for an open group.
+    Used by the admin student-detail page to let a teacher set or reassign a pick
+    (bypasses the student-side lock — see
+    docs/shared/lernmanager/fork-choice-artifact-model.md decision 1). Open groups
+    are listed because a Seilbahn student cannot pick at all (is_fork_teacher_choice):
+    without them the teacher had nowhere to set the first branch.
     """
     with db_session() as conn:
-        choices = conn.execute(
+        chosen = {c['fork_group']: c['fork_branch'] for c in conn.execute(
             "SELECT fork_group, fork_branch FROM student_fork_choice WHERE student_id = ?",
             (student_id,)
-        ).fetchall()
+        ).fetchall()}
+        open_groups = [r['fork_group'] for r in conn.execute('''
+            SELECT s.fork_group, MIN(s.reihenfolge) as first
+            FROM subtask s JOIN student_task st ON st.task_id = s.task_id
+            WHERE st.student_id = ? AND st.abgeschlossen = 0
+              AND s.fork_group IS NOT NULL AND COALESCE(s.hidden, 0) = 0
+            GROUP BY s.fork_group ORDER BY st.id, first
+        ''', (student_id,)).fetchall() if r['fork_group'] not in chosen]
+
         result = []
-        for c in choices:
+        for fork_group in list(chosen) + open_groups:
+            # A twin shares its fork_group with the regular topic: name the topic
+            # the student actually has, if any.
             branch_rows = conn.execute('''
                 SELECT DISTINCT s.fork_branch, s.fork_branch_label, s.task_id, t.name as task_name
                 FROM subtask s JOIN task t ON t.id = s.task_id
                 WHERE s.fork_group = ?
-            ''', (c['fork_group'],)).fetchall()
+                ORDER BY EXISTS (SELECT 1 FROM student_task st
+                                 WHERE st.student_id = ? AND st.task_id = s.task_id) DESC
+            ''', (fork_group, student_id)).fetchall()
             if not branch_rows:
                 continue
             task_id = branch_rows[0]['task_id']
@@ -2469,11 +2506,11 @@ def get_student_fork_choices(student_id):
             labels = {}
             for r in branch_rows:
                 if r['fork_branch_label']:
-                    labels[r['fork_branch']] = r['fork_branch_label']
+                    labels.setdefault(r['fork_branch'], r['fork_branch_label'])
             branches = sorted({r['fork_branch'] for r in branch_rows})
             result.append({
-                'fork_group': c['fork_group'],
-                'fork_branch': c['fork_branch'],
+                'fork_group': fork_group,
+                'fork_branch': chosen.get(fork_group),
                 'task_id': task_id,
                 'task_name': task_name,
                 'branches': [{'branch': b, 'label': labels.get(b, b)} for b in branches],

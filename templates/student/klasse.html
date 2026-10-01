@@ -34,8 +34,9 @@
             <div class="progress-dots-column">
             <div class="progress-dots" role="group" aria-label="Aufgabenfortschritt">
                 {% macro fork_dot(fg) %}
-                {% if fg.chosen %}{% set fork_hint = 'Verzweigung: dein gewählter Weg' %}
+                {% if fg.chosen %}{% set fork_hint = 'Verzweigung: dein Weg' if fork_teacher_choice else 'Verzweigung: dein gewählter Weg' %}
                 {% elif fg.remaining %}{% set fork_hint = 'Verzweigung: noch ' ~ fg.remaining ~ ' Aufgabe' ~ ('n' if fg.remaining != 1 else '') ~ ' davor erledigen' %}
+                {% elif fork_teacher_choice %}{% set fork_hint = 'Verzweigung: deine Lehrperson wählt deinen Weg' %}
                 {% else %}{% set fork_hint = 'Verzweigung: du kannst jetzt wählen' %}{% endif %}
                 <div class="dot dot-fork {% if fg.chosen %}completed{% else %}dot-fork-pending{% endif %}{% if shown_fork and shown_fork.fork_group == fg.fork_group %} current{% endif %}"
                      role="button"
@@ -139,7 +140,8 @@
        app does not even identify files by. Quiz and checkpoint thresholds are
        untouched: there the threshold does real work. #}
 
-    {% if pending_fork_remaining %}
+    {# Not for a student whose teacher picks: nothing here is theirs to choose. #}
+    {% if pending_fork_remaining and not fork_teacher_choice %}
     <div id="fork-locked-card" class="card mt-2" style="border-left: 4px solid #f59e0b;">
         <div class="card-header">🔀 Gleich darfst du wählen</div>
         <p style="padding: 0 1rem 1rem;">
@@ -156,18 +158,24 @@
         {% if shown_fork.chosen %}
         <div class="card-header">🔀 Dein Weg</div>
         <p style="padding: 0 1rem;">
-            Du hast <strong>{{ chosen_branch.label or chosen_branch.branch }}</strong> gewählt.
+            {% if fork_teacher_choice %}Dein Weg ist <strong>{{ chosen_branch.label or chosen_branch.branch }}</strong>. Ändern kann ihn nur deine Lehrperson.
+            {% else %}Du hast <strong>{{ chosen_branch.label or chosen_branch.branch }}</strong> gewählt.
             {% if shown_fork.locked %}Deine Wahl ist festgelegt, weil du darin schon eine Aufgabe erledigt hast.
             {% else %}Du kannst noch wechseln, bis du die erste Aufgabe darin abgeschlossen hast. Danach ist deine Wahl festgelegt.{% endif %}
+            {% endif %}
         </p>
+        {% elif fork_teacher_choice %}
+        <div class="card-header">🔀 Dein Weg</div>
+        <p style="padding: 0 1rem;">Deine Lehrperson wählt deinen Weg.{% if not shown_fork.remaining %} Sag ihr Bescheid, dass du hier angekommen bist.{% endif %}</p>
         {% else %}
         <div class="card-header">🔀 Wähle deinen Weg</div>
         <p style="padding: 0 1rem;">Ab hier geht es in verschiedene Richtungen weiter. Wähle einen der folgenden Wege — du kannst deine Wahl noch ändern, bis du die erste Aufgabe darin abgeschlossen hast. Danach ist sie festgelegt.</p>
         {% endif %}
-        {% for branch in shown_fork.branches %}
+        {# Teacher's choice: no menu of ways the student cannot take -- only their own. #}
+        {% for branch in shown_fork.branches if not fork_teacher_choice or branch.branch == shown_fork.chosen %}
         {% set is_chosen = branch.branch == shown_fork.chosen %}
         <div class="card mt-1" style="margin: 0 1rem 1rem;{% if is_chosen %} border: 2px solid #10b981;{% endif %}">
-            <div class="card-header">{{ branch.label or branch.branch }}{% if is_chosen %} ✅ Deine Wahl{% endif %}</div>
+            <div class="card-header">{{ branch.label or branch.branch }}{% if is_chosen %} ✅ {{ 'Dein Weg' if fork_teacher_choice else 'Deine Wahl' }}{% endif %}</div>
             {% if branch.note %}
             <div class="markdown-content" style="padding: 0 1rem;">{{ branch.note | markdown }}</div>
             {% endif %}

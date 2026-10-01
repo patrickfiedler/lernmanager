@@ -5069,14 +5069,16 @@ def student_klasse(slug):
     # visible subtasks; its branches stay out of `subtasks` until chosen
     # (docs/shared/lernmanager/fork-choice-artifact-model.md).
     fork_groups = models.get_fork_groups(task['task_id'], student_id)
+    # Seilbahn: the teacher picks. No picker, and a set branch is fixed at once.
+    fork_teacher_choice = models.is_fork_teacher_choice(student.get('lernpfad'))
     fork_dot_positions = {}
     for fg in fork_groups:
         before = [s for s in subtasks if s['reihenfolge'] < fg['min_reihenfolge']]
         fg['position'] = len(before)
         # Tasks still between the student and the choice; the picker waits for 0.
         fg['remaining'] = sum(1 for s in before if not s['erledigt'])
-        fg['locked'] = bool(fg['chosen']) and models.is_fork_choice_locked(
-            student_id, fg['fork_group'], fg['chosen'])
+        fg['locked'] = bool(fg['chosen']) and (fork_teacher_choice or models.is_fork_choice_locked(
+            student_id, fg['fork_group'], fg['chosen']))
         fork_dot_positions[fg['position']] = fg
     pending_fork_groups = [fg for fg in fork_groups if fg['chosen'] is None]
     # The dot alone said nothing (production screenshot, Kl.6, 2026-09-06): the page
@@ -5219,6 +5221,7 @@ def student_klasse(slug):
                            artifact_llm_feedback=artifact_llm_feedback,
                            artifact_last_position=artifact_last_position,
                            shown_fork=shown_fork,
+                           fork_teacher_choice=fork_teacher_choice,
                            pending_fork_remaining=pending_fork_remaining,
                            fork_dot_positions=fork_dot_positions)
 
@@ -5300,6 +5303,11 @@ def student_fork_choice(slug, fork_group):
     valid_branches = models.get_fork_branches(task['task_id'], fork_group)
     if not valid_branches or branch not in valid_branches:
         flash('Diese Wahl ist nicht möglich.', 'danger')
+        return redirect(url_for('student_klasse', slug=slug))
+
+    # The page shows no picker to these students; this stops a hand-built request.
+    if models.is_fork_teacher_choice((models.get_student(student_id) or {}).get('lernpfad')):
+        flash('Deine Lehrperson wählt deinen Weg.', 'info')
         return redirect(url_for('student_klasse', slug=slug))
 
     existing = models.get_student_fork_choice(student_id, fork_group)

@@ -77,6 +77,9 @@
 <!-- Fork/Choice branch reassignment -->
 <div class="card mt-2">
     <div class="card-header">🔀 Verzweigungs-Wahl</div>
+    {% if student.lernpfad == 'seilbahn' %}
+    <p class="text-muted" style="margin: 0;">Seilbahn: den Zweig wählst du. Der Schüler sieht keine Auswahl und kann einen gesetzten Zweig nicht ändern.</p>
+    {% endif %}
     {% for fc in fork_choices %}
     <form method="POST" action="{{ url_for('admin_schueler_fork_zweig', student_id=student.id) }}" class="flex gap-1 flex-center mt-1">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -84,11 +87,12 @@
         <input type="hidden" name="task_id" value="{{ fc.task_id }}">
         <span style="min-width: 160px;">{{ fc.task_name }}</span>
         <select name="branch" class="form-control" style="width: auto;">
+            {% if not fc.fork_branch %}<option value="" disabled selected>noch kein Zweig</option>{% endif %}
             {% for b in fc.branches %}
             <option value="{{ b.branch }}" {% if b.branch == fc.fork_branch %}selected{% endif %}>{{ b.label }}</option>
             {% endfor %}
         </select>
-        <button type="submit" class="btn btn-secondary">Zweig ändern</button>
+        <button type="submit" class="btn {{ 'btn-secondary' if fc.fork_branch else 'btn-primary' }}">{{ 'Zweig ändern' if fc.fork_branch else 'Zweig setzen' }}</button>
     </form>
     {% endfor %}
 </div>
