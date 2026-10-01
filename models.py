@@ -1700,8 +1700,6 @@ def get_students_in_klasse(klasse_id):
     seilbahn_regulaer: a Seilbahn student whose active topic has no Seilbahn task,
     i.e. they sit at the regular topic instead of its twin. It works (see
     effective_path_for_topic: measured like Wanderweg), but the teacher should know.
-    zweig_fehlt: a Seilbahn student whose active topic has a fork with no branch set.
-    Only the teacher can set it (is_fork_teacher_choice); until then the student waits.
     """
     with db_session() as conn:
         rows = conn.execute('''
@@ -1710,14 +1708,7 @@ def get_students_in_klasse(klasse_id):
                           AND NOT EXISTS (SELECT 1 FROM subtask
                                           WHERE task_id = st.task_id AND path = 'seilbahn'
                                             AND COALESCE(hidden, 0) = 0)
-                THEN 1 ELSE 0 END as seilbahn_regulaer,
-                CASE WHEN s.lernpfad = 'seilbahn' AND EXISTS (
-                        SELECT 1 FROM subtask sub
-                        WHERE sub.task_id = st.task_id AND sub.fork_group IS NOT NULL
-                          AND COALESCE(sub.hidden, 0) = 0
-                          AND NOT EXISTS (SELECT 1 FROM student_fork_choice fc
-                                          WHERE fc.student_id = s.id AND fc.fork_group = sub.fork_group))
-                THEN 1 ELSE 0 END as zweig_fehlt
+                THEN 1 ELSE 0 END as seilbahn_regulaer
             FROM student s
             JOIN student_klasse sk ON s.id = sk.student_id
             LEFT JOIN student_task st ON st.id = (
@@ -2425,19 +2416,6 @@ def get_student_fork_choice(student_id, fork_group):
         return row['fork_branch'] if row else None
 
 
-def is_fork_teacher_choice(student_path):
-    """Whether the teacher, not the student, picks this student's fork branches.
-
-    True for Seilbahn (MBI request 2026-08-31, point 5): these students see no
-    picker. With no branch set the page says the teacher will choose; a set branch
-    is fixed at once, not only after the first finished task. So it never matters
-    who stored a Seilbahn student's choice -- the student cannot change it either way.
-    Keyed on the student, not the topic: it also covers a Seilbahn student sitting
-    at a regular topic.
-    """
-    return student_path == 'seilbahn'
-
-
 def is_fork_choice_locked(student_id, fork_group, fork_branch):
     """True once the student has completed a subtask in the chosen branch.
 
@@ -2475,8 +2453,7 @@ def get_student_fork_choices(student_id):
     Used by the admin student-detail page to let a teacher set or reassign a pick
     (bypasses the student-side lock — see
     docs/shared/lernmanager/fork-choice-artifact-model.md decision 1). Open groups
-    are listed because a Seilbahn student cannot pick at all (is_fork_teacher_choice):
-    without them the teacher had nowhere to set the first branch.
+    are listed so the teacher can set a branch before the student reaches the fork.
     """
     with db_session() as conn:
         chosen = {c['fork_group']: c['fork_branch'] for c in conn.execute(

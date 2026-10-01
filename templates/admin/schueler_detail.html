@@ -77,9 +77,6 @@
 <!-- Fork/Choice branch reassignment -->
 <div class="card mt-2">
     <div class="card-header">🔀 Verzweigungs-Wahl</div>
-    {% if student.lernpfad == 'seilbahn' %}
-    <p class="text-muted" style="margin: 0;">Seilbahn: den Zweig wählst du. Der Schüler sieht keine Auswahl und kann einen gesetzten Zweig nicht ändern.</p>
-    {% endif %}
     {% for fc in fork_choices %}
     <form method="POST" action="{{ url_for('admin_schueler_fork_zweig', student_id=student.id) }}" class="flex gap-1 flex-center mt-1">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

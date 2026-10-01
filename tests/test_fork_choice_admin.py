@@ -39,7 +39,7 @@ def test_saving_subtasks_persists_fork_fields(app, client, as_admin):
     assert zweig["fork_required"] == 0
 
 
-def _setup_chosen_fork():
+def _setup_chosen_fork(choose=True):
     student_id = models.create_student("Test", "Schueler", "forkadmintest", "pw123")
     klasse_id = models.create_klasse("Testklasse")
     models.add_student_to_klasse(student_id, klasse_id)
@@ -54,7 +54,8 @@ def _setup_chosen_fork():
             "UPDATE subtask SET fork_group='g1', fork_branch='b', fork_branch_label='Weg B' WHERE id=?", (b1,)
         )
     models.assign_task_to_student(student_id, klasse_id, task_id)
-    models.set_student_fork_choice(student_id, 'g1', 'a')
+    if choose:
+        models.set_student_fork_choice(student_id, 'g1', 'a')
     return student_id, task_id
 
 
@@ -91,3 +92,21 @@ def test_fork_group_without_branch_rejected(app, client, as_admin):
     assert "müssen beide oder keins ausgefüllt sein" in resp.get_data(as_text=True)
     subtasks = models.get_subtasks(task_id)
     assert subtasks[0]["fork_group"] is None
+
+
+def test_teacher_can_set_the_first_branch(app, client, as_admin):
+    """An open fork is listed too, so a branch can be set before the student gets there."""
+    app.config["WTF_CSRF_ENABLED"] = False
+    student_id, task_id = _setup_chosen_fork(choose=False)
+
+    assert [(c['fork_group'], c['fork_branch'])
+            for c in models.get_student_fork_choices(student_id)] == [('g1', None)]
+    body = as_admin.get(f"/admin/schueler/{student_id}").get_data(as_text=True)
+    assert "noch kein Zweig" in body
+    assert "Zweig setzen" in body
+
+    as_admin.post(f"/admin/schueler/{student_id}/fork-zweig", data={
+        "fork_group": "g1", "task_id": task_id, "branch": "b",
+    })
+    assert [(c['fork_group'], c['fork_branch'])
+            for c in models.get_student_fork_choices(student_id)] == [('g1', 'b')]

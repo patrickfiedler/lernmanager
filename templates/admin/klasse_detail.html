@@ -210,14 +210,6 @@
         Pflicht sind dort die Wanderweg-Aufgaben, die Texte sind nicht vereinfacht. Gibt es einen Seilbahn-Zwilling, weise ihn zu.
     </p>
     {% endif %}
-    {% set zweig_fehlt = students|selectattr('zweig_fehlt')|list %}
-    {% if zweig_fehlt %}
-    <p class="text-muted" style="margin: 0 0 0.75rem;">
-        🔀 <strong>{{ zweig_fehlt|length }} Seilbahn-Schüler ohne Zweig:</strong>
-        {% for s in zweig_fehlt %}<a href="{{ url_for('admin_schueler_detail', student_id=s.id) }}">{{ s.vorname }} {{ s.nachname }}</a> ({{ s.task_name }}){{ ", " if not loop.last }}{% endfor %}.
-        Das Thema verzweigt sich, und bei Seilbahn wählst du den Weg. Setze ihn auf der Schülerseite, sonst bleibt der Schüler an der Verzweigung stehen.
-    </p>
-    {% endif %}
     {% if students %}
     <form method="POST" action="{{ url_for('admin_klasse_schueler_verschieben_batch', klasse_id=klasse.id) }}"
           onsubmit="return confirm('Ausgewählte Schüler wirklich in die andere Klasse verschieben?');">

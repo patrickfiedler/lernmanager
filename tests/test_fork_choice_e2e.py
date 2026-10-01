@@ -98,3 +98,30 @@ def test_repick_blocked_after_lock(app, client):
 
     client.post("/schueler/thema/testthema/fork/g1/waehlen", data={"branch": "b"})
     assert models.get_student_fork_choice(ctx['student_id'], 'g1') == 'a'
+
+
+def test_seilbahn_student_picks_among_the_twins_branches(app, client):
+    """Seilbahn students choose themselves (Patrick 2026-10-01), from the branches of
+    the topic they sit at -- on a twin, the twin's."""
+    app.config["WTF_CSRF_ENABLED"] = False
+    student_id = models.create_student("Seil", "Bahn", "seilbahntest", "pw123", lernpfad='seilbahn')
+    klasse_id = models.create_klasse("Testklasse")
+    models.add_student_to_klasse(student_id, klasse_id)
+    twin = models.create_task("Zwilling", "", "", "MBI", "5", "")
+    base = models.create_subtask(twin, "Basis", reihenfolge=1, path='seilbahn')
+    for branch, label in (('a', 'Plakat'), ('b', 'Comic')):
+        models.create_subtask(twin, f"Zweig {branch}", reihenfolge=2, path='seilbahn',
+                              fork_group='g1', fork_branch=branch, fork_branch_label=label)
+    models.assign_task_to_student(student_id, klasse_id, twin)
+    with models.db_session() as conn:
+        student_task_id = conn.execute(
+            "SELECT id FROM student_task WHERE student_id = ?", (student_id,)).fetchone()['id']
+    models.toggle_student_subtask(student_task_id, base, True)
+    _login(client, student_id)
+
+    body = client.get("/schueler/thema/zwilling").get_data(as_text=True)
+    assert "Wähle deinen Weg" in body
+    assert "Plakat wählen" in body and "Comic wählen" in body
+
+    client.post("/schueler/thema/zwilling/fork/g1/waehlen", data={'branch': 'b'})
+    assert models.get_student_fork_choice(student_id, 'g1') == 'b'
