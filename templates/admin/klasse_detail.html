@@ -202,6 +202,14 @@
 
 <div class="card">
     <div class="card-header">👥 Schüler ({{ students|length }})</div>
+    {% set seilbahn_regulaer = students|selectattr('seilbahn_regulaer')|list %}
+    {% if seilbahn_regulaer %}
+    <p class="text-muted" style="margin: 0 0 0.75rem;">
+        ⚠️ <strong>{{ seilbahn_regulaer|length }} Seilbahn-Schüler an einem regulären Thema:</strong>
+        {% for s in seilbahn_regulaer %}{{ s.vorname }} {{ s.nachname }} ({{ s.task_name }}){{ ", " if not loop.last }}{% endfor %}.
+        Pflicht sind dort die Wanderweg-Aufgaben, die Texte sind nicht vereinfacht. Gibt es einen Seilbahn-Zwilling, weise ihn zu.
+    </p>
+    {% endif %}
     {% if students %}
     <form method="POST" action="{{ url_for('admin_klasse_schueler_verschieben_batch', klasse_id=klasse.id) }}"
           onsubmit="return confirm('Ausgewählte Schüler wirklich in die andere Klasse verschieben?');">
@@ -232,6 +240,9 @@
                             {{ student.task_name }}
                             {% if student.queue_pos %}
                             <span class="text-muted">({{ student.queue_pos }}/{{ student.queue_total }})</span>
+                            {% endif %}
+                            {% if student.seilbahn_regulaer %}
+                            <span class="badge badge-warning" title="Seilbahn-Schüler an einem regulären Thema: Pflicht sind die Wanderweg-Aufgaben, die Texte sind nicht vereinfacht. Gibt es einen Seilbahn-Zwilling, weise ihn zu.">⚠️ kein Seilbahn-Thema</span>
                             {% endif %}
                         {% elif student.queue_erschoepft %}
                             <span class="text-muted">Reihenfolge abgearbeitet</span>

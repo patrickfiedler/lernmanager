@@ -1694,10 +1694,20 @@ def reset_student_password(student_id, new_password):
 
 
 def get_students_in_klasse(klasse_id):
-    """Get all students in a class with their active primary topic."""
+    """Get all students in a class with their active primary topic.
+
+    seilbahn_regulaer: a Seilbahn student whose active topic has no Seilbahn task,
+    i.e. they sit at the regular topic instead of its twin. It works (see
+    effective_path_for_topic: measured like Wanderweg), but the teacher should know.
+    """
     with db_session() as conn:
         rows = conn.execute('''
-            SELECT s.*, st.task_id, t.name as task_name, st.abgeschlossen, st.manuell_abgeschlossen
+            SELECT s.*, st.task_id, t.name as task_name, st.abgeschlossen, st.manuell_abgeschlossen,
+                CASE WHEN s.lernpfad = 'seilbahn' AND st.task_id IS NOT NULL
+                          AND NOT EXISTS (SELECT 1 FROM subtask
+                                          WHERE task_id = st.task_id AND path = 'seilbahn'
+                                            AND COALESCE(hidden, 0) = 0)
+                THEN 1 ELSE 0 END as seilbahn_regulaer
             FROM student s
             JOIN student_klasse sk ON s.id = sk.student_id
             LEFT JOIN student_task st ON st.id = (

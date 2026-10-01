@@ -60,3 +60,27 @@ def test_pure_seilbahn_topic_unchanged(db):
 def test_main_path_student_at_regular_topic_unchanged(db):
     sid, kid, tid, _ = _setup('wanderweg', ['wanderweg', 'bergweg'])
     assert _required(sid, kid, tid) == [True, False]
+
+
+def test_class_page_names_seilbahn_student_at_regular_topic(as_admin):
+    sid, kid, _, _ = _setup('seilbahn', ['wanderweg', 'bergweg'])
+    roster = models.get_students_in_klasse(kid)
+    assert [s['seilbahn_regulaer'] for s in roster] == [1]
+
+    html = as_admin.get(f"/admin/klasse/{kid}").get_data(as_text=True)
+    assert "1 Seilbahn-Schüler an einem regulären Thema" in html
+    assert "kein Seilbahn-Thema" in html
+
+
+def test_class_page_is_quiet_for_the_twin_and_for_main_paths(as_admin):
+    sid, kid, _, _ = _setup('seilbahn', ['seilbahn', 'seilbahn'])
+    other = models.create_student("Berg", "Kind", "bergkind", "pw123", lernpfad='bergweg')
+    models.add_student_to_klasse(other, kid)
+    regular = models.create_task("Regulär", "", "", "MBI", "5", "")
+    models.create_subtask(regular, "Aufgabe", reihenfolge=1, path='wanderweg')
+    models.assign_task_to_student(other, kid, regular)
+
+    assert [s['seilbahn_regulaer'] for s in models.get_students_in_klasse(kid)] == [0, 0]
+    html = as_admin.get(f"/admin/klasse/{kid}").get_data(as_text=True)
+    assert "an einem regulären Thema" not in html
+    assert "kein Seilbahn-Thema" not in html
