@@ -1522,6 +1522,18 @@ tr.unsaved-row td {
     color: rgba(255, 255, 255, 0.85);
 }
 
+/* Checkpoint with a question still owed (rejected report or sent back by the
+   teacher): the same amber as a quiz that is waiting. Colour only -- the dot stays
+   "completed" for the progress count. After the green rules so it wins on them. */
+.dot.dot-subtask.owed,
+.dot.dot-subtask.optional.owed {
+    background: #f59e0b;
+}
+
+.dot.dot-subtask.owed.current {
+    box-shadow: 0 0 0 3px white, 0 0 0 5px #f59e0b;
+}
+
 /* Quiz images */
 .quiz-question-image {
     max-width: 100%;

@@ -54,17 +54,20 @@
                 {% set quiz_available = true if sub.checkpoint_type == 'quiz' else sub.erledigt %}
                 {% set disp = loop.index | aufgabe_label(subtasks) %}
                 {% set is_current = current_subtask and sub.id == current_subtask.id and not shown_fork %}
-                <div class="dot dot-subtask {% if sub.erledigt %}completed {% endif %}{% if is_current %}current{% endif %}{% if not sub.get('required', true) %} optional{% endif %}"
+                {# Display only: the dot keeps "completed", so the progress count and the
+                   Thema's completion do not move while a question is owed. #}
+                {% set is_owed = sub.id in retry_checkpoint_ids %}
+                <div class="dot dot-subtask {% if sub.erledigt %}completed {% endif %}{% if is_current %}current{% endif %}{% if not sub.get('required', true) %} optional{% endif %}{% if is_owed %} owed{% endif %}"
                      role="button"
                      tabindex="0"
-                     aria-label="Aufgabe {{ disp }}: {{ sub.beschreibung[:50] }}{% if sub.beschreibung|length > 50 %}...{% endif %}{% if sub.erledigt %} - Erledigt{% endif %}{% if not sub.get('required', true) %} (Zusatz){% endif %}"
+                     aria-label="Aufgabe {{ disp }}: {{ sub.beschreibung[:50] }}{% if sub.beschreibung|length > 50 %}...{% endif %}{% if is_owed %} - Frage offen{% elif sub.erledigt %} - Erledigt{% endif %}{% if not sub.get('required', true) %} (Zusatz){% endif %}"
                      {% if is_current %}aria-current="true"{% endif %}
                      data-subtask-position="{{ loop.index }}"
                      data-required="{{ 'true' if sub.get('required', true) else 'false' }}"
                      data-is-intro="{{ 'true' if sub.get('is_intro') else 'false' }}"
                      onclick="navigateToSubtask({{ loop.index }})"
                      onkeydown="handleDotKeydown(event)"
-                     title="Aufgabe {{ disp }}{% if not sub.get('required', true) %} (Zusatz){% endif %}"><span class="dot-num">{% if not sub.get('required', true) %}★&nbsp;{% endif %}{{ disp }}</span></div>
+                     title="Aufgabe {{ disp }}{% if not sub.get('required', true) %} (Zusatz){% endif %}{% if is_owed %} (Frage offen){% endif %}"><span class="dot-num">{% if not sub.get('required', true) %}★&nbsp;{% endif %}{{ disp }}</span></div>
                 {% if has_quiz %}
                 <div class="dot dot-subtask-quiz {% if quiz_passed %}completed{% elif quiz_available %}available{% endif %}"
                      role="button"

@@ -7,6 +7,7 @@ happened per question. Decided: no retake without a teacher reset, points per
 question, no model answer and no criteria.
 """
 import json
+import re
 
 import pytest
 
@@ -38,7 +39,7 @@ def cp(app, client):
     with client.session_transaction() as sess:
         sess["student_id"] = student_id
     return {"student_id": student_id, "subtask_id": subtask_id, "task_id": task_id,
-            "slug": app_module.topic_slug(task)}
+            "student_task_id": task["id"], "slug": app_module.topic_slug(task)}
 
 
 def _finish(cp, scores, session_uid="sess-1"):
@@ -135,6 +136,22 @@ def test_the_thema_page_names_the_owed_question(cp, client):
                                   checkpoint_attempt_id=attempt_id, resolved_by=1)
     text = " ".join(client.get(f"/schueler/thema/{cp['slug']}").get_data(as_text=True).split())
     assert "wartet Frage 3 noch auf dich" in text
+
+
+def test_the_thema_page_marks_the_dot_of_an_owed_checkpoint(cp, client):
+    """Display only: the dot turns amber, the Aufgabe stays ticked and counted."""
+    attempt_id = _finish(cp, {"0": 2, "1": 3, "2": 0})
+    models.toggle_student_subtask(cp["student_task_id"], cp["subtask_id"], True)
+    url = f"/schueler/thema/{cp['slug']}"
+
+    def dot():
+        return re.search(r'<div class="(dot dot-subtask [^"]*)"', client.get(url).get_data(as_text=True)).group(1)
+
+    assert "owed" not in dot()
+    models.create_checkpoint_flag(cp["subtask_id"], 2, source="teacher",
+                                  student_id=cp["student_id"], status="nachbesserung",
+                                  checkpoint_attempt_id=attempt_id, resolved_by=1)
+    assert {"completed", "owed"} <= set(dot().split())
 
 
 def test_a_teacher_reset_opens_the_checkpoint_again(cp, client):
