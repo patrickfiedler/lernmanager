@@ -30,6 +30,7 @@ import quiz_grading
 import artifact_processor
 import artifact_checker
 import inline_images
+import key_combos
 import checkpoint_questions
 from utils import generate_username, generate_password, allowed_file, file_extension, material_pfad, material_filename, content_matches_extension, generate_credentials_pdf, generate_credentials_pdf_grouped, generate_name_username_pdf, generate_student_self_report_pdf, generate_class_report_pdf, generate_student_report_pdf, slugify, format_bytes, is_ip_allowed, is_within_time_window, parse_netzwerk_csv, split_tasks_by_stufe, stufe_sort_key, normalize_markdown_lists
 from import_task import validate_task_structure, check_duplicate, import_task as do_import_task, overwrite_task_from_import, ValidationError
@@ -67,7 +68,8 @@ def markdown_filter(text, materials=None):
         return ''
     text = normalize_markdown_lists(text)
     extensions = ['nl2br', 'fenced_code', 'tables', 'sane_lists',
-                  inline_images.InlineImageExtension(_inline_image_resolver(materials))]
+                  inline_images.InlineImageExtension(_inline_image_resolver(materials)),
+                  key_combos.KeyComboExtension(config.KEY_COMBO_MODIFIERS)]
     html = md.markdown(text, extensions=extensions, tab_length=3)
     return Markup(html)
 

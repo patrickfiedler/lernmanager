@@ -39,6 +39,7 @@
 !/analytics_queue.py
 !/import_task.py
 !/inline_images.py
+!/key_combos.py
 !/list_students.py
 !/generate_weekly_reports.py
 

@@ -98,6 +98,12 @@ CHARACTER_SETS = {
     ],
 }
 
+# Tastenkombinationen: a chain joined by "+" is shown as keys only if it starts
+# with one of these ("Strg + S" yes, "2 + 3" no). See key_combos.py.
+# Spelled exactly as in the content, upper/lower case included. "Alt" and
+# "Windows" are ordinary words too -- "Alt + Neu" would turn into keys.
+KEY_COMBO_MODIFIERS = ['Strg', 'Windows', 'Win', 'Umschalt', 'Alt', 'AltGr']
+
 
 # Rules (limits, timeouts) are plain values here, not .env overrides: one source,
 # visible in git. .env holds secrets and deployment choices (keys, URLs, school
