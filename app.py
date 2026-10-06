@@ -32,6 +32,7 @@ import artifact_checker
 import inline_images
 import key_combos
 import checkpoint_questions
+import checkpoint_overview
 from utils import generate_username, generate_password, allowed_file, file_extension, material_pfad, material_filename, content_matches_extension, generate_credentials_pdf, generate_credentials_pdf_grouped, generate_name_username_pdf, generate_student_self_report_pdf, generate_class_report_pdf, generate_student_report_pdf, slugify, format_bytes, is_ip_allowed, is_within_time_window, parse_netzwerk_csv, split_tasks_by_stufe, stufe_sort_key, normalize_markdown_lists
 from import_task import validate_task_structure, check_duplicate, import_task as do_import_task, overwrite_task_from_import, ValidationError
 
@@ -3344,6 +3345,7 @@ def _build_checkpoint_sessions(attempts):
     # that says whether the question or the student is the problem.
     checkpoint_ids = {a['checkpoint_id'] for a in attempts}
     open_by_question = models.count_open_flags_by_question(checkpoint_ids)
+    excluded_questions = models.get_excluded_questions(checkpoint_ids)
     # Not derivable from `open_flags` below: that set answers "which question drops
     # out of the min() right now" ('offen' only), this one answers "may anyone read
     # this number as a grade" -- a rejected report is settled for the scoring but
@@ -3395,6 +3397,8 @@ def _build_checkpoint_sessions(attempts):
             entry['flags'] = (flags.get(entry['question_index'], [])
                               + question_flags.get((attempt['checkpoint_id'],
                                                     entry['question_index']), []))
+            entry['excluded'] = entry['question_index'] in excluded_questions.get(
+                attempt['checkpoint_id'], {})
             entry['flag_class_count'] = open_by_question.get(
                 (attempt['checkpoint_id'], entry['question_index']), 0)
             question = (questions[entry['question_index']]
@@ -3986,6 +3990,76 @@ def admin_checkpoint_flag_question(checkpoint_id, question_index):
           'Die Punkte der Schüler ändert das nicht — dafür sind die zwei Knöpfe an '
           'der Sitzung da.', 'success')
     return redirect(request.referrer or url_for('admin_checkpoint_pruefung'))
+
+
+@app.route('/admin/checkpoint-uebersicht')
+@admin_required
+def admin_checkpoint_uebersicht():
+    """Points per student and question for one class and Thema, with the sum, the
+    missing questions, and the switch that takes a question out of the grading."""
+    klassen = models.get_all_klassen()
+    klasse_id = request.args.get('klasse_id', type=int)
+    tasks = models.get_checkpoint_topics_for_klasse(klasse_id) if klasse_id else []
+    task_id = request.args.get('task_id', type=int)
+    if task_id not in {t['id'] for t in tasks}:
+        task_id = tasks[0]['id'] if tasks else None
+
+    overview, checkpoints, excluded = None, [], {}
+    if task_id:
+        students, subtasks, attempts, pending = models.get_checkpoint_overview_data(
+            klasse_id, task_id)
+        excluded = models.get_excluded_questions([s['id'] for s in subtasks])
+        checkpoints = [{
+            'id': s['id'], 'titel': aufgabe_titel(s['beschreibung']),
+            'kern': s.get('kern_standard_tag') == 'kern',
+            'questions': [q.get('text', '') for q in
+                          json.loads(s['quiz_json']).get('questions', [])],
+        } for s in subtasks]
+        scores = {a['id']: json.loads(a['question_scores_json'])
+                  for a in attempts.values() if a.get('question_scores_json')}
+        overview = checkpoint_overview.build_overview(
+            students, checkpoints, attempts, scores, excluded, pending)
+
+    return render_template('admin/checkpoint_uebersicht.html',
+                           klassen=klassen, klasse_id=klasse_id,
+                           tasks=tasks, task_id=task_id,
+                           overview=overview, checkpoints=checkpoints, excluded=excluded)
+
+
+@app.route('/admin/checkpoint-uebersicht/frage/<int:checkpoint_id>/<int:question_index>/wertung',
+           methods=['POST'])
+@admin_required
+def admin_checkpoint_question_exclusion(checkpoint_id, question_index):
+    """Take one question out of the grading for everyone, or put it back.
+
+    Reverses the rule of 2026-09-01 that a teacher's statement about a question
+    changes no score (admin_checkpoint_flag_question, which still holds for the
+    verdict itself). Patrick, 2026-10-06: possible now because nothing is rewritten --
+    the stored points stay, readers skip the question, and one click undoes it.
+    """
+    exclude = request.form.get('ausschliessen') == '1'
+    wording = _checkpoint_question_wording(checkpoint_id, question_index)
+    if exclude and wording is None:
+        flash('Diese Frage gibt es nicht (mehr).', 'danger')
+        return redirect(request.referrer or url_for('admin_checkpoint_uebersicht'))
+
+    models.set_question_excluded(
+        checkpoint_id, question_index, exclude,
+        reason=(request.form.get('grund') or '').strip(),
+        question_text=wording, admin_id=session['admin_id'])
+    if not exclude:
+        flash(f'Frage {question_index + 1} wird wieder gewertet.', 'success')
+    else:
+        message = (f'Frage {question_index + 1} wird für niemanden mehr gewertet. '
+                   'Die gespeicherten Punkte bleiben erhalten.')
+        total = len(json.loads(models.get_subtask(checkpoint_id)['quiz_json'])
+                    .get('questions', []))
+        if len(models.get_excluded_questions([checkpoint_id]).get(checkpoint_id, {})) >= total:
+            # Same floor as everywhere else: nothing left to take a min() over is 0.
+            message += (' Achtung: In diesem Checkpoint zählt jetzt keine Frage mehr — '
+                        'die Sitzungs-Punktzahl steht damit bei allen auf 0.')
+        flash(message, 'success')
+    return redirect(request.referrer or url_for('admin_checkpoint_uebersicht'))
 
 
 @app.route('/admin/checkpoint-pruefung/<int:attempt_id>/frage/<int:question_index>/nachbessern',
@@ -6352,6 +6426,17 @@ def _checkpoint_question_points_text(score, manual, answers, flag, capped):
     return ', '.join(parts) or 'richtig'
 
 
+def _counted_scores(attempt):
+    """The attempt's per-question scores as they count NOW: stored breakdown with the
+    questions taken out of the grading set to None. None for a sitting that has no
+    breakdown. What student-facing pages show -- never the raw stored JSON."""
+    counted = models.counted_question_scores(attempt)
+    if counted is not None:
+        return counted
+    return (json.loads(attempt['question_scores_json'])
+            if attempt.get('question_scores_json') else None)
+
+
 def _checkpoint_review(subtask, attempt):
     """Everything the read-only review page shows about one finished session.
 
@@ -6365,9 +6450,13 @@ def _checkpoint_review(subtask, attempt):
     """
     quiz = json.loads(attempt.get('quiz_snapshot_json') or subtask['quiz_json'])
     questions = quiz.get('questions', [])
-    scores = json.loads(attempt['question_scores_json']) if attempt.get('question_scores_json') else None
+    scores = _counted_scores(attempt)
     manual = (json.loads(attempt['question_scores_manual_json'])
               if attempt.get('question_scores_manual_json') else {})
+    # Taken out for everyone: reads like a confirmed report ("zählt nicht mit"),
+    # whatever flag or hand-set score still hangs on the question.
+    excluded = models.get_excluded_questions([attempt['checkpoint_id']]).get(
+        attempt['checkpoint_id'], {})
     hints_for = _checkpoint_hints(subtask)
 
     by_question = {}
@@ -6393,9 +6482,11 @@ def _checkpoint_review(subtask, attempt):
             'nr': index + 1,
             'text': question.get('text', ''),
             'points': score,
-            'why': (_checkpoint_question_points_text(score, key in manual, answers,
-                                                     flags.get(index), index in capped)
-                    if scores is not None else None),
+            'why': (None if scores is None else
+                    _checkpoint_question_points_text(None, False, answers, None, False)
+                    if index in excluded else
+                    _checkpoint_question_points_text(score, key in manual, answers,
+                                                     flags.get(index), index in capped)),
             'final_answer': next((_checkpoint_answer_display(question, a['answer_text'])
                                   for a in reversed(answers) if a['answer_text']), None),
             'attempts': [{
@@ -6605,7 +6696,9 @@ def student_checkpoints():
         # score helpers expect -- both read attempt['id'], and passing the raw row
         # fails on that key alone.
         attempt = ({'id': row['attempt_id'], 'score': row['score'],
-                    'teacher_score': row['teacher_score']}
+                    'teacher_score': row['teacher_score'],
+                    'checkpoint_id': row['checkpoint_id'],
+                    'question_scores_json': row['question_scores_json']}
                    if row['attempt_id'] else None)
         if attempt:
             score = models.effective_checkpoint_score(attempt)
@@ -6636,8 +6729,8 @@ def student_checkpoints():
             'score': score,
             # Points per question, not the session min() (2026-09-16); None for an
             # attempt from before question scores were stored.
-            'points': (_question_points(json.loads(row['question_scores_json']))
-                       if row['attempt_id'] and row['question_scores_json'] else None),
+            'points': (_question_points(_counted_scores(attempt))
+                       if attempt and row['question_scores_json'] else None),
             'owed': owed.get(row['checkpoint_id'], []),
             'status': status,
             'feedback': row['student_feedback'],
@@ -7080,8 +7173,7 @@ def _consolidate_question_scores(scores):
     whole session wants the session-level teacher_score override instead, which
     effective_checkpoint_score() lets win.
     """
-    counted = [v for v in scores.values() if v is not None]
-    return min(counted) if counted else 0
+    return models.consolidate_question_scores(scores)
 
 
 def _finish_checkpoint_retry(student_id, subtask_id, slug, progress, question_results):
@@ -7128,7 +7220,8 @@ def _finish_checkpoint_retry(student_id, subtask_id, slug, progress, question_re
     total = len(question_results)
     return jsonify({
         'score': score,
-        'question_points': _question_points(scores),
+        'question_points': _question_points(_counted_scores(
+            {'checkpoint_id': subtask_id, 'question_scores_json': json.dumps(scores)})),
         # The cap applies only to a rejected report -- a question the teacher sent
         # back is redone without it, and saying otherwise would be wrong.
         'score_reason': (f'{solved} von {total} nachgeholten Fragen gelöst.'
@@ -7255,7 +7348,8 @@ def student_checkpoint_finish():
     return jsonify({
         'score': score, 'score_reason': score_reason, 'needs_review': needs_review,
         'flagged_count': flagged_count,
-        'question_points': _question_points(json.loads(question_scores)),
+        'question_points': _question_points(_counted_scores(
+            {'checkpoint_id': subtask_id, 'question_scores_json': question_scores})),
         'redirect_url': url_for('student_klasse', slug=slug)
     })
 

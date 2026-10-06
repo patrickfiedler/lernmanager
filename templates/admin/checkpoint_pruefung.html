@@ -326,6 +326,9 @@
                 {% endif %}
                 {# A corrected score must not look like a computed one -- otherwise the
                    teacher cannot see their own correction on the next visit. #}
+                {% if question.excluded %}
+                <span class="badge badge-warning" title="Für alle Schüler aus der Wertung genommen (Checkpoint-Übersicht)">nicht gewertet</span>
+                {% endif %}
                 {% if question.scored_manual %}
                 <span class="badge badge-secondary" title="Nicht aus den Antworten gerechnet, sondern von dir gesetzt">✋ von Hand</span>
                 {% endif %}
