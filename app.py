@@ -4234,6 +4234,10 @@ def _checkpoint_export_rows(sessions):
             # a property of the question the row is about.
             flag = question['flags'][0] if question.get('flags') else {}
             flag_columns = {
+                # Taken out of the grading for everyone (checkpoint_question_exclusion).
+                # The points columns keep what the question earned; whoever adds
+                # them up has to skip the row. score_gueltig already does.
+                'nicht_gewertet': 1 if question.get('excluded') else 0,
                 'gemeldet': 1 if flag else 0,
                 'meldung_grund_code': flag.get('reason_code'),
                 'meldung_grund': models.CHECKPOINT_FLAG_REASONS.get(flag.get('reason_code')),
@@ -4446,6 +4450,10 @@ def admin_checkpoint_export_json():
                 # log alone would have given.
                 'punkte_berechnet': question['scored_computed'],
                 'punkte_lehrer': question['scored_teacher'],
+                # Counts for nobody (checkpoint_question_exclusion). `punkte` stays
+                # what the question earned -- a reader summing points must skip it,
+                # in numerator and denominator alike. score_gueltig already does.
+                'nicht_gewertet': bool(question.get('excluded')),
                 'versuche_gezaehlt': question['attempts_counted'],
                 # Structured, not free text: "which questions did students report,
                 # for what reason, and what did the teacher decide" is the question

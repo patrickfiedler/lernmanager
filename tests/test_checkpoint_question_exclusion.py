@@ -149,3 +149,25 @@ def test_student_reads_zaehlt_nicht(data, client):
         sess["student_id"] = a
     body = client.get("/schueler/checkpoints").get_data(as_text=True)
     assert "F2 –" in body
+
+
+def test_exports_say_which_question_is_not_graded(data, as_admin):
+    """Chemie adds the points up itself -- it has to know which rows to skip. The
+    points stay what the question earned."""
+    a = data["students"][0]
+    attempt_id = _sit(data, a, {"0": 3, "1": 0, "2": 2})
+    for index in range(3):
+        models.create_checkpoint_answer(
+            a, data["cp"], f"s-{a}", index, 1, "Antwort", correct=1, feedback="ok",
+            hints_used_before=0, grader="llm")
+    models.attach_checkpoint_session_to_attempt(f"s-{a}", attempt_id)
+    models.set_question_excluded(data["cp"], 1, True)
+
+    export = json.loads(as_admin.get("/admin/checkpoint-pruefung/export.json").get_data(as_text=True))
+    session = export["sessions"][0]
+    assert [q["nicht_gewertet"] for q in session["fragen"]] == [False, True, False]
+    assert session["score_gueltig"] == 2
+
+    lines = as_admin.get("/admin/checkpoint-pruefung/export.csv").get_data(as_text=True).splitlines()
+    column = lines[0].split(";").index("nicht_gewertet")
+    assert [line.split(";")[column] for line in lines[1:] if line.strip()] == ["0", "1", "0"]
