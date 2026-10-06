@@ -100,6 +100,31 @@ def test_the_draft_answer_is_kept_as_evidence_but_not_graded(app, client):
     assert json.loads(logged[0]["answer_text"]) == [1]
 
 
+def test_every_logged_answer_keeps_the_question_it_was_given_to(app, client):
+    """Graded answer, give-up and reported draft all store the question as it read
+    at that moment (migrate_065) -- editing the quiz afterwards must not rewrite what
+    a student was asked."""
+    student_id, subtask_id = _checkpoint_student(app)
+    _login(client, student_id)
+
+    _answer(client, subtask_id, 0, [1])
+    with models.db_session() as conn:
+        conn.execute("UPDATE subtask SET quiz_json = replace(quiz_json, 'Frage 1', 'Neu gefasst') "
+                     "WHERE id = ?", (subtask_id,))
+    client.post("/schueler/checkpoint/aufgeben", json={
+        "slug": "redoxreaktionen", "subtask_id": subtask_id, "question_index": 0})
+    _flag(client, subtask_id, 1, reason="unklar", answer=[1])
+
+    with models.db_session() as conn:
+        rows = [dict(r) for r in conn.execute(
+            "SELECT grader, question_index, question_snapshot_json FROM checkpoint_answer "
+            "WHERE student_id = ? ORDER BY id", (student_id,)).fetchall()]
+    asked = [(r["grader"], json.loads(r["question_snapshot_json"])["text"]) for r in rows]
+    assert asked[0] == ("mc", "Frage 1")
+    assert asked[1] == ("gaveup", "Neu gefasst")
+    assert asked[2][0] == "flagged" and asked[2][1]
+
+
 def test_ki_bewertung_needs_a_verdict_to_complain_about(app, client):
     student_id, subtask_id = _checkpoint_student(app)
     _login(client, student_id)

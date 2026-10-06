@@ -62,6 +62,7 @@ def _log_session(data, answers, score=2, session_uid="sess-1"):
             hints_used_before=answer.get("hints_used_before", 0),
             gave_up=answer.get("gave_up", False),
             prompt_version=answer.get("prompt_version", "checkpoint:abc12345"),
+            question=answer.get("question"),
         )
     return models.create_checkpoint_attempt(
         data["student_id"], data["subtask_id"], data["task_id"], "quiz", "kern",
@@ -272,6 +273,33 @@ def test_json_export_nests_attempts_under_questions(as_admin, checkpoint_data):
     assert question["frage"] == "Erkläre den Aufbau des Atoms."
     assert question["bewertungskriterien"].startswith("Kern mit Protonen")
     assert [v["antwort"] for v in question["versuche"]] == ["Falsch", "Richtig"]
+
+
+def test_exports_carry_the_wording_each_answer_was_given_to(as_admin, checkpoint_data):
+    """A sitting keeps ONE wording, taken when it ends, but its answers can be weeks
+    apart with a rewrite in between (register B04). Each answer carries its own; an
+    answer from before migrate_065 has none, and the sitting's is not filled in for it
+    -- that would pass a guess off as a fact."""
+    _log_session(checkpoint_data, [
+        {"question_index": 0, "attempt_no": 1, "correct": False},
+        {"question_index": 0, "attempt_no": 2, "correct": True,
+         "question": {"type": "short_answer", "text": "Alte Fassung der Frage.",
+                      "rubric": "Alte Rubrik."}},
+    ])
+
+    export = json.loads(as_admin.get("/admin/checkpoint-pruefung/export.json").data)
+    question = export["sessions"][0]["fragen"][0]
+    first, second = question["versuche"]
+    assert question["frage"] == "Erkläre den Aufbau des Atoms."      # the sitting's
+    assert first["frage_bei_antwort"] is None
+    assert first["bewertungskriterien_bei_antwort"] is None
+    assert second["frage_bei_antwort"] == "Alte Fassung der Frage."
+    assert second["bewertungskriterien_bei_antwort"] == "Alte Rubrik."
+
+    body = as_admin.get("/admin/checkpoint-pruefung/export.csv").data.decode("utf-8-sig")
+    header = body.splitlines()[0].split(";")
+    assert "frage_bei_antwort" in header and "bewertungskriterien_bei_antwort" in header
+    assert "Alte Fassung der Frage." in body
 
 
 # ------------------------------------------------- double-click detection (TODO)

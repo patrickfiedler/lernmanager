@@ -404,6 +404,7 @@ def init_db():
                 hint_source TEXT,  -- 'frage' | 'checkpoint': which hint list the model got
                 hint_status TEXT,  -- pending | ok | melden | error | limit; NULL = never requested
                 hint_prompt_version TEXT,
+                question_snapshot_json TEXT,  -- migrate_065: the question (text, rubric, options) as it read when THIS answer was given. checkpoint_attempt.quiz_snapshot_json is taken once, when the sitting ends, but a sitting's answers can be weeks apart with a rewrite in between. NULL on rows from before the migration -- their wording is not known, do not assume the sitting's
                 FOREIGN KEY (student_id) REFERENCES student(id) ON DELETE CASCADE
             );
 
@@ -3906,7 +3907,7 @@ def create_checkpoint_answer(student_id, checkpoint_id, session_uid, question_in
                               attempt_no, answer_text, correct, feedback, grader,
                               llm_model=None, hints_used_before=0, gave_up=False,
                               prompt_version=None, judgment_confidence=None,
-                              dedupe=False):
+                              dedupe=False, question=None):
     """Log one graded attempt at one checkpoint question -- the per-question detail
     checkpoint_attempt never captured (see migrate_047). Written as answers happen,
     before checkpoint_attempt exists (checkpoint_attempt_id starts NULL and is
@@ -3933,6 +3934,10 @@ def create_checkpoint_answer(student_id, checkpoint_id, session_uid, question_in
     but that read and this write are separate transactions with a slow grading call in
     between -- long enough for a second request to pass the same check. SQLite
     serialises writers, so re-checking here is what actually closes the window.
+
+    question: the question dict this answer was given to, stored as it is
+    (migrate_065). An answer can only be judged against the wording and rubric it
+    was graded with, and the quiz gets edited while sittings are still open.
 
     Returns {'created': bool, 'attempt_no': int, 'existing': row or None, 'id': int}.
     `created` is False only when dedupe suppressed the insert; `existing` then carries
@@ -3962,11 +3967,13 @@ def create_checkpoint_answer(student_id, checkpoint_id, session_uid, question_in
             INSERT INTO checkpoint_answer
             (student_id, checkpoint_id, session_uid, question_index, attempt_no,
              answer_text, correct, feedback, grader, llm_model, hints_used_before,
-             gave_up, timestamp, prompt_version, judgment_confidence)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             gave_up, timestamp, prompt_version, judgment_confidence,
+             question_snapshot_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (student_id, checkpoint_id, session_uid, question_index, attempt_no,
               answer_text, correct, feedback, grader, llm_model, hints_used_before,
-              1 if gave_up else 0, now_local(), prompt_version, judgment_confidence))
+              1 if gave_up else 0, now_local(), prompt_version, judgment_confidence,
+              json.dumps(question, ensure_ascii=False) if question else None))
         return {'created': True, 'attempt_no': attempt_no, 'existing': None,
                 'id': cursor.lastrowid}
 

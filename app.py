@@ -3414,10 +3414,19 @@ def _build_checkpoint_sessions(attempts):
             else:
                 entry['correct_display'] = None
             for answer in entry['answers']:
+                # The question as it read when this answer was given (migrate_065).
+                # Older rows have none: their wording is unknown, and the sitting's
+                # is deliberately NOT filled in for them -- it may be a later rewrite.
+                asked = (json.loads(answer['question_snapshot_json'])
+                         if answer.get('question_snapshot_json') else None)
+                answer['question_text_at_answer'] = asked.get('text') if asked else None
+                answer['rubric_at_answer'] = asked.get('rubric') if asked else None
+                # Option indices are resolved against the options that were on screen.
+                shown = asked or question
                 if interactive:
-                    answer['answer_display'] = _resolve_interactive_answer(question, answer['answer_text'])
+                    answer['answer_display'] = _resolve_interactive_answer(shown, answer['answer_text'])
                 elif entry['question_type'] == 'multiple_choice':
-                    answer['answer_display'] = _resolve_mc_answer(question, answer['answer_text'])
+                    answer['answer_display'] = _resolve_mc_answer(shown, answer['answer_text'])
                 else:
                     answer['answer_display'] = None
                 _mark_calibration_relevance(answer, entry['question_type'])
@@ -4174,6 +4183,7 @@ def _checkpoint_export_rows(sessions):
                     'frage_typ': question['question_type'],
                     'frage': question['question_text'],
                     'bewertungskriterien': question['rubric'],
+                    'frage_bei_antwort': None, 'bewertungskriterien_bei_antwort': None,
                     'versuch_nr': None,
                     'antwort': None, 'antwort_roh': None,
                     'richtige_antwort': question.get('correct_display'),
@@ -4203,6 +4213,11 @@ def _checkpoint_export_rows(sessions):
                     'frage_typ': question['question_type'],
                     'frage': question['question_text'],
                     'bewertungskriterien': question['rubric'],
+                    # `frage`/`bewertungskriterien` are the sitting's (one snapshot,
+                    # taken when it ended). These two are what this very answer was
+                    # given to; empty = recorded before migrate_065, wording unknown.
+                    'frage_bei_antwort': answer.get('question_text_at_answer'),
+                    'bewertungskriterien_bei_antwort': answer.get('rubric_at_answer'),
                     'versuch_nr': answer['attempt_no'],
                     # Readable option text for multiple choice, raw stored value
                     # beside it: a spreadsheet reader wants the option, an analysis
@@ -4377,6 +4392,11 @@ def admin_checkpoint_export_json():
                     'zeitpunkt': answer['timestamp'],
                     'antwort': answer.get('answer_display') or answer['answer_text'],
                     'antwort_roh': answer['answer_text'],
+                    # What this answer was given to. The question-level `frage` is
+                    # the sitting's snapshot and can be a later rewrite; null here =
+                    # recorded before migrate_065, wording unknown.
+                    'frage_bei_antwort': answer.get('question_text_at_answer'),
+                    'bewertungskriterien_bei_antwort': answer.get('rubric_at_answer'),
                     'ki_urteil': answer['correct'],
                     'ki_feedback': answer['feedback'],
                     'grader': answer['grader'],
@@ -6757,6 +6777,7 @@ def student_checkpoint_answer():
         _save_checkpoint_progress(subtask_id, progress)
         models.create_checkpoint_answer(
             student_id, subtask_id, progress['session_uid'], question_index,
+            question=question,
             attempt_no=progress['attempts'].get(qidx, 0) + 1, answer_text=answer_text,
             correct=None, feedback=feedback, grader=source, llm_model=llm_model,
             hints_used_before=progress['hints_used'].get(qidx, 0),
@@ -6781,6 +6802,7 @@ def student_checkpoint_answer():
     # moved below the insert.
     logged = models.create_checkpoint_answer(
         student_id, subtask_id, progress['session_uid'], question_index,
+        question=question,
         attempt_no=None, answer_text=answer_text,
         correct=correct, feedback=feedback, grader=source, llm_model=llm_model,
         hints_used_before=progress['hints_used'].get(qidx, 0),
@@ -6945,6 +6967,7 @@ def student_checkpoint_give_up():
     _save_checkpoint_progress(subtask_id, progress)
     models.create_checkpoint_answer(
         student_id, subtask_id, progress['session_uid'], question_index,
+        question=question,
         attempt_no=progress['attempts'].get(qidx, 0) + 1, answer_text=None,
         correct=False, feedback=correct_answer, grader='gaveup',
         hints_used_before=progress['hints_used'].get(qidx, 0), gave_up=True
@@ -7016,6 +7039,7 @@ def student_checkpoint_flag():
     if draft_text:
         models.create_checkpoint_answer(
             student_id, subtask_id, progress['session_uid'], question_index,
+            question=question,
             attempt_no=progress['attempts'].get(qidx, 0) + 1, answer_text=draft_text,
             correct=None, feedback=None, grader='flagged',
             hints_used_before=progress['hints_used'].get(qidx, 0)
