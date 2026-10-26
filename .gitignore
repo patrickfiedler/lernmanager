@@ -41,6 +41,7 @@
 !/import_task.py
 !/inline_images.py
 !/key_combos.py
+!/permissions.py
 !/list_students.py
 !/generate_weekly_reports.py
 

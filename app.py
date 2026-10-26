@@ -29,6 +29,8 @@ import llm_grading
 import quiz_grading
 import artifact_processor
 import artifact_checker
+from permissions import admin_required, staff_required
+import permissions
 import inline_images
 import key_combos
 import checkpoint_questions
@@ -459,14 +461,7 @@ def _apply_question_order(quiz, antworten):
 
 # ============ Auth Decorators ============
 
-def admin_required(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        if 'admin_id' not in session:
-            flash('Bitte melden Sie sich an.', 'warning')
-            return redirect(url_for('login'))
-        return f(*args, **kwargs)
-    return decorated
+# admin_required / staff_required: see permissions.py
 
 
 def student_required(f):
@@ -578,7 +573,7 @@ def internal_auth_check():
     client's cookies to this subrequest automatically; we just check the
     session. 204 (not 200) so nginx has nothing to accidentally proxy back.
     """
-    if 'admin_id' not in session:
+    if not permissions.is_admin():
         return '', 401
     return '', 204
 
@@ -602,6 +597,9 @@ def login():
 
         # Try admin login
         admin = models.verify_admin(username, password)
+        if admin and not admin['active']:
+            flash('Dieses Konto ist deaktiviert.', 'danger')
+            return render_template('login.html')
         if admin:
             session['admin_id'] = admin['id']
             session['admin_username'] = admin['username']

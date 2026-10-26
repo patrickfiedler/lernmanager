@@ -141,7 +141,9 @@ def init_db():
             CREATE TABLE IF NOT EXISTS admin (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT UNIQUE NOT NULL,
-                password_hash TEXT NOT NULL
+                password_hash TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT 'admin',  -- admin/teacher, see permissions.py
+                active INTEGER NOT NULL DEFAULT 1  -- 0 = login blocked, row kept for resolved_by etc.
             );
 
             -- Classes (Klassen)
@@ -182,6 +184,15 @@ def init_db():
                 PRIMARY KEY (student_id, klasse_id),
                 FOREIGN KEY (student_id) REFERENCES student(id) ON DELETE CASCADE,
                 FOREIGN KEY (klasse_id) REFERENCES klasse(id) ON DELETE CASCADE
+            );
+
+            -- Which teacher teaches which class (several per class: co-teaching, substitutes)
+            CREATE TABLE IF NOT EXISTS klasse_lehrer (
+                klasse_id INTEGER NOT NULL,
+                admin_id INTEGER NOT NULL,
+                PRIMARY KEY (klasse_id, admin_id),
+                FOREIGN KEY (klasse_id) REFERENCES klasse(id) ON DELETE CASCADE,
+                FOREIGN KEY (admin_id) REFERENCES admin(id) ON DELETE CASCADE
             );
 
             -- Class schedule (day of week each class meets)
@@ -871,6 +882,30 @@ def update_admin_password(admin_id, new_password):
             "UPDATE admin SET password_hash = ? WHERE id = ?",
             (hash_password(new_password), admin_id)
         )
+
+
+def get_admin(admin_id):
+    """One admin/teacher row (role, active included), or None."""
+    with db_session() as conn:
+        row = conn.execute("SELECT * FROM admin WHERE id = ?", (admin_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def get_klasse_ids_for_teacher(admin_id):
+    """Class ids linked to this teacher in klasse_lehrer (see permissions.py)."""
+    with db_session() as conn:
+        rows = conn.execute(
+            "SELECT klasse_id FROM klasse_lehrer WHERE admin_id = ?", (admin_id,)
+        ).fetchall()
+        return {r['klasse_id'] for r in rows}
+
+
+def get_klasse_ids_for_student(student_id):
+    with db_session() as conn:
+        rows = conn.execute(
+            "SELECT klasse_id FROM student_klasse WHERE student_id = ?", (student_id,)
+        ).fetchall()
+        return {r['klasse_id'] for r in rows}
 
 
 def verify_student(username, password):

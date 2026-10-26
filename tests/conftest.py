@@ -21,6 +21,9 @@ def app(tmp_path):
     flask_app.config["TESTING"] = True
     flask_app.config["SECRET_KEY"] = "test-secret"
     models.init_db()
+    # id 1 on a fresh DB: several tests set sess["admin_id"] = 1 directly, and
+    # permissions.py looks the account up on every request.
+    models.create_admin("admin", "testpass")
     yield flask_app
 
 
