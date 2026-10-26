@@ -916,6 +916,32 @@ def remove_teacher_from_klasse(admin_id, klasse_id):
         )
 
 
+def list_teachers():
+    """Teacher accounts with their class ids, for admin/lehrkraefte."""
+    with db_session() as conn:
+        teachers = [dict(r) for r in conn.execute(
+            "SELECT id, username, active FROM admin WHERE role = 'teacher' ORDER BY username"
+        ).fetchall()]
+    for t in teachers:
+        t['klasse_ids'] = get_klasse_ids_for_teacher(t['id'])
+    return teachers
+
+
+def set_teacher_klassen(admin_id, klasse_ids):
+    """Replace this teacher's classes with exactly `klasse_ids`."""
+    with db_session() as conn:
+        conn.execute("DELETE FROM klasse_lehrer WHERE admin_id = ?", (admin_id,))
+        conn.executemany(
+            "INSERT INTO klasse_lehrer (klasse_id, admin_id) VALUES (?, ?)",
+            [(k, admin_id) for k in set(klasse_ids)]
+        )
+
+
+def set_admin_active(admin_id, active):
+    with db_session() as conn:
+        conn.execute("UPDATE admin SET active = ? WHERE id = ?", (1 if active else 0, admin_id))
+
+
 def get_klasse_ids_for_student_topic(student_id, task_id):
     """Classes in which this student has this topic (student_task rows)."""
     with db_session() as conn:

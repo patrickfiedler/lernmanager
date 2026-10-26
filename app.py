@@ -2996,6 +2996,69 @@ def admin_passwort():
     return render_template('admin/passwort.html')
 
 
+# ============ Admin: Teacher Accounts ============
+# Colleagues with role 'teacher' (permissions.py). Created and linked to classes
+# here; the admin account itself is never listed or changed on this page.
+
+def _teacher_or_404(admin_id):
+    teacher = models.get_admin(admin_id)
+    if not teacher or teacher['role'] != 'teacher':
+        abort(404)
+    return teacher
+
+
+@app.route('/admin/lehrkraefte')
+@admin_required
+def admin_lehrkraefte():
+    return render_template('admin/lehrkraefte.html', teachers=models.list_teachers(),
+                           klassen=models.get_all_klassen())
+
+
+@app.route('/admin/lehrkraefte/neu', methods=['POST'])
+@admin_required
+def admin_lehrkraft_neu():
+    username = request.form.get('username', '').strip()
+    if not username:
+        flash('Bitte einen Benutzernamen eingeben.', 'danger')
+        return redirect(url_for('admin_lehrkraefte'))
+    password = generate_password()
+    if not models.create_admin(username, password, role='teacher'):
+        flash(f'Den Benutzernamen „{username}“ gibt es schon.', 'danger')
+        return redirect(url_for('admin_lehrkraefte'))
+    flash(f'Lehrkraft „{username}“ angelegt. Startpasswort: {password} -- '
+          'jetzt notieren, es wird nicht noch einmal angezeigt.', 'success')
+    return redirect(url_for('admin_lehrkraefte'))
+
+
+@app.route('/admin/lehrkraft/<int:admin_id>/klassen', methods=['POST'])
+@admin_required
+def admin_lehrkraft_klassen(admin_id):
+    _teacher_or_404(admin_id)
+    models.set_teacher_klassen(admin_id, request.form.getlist('klasse_ids', type=int))
+    flash('Klassen gespeichert. ✅', 'success')
+    return redirect(url_for('admin_lehrkraefte'))
+
+
+@app.route('/admin/lehrkraft/<int:admin_id>/aktiv', methods=['POST'])
+@admin_required
+def admin_lehrkraft_aktiv(admin_id):
+    teacher = _teacher_or_404(admin_id)
+    models.set_admin_active(admin_id, not teacher['active'])
+    flash(f'„{teacher["username"]}“ ' + ('deaktiviert.' if teacher['active'] else 'wieder aktiviert.'),
+          'success')
+    return redirect(url_for('admin_lehrkraefte'))
+
+
+@app.route('/admin/lehrkraft/<int:admin_id>/passwort', methods=['POST'])
+@admin_required
+def admin_lehrkraft_passwort(admin_id):
+    teacher = _teacher_or_404(admin_id)
+    password = generate_password()
+    models.update_admin_password(admin_id, password)
+    flash(f'Neues Passwort für „{teacher["username"]}“: {password}', 'success')
+    return redirect(url_for('admin_lehrkraefte'))
+
+
 # ============ Admin: Quiz Answer Review ============
 
 @app.route('/admin/quiz-antworten')

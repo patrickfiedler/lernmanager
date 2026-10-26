@@ -1,0 +1,54 @@
+{% extends 'base.html' %}
+
+{% block title %}Lehrkräfte - Lernmanager{% endblock %}
+
+{% block content %}
+<h1 class="mb-2">👩‍🏫 Lehrkräfte</h1>
+
+<div class="card mb-2">
+    <div class="card-header">➕ Neue Lehrkraft</div>
+    <form method="POST" action="{{ url_for('admin_lehrkraft_neu') }}" class="flex gap-1" style="padding: 1rem;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="text" name="username" class="form-control" placeholder="Benutzername" required style="flex: 1;">
+        <button type="submit" class="btn btn-primary">Anlegen</button>
+    </form>
+    <p class="text-muted" style="padding: 0 1rem 1rem; margin: 0; font-size: 0.875rem;">
+        Das Startpasswort erscheint einmal nach dem Anlegen. Die Lehrkraft ändert es selbst unter „Passwort ändern“.
+        Sie sieht nur die Klassen, die hier angehakt sind.
+    </p>
+</div>
+
+{% for t in teachers %}
+<div class="card mb-2">
+    <div class="card-header flex flex-between flex-center">
+        <span>{{ t.username }}{% if not t.active %} <span class="badge badge-warning">deaktiviert</span>{% endif %}</span>
+        <span class="flex gap-1">
+            <form method="POST" action="{{ url_for('admin_lehrkraft_passwort', admin_id=t.id) }}" onsubmit="return confirm('Neues Passwort für {{ t.username }} erzeugen?');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-secondary btn-sm">🔑 Neues Passwort</button>
+            </form>
+            <form method="POST" action="{{ url_for('admin_lehrkraft_aktiv', admin_id=t.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-sm {{ 'btn-danger' if t.active else 'btn-secondary' }}">
+                    {{ 'Deaktivieren' if t.active else 'Wieder aktivieren' }}
+                </button>
+            </form>
+        </span>
+    </div>
+    <form method="POST" action="{{ url_for('admin_lehrkraft_klassen', admin_id=t.id) }}" style="padding: 1rem;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="flex gap-1" style="flex-wrap: wrap;">
+            {% for k in klassen %}
+            <label style="white-space: nowrap;">
+                <input type="checkbox" name="klasse_ids" value="{{ k.id }}" {% if k.id in t.klasse_ids %}checked{% endif %}>
+                {{ k.name }}
+            </label>
+            {% endfor %}
+        </div>
+        <button type="submit" class="btn btn-primary btn-sm mt-1">Klassen speichern</button>
+    </form>
+</div>
+{% else %}
+<p class="text-muted">Noch keine Lehrkräfte angelegt.</p>
+{% endfor %}
+{% endblock %}

@@ -84,7 +84,7 @@
         </div>
     </form>
     {% if not klasse.klassenstufe %}
-    <small class="text-muted">Keine Klassenstufe gesetzt — Themen werden unsortiert angezeigt. Trage die Stufe oben ein, damit passende Themen zuerst erscheinen.</small>
+    <small class="text-muted">Keine Klassenstufe gesetzt — Themen werden unsortiert angezeigt. {% if is_admin %}Trage die Stufe oben ein{% else %}Der Admin kann die Stufe setzen{% endif %}, damit passende Themen zuerst erscheinen.</small>
     {% endif %}
 </div>
 

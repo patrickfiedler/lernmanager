@@ -247,3 +247,29 @@ def test_checkpoint_review_lists_only_own_classes(own, teacher):
     admin.post('/admin/checkpoint-pruefung/zuruecksetzen',
                data={'checkpoint_id': foreign['checkpoint_id']})
     assert models.get_checkpoint_reviews(checkpoint_id=foreign['checkpoint_id']) == []
+
+
+def test_admin_creates_teacher_who_then_sees_her_class(app):
+    """End to end through the real login form, not a session shortcut."""
+    app.config["WTF_CSRF_ENABLED"] = False
+    klasse = models.create_klasse("7b")
+    models.create_klasse("8a")
+    admin = app.test_client()
+    with admin.session_transaction() as sess:
+        sess["admin_id"] = 1
+    resp = admin.post('/admin/lehrkraefte/neu', data={'username': 'kollegin'}, follow_redirects=True)
+    password = re.search(r'Startpasswort: (\w+)', resp.get_data(as_text=True)).group(1)
+    teacher_id = models.verify_admin('kollegin', password)['id']
+    admin.post(f'/admin/lehrkraft/{teacher_id}/klassen', data={'klasse_ids': [klasse]})
+
+    colleague = app.test_client()
+    colleague.post('/login', data={'username': 'kollegin', 'password': password})
+    html = colleague.get('/admin/klassen').get_data(as_text=True)
+    assert '7b' in html and '8a' not in html
+    assert colleague.get('/admin/lehrkraefte').status_code == 404
+
+    admin.post(f'/admin/lehrkraft/{teacher_id}/aktiv')
+    assert colleague.get('/admin/klassen').status_code == 302
+    login = app.test_client().post('/login', data={'username': 'kollegin', 'password': password},
+                                   follow_redirects=True)
+    assert 'deaktiviert' in login.get_data(as_text=True)
