@@ -1937,6 +1937,16 @@ def admin_schueler_lernpfad(student_id):
     return redirect(url_for('admin_schueler_detail', student_id=student_id))
 
 
+@app.route('/admin/schueler/<int:student_id>/demo-ueben', methods=['POST'])
+@admin_required
+def admin_schueler_demo_practice(student_id):
+    """Demo account: Üben gets every question of the assigned Themen (migrate_067)."""
+    demo = 1 if request.form.get('demo_practice') == 'on' else 0
+    models.update_student_setting(student_id, 'demo_practice', demo)
+    flash('Demo-Üben eingeschaltet. ✅' if demo else 'Demo-Üben ausgeschaltet.', 'success')
+    return redirect(url_for('admin_schueler_detail', student_id=student_id))
+
+
 @app.route('/admin/schueler/<int:student_id>/fork-zweig', methods=['POST'])
 @admin_required
 def admin_schueler_fork_zweig(student_id):

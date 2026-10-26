@@ -71,6 +71,17 @@
             <button type="submit" class="btn btn-primary">Speichern</button>
         </form>
     </div>
+
+    <!-- Demo account: practice without gates -->
+    <div class="card">
+        <div class="card-header">🎬 Demo-Üben</div>
+        <p class="text-muted" style="font-size: 0.9em;">Nur für Demo-Konten: Üben bekommt alle Fragen der zugewiesenen Themen, auch aus Checkpoints, ohne Bearbeitung, Durchsicht oder Wartezeit.</p>
+        <form method="POST" action="{{ url_for('admin_schueler_demo_practice', student_id=student.id) }}" class="flex gap-1 flex-center">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <label><input type="checkbox" name="demo_practice" {% if student.demo_practice %}checked{% endif %}> Demo-Üben</label>
+            <button type="submit" class="btn btn-primary">Speichern</button>
+        </form>
+    </div>
 </div>
 
 {% if fork_choices %}

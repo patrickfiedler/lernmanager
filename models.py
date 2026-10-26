@@ -170,6 +170,7 @@ def init_db():
                 easy_reading_mode INTEGER DEFAULT 0,
                 llm_transparency_mode INTEGER DEFAULT 0,
                 step_checkboxes INTEGER NOT NULL DEFAULT 0,  -- on for new students: create_student passes 1 (migrate_054)
+                demo_practice INTEGER NOT NULL DEFAULT 0,  -- demo account: practice pool without gates (migrate_067)
                 netzwerk_id TEXT  -- surname.firstname school network ID, matches scan-folders' folder names (grading-service-deployment.md §Phase 2)
             );
             CREATE UNIQUE INDEX IF NOT EXISTS idx_student_netzwerk_id ON student(netzwerk_id) WHERE netzwerk_id IS NOT NULL;
@@ -7752,7 +7753,7 @@ def get_warmup_question_pool(student_id, include_short_answer=False):
     pool = []
     with db_session() as conn:
         row = conn.execute(
-            'SELECT lernpfad FROM student WHERE id = ?', (student_id,)).fetchone()
+            'SELECT lernpfad, demo_practice FROM student WHERE id = ?', (student_id,)).fetchone()
         student_path = row['lernpfad'] if row else None
         fork_choices = {
             r['fork_group']: r['fork_branch'] for r in conn.execute(
@@ -7901,6 +7902,37 @@ def get_warmup_question_pool(student_id, include_short_answer=False):
             pool.extend(_quiz_json_to_pool_entries(
                 sub['task_id'], sub['subtask_id'], sub['quiz_json'], sub['topic_name'],
                 student_path=student_path, fach=sub['fach']))
+
+        # 4. Demo accounts (student.demo_practice, set by the teacher): every question
+        #    of every assigned Thema, checkpoints included -- no attempt, no review,
+        #    no waiting. Free text still only from checkpoints, the only ones the
+        #    practice grader has a rubric path for.
+        if row and row['demo_practice']:
+            seen = {(e['task_id'], e['subtask_id'], e['question_index']) for e in pool}
+            assigned_quizzes = conn.execute('''
+                SELECT t.id as task_id, NULL as subtask_id, t.quiz_json,
+                       t.name as topic_name, t.fach, NULL as checkpoint_type
+                FROM student_task st
+                JOIN task t ON t.id = st.task_id
+                WHERE st.student_id = ?
+                  AND t.quiz_json IS NOT NULL AND t.quiz_json != ''
+                UNION ALL
+                SELECT sub.task_id, sub.id, sub.quiz_json,
+                       t.name, t.fach, sub.checkpoint_type
+                FROM student_task st
+                JOIN task t ON t.id = st.task_id
+                JOIN subtask sub ON sub.task_id = t.id
+                WHERE st.student_id = ?
+                  AND sub.quiz_json IS NOT NULL AND sub.quiz_json != ''
+                  AND COALESCE(sub.is_intro, 0) = 0
+            ''', (student_id, student_id)).fetchall()
+            for q in assigned_quizzes:
+                entries = _quiz_json_to_pool_entries(
+                    q['task_id'], q['subtask_id'], q['quiz_json'], q['topic_name'],
+                    student_path=student_path, fach=q['fach'],
+                    allow_short_answer=include_short_answer and q['checkpoint_type'] is not None)
+                pool.extend(e for e in entries
+                            if (e['task_id'], e['subtask_id'], e['question_index']) not in seen)
 
     return pool
 

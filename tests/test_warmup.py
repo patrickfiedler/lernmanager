@@ -453,3 +453,43 @@ def test_practice_answer_grades_checkpoint_short_answer(app, client, monkeypatch
     resp = client.post("/schueler/aufwaermen/antwort", json={**body, "phase": "practice"})
     assert resp.status_code == 200
     assert resp.get_json()["correct"] is True
+
+
+# ---- Demo accounts: student.demo_practice skips every gate ----
+
+def test_demo_student_practises_unsat_checkpoint(db):
+    """Demo flag: an assigned checkpoint nobody has sat is in the pool, free text
+    included for practice, not for the warm-up."""
+    student_id = models.create_student("Demo", "Konto", "cpdemo", "pw123")
+    _checkpoint(student_id)
+    assert models.get_warmup_question_pool(student_id, include_short_answer=True) == []
+
+    models.update_student_setting(student_id, "demo_practice", 1)
+    assert _pool_indices(student_id) == [0, 1, 2]
+    warmup = models.get_warmup_question_pool(student_id)
+    assert sorted(e["question_index"] for e in warmup) == [0, 1]
+
+
+def test_demo_student_gets_no_duplicates_and_unassigned_topics_stay_out(db):
+    student_id = models.create_student("Demo", "Konto", "cpdemo2", "pw123")
+    task_id, subtask_id = _checkpoint(student_id)
+    _finish_checkpoint(student_id, task_id, subtask_id)
+    models.create_task("Fremdes Thema", "", "", "Chemie", "11s", "",
+                       quiz_json=json.dumps(MIXED_QUIZ))
+    models.update_student_setting(student_id, "demo_practice", 1)
+    assert _pool_indices(student_id) == [0, 1, 2]
+
+
+def test_teacher_switches_demo_practice_on_and_off(app, client, as_admin):
+    app.config["WTF_CSRF_ENABLED"] = False
+    student_id = models.create_student("Demo", "Konto", "routedemo", "pw123")
+    page = as_admin.get(f"/admin/schueler/{student_id}").get_data(as_text=True)
+    assert 'name="demo_practice" >' in page
+
+    as_admin.post(f"/admin/schueler/{student_id}/demo-ueben", data={"demo_practice": "on"})
+    assert models.get_student(student_id)["demo_practice"] == 1
+    page = as_admin.get(f"/admin/schueler/{student_id}").get_data(as_text=True)
+    assert 'name="demo_practice" checked' in page
+
+    as_admin.post(f"/admin/schueler/{student_id}/demo-ueben", data={})
+    assert models.get_student(student_id)["demo_practice"] == 0
