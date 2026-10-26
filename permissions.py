@@ -42,6 +42,12 @@ def visible_klasse_ids():
     return models.get_klasse_ids_for_teacher(staff['id']) if staff else set()
 
 
+def visible_klassen():
+    """models.get_all_klassen(), cut down to what this user may see."""
+    ids = visible_klasse_ids()
+    return [k for k in models.get_all_klassen() if ids is None or k['id'] in ids]
+
+
 def can_see_klasse(klasse_id):
     ids = visible_klasse_ids()
     return ids is None or klasse_id in ids
@@ -60,8 +66,25 @@ def can_see_student_topic(student_id, task_id):
     return ids is None or bool(ids & models.get_klasse_ids_for_student_topic(student_id, task_id))
 
 
+def require_checkpoint(kind, row_id):
+    """kind: 'attempt' | 'flag' | 'answer' (models.get_checkpoint_owner). A teacher's
+    own question flag (no student) is a verdict about the question: admin only."""
+    if is_admin():
+        return
+    owner = models.get_checkpoint_owner(kind, row_id)
+    if not owner or owner[0] is None or not can_see_student_topic(*owner):
+        abort(404)
+
+
 def require_klasse(klasse_id):
     if not can_see_klasse(klasse_id):
+        abort(404)
+
+
+def require_unterricht(unterricht_id):
+    """A lesson belongs to one class; unknown lessons are 404 too."""
+    klasse_id = models.get_unterricht_klasse_id(unterricht_id)
+    if klasse_id is None or not can_see_klasse(klasse_id):
         abort(404)
 
 

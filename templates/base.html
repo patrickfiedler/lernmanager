@@ -36,6 +36,7 @@
                     <a href="{{ url_for('admin_dashboard') }}">Dashboard</a>
                     <a href="{{ url_for('admin_klassen') }}">Klassen</a>
                     <a href="{{ url_for('admin_themen') }}">Themen</a>
+                    {% if is_admin %}
                     <details class="nav-dropdown">
                         <summary>Bewertung ▾</summary>
                         <div class="nav-dropdown-menu">
@@ -44,16 +45,22 @@
                             <a href="{{ url_for('admin_bewertung_netzwerk_ids') }}">Schülerdaten abgleichen</a>
                         </div>
                     </details>
+                    {% endif %}
                     <details class="nav-dropdown">
                         <summary>Auswertung ▾</summary>
                         <div class="nav-dropdown-menu">
+                            {% if is_admin %}
                             <a href="{{ url_for('admin_analytics') }}">Aktivität</a>
+                            {% endif %}
                             <a href="{{ url_for('admin_quiz_antworten') }}">Quiz-Prüfung</a>
                             <a href="{{ url_for('admin_checkpoint_pruefung') }}">Checkpoint-Prüfung</a>
+                            {% if is_admin %}
                             <a href="{{ url_for('admin_checkpoint_uebersicht') }}">Checkpoint-Übersicht</a>
+                            {% endif %}
                             <a href="{{ url_for('admin_quiz_statistik') }}">Quiz-Statistik</a>
                         </div>
                     </details>
+                    {% if is_admin %}
                     <details class="nav-dropdown">
                         <summary>System ▾</summary>
                         <div class="nav-dropdown-menu">
@@ -63,6 +70,7 @@
                             <a href="{{ url_for('admin_llm_check') }}">LLM-Check</a>
                         </div>
                     </details>
+                    {% endif %}
                     <details class="nav-dropdown">
                         <summary>👤 {{ session.admin_username }} ▾</summary>
                         <div class="nav-dropdown-menu">

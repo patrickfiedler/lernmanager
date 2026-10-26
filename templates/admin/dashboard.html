@@ -18,6 +18,7 @@
         <a href="{{ url_for('admin_themen') }}" class="btn btn-primary">Verwalten</a>
     </div>
 
+    {% if is_admin %}
     <div class="card">
         <div class="card-header">⚡ Schnellzugriff</div>
         <div class="flex flex-column gap-1">
@@ -25,6 +26,7 @@
             <a href="{{ url_for('admin_thema_neu') }}" class="btn btn-secondary">+ Neues Thema</a>
         </div>
     </div>
+    {% endif %}
 </div>
 
 <div class="card mt-2">
@@ -42,6 +44,7 @@
     {% endif %}
 </div>
 
+{% if is_admin %}
 <div class="card mt-2">
     <div class="card-header">💾 Speicherplatz</div>
     <div style="padding: 1rem;">
@@ -54,4 +57,5 @@
         </div>
     </div>
 </div>
+{% endif %}
 {% endblock %}

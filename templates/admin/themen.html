@@ -7,9 +7,11 @@
 <div class="flex flex-between flex-center mb-2">
     <h1>📝 Themen</h1>
     <div class="flex gap-1">
+        {% if is_admin %}
         <a href="{{ url_for('admin_themen_export') }}" class="btn btn-secondary">📤 Alle exportieren</a>
         <a href="{{ url_for('admin_themen_import') }}" class="btn btn-secondary">📥 Importieren</a>
         <a href="{{ url_for('admin_thema_neu') }}" class="btn btn-primary">+ Neues Thema</a>
+        {% endif %}
     </div>
 </div>
 
@@ -52,7 +54,8 @@
             <tr data-name="{{ task.name }}" data-fach="{{ task.fach }}" data-stufe="{{ task.stufe }}"
                 data-stufe-key="{{ task.stufe_key }}" data-kategorie="{{ task.kategorie }}">
                 <td>
-                    <a href="{{ url_for('admin_thema_detail', task_id=task.id) }}">
+                    {# teachers read the print view; the editor is admin-only #}
+                    <a href="{{ url_for('admin_thema_detail', task_id=task.id) if is_admin else url_for('admin_thema_drucken', task_id=task.id) }}">
                         <strong>{{ thema_opts.thema_label(task) }}</strong>
                     </a>
                 </td>
@@ -66,7 +69,9 @@
                     {% endif %}
                 </td>
                 <td>
+                    {% if is_admin %}
                     <a href="{{ url_for('admin_thema_detail', task_id=task.id) }}" class="btn btn-sm btn-secondary">Bearbeiten</a>
+                    {% endif %}
                     <a href="{{ url_for('admin_thema_drucken', task_id=task.id) }}" target="_blank" class="btn btn-sm btn-secondary" title="Aufgabenblatt drucken">🖨</a>
                 </td>
             </tr>
@@ -78,7 +83,9 @@
 {% else %}
 <div class="card text-center text-muted">
     <p>Noch keine Themen vorhanden.</p>
+    {% if is_admin %}
     <a href="{{ url_for('admin_thema_neu') }}" class="btn btn-primary mt-1">Erstes Thema erstellen</a>
+    {% endif %}
 </div>
 {% endif %}
 {% endblock %}

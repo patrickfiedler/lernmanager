@@ -4131,6 +4131,31 @@ def get_latest_checkpoint_attempt(student_id, checkpoint_id):
         return dict(row) if row else None
 
 
+_CHECKPOINT_OWNER_SQL = {
+    'attempt': "SELECT student_id, module_id AS task_id FROM checkpoint_attempt WHERE id = ?",
+    # flag/answer: the session's module first, the Aufgabe's topic as fallback
+    # (checkpoint_attempt_id is backfilled and may still be NULL).
+    'flag': """SELECT x.student_id, COALESCE(ca.module_id, sub.task_id) AS task_id
+               FROM checkpoint_flag x
+               LEFT JOIN checkpoint_attempt ca ON ca.id = x.checkpoint_attempt_id
+               LEFT JOIN subtask sub ON sub.id = x.checkpoint_id
+               WHERE x.id = ?""",
+    'answer': """SELECT x.student_id, COALESCE(ca.module_id, sub.task_id) AS task_id
+                 FROM checkpoint_answer x
+                 LEFT JOIN checkpoint_attempt ca ON ca.id = x.checkpoint_attempt_id
+                 LEFT JOIN subtask sub ON sub.id = x.checkpoint_id
+                 WHERE x.id = ?""",
+}
+
+
+def get_checkpoint_owner(kind, row_id):
+    """(student_id, task_id) of a checkpoint attempt/flag/answer, for permissions.py.
+    None if the row does not exist. student_id is None for a teacher's own flag."""
+    with db_session() as conn:
+        row = conn.execute(_CHECKPOINT_OWNER_SQL[kind], (row_id,)).fetchone()
+        return (row['student_id'], row['task_id']) if row else None
+
+
 def get_checkpoint_attempt(attempt_id):
     """One session by id, superseded or not -- the admin review page addresses
     sessions by id and has to be able to act on a reset one too."""
@@ -4333,7 +4358,8 @@ def checkpoint_review_status(attempt):
 
 def get_checkpoint_reviews(klasse_id=None, student_id=None, date_from=None,
                            date_to=None, unreviewed_only=False, checkpoint_id=None,
-                           include_superseded=False, flagged_only=False, limit=300):
+                           include_superseded=False, flagged_only=False, limit=300,
+                           klasse_ids=None):
     """Checkpoint sessions for the teacher-review UI, newest first.
 
     One row per completed checkpoint (checkpoint_attempt), enriched with the
@@ -4375,6 +4401,13 @@ def get_checkpoint_reviews(klasse_id=None, student_id=None, date_from=None,
         sql += ''' AND EXISTS (SELECT 1 FROM student_klasse sk
                                 WHERE sk.student_id = ca.student_id AND sk.klasse_id = ?)'''
         params.append(klasse_id)
+    if klasse_ids is not None:
+        # Teacher (permissions.py): only sessions on a topic one of her classes
+        # gave the student -- a student shared with another class stays hidden there.
+        sql += f""" AND EXISTS (SELECT 1 FROM student_task st
+                                 WHERE st.student_id = ca.student_id AND st.task_id = ca.module_id
+                                   AND st.klasse_id IN ({','.join('?' * len(klasse_ids))}))"""
+        params.extend(klasse_ids)
     if student_id:
         sql += ' AND ca.student_id = ?'
         params.append(student_id)
@@ -5170,7 +5203,7 @@ def update_checkpoint_attempt_scores(attempt_id, question_scores, score,
             ''', (score, json.dumps(question_scores), json.dumps(manual_scores), attempt_id))
 
 
-def get_text_quiz_answers(klasse_id=None, only_fallback=False):
+def get_text_quiz_answers(klasse_id=None, only_fallback=False, klasse_ids=None):
     """Get all text-based quiz answers (fill_blank, short_answer) for admin review.
 
     Returns flat list of dicts, one per text answer (not per attempt).
@@ -5196,6 +5229,9 @@ def get_text_quiz_answers(klasse_id=None, only_fallback=False):
         if klasse_id:
             sql += ' AND k.id = ?'
             params.append(klasse_id)
+        if klasse_ids is not None:  # teacher: only her classes (permissions.py)
+            sql += f" AND k.id IN ({','.join('?' * len(klasse_ids))})"
+            params.extend(klasse_ids)
         sql += ' ORDER BY qa.timestamp DESC LIMIT 500'
 
         rows = conn.execute(sql, params).fetchall()
@@ -5288,7 +5324,8 @@ def _question_hash(q_def):
     return sha256('|'.join(parts).encode()).hexdigest()[:16]
 
 
-def get_quiz_stats_by_topic(klasse_id=None, task_id=None, only_attempted=True, for_export=False):
+def get_quiz_stats_by_topic(klasse_id=None, task_id=None, only_attempted=True, for_export=False,
+                            klasse_ids=None):
     """Aggregate quiz attempt stats grouped by topic → subtask (by position) → question.
 
     Buckets answers by question hash (not index), using quiz_snapshot_json when available
@@ -5315,6 +5352,9 @@ def get_quiz_stats_by_topic(klasse_id=None, task_id=None, only_attempted=True, f
         if klasse_id:
             sql += ' AND st.klasse_id = ?'
             params.append(klasse_id)
+        if klasse_ids is not None:  # teacher: only her classes (permissions.py)
+            sql += f" AND st.klasse_id IN ({','.join('?' * len(klasse_ids))})"
+            params.extend(klasse_ids)
         if task_id:
             sql += ' AND st.task_id = ?'
             params.append(task_id)
@@ -5494,6 +5534,12 @@ def create_or_get_unterricht(klasse_id, datum):
                 VALUES (?, ?)
             ''', (unterricht_id, s['student_id']))
         return unterricht_id
+
+
+def get_unterricht_klasse_id(unterricht_id):
+    with db_session() as conn:
+        row = conn.execute("SELECT klasse_id FROM unterricht WHERE id = ?", (unterricht_id,)).fetchone()
+        return row['klasse_id'] if row else None
 
 
 def get_unterricht_students(unterricht_id):
@@ -6176,7 +6222,8 @@ def get_report_data_for_class(klasse_id, date_from=None, date_to=None):
         }
 
 
-def get_report_data_for_student(student_id, report_type='summary', date_from=None, date_to=None):
+def get_report_data_for_student(student_id, report_type='summary', date_from=None, date_to=None,
+                                klasse_ids=None):
     """Get all data needed for student report generation."""
     with db_session() as conn:
         # Get student info
@@ -6198,6 +6245,10 @@ def get_report_data_for_student(student_id, report_type='summary', date_from=Non
                WHERE sk.student_id = ?""",
             (student_id,)
         ).fetchall()
+        # klasse_ids (teacher, see permissions.py): only these classes' data;
+        # the activity log is analytics and stays admin-only.
+        if klasse_ids is not None:
+            klassen = [k for k in klassen if k['id'] in klasse_ids]
 
         # Get activity summary
         summary = get_student_activity_summary(
@@ -6240,14 +6291,14 @@ def get_report_data_for_student(student_id, report_type='summary', date_from=Non
         # For complete report, add additional data
         if report_type == 'complete':
             # Get activity timeline (latest 100 events)
-            result['activity_log'] = get_student_activity_log(
+            result['activity_log'] = [] if klasse_ids is not None else get_student_activity_log(
                 student_id,
                 limit=100
             )
 
             # Get attendance records
             result['attendance'] = conn.execute(
-                """SELECT ut.datum as date, k.name as klasse_name, us.anwesend,
+                """SELECT ut.datum as date, k.name as klasse_name, k.id as klasse_id, us.anwesend,
                           us.admin_selbststaendigkeit, us.admin_respekt,
                           us.admin_fortschritt, us.admin_kommentar
                    FROM unterricht_student us
@@ -6259,11 +6310,15 @@ def get_report_data_for_student(student_id, report_type='summary', date_from=Non
                 (student_id,)
             ).fetchall()
             result['attendance'] = [dict(row) for row in result['attendance']]
+            if klasse_ids is not None:
+                result['attendance'] = [r for r in result['attendance']
+                                        if r['klasse_id'] in klasse_ids]
 
             # Get quiz attempts (must join through student_task)
             result['quiz_attempts'] = conn.execute(
                 """SELECT qa.timestamp, qa.punkte as score, qa.max_punkte as total_questions,
-                          qa.bestanden as passed, t.name as task_name, k.name as klasse_name
+                          qa.bestanden as passed, t.name as task_name, k.name as klasse_name,
+                          k.id as klasse_id
                    FROM quiz_attempt qa
                    JOIN student_task st ON qa.student_task_id = st.id
                    JOIN task t ON st.task_id = t.id
@@ -6274,6 +6329,9 @@ def get_report_data_for_student(student_id, report_type='summary', date_from=Non
                 (student_id,)
             ).fetchall()
             result['quiz_attempts'] = [dict(row) for row in result['quiz_attempts']]
+            if klasse_ids is not None:
+                result['quiz_attempts'] = [r for r in result['quiz_attempts']
+                                           if r['klasse_id'] in klasse_ids]
 
         return result
 
@@ -6434,7 +6492,7 @@ def get_all_artifact_feedback_for_student(student_id):
     with db_session() as conn:
         rows = conn.execute(
             "SELECT af.id, af.timestamp_local, af.timezone, af.feedback_json, "
-            "       s.beschreibung, af.subtask_id "
+            "       s.beschreibung, af.subtask_id, s.task_id "
             "FROM artifact_feedback af "
             "JOIN subtask s ON s.id = af.subtask_id "
             "WHERE af.student_id = ? ORDER BY af.id DESC",
@@ -6448,6 +6506,7 @@ def get_all_artifact_feedback_for_student(student_id):
             'feedback': json.loads(r[3]),
             'subtask_beschreibung': r[4],
             'subtask_id': r[5],
+            'task_id': r[6],
         }
         for r in rows
     ]

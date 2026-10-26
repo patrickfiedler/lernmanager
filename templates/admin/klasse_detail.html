@@ -7,6 +7,7 @@
 <div class="flex flex-between flex-center mb-2">
     <div class="flex flex-center gap-1">
         <h1>📁 {{ klasse.name }}</h1>
+        {% if is_admin %}
         <form method="POST" action="{{ url_for('admin_klasse_umbenennen', klasse_id=klasse.id) }}" class="flex gap-1 flex-center">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="text" name="name" class="form-control" value="{{ klasse.name }}" style="width: 12rem;" title="Neuer Klassenname">
@@ -17,17 +18,22 @@
             <input type="number" name="klassenstufe" class="form-control" value="{{ klasse.klassenstufe or '' }}" style="width: 6rem;" title="Klassenstufe" placeholder="Stufe">
             <button type="submit" class="btn btn-secondary btn-sm">🎓 Stufe setzen</button>
         </form>
+        {% endif %}
     </div>
     <div class="flex gap-1">
         <a href="{{ url_for('admin_topic_queue', klasse_id=klasse.id) }}" class="btn btn-secondary">📋 Themen-Reihenfolge</a>
+        {% if is_admin %}
         <a href="{{ url_for('admin_grading_upload') }}" class="btn btn-secondary">🎯 KI-Bewertung hochladen</a>
+        {% endif %}
         <a href="{{ url_for('admin_unterricht', klasse_id=klasse.id) }}" class="btn btn-primary">📅 Unterricht</a>
         <a href="{{ url_for('admin_klasse_bericht', klasse_id=klasse.id) }}" class="btn btn-success">📊 Klassenbericht</a>
         <a href="{{ url_for('admin_klasse_namen_benutzernamen_pdf', klasse_id=klasse.id) }}" class="btn btn-secondary">📄 Namen &amp; Benutzernamen</a>
+        {% if is_admin %}
         <form method="POST" action="{{ url_for('admin_klasse_loeschen', klasse_id=klasse.id) }}" style="display: inline;" onsubmit="return confirm('Klasse wirklich löschen?');">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button type="submit" class="btn btn-danger">🗑️ Löschen</button>
         </form>
+        {% endif %}
     </div>
 </div>
 
@@ -141,6 +147,9 @@
             Schüler können Dateien hochladen und von der KI auf Kriterien prüfen lassen.
             Erst aktivieren, wenn alle DSGVO-Voraussetzungen erfüllt sind (AV-Vertrag, Informationsschreiben, DSB-Freigabe).
         </p>
+        {% if not is_admin %}
+        <span>{{ '✅ Aktiviert' if klasse.llm_artifact_feedback_enabled else '⬜ Deaktiviert' }}</span> (ändert der Admin)
+        {% else %}
         <form method="POST" action="{{ url_for('admin_klasse_llm_feedback_toggle', klasse_id=klasse.id) }}" class="flex gap-1 flex-center">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="enabled" value="{{ '0' if klasse.llm_artifact_feedback_enabled else '1' }}">
@@ -152,6 +161,7 @@
             <span style="color: #6b7280;">⬜ Deaktiviert</span>
             {% endif %}
         </form>
+        {% endif %}
     </div>
 </div>
 
@@ -163,6 +173,9 @@
             Schüler können sehen, was genau an die KI geschickt wurde (Frage, Kriterien, Antwort).
             Klassen-Einstellung überschreibt die individuelle Schüler-Einstellung.
         </p>
+        {% if not is_admin %}
+        <span>{% if klasse.llm_transparency_mode is none %}Schüler entscheiden selbst{% elif klasse.llm_transparency_mode == 1 %}Für alle aktiviert{% else %}Für alle deaktiviert{% endif %}</span> (ändert der Admin)
+        {% else %}
         <form method="POST" action="{{ url_for('admin_klasse_transparency_mode', klasse_id=klasse.id) }}" class="flex gap-1 flex-center">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <select name="mode" style="padding: 0.4rem 0.6rem; border: 1px solid #d1d5db; border-radius: 4px; font-size: 0.9rem;">
@@ -172,6 +185,7 @@
             </select>
             <button type="submit" class="btn btn-secondary">Speichern</button>
         </form>
+        {% endif %}
     </div>
 </div>
 
@@ -323,6 +337,7 @@
 </div>
 
 <!-- DSGVO: Year-end bulk delete -->
+{% if is_admin %}
 <details class="card mt-2" style="border: 1px solid #fca5a5;">
     <summary class="card-header" style="cursor: pointer; background: #fff1f2; color: #991b1b;">⚠️ Gefahrenzone: Alle Schülerdaten löschen (DSGVO Schuljahresende)</summary>
     <div style="padding: 1rem;">
@@ -337,6 +352,7 @@
         </form>
     </div>
 </details>
+{% endif %}
 
 <!-- Active Sidequests Overview -->
 {% if sidequests %}

@@ -14,16 +14,20 @@
         {% endif %}
     </h1>
     <div class="flex gap-1">
+        {% if is_admin %}
         <a href="{{ url_for('admin_student_activity', student_id=student.id) }}" class="btn btn-secondary">📊 Aktivität</a>
+        {% endif %}
         <div class="btn-group">
             <a href="{{ url_for('admin_schueler_bericht', student_id=student.id, type='summary') }}" class="btn btn-success">📄 Bericht (Zusammenfassung)</a>
             <a href="{{ url_for('admin_schueler_bericht', student_id=student.id, type='complete') }}" class="btn btn-success">📋 Bericht (Vollständig)</a>
         </div>
+        {% if is_admin %}
         <a href="{{ url_for('admin_schueler_datenauszug', student_id=student.id) }}" class="btn btn-secondary">⬇️ Datenauszug</a>
         <form method="POST" action="{{ url_for('admin_schueler_loeschen', student_id=student.id) }}" onsubmit="return confirm('Schüler wirklich löschen?');" style="display: inline;">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button type="submit" class="btn btn-danger">🗑️ Löschen</button>
         </form>
+        {% endif %}
     </div>
 </div>
 
@@ -48,6 +52,10 @@
             {% for klasse in klassen %}
             <li class="material-item">
                 <a href="{{ url_for('admin_klasse_detail', klasse_id=klasse.id) }}">{{ klasse.name }}</a>
+                <form method="POST" action="{{ url_for('admin_schueler_aus_klasse_entfernen', student_id=student.id, klasse_id=klasse.id) }}" onsubmit="return confirm('Aus „{{ klasse.name }}“ entfernen? Konto und Daten bleiben.');" style="display: inline;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-secondary btn-sm">Aus Klasse entfernen</button>
+                </form>
             </li>
             {% endfor %}
         </ul>
@@ -229,7 +237,8 @@
 </div>
 {% endif %}
 
-<!-- Art. 15 DSGVO Data Summary -->
+<!-- Art. 15 DSGVO Data Summary (admin only: counts span every class) -->
+{% if data_summary %}
 <details class="card mt-2">
     <summary class="card-header" style="cursor: pointer;">🔒 Gespeicherte Daten (Art. 15 DSGVO)</summary>
     <table class="table mt-1">
@@ -246,6 +255,7 @@
         Vollständiger Datenauszug: <a href="{{ url_for('admin_schueler_datenauszug', student_id=student.id) }}">JSON herunterladen</a>
     </p>
 </details>
+{% endif %}
 
 <!-- Artifact Feedback History -->
 {% if artifact_feedback %}

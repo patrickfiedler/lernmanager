@@ -158,6 +158,7 @@
         </p>
         {% endfor %}
 
+        {% if is_admin %}{# a verdict about the question, for every class: admin only #}
         <details class="cq-sub cq-flag-form">
             <summary>🛠️ Diese Frage bemängeln</summary>
             <form method="POST"
@@ -181,6 +182,7 @@
                 </div>
             </form>
         </details>
+        {% endif %}
 
         {# The batch. Two steps, never a confirm dialog: this button only asks the
            server what it WOULD do, and the preview page is where the teacher agrees.

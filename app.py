@@ -232,6 +232,13 @@ def inject_llm_client_timeout():
 
 
 @app.context_processor
+def inject_is_admin():
+    """Templates hide admin-only controls for teachers. Hiding is comfort only:
+    the routes themselves refuse (permissions.py)."""
+    return {'is_admin': 'admin_id' in session and permissions.is_admin()}
+
+
+@app.context_processor
 def inject_student_display_name():
     """Make student_display_name available in all templates."""
     if 'student_id' in session:
@@ -688,9 +695,9 @@ def get_disk_status(percent_used):
 
 
 @app.route('/admin')
-@admin_required
+@staff_required
 def admin_dashboard():
-    klassen = models.get_all_klassen()
+    klassen = permissions.visible_klassen()
     tasks = models.get_all_tasks()
 
     disk_total, _, disk_free = shutil.disk_usage(config.BASE_DIR)
@@ -789,9 +796,9 @@ def admin_update_network_gate():
 # ============ Admin: Klassen ============
 
 @app.route('/admin/klassen')
-@admin_required
+@staff_required
 def admin_klassen():
-    klassen = models.get_all_klassen()
+    klassen = permissions.visible_klassen()
     return render_template('admin/klassen.html', klassen=klassen)
 
 
@@ -806,8 +813,9 @@ def admin_klasse_neu():
 
 
 @app.route('/admin/klasse/<int:klasse_id>')
-@admin_required
+@staff_required
 def admin_klasse_detail(klasse_id):
+    permissions.require_klasse(klasse_id)
     klasse = models.get_klasse(klasse_id)
     if not klasse:
         flash('Klasse nicht gefunden.', 'danger')
@@ -842,7 +850,7 @@ def admin_klasse_detail(klasse_id):
 
     sidequests = models.get_sidequests_for_klasse(klasse_id)
     practice_unlocked_ids = models.get_practice_unlocked_task_ids(klasse_id)
-    andere_klassen = [k for k in models.get_all_klassen() if k['id'] != klasse_id]
+    andere_klassen = [k for k in permissions.visible_klassen() if k['id'] != klasse_id]
     themen_exact, themen_other = split_tasks_by_stufe(tasks, [klasse.get('klassenstufe')])
     return render_template('admin/klasse_detail.html', klasse=klasse, students=students,
                            tasks=tasks, themen_exact=themen_exact, themen_other=themen_other,
@@ -853,9 +861,10 @@ def admin_klasse_detail(klasse_id):
 
 
 @app.route('/admin/klasse/<int:klasse_id>/namen-benutzernamen-pdf')
-@admin_required
+@staff_required
 def admin_klasse_namen_benutzernamen_pdf(klasse_id):
     """Download a PDF with student names and usernames (no passwords)."""
+    permissions.require_klasse(klasse_id)
     klasse = models.get_klasse(klasse_id)
     if not klasse:
         flash('Klasse nicht gefunden.', 'danger')
@@ -1553,9 +1562,10 @@ def admin_klasse_transparency_mode(klasse_id):
 
 
 @app.route('/admin/klasse/<int:klasse_id>/abgeschlossene-themen', methods=['POST'])
-@admin_required
+@staff_required
 def admin_klasse_show_completed_topics(klasse_id):
     """Toggle the 'Abgeschlossene Themen' list on this class's student dashboards."""
+    permissions.require_klasse(klasse_id)
     show = request.form.get('show') == '1'
     models.set_klasse_show_completed_topics(klasse_id, show)
     state = 'sichtbar' if show else 'ausgeblendet'
@@ -1601,13 +1611,19 @@ def admin_klasse_klassenstufe(klasse_id):
 
 
 @app.route('/admin/klasse/<int:klasse_id>/schueler-verschieben-batch', methods=['POST'])
-@admin_required
+@staff_required
 def admin_klasse_schueler_verschieben_batch(klasse_id):
     """Move multiple selected students from this class to another in one go
     (prep for school-year transitions: reshuffling/splitting/merging classes)."""
+    permissions.require_klasse(klasse_id)
     to_klasse_id = request.form.get('to_klasse', type=int)
-    student_ids = request.form.getlist('student_ids', type=int)
+    # Only students who sit in this class: an id from the form alone would let a
+    # teacher pull anyone into her class.
+    student_ids = [sid for sid in request.form.getlist('student_ids', type=int)
+                   if klasse_id in models.get_klasse_ids_for_student(sid)]
     to_klasse = models.get_klasse(to_klasse_id) if to_klasse_id else None
+    if to_klasse:
+        permissions.require_klasse(to_klasse_id)
     if not to_klasse or not student_ids:
         flash('Bitte Zielklasse und mindestens einen Schüler auswählen.', 'danger')
         return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id))
@@ -1635,8 +1651,9 @@ def admin_klasse_alle_schueler_loeschen(klasse_id):
 
 
 @app.route('/admin/klasse/<int:klasse_id>/schedule', methods=['POST'])
-@admin_required
+@staff_required
 def admin_klasse_schedule(klasse_id):
+    permissions.require_klasse(klasse_id)
     weekday_str = request.form.get('weekday')
     if weekday_str:
         weekday = int(weekday_str)
@@ -1650,9 +1667,10 @@ def admin_klasse_schedule(klasse_id):
 
 
 @app.route('/admin/klasse/<int:klasse_id>/bericht')
-@admin_required
+@staff_required
 def admin_klasse_bericht(klasse_id):
     """Generate and download class progress report PDF."""
+    permissions.require_klasse(klasse_id)
     date_from = request.args.get('date_from')
     date_to = request.args.get('date_to')
 
@@ -1679,8 +1697,9 @@ def admin_klasse_bericht(klasse_id):
 
 
 @app.route('/admin/klasse/<int:klasse_id>/schueler-hinzufuegen', methods=['POST'])
-@admin_required
+@staff_required
 def admin_klasse_schueler_hinzufuegen(klasse_id):
+    permissions.require_klasse(klasse_id)
     batch_input = request.form['batch_input']
     existing_usernames = models.get_existing_usernames()
     existing_netzwerk_ids = models.get_existing_netzwerk_ids()
@@ -1733,8 +1752,9 @@ def admin_klasse_schueler_hinzufuegen(klasse_id):
 
 
 @app.route('/admin/klasse/<int:klasse_id>/thema-zuweisen', methods=['POST'])
-@admin_required
+@staff_required
 def admin_klasse_thema_zuweisen(klasse_id):
+    permissions.require_klasse(klasse_id)
     task_id = request.form['task_id']
     if task_id:
         counts = models.assign_task_to_klasse(klasse_id, int(task_id))
@@ -1752,9 +1772,10 @@ def admin_klasse_thema_zuweisen(klasse_id):
 
 
 @app.route('/admin/klasse/<int:klasse_id>/seilbahn-umhaengen', methods=['POST'])
-@admin_required
+@staff_required
 def admin_klasse_seilbahn_umhaengen(klasse_id):
     """Move the class's Seilbahn students from a regular topic to its twin."""
+    permissions.require_klasse(klasse_id)
     moved = models.move_seilbahn_students_to_twin(klasse_id)
     flash(f'{moved} Seilbahn-Schüler auf den Seilbahn-Zwilling umgehängt. ✅' if moved
           else 'Niemand umzuhängen.', 'success' if moved else 'info')
@@ -1762,8 +1783,9 @@ def admin_klasse_seilbahn_umhaengen(klasse_id):
 
 
 @app.route('/admin/klasse/<int:klasse_id>/sidequest-zuweisen', methods=['POST'])
-@admin_required
+@staff_required
 def admin_klasse_sidequest_zuweisen(klasse_id):
+    permissions.require_klasse(klasse_id)
     task_id = request.form.get('task_id')
     student_ids = request.form.getlist('student_ids')
     if task_id and student_ids:
@@ -1774,8 +1796,9 @@ def admin_klasse_sidequest_zuweisen(klasse_id):
 
 
 @app.route('/admin/klasse/<int:klasse_id>/ueben-freischalten', methods=['POST'])
-@admin_required
+@staff_required
 def admin_klasse_ueben_freischalten(klasse_id):
+    permissions.require_klasse(klasse_id)
     task_id = request.form.get('task_id')
     action = request.form.get('action', 'unlock')
     if task_id:
@@ -1787,8 +1810,9 @@ def admin_klasse_ueben_freischalten(klasse_id):
 
 
 @app.route('/admin/klasse/<int:klasse_id>/lernpfad-setzen', methods=['POST'])
-@admin_required
+@staff_required
 def admin_klasse_lernpfad(klasse_id):
+    permissions.require_klasse(klasse_id)
     lernpfad = request.form.get('lernpfad')
     if lernpfad not in ('wanderweg', 'bergweg', 'gipfeltour', 'seilbahn'):
         flash('Ungültiger Lernpfad.', 'danger')
@@ -1799,9 +1823,10 @@ def admin_klasse_lernpfad(klasse_id):
 
 
 @app.route('/admin/klasse/<int:klasse_id>/themen-reihenfolge', methods=['GET', 'POST'])
-@admin_required
+@staff_required
 def admin_topic_queue(klasse_id):
     """Manage topic queue (ordered progression) for a class."""
+    permissions.require_klasse(klasse_id)
     klasse = models.get_klasse(klasse_id)
     if not klasse:
         flash('Klasse nicht gefunden.', 'danger')
@@ -1827,14 +1852,17 @@ def admin_topic_queue(klasse_id):
 # ============ Admin: Schüler ============
 
 @app.route('/admin/schueler/<int:student_id>')
-@admin_required
+@staff_required
 def admin_schueler_detail(student_id):
+    permissions.require_student(student_id)
     student = models.get_student(student_id)
     if not student:
         flash('Schüler nicht gefunden.', 'danger')
         return redirect(url_for('admin_klassen'))
-    klassen = models.get_student_klassen(student_id)
-    all_klassen = models.get_all_klassen()
+    visible_ids = permissions.visible_klasse_ids()
+    klassen = [k for k in models.get_student_klassen(student_id)
+               if visible_ids is None or k['id'] in visible_ids]
+    all_klassen = permissions.visible_klassen()
     tasks = models.get_all_tasks()
 
     # Get current tasks for each class
@@ -1858,9 +1886,18 @@ def admin_schueler_detail(student_id):
 
     artifact_feedback = models.get_all_artifact_feedback_for_student(student_id)
     artifact_files = models.get_all_student_artifact_files_for_student(student_id)
-    data_summary = models.get_student_data_summary(student_id)
     fork_choices = models.get_student_fork_choices(student_id)
     material_variants = models.get_student_material_variant_overview(student_id)
+    data_summary = None
+    if permissions.is_admin():
+        data_summary = models.get_student_data_summary(student_id)
+    else:
+        # A student shared with another teacher's class: show only the topics
+        # this teacher's classes gave them.
+        def mine(rows):
+            return [r for r in rows if permissions.can_see_student_topic(student_id, r['task_id'])]
+        artifact_feedback, artifact_files = mine(artifact_feedback), mine(artifact_files)
+        fork_choices, material_variants = mine(fork_choices), mine(material_variants)
 
     # The topic dropdown is not tied to one class, so match against every
     # grade level this student sits in.
@@ -1908,8 +1945,9 @@ def admin_schueler_datenauszug(student_id):
 
 
 @app.route('/admin/schueler/<int:student_id>/passwort-reset', methods=['POST'])
-@admin_required
+@staff_required
 def admin_schueler_passwort_reset(student_id):
+    permissions.require_student(student_id)
     student = models.get_student(student_id)
     if not student:
         flash('Schüler nicht gefunden.', 'danger')
@@ -1924,8 +1962,9 @@ def admin_schueler_passwort_reset(student_id):
 
 
 @app.route('/admin/schueler/<int:student_id>/lernpfad', methods=['POST'])
-@admin_required
+@staff_required
 def admin_schueler_lernpfad(student_id):
+    permissions.require_student(student_id)
     lernpfad = request.form.get('lernpfad')
     if lernpfad not in ('wanderweg', 'bergweg', 'gipfeltour', 'seilbahn'):
         flash('Ungültiger Lernpfad.', 'danger')
@@ -1936,9 +1975,10 @@ def admin_schueler_lernpfad(student_id):
 
 
 @app.route('/admin/schueler/<int:student_id>/demo-ueben', methods=['POST'])
-@admin_required
+@staff_required
 def admin_schueler_demo_practice(student_id):
     """Demo account: Üben gets every question of the assigned Themen (migrate_067)."""
+    permissions.require_student(student_id)
     demo = 1 if request.form.get('demo_practice') == 'on' else 0
     models.update_student_setting(student_id, 'demo_practice', demo)
     flash('Demo-Üben eingeschaltet. ✅' if demo else 'Demo-Üben ausgeschaltet.', 'success')
@@ -1946,7 +1986,7 @@ def admin_schueler_demo_practice(student_id):
 
 
 @app.route('/admin/schueler/<int:student_id>/fork-zweig', methods=['POST'])
-@admin_required
+@staff_required
 def admin_schueler_fork_zweig(student_id):
     """Teacher reassignment of a student's fork/choice branch pick.
 
@@ -1954,6 +1994,7 @@ def admin_schueler_fork_zweig(student_id):
     override mechanism for the branch-imbalance risk noted in the design doc
     (docs/shared/lernmanager/fork-choice-artifact-model.md decision 1).
     """
+    permissions.require_student(student_id)
     fork_group = request.form.get('fork_group')
     branch = request.form.get('branch')
     task_id = request.form.get('task_id', type=int)
@@ -1967,11 +2008,12 @@ def admin_schueler_fork_zweig(student_id):
 
 
 @app.route('/admin/schueler/<int:student_id>/material-variante', methods=['POST'])
-@admin_required
+@staff_required
 def admin_schueler_material_variante(student_id):
     """Teacher override of a student's material combination (MBI request
     2026-09-24). `set_index` points into the topic's current sets; what gets
     stored is the combination itself, like the automatic assignment."""
+    permissions.require_student(student_id)
     task_id = request.form.get('task_id', type=int)
     key = request.form.get('key')
     set_index = request.form.get('set_index', type=int)
@@ -1986,22 +2028,41 @@ def admin_schueler_material_variante(student_id):
 
 
 @app.route('/admin/schueler/<int:student_id>/verschieben', methods=['POST'])
-@admin_required
+@staff_required
 def admin_schueler_verschieben(student_id):
+    permissions.require_student(student_id)
     from_klasse = request.form['from_klasse']
     to_klasse = request.form['to_klasse']
     if from_klasse and to_klasse:
+        permissions.require_klasse(int(from_klasse))
+        permissions.require_klasse(int(to_klasse))
         models.move_student_to_klasse(student_id, int(from_klasse), int(to_klasse))
         flash('Schüler verschoben. ✅', 'success')
     return redirect(url_for('admin_schueler_detail', student_id=student_id))
 
 
+@app.route('/admin/schueler/<int:student_id>/klasse/<int:klasse_id>/entfernen', methods=['POST'])
+@staff_required
+def admin_schueler_aus_klasse_entfernen(student_id, klasse_id):
+    """Take a student out of one class. The account and its data stay; deleting
+    it is admin-only, since it erases work from other classes too."""
+    permissions.require_student(student_id)
+    permissions.require_klasse(klasse_id)
+    models.remove_student_from_klasse(student_id, klasse_id)
+    flash('Schüler aus der Klasse entfernt. ✅', 'success')
+    if permissions.can_see_student(student_id):
+        return redirect(url_for('admin_schueler_detail', student_id=student_id))
+    return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id))
+
+
 @app.route('/admin/schueler/<int:student_id>/thema-zuweisen', methods=['POST'])
-@admin_required
+@staff_required
 def admin_schueler_thema_zuweisen(student_id):
+    permissions.require_student(student_id)
     klasse_id = request.form['klasse_id']
     task_id = request.form['task_id']
     if klasse_id and task_id:
+        permissions.require_klasse(int(klasse_id))
         rolle = request.form.get('rolle', 'primary')
         # 'reopen', not 'skip': picking one student and one topic by hand is a
         # deliberate act, and the useful reading of it is "make this current
@@ -2021,8 +2082,10 @@ def admin_schueler_thema_zuweisen(student_id):
 
 
 @app.route('/admin/schueler/<int:student_id>/klasse/<int:klasse_id>/abschliessen', methods=['POST'])
-@admin_required
+@staff_required
 def admin_schueler_thema_abschliessen(student_id, klasse_id):
+    permissions.require_student(student_id)
+    permissions.require_klasse(klasse_id)
     student_task = models.get_student_task(student_id, klasse_id)
     if student_task:
         models.mark_task_complete(student_task['id'], manual=True)
@@ -2031,9 +2094,10 @@ def admin_schueler_thema_abschliessen(student_id, klasse_id):
 
 
 @app.route('/admin/schueler/<int:student_id>/bericht')
-@admin_required
+@staff_required
 def admin_schueler_bericht(student_id):
     """Generate and download student progress report PDF (admin version)."""
+    permissions.require_student(student_id)
     report_type = request.args.get('type', 'summary')  # 'summary' or 'complete'
     date_from = request.args.get('date_from')
     date_to = request.args.get('date_to')
@@ -2047,7 +2111,8 @@ def admin_schueler_bericht(student_id):
         student_id,
         report_type=report_type,
         date_from=date_from,
-        date_to=date_to
+        date_to=date_to,
+        klasse_ids=permissions.visible_klasse_ids()
     )
 
     if not report_data:
@@ -2074,7 +2139,7 @@ def admin_schueler_bericht(student_id):
 # ============ Admin: Tasks ============
 
 @app.route('/admin/themen')
-@admin_required
+@staff_required
 def admin_themen():
     tasks = models.get_all_tasks()
     # Re-sort in Python: SQL orders `stufe` as text, so '10' would sort before '5'.
@@ -2107,7 +2172,7 @@ def admin_themen_export():
 
 
 @app.route('/admin/thema/<int:task_id>/drucken')
-@admin_required
+@staff_required
 def admin_thema_drucken(task_id):
     task = models.get_task(task_id)
     if not task:
@@ -2901,7 +2966,7 @@ def download_material(material_id):
 # ============ Admin: Password Change ============
 
 @app.route('/admin/passwort', methods=['GET', 'POST'])
-@admin_required
+@staff_required
 def admin_passwort():
     if request.method == 'POST':
         current_password = request.form.get('current_password', '')
@@ -2934,15 +2999,18 @@ def admin_passwort():
 # ============ Admin: Quiz Answer Review ============
 
 @app.route('/admin/quiz-antworten')
-@admin_required
+@staff_required
 def admin_quiz_antworten():
     """Review text-based quiz answers (fill_blank, short_answer)."""
     filter_mode = request.args.get('filter', 'review')
     klasse_id = request.args.get('klasse_id', type=int)
     only_fallback = (filter_mode == 'review')
+    if klasse_id:
+        permissions.require_klasse(klasse_id)
 
-    answers = models.get_text_quiz_answers(klasse_id=klasse_id, only_fallback=only_fallback)
-    klassen = models.get_all_klassen()
+    answers = models.get_text_quiz_answers(klasse_id=klasse_id, only_fallback=only_fallback,
+                                           klasse_ids=permissions.visible_klasse_ids())
+    klassen = permissions.visible_klassen()
 
     return render_template('admin/quiz_antworten.html',
                          answers=answers,
@@ -3486,7 +3554,7 @@ def _count_by_student(sessions, attempt_ids):
 
 
 @app.route('/admin/checkpoint-pruefung')
-@admin_required
+@staff_required
 def admin_checkpoint_pruefung():
     """Review checkpoint quiz answers, LLM verdicts and scores."""
     filters = _checkpoint_filters()
@@ -3517,8 +3585,9 @@ def admin_checkpoint_pruefung():
                            ansicht=('fragen' if request.args.get('ansicht') == 'fragen'
                                     else 'sitzungen'),
                            unsure_confidence=checkpoint_questions.UNSURE_CONFIDENCE,
-                           klassen=models.get_all_klassen(),
-                           students=models.get_checkpoint_students(),
+                           klassen=permissions.visible_klassen(),
+                           students=[st for st in models.get_checkpoint_students()
+                                     if permissions.can_see_student(st['id'])],
                            checkpoints=models.get_checkpoint_checkpoints(),
                            klasse_id=filters['klasse_id'],
                            student_id=filters['student_id'],
@@ -3543,7 +3612,7 @@ def admin_checkpoint_pruefung():
 
 
 @app.route('/admin/checkpoint-pruefung/<int:attempt_id>/bewerten', methods=['POST'])
-@admin_required
+@staff_required
 def admin_checkpoint_review_save(attempt_id):
     """Save one checkpoint review: the grade, the private reason, the student note.
 
@@ -3556,6 +3625,7 @@ def admin_checkpoint_review_save(attempt_id):
     session checked (that is the point -- a student is shown that it happened),
     "Prüfung zurücknehmen" clears it back to unreviewed.
     """
+    permissions.require_checkpoint('attempt', attempt_id)
     raw_score = request.form.get('teacher_score', '')
     note = (request.form.get('teacher_note') or '').strip()
     student_feedback = (request.form.get('student_feedback') or '').strip()
@@ -3586,7 +3656,7 @@ def admin_checkpoint_review_save(attempt_id):
 
 
 @app.route('/admin/checkpoint-pruefung/<int:attempt_id>/zuruecksetzen', methods=['POST'])
-@admin_required
+@staff_required
 def admin_checkpoint_reset(attempt_id):
     """Reopen one checkpoint session so the student can take it again.
 
@@ -3594,6 +3664,7 @@ def admin_checkpoint_reset(attempt_id):
     session and its answers stay as history. This is the per-student escape hatch
     -- one student hit a bug, one session reopens.
     """
+    permissions.require_checkpoint('attempt', attempt_id)
     count = models.supersede_checkpoint_attempts([attempt_id])
     flash('Checkpoint wurde zurückgesetzt — der Schüler kann ihn erneut bearbeiten.'
           if count else 'Diese Sitzung war bereits zurückgesetzt.',
@@ -3602,7 +3673,7 @@ def admin_checkpoint_reset(attempt_id):
 
 
 @app.route('/admin/checkpoint-pruefung/zuruecksetzen', methods=['POST'])
-@admin_required
+@staff_required
 def admin_checkpoint_reset_bulk():
     """Reopen every checkpoint session currently listed by the page's filters.
 
@@ -3756,7 +3827,7 @@ def _apply_double_click_corrections(filters):
 
 
 @app.route('/admin/checkpoint-pruefung/doppelklick-korrigieren', methods=['POST'])
-@admin_required
+@staff_required
 def admin_checkpoint_correct_double_clicks():
     """Correct every double-click session in the current selection in one go.
 
@@ -3815,7 +3886,7 @@ def _bulk_question_score_plan(filters, checkpoint_id, question_index, score,
 
 @app.route('/admin/checkpoint-pruefung/frage/<int:checkpoint_id>/<int:question_index>'
            '/sammelkorrektur', methods=['POST'])
-@admin_required
+@staff_required
 def admin_checkpoint_bulk_question_score(checkpoint_id, question_index):
     """Rescore ONE question across every session in the current selection.
 
@@ -3910,7 +3981,7 @@ def admin_checkpoint_bulk_question_score(checkpoint_id, question_index):
 
 
 @app.route('/admin/checkpoint-pruefung/meldung/<int:flag_id>/urteil', methods=['POST'])
-@admin_required
+@staff_required
 def admin_checkpoint_flag_resolve(flag_id):
     """Rule on one student report of a broken checkpoint question.
 
@@ -3924,6 +3995,7 @@ def admin_checkpoint_flag_resolve(flag_id):
     calibration export, where a question-design note would be indistinguishable
     from a grading note.
     """
+    permissions.require_checkpoint('flag', flag_id)
     status = request.form.get('status')
     if status not in models.CHECKPOINT_FLAG_RESOLUTIONS:
         flash('Unbekanntes Urteil.', 'danger')
@@ -4072,7 +4144,7 @@ def admin_checkpoint_question_exclusion(checkpoint_id, question_index):
 
 @app.route('/admin/checkpoint-pruefung/<int:attempt_id>/frage/<int:question_index>/nachbessern',
            methods=['POST'])
-@admin_required
+@staff_required
 def admin_checkpoint_question_retry(attempt_id, question_index):
     """Send one question back to one student, without reopening the whole checkpoint.
 
@@ -4082,6 +4154,7 @@ def admin_checkpoint_question_retry(attempt_id, question_index):
     at REJECTED_FLAG_RETRY_CAP, because the student is redoing the question on our
     account, not on their own.
     """
+    permissions.require_checkpoint('attempt', attempt_id)
     attempt = models.get_checkpoint_attempt(attempt_id)
     if not attempt:
         flash('Diese Sitzung gibt es nicht mehr.', 'danger')
@@ -4121,7 +4194,7 @@ def admin_checkpoint_question_retry(attempt_id, question_index):
 
 @app.route('/admin/checkpoint-pruefung/<int:attempt_id>/frage/<int:question_index>/punkte',
            methods=['POST'])
-@admin_required
+@staff_required
 def admin_checkpoint_question_score(attempt_id, question_index):
     """Set one question's score by hand -- the other repair next to a redo.
 
@@ -4130,6 +4203,7 @@ def admin_checkpoint_question_score(attempt_id, question_index):
     was ours to fix", leaves the rest of the breakdown alone, and lets the session
     score follow from it.
     """
+    permissions.require_checkpoint('attempt', attempt_id)
     raw = request.form.get('punkte', '')
     if raw not in ('0', '2', '3', ''):
         flash('Für eine Frage sind nur 0, 2, 3 oder „zählt nicht" möglich.', 'danger')
@@ -4192,9 +4266,10 @@ def _set_checkpoint_question_score(attempt, question_index, score, via='einzeln'
 
 
 @app.route('/admin/checkpoint-pruefung/antwort/<int:answer_id>/urteil', methods=['POST'])
-@admin_required
+@staff_required
 def admin_checkpoint_answer_verdict(answer_id):
     """Save the teacher's own verdict on one answer (calibration only, no score change)."""
+    permissions.require_checkpoint('answer', answer_id)
     raw_verdict = request.form.get('teacher_verdict', '')
     note = (request.form.get('teacher_note') or '').strip()
     verdict = None if raw_verdict == '' else (1 if raw_verdict == '1' else 0)
@@ -4371,9 +4446,18 @@ def _checkpoint_filters(source=None, limit=300):
     was looking at, resolved server-side rather than from a client-supplied id list.
     """
     args = request.args if source is None else source
+    klasse_id = args.get('klasse_id', type=int)
+    student_id = args.get('student_id', type=int)
+    if klasse_id:
+        permissions.require_klasse(klasse_id)
+    if student_id:
+        permissions.require_student(student_id)
     return {
-        'klasse_id': args.get('klasse_id', type=int),
-        'student_id': args.get('student_id', type=int),
+        'klasse_id': klasse_id,
+        'student_id': student_id,
+        # Every list, export and bulk action reads its sessions through these
+        # filters, so a teacher's scope is set here once (permissions.py).
+        'klasse_ids': permissions.visible_klasse_ids(),
         'checkpoint_id': args.get('checkpoint_id', type=int),
         'date_from': args.get('von') or None,
         'date_to': args.get('bis') or None,
@@ -4521,15 +4605,18 @@ def admin_checkpoint_export_json():
 
 
 @app.route('/admin/quiz-statistik')
-@admin_required
+@staff_required
 def admin_quiz_statistik():
     """Quiz answer statistics grouped by topic and task."""
     klasse_id = request.args.get('klasse_id', type=int)
     task_id = request.args.get('task_id', type=int)
     only_attempted = request.args.get('attempted', '1') != '0'
+    if klasse_id:
+        permissions.require_klasse(klasse_id)
 
-    stats = models.get_quiz_stats_by_topic(klasse_id=klasse_id, task_id=task_id, only_attempted=only_attempted)
-    klassen = models.get_all_klassen()
+    stats = models.get_quiz_stats_by_topic(klasse_id=klasse_id, task_id=task_id, only_attempted=only_attempted,
+                                           klasse_ids=permissions.visible_klasse_ids())
+    klassen = permissions.visible_klassen()
     tasks = models.get_all_tasks()
 
     return render_template('admin/quiz_statistik.html',
@@ -4539,20 +4626,23 @@ def admin_quiz_statistik():
                            klasse_id=klasse_id,
                            task_id=task_id,
                            only_attempted=only_attempted,
-                           llm_enabled=config.LLM_ENABLED)
+                           llm_enabled=config.LLM_ENABLED and permissions.is_admin())  # noise filter costs LLM calls
 
 
 @app.route('/admin/quiz-statistik/export.json')
-@admin_required
+@staff_required
 def admin_quiz_statistik_export():
     """Export full quiz stats as JSON for offline analysis and question redesign."""
     from datetime import datetime
     klasse_id = request.args.get('klasse_id', type=int)
     task_id = request.args.get('task_id', type=int)
     only_attempted = request.args.get('attempted', '1') != '0'
+    if klasse_id:
+        permissions.require_klasse(klasse_id)
 
     stats = models.get_quiz_stats_by_topic(klasse_id=klasse_id, task_id=task_id,
-                                           only_attempted=only_attempted, for_export=True)
+                                           only_attempted=only_attempted, for_export=True,
+                                           klasse_ids=permissions.visible_klasse_ids())
 
     klasse_name = None
     task_name = None
@@ -4823,8 +4913,9 @@ def admin_student_activity(student_id):
 # ============ Admin: Unterricht (Lessons) ============
 
 @app.route('/admin/klasse/<int:klasse_id>/unterricht')
-@admin_required
+@staff_required
 def admin_unterricht(klasse_id):
+    permissions.require_klasse(klasse_id)
     klasse = models.get_klasse(klasse_id)
     if not klasse:
         flash('Klasse nicht gefunden.', 'danger')
@@ -4834,8 +4925,9 @@ def admin_unterricht(klasse_id):
 
 
 @app.route('/admin/klasse/<int:klasse_id>/unterricht/<datum>')
-@admin_required
+@staff_required
 def admin_unterricht_datum(klasse_id, datum):
+    permissions.require_klasse(klasse_id)
     klasse = models.get_klasse(klasse_id)
     if not klasse:
         flash('Klasse nicht gefunden.', 'danger')
@@ -4863,9 +4955,10 @@ def admin_unterricht_datum(klasse_id, datum):
 
 
 @app.route('/admin/klasse/<int:klasse_id>/unterricht/<datum>/auto-attendance', methods=['POST'])
-@admin_required
+@staff_required
 def admin_auto_attendance(klasse_id, datum):
     """Auto-fill attendance from student login data."""
+    permissions.require_klasse(klasse_id)
     klasse = models.get_klasse(klasse_id)
     if not klasse:
         return jsonify({'error': 'Klasse nicht gefunden'}), 404
@@ -4874,24 +4967,27 @@ def admin_auto_attendance(klasse_id, datum):
 
 
 @app.route('/admin/klasse/<int:klasse_id>/unterricht/<datum>/next')
-@admin_required
+@staff_required
 def admin_unterricht_next(klasse_id, datum):
     """Navigate to next week's class date."""
+    permissions.require_klasse(klasse_id)
     next_date = models.get_next_class_date(klasse_id, datum)
     return redirect(url_for('admin_unterricht_datum', klasse_id=klasse_id, datum=next_date))
 
 
 @app.route('/admin/klasse/<int:klasse_id>/unterricht/<datum>/prev')
-@admin_required
+@staff_required
 def admin_unterricht_prev(klasse_id, datum):
     """Navigate to previous week's class date."""
+    permissions.require_klasse(klasse_id)
     prev_date = models.get_previous_class_date(klasse_id, datum)
     return redirect(url_for('admin_unterricht_datum', klasse_id=klasse_id, datum=prev_date))
 
 
 @app.route('/admin/unterricht/<int:unterricht_id>/bewertung', methods=['POST'])
-@admin_required
+@staff_required
 def admin_unterricht_bewertung(unterricht_id):
+    permissions.require_unterricht(unterricht_id)
     student_id = request.form['student_id']
     anwesend = 1 if request.form.get('anwesend') else 0
     # New rating system: '-', 'ok', '+'
@@ -4909,9 +5005,10 @@ def admin_unterricht_bewertung(unterricht_id):
 
 
 @app.route('/admin/unterricht/<int:unterricht_id>/kommentar', methods=['POST'])
-@admin_required
+@staff_required
 def admin_unterricht_kommentar(unterricht_id):
     """Save lesson-wide comment"""
+    permissions.require_unterricht(unterricht_id)
     kommentar = request.form.get('kommentar', '')
 
     with models.db_session() as conn:

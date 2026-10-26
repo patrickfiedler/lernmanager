@@ -6,8 +6,10 @@
 <div class="flex flex-between flex-center mb-2">
     <h1>Checkpoint-Prüfung</h1>
     <div class="flex gap-1">
+        {% if is_admin %}{# anonymised exports for Chemie: admin only #}
         <a href="{{ url_for('admin_checkpoint_export_csv', **request.args) }}" class="btn btn-secondary btn-sm">CSV</a>
         <a href="{{ url_for('admin_checkpoint_export_json', **request.args) }}" class="btn btn-secondary btn-sm">JSON</a>
+        {% endif %}
     </div>
 </div>
 
