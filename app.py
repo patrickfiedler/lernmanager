@@ -5758,9 +5758,13 @@ def student_artifact_gate_check(slug, position):
 
 @app.route('/artefakt-datei/<int:student_id>/<int:task_id>/download')
 def download_student_artifact(student_id, task_id):
-    """Download the latest artifact upload for a student+task (unit). Owner (student) or admin only."""
-    if session.get('student_id') != student_id and 'admin_id' not in session:
-        abort(403)
+    """Download the latest artifact upload for a student+task (unit). Owner (student) or staff of that class."""
+    if session.get('student_id') != student_id:
+        staff = permissions.current_staff()
+        if not staff or not staff['active']:
+            abort(403)
+        if not permissions.can_see_student_topic(student_id, task_id):
+            abort(404)
     record = models.get_student_artifact_file(student_id, task_id)
     if not record:
         abort(404)

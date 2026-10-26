@@ -53,6 +53,13 @@ def can_see_student(student_id):
     return ids is None or bool(ids & models.get_klasse_ids_for_student(student_id))
 
 
+def can_see_student_topic(student_id, task_id):
+    """Work a student did on one topic: visible if the topic belongs to one of her
+    classes. A student shared with another teacher's class stays partly hidden."""
+    ids = visible_klasse_ids()
+    return ids is None or bool(ids & models.get_klasse_ids_for_student_topic(student_id, task_id))
+
+
 def require_klasse(klasse_id):
     if not can_see_klasse(klasse_id):
         abort(404)

@@ -836,16 +836,16 @@ def init_db():
         ''')
 
 
-def create_admin(username, password):
-    """Create admin user if not exists."""
+def create_admin(username, password, role='admin'):
+    """Create admin/teacher user if not exists. role: 'admin' or 'teacher'."""
     with db_session() as conn:
         existing = conn.execute(
             "SELECT id FROM admin WHERE username = ?", (username,)
         ).fetchone()
         if not existing:
             conn.execute(
-                "INSERT INTO admin (username, password_hash) VALUES (?, ?)",
-                (username, hash_password(password))
+                "INSERT INTO admin (username, password_hash, role) VALUES (?, ?, ?)",
+                (username, hash_password(password), role)
             )
             return True
         return False
@@ -896,6 +896,32 @@ def get_klasse_ids_for_teacher(admin_id):
     with db_session() as conn:
         rows = conn.execute(
             "SELECT klasse_id FROM klasse_lehrer WHERE admin_id = ?", (admin_id,)
+        ).fetchall()
+        return {r['klasse_id'] for r in rows}
+
+
+def add_teacher_to_klasse(admin_id, klasse_id):
+    with db_session() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO klasse_lehrer (klasse_id, admin_id) VALUES (?, ?)",
+            (klasse_id, admin_id)
+        )
+
+
+def remove_teacher_from_klasse(admin_id, klasse_id):
+    with db_session() as conn:
+        conn.execute(
+            "DELETE FROM klasse_lehrer WHERE klasse_id = ? AND admin_id = ?",
+            (klasse_id, admin_id)
+        )
+
+
+def get_klasse_ids_for_student_topic(student_id, task_id):
+    """Classes in which this student has this topic (student_task rows)."""
+    with db_session() as conn:
+        rows = conn.execute(
+            "SELECT klasse_id FROM student_task WHERE student_id = ? AND task_id = ?",
+            (student_id, task_id)
         ).fetchall()
         return {r['klasse_id'] for r in rows}
 
