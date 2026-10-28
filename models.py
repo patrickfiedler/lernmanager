@@ -960,6 +960,12 @@ def list_teachers():
     return teachers
 
 
+def set_admin_name(admin_id, nachname, vorname):
+    with db_session() as conn:
+        conn.execute("UPDATE admin SET nachname = ?, vorname = ? WHERE id = ?",
+                     (nachname, vorname, admin_id))
+
+
 def set_teacher_klassen(admin_id, klasse_ids):
     """Replace this teacher's classes with exactly `klasse_ids`."""
     with db_session() as conn:

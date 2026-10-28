@@ -46,3 +46,18 @@ def test_umlaut_initials_use_the_plain_letter():
     username = generate_username(set(), 'Örtel', 'Übel')
     assert any(username.startswith(a) for a in ADJECTIVES_BY_LETTER['o'])
     assert any(username.endswith(t) for t in ANIMALS_BY_LETTER['u'])
+
+
+def test_name_can_be_set_on_an_account_created_without_one(app):
+    client = _admin(app)
+    models.create_admin("kollegin", "pw", role='teacher')
+    teacher_id = models.list_teachers()[0]['id']
+    client.post(f'/admin/lehrkraft/{teacher_id}/name', data={'nachname': 'Bauer', 'vorname': 'Anna'})
+    html = client.get('/admin/lehrkraefte').get_data(as_text=True)
+    assert 'Bauer, Anna (kollegin)' in html
+
+
+def test_name_route_refuses_the_admin_account(app):
+    client = _admin(app)
+    resp = client.post('/admin/lehrkraft/1/name', data={'nachname': 'X', 'vorname': 'Y'})
+    assert resp.status_code == 404

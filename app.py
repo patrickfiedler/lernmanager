@@ -3155,6 +3155,20 @@ def admin_lehrkraft_klassen(admin_id):
     return redirect(url_for('admin_lehrkraefte'))
 
 
+@app.route('/admin/lehrkraft/<int:admin_id>/name', methods=['POST'])
+@admin_required
+def admin_lehrkraft_name(admin_id):
+    _teacher_or_404(admin_id)
+    nachname = request.form.get('nachname', '').strip()
+    vorname = request.form.get('vorname', '').strip()
+    if not nachname or not vorname:
+        flash('Bitte Nachname und Vorname eingeben.', 'danger')
+    else:
+        models.set_admin_name(admin_id, nachname, vorname)
+        flash('Name gespeichert. ✅', 'success')
+    return redirect(url_for('admin_lehrkraefte'))
+
+
 @app.route('/admin/lehrkraft/<int:admin_id>/aktiv', methods=['POST'])
 @admin_required
 def admin_lehrkraft_aktiv(admin_id):

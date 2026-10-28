@@ -53,6 +53,12 @@
             </form>
         </span>
     </div>
+    <form method="POST" action="{{ url_for('admin_lehrkraft_name', admin_id=t.id) }}" class="flex gap-1" style="padding: 1rem 1rem 0;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="text" name="nachname" class="form-control" placeholder="Nachname" value="{{ t.nachname or '' }}" required style="flex: 1;">
+        <input type="text" name="vorname" class="form-control" placeholder="Vorname" value="{{ t.vorname or '' }}" required style="flex: 1;">
+        <button type="submit" class="btn btn-secondary btn-sm">Name speichern</button>
+    </form>
     <form method="POST" action="{{ url_for('admin_lehrkraft_klassen', admin_id=t.id) }}" style="padding: 1rem;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="flex gap-1" style="flex-wrap: wrap;">
