@@ -5564,7 +5564,10 @@ def student_klasse(slug):
     # already ticked off, so without this notice nothing points the student back.
     retry_checkpoint_ids = models.get_checkpoints_awaiting_retry(student_id)
 
+    step_ticks = models.get_step_ticks(student_id, [s['id'] for s in subtasks])
+
     return render_template('student/klasse.html',
+                           step_ticks=step_ticks,
                            retry_checkpoint_ids=retry_checkpoint_ids,
                            connections=connections,
                            looking_forward_to=looking_forward_to,
@@ -5604,29 +5607,29 @@ def student_klasse(slug):
                            fork_dot_positions=fork_dot_positions)
 
 
+def _resolve_student_subtask(student_id, slug, position):
+    """Slug + 1-based position -> (student_task, subtask), or (None, None)."""
+    task, klasse = _resolve_student_topic(student_id, slug)
+    if not task:
+        return None, None
+    all_subtasks = models.get_student_subtask_progress(task['id'])
+    visible_subtask_ids = {s['id'] for s in models.get_visible_subtasks_for_student(
+        student_id, klasse['id'], task['task_id']
+    )}
+    subtasks = [st for st in all_subtasks if st['id'] in visible_subtask_ids]
+    return task, _resolve_subtask_by_position(subtasks, position)
+
+
 @app.route('/schueler/thema/<slug>/aufgabe/<int:position>', methods=['POST'])
 @student_required
 def student_toggle_subtask(slug, position):
     student_id = session['student_id']
 
-    # Resolve slug to student_task
-    task, klasse = _resolve_student_topic(student_id, slug)
-    if not task:
-        return jsonify({'status': 'error', 'message': 'Not found'}), 404
-
-    student_task_id = task['id']
-
-    # Resolve position to subtask
-    all_subtasks = models.get_student_subtask_progress(student_task_id)
-    visible_subtasks = models.get_visible_subtasks_for_student(
-        student_id, klasse['id'], task['task_id']
-    )
-    visible_subtask_ids = {s['id'] for s in visible_subtasks}
-    subtasks = [st for st in all_subtasks if st['id'] in visible_subtask_ids]
-    subtask = _resolve_subtask_by_position(subtasks, position)
+    task, subtask = _resolve_student_subtask(student_id, slug, position)
     if not subtask:
         return jsonify({'status': 'error', 'message': 'Not found'}), 404
 
+    student_task_id = task['id']
     subtask_id = subtask['id']
     erledigt = request.json.get('erledigt', False)
     toggle_result = models.toggle_student_subtask(student_task_id, subtask_id, erledigt)
@@ -5660,6 +5663,25 @@ def student_toggle_subtask(slug, position):
         return jsonify({'status': 'ok', 'task_complete': True})
 
     return jsonify({'status': 'ok', 'task_complete': False})
+
+
+@app.route('/schueler/thema/<slug>/aufgabe/<int:position>/schritte', methods=['POST'])
+@student_required
+def student_save_step_ticks(slug, position):
+    """Save the ticked steps of one Aufgabe. The page sends the whole list each time."""
+    student_id = session['student_id']
+    _, subtask = _resolve_student_subtask(student_id, slug, position)
+    if not subtask:
+        return jsonify({'status': 'error', 'message': 'Not found'}), 404
+
+    keys = (request.get_json(silent=True) or {}).get('keys')
+    # Hashes are short base-36 strings; anything else is not from our page.
+    if (not isinstance(keys, list) or len(keys) > 200
+            or not all(isinstance(k, str) and 0 < len(k) <= 16 for k in keys)):
+        return jsonify({'status': 'error', 'message': 'Bad keys'}), 400
+
+    models.save_step_ticks(student_id, subtask['id'], sorted(set(keys)))
+    return jsonify({'status': 'ok'})
 
 
 @app.route('/schueler/thema/<slug>/fork/<fork_group>/waehlen', methods=['POST'])

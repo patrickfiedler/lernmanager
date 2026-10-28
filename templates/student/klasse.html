@@ -1264,9 +1264,11 @@ wireGateCard('inline-gate', 'inline-gate-feedback', inlineGateKeyword);
 {% if student and student.step_checkboxes and session.student_id %}
 /* Arbeitsschritte abhaken -- opt-in per student (student.step_checkboxes).
 
-   Ticks live in localStorage only, never on the server: they are scratchpad
-   state for one ~20-minute Aufgabe, and the durable record is student_subtask.
-   Keyed by student id because school PCs are shared.
+   Ticks are saved on the server (table step_tick): school PCs wipe browser
+   data at logout, so localStorage lost them every lesson. They are still
+   scratchpad state for one ~20-minute Aufgabe; the durable record is
+   student_subtask. A click never waits: the tick shows at once and the whole
+   list goes to the server in the background.
 
    Steps are keyed by a hash of their own text, not by position. A teacher who
    inserts a step must not shift every tick below it -- that would show a
@@ -1280,7 +1282,8 @@ wireGateCard('inline-gate', 'inline-gate-feedback', inlineGateKeyword);
         .filter(li => !li.parentElement.closest('li'));
     if (!steps.length) return;
 
-    const STORE_KEY = 'lm.steps.{{ session.student_id }}.' + topicSlug + '.{{ current_index + 1 }}';
+    const SAVE_URL = `/schueler/thema/${topicSlug}/aufgabe/{{ current_index + 1 }}/schritte`;
+    const stored = new Set({{ (step_ticks.get(_active.id, []) if _active else []) | tojson }});
 
     function stepText(li) {
         // Nested sub-items are excluded so that editing a sub-bullet does not
@@ -1296,24 +1299,56 @@ wireGateCard('inline-gate', 'inline-gate-feedback', inlineGateKeyword);
         return (h >>> 0).toString(36);
     }
 
-    function load() {
-        try {
-            const raw = localStorage.getItem(STORE_KEY);
-            return raw ? new Set(JSON.parse(raw)) : new Set();
-        } catch (e) {
-            return new Set();
-        }
+    function liveKeys() {
+        // Only hashes still present in the DOM are sent, so steps the teacher
+        // removed garbage-collect themselves.
+        return steps.filter(li => li.classList.contains('step-done'))
+                    .map(li => li.dataset.stepKey);
     }
 
+    /* One request at a time. Clicks during a request only mark the list as
+       dirty; when the request returns, the newest list goes out. Two requests
+       racing could otherwise land in the wrong order and the older list win. */
+    let inFlight = false;
+    let dirty = false;
+    let retried = false;
+    // Teacher looking at a real student: the server refuses every save anyway.
+    const READ_ONLY = {{ 'true' if g.read_only else 'false' }};
+
     function save() {
-        // Only hashes still present in the DOM are written back, so steps the
-        // teacher removed garbage-collect themselves.
-        const live = steps.filter(li => li.classList.contains('step-done'))
-                          .map(li => li.dataset.stepKey);
-        try {
-            if (live.length) localStorage.setItem(STORE_KEY, JSON.stringify(live));
-            else localStorage.removeItem(STORE_KEY);
-        } catch (e) { /* private mode: ticks still work for this page view */ }
+        if (READ_ONLY) return;
+        if (inFlight) { dirty = true; return; }
+        inFlight = true;
+        dirty = false;
+        fetch(SAVE_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').content
+            },
+            body: JSON.stringify({ keys: liveKeys() })
+        })
+        .then(response => { if (!response.ok) throw new Error(response.status); })
+        .then(() => {
+            inFlight = false;
+            retried = false;
+            if (dirty) save();
+        })
+        .catch(err => {
+            inFlight = false;
+            dirty = false;
+            onSaveFailed(err);
+        });
+    }
+
+    /* No message on failure (Patrick 2026-10-28): ticks are scratchpad, a lost
+       save costs little, and a hint the student cannot act on is noise. One
+       quiet retry; after that the next click sends the full list again. */
+    function onSaveFailed(err) {
+        console.warn('Schritt-Haken nicht gespeichert:', err);
+        if (retried) { retried = false; return; }
+        retried = true;
+        setTimeout(save, 2000);
     }
 
     /* The decisive control, in the order the system actually cares about: an
@@ -1367,8 +1402,6 @@ wireGateCard('inline-gate', 'inline-gate-feedback', inlineGateKeyword);
         refreshNudge();
     }
 
-    const stored = load();
-
     steps.forEach(li => {
         li.dataset.stepKey = hash(stepText(li));
         li.classList.add('step-item');
@@ -1412,7 +1445,6 @@ wireGateCard('inline-gate', 'inline-gate-feedback', inlineGateKeyword);
         }
     });
 
-    save();
     refreshNudge();
 })();
 {% endif %}

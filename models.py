@@ -500,6 +500,18 @@ def init_db():
                 PRIMARY KEY (checkpoint_id, question_index)
             );
 
+            -- Ticked steps inside an Aufgabe (templates/student/klasse.html).
+            -- Scratchpad, not progress: the durable record is student_subtask.
+            CREATE TABLE IF NOT EXISTS step_tick (
+                student_id INTEGER NOT NULL,
+                subtask_id INTEGER NOT NULL,
+                step_keys TEXT NOT NULL,  -- JSON list of step-text hashes
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (student_id, subtask_id),
+                FOREIGN KEY (student_id) REFERENCES student(id) ON DELETE CASCADE,
+                FOREIGN KEY (subtask_id) REFERENCES subtask(id) ON DELETE CASCADE
+            );
+
             -- Subtask visibility (per-class and per-student overrides)
             CREATE TABLE IF NOT EXISTS subtask_visibility (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -3709,6 +3721,35 @@ def get_student_subtask_progress(student_task_id):
         ''', (student_task_id, student_task_id)).fetchall()
         result = [dict(r) for r in rows]
     return result
+
+
+def get_step_ticks(student_id, subtask_ids):
+    """{subtask_id: [hashes of ticked steps]} for the given Aufgaben that have ticks."""
+    ids = list(subtask_ids)
+    if not ids:
+        return {}
+    with db_session() as conn:
+        rows = conn.execute(
+            f"SELECT subtask_id, step_keys FROM step_tick WHERE student_id = ? "
+            f"AND subtask_id IN ({','.join('?' * len(ids))})",
+            (student_id, *ids)
+        ).fetchall()
+    return {r['subtask_id']: json.loads(r['step_keys']) for r in rows}
+
+
+def save_step_ticks(student_id, subtask_id, step_keys):
+    """Replace the whole tick list; an empty list deletes the row."""
+    with db_session() as conn:
+        if not step_keys:
+            conn.execute('DELETE FROM step_tick WHERE student_id = ? AND subtask_id = ?',
+                         (student_id, subtask_id))
+            return
+        conn.execute(
+            'INSERT INTO step_tick (student_id, subtask_id, step_keys, updated_at) VALUES (?, ?, ?, ?) '
+            'ON CONFLICT(student_id, subtask_id) DO UPDATE SET '
+            'step_keys = excluded.step_keys, updated_at = excluded.updated_at',
+            (student_id, subtask_id, json.dumps(step_keys), datetime.now().isoformat(timespec='seconds'))
+        )
 
 
 def toggle_student_subtask(student_task_id, subtask_id, erledigt):
