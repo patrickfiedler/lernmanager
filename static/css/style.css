@@ -244,6 +244,28 @@ nav .nav-links {
     border-top: none;
 }
 
+/* A POST action inside the menu (👁 Mein Vorschau-Schüler), drawn like the links. */
+.nav-dropdown-button {
+    font: inherit;
+    color: white;
+    background: none;
+    border: none;
+    border-top: 1px solid rgba(255,255,255,0.15);
+    padding: 0.625rem 1rem;
+    width: 100%;
+    text-align: left;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.nav-dropdown-button:hover {
+    text-decoration: underline;
+}
+
+.nav-dropdown-menu form:first-child .nav-dropdown-button {
+    border-top: none;
+}
+
 @media (max-width: 960px) {
     .nav-dropdown {
         width: 100%;

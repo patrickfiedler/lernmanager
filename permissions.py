@@ -93,6 +93,19 @@ def require_student(student_id):
         abort(404)
 
 
+def can_preview_student(student_id):
+    """Looking at the student pages as this student. They show every class the
+    student is in, so a teacher may only preview a student who sits in none but
+    hers. Her own sandbox student is always fine."""
+    staff = current_staff()
+    if not staff:
+        return False
+    if is_admin() or models.is_preview_student_of(student_id, staff['id']):
+        return True
+    klassen = models.get_klasse_ids_for_student(student_id)
+    return bool(klassen) and klassen <= visible_klasse_ids()
+
+
 def _login_guard():
     """Redirect (no session) or log out (account gone/deactivated); None = fine."""
     if 'admin_id' not in session:

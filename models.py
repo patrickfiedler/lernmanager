@@ -19,6 +19,8 @@ from utils import material_filename
 
 import sqlite3
 
+from flask import g, has_request_context
+
 
 def hash_password(password):
     """Hash password using werkzeug (bcrypt-based)."""
@@ -119,13 +121,27 @@ def get_db():
     return conn
 
 
+def request_is_read_only():
+    """True while staff previews a real student (app.py, guard_student_preview):
+    the page runs normally, but nothing it writes is kept."""
+    return has_request_context() and g.get('read_only', False)
+
+
 @contextmanager
-def db_session():
-    """Context manager for database operations."""
+def db_session(always_commit=False):
+    """Context manager for database operations.
+
+    In a read-only request the transaction is rolled back instead of committed, so a
+    page that writes on GET (material variants, warm-up questions) shows what it
+    would show but changes nothing. always_commit=True is for the error log only.
+    """
     conn = get_db()
     try:
         yield conn
-        conn.commit()
+        if request_is_read_only() and not always_commit:
+            conn.rollback()
+        else:
+            conn.commit()
     except Exception:
         conn.rollback()
         raise
@@ -173,6 +189,7 @@ def init_db():
                 llm_transparency_mode INTEGER DEFAULT 0,
                 step_checkboxes INTEGER NOT NULL DEFAULT 0,  -- on for new students: create_student passes 1 (migrate_054)
                 demo_practice INTEGER NOT NULL DEFAULT 0,  -- demo account: practice pool without gates (migrate_067)
+                preview_of_admin INTEGER DEFAULT NULL,  -- sandbox student of this admin/teacher (migrate_069)
                 netzwerk_id TEXT  -- surname.firstname school network ID, matches scan-folders' folder names (grading-service-deployment.md §Phase 2)
             );
             CREATE UNIQUE INDEX IF NOT EXISTS idx_student_netzwerk_id ON student(netzwerk_id) WHERE netzwerk_id IS NOT NULL;
@@ -1829,6 +1846,55 @@ def get_students_in_klasse(klasse_id):
         ''', (klasse_id, klasse_id)).fetchall()
         result = [dict(r) for r in rows]
     return result
+
+
+def is_preview_student_of(student_id, admin_id):
+    """The staff member's own sandbox student (student.preview_of_admin)."""
+    with db_session() as conn:
+        row = conn.execute("SELECT 1 FROM student WHERE id = ? AND preview_of_admin = ?",
+                           (student_id, admin_id)).fetchone()
+    return row is not None
+
+
+def get_or_create_preview_student(admin_id, admin_username):
+    """The sandbox student of this staff account; returns its id.
+
+    Created on first use, together with its own class „Vorschau – <name>". That is
+    an ordinary class linked to the account (klasse_lehrer), so topics are assigned
+    and queued there like anywhere else. A sandbox without such a class gets one here.
+    """
+    with db_session() as conn:
+        row = conn.execute("SELECT id FROM student WHERE preview_of_admin = ?", (admin_id,)).fetchone()
+        if row:
+            student_id = row['id']
+        else:
+            student_id = conn.execute(
+                "INSERT INTO student (nachname, vorname, username, password_hash, step_checkboxes, "
+                "demo_practice, preview_of_admin) VALUES ('Vorschau', ?, ?, ?, 1, 1, ?)",
+                (admin_username, _free_login(conn, f"{admin_username}.vorschau"),
+                 hash_password(os.urandom(16).hex()), admin_id)
+            ).lastrowid
+        has_class = conn.execute(
+            "SELECT 1 FROM student_klasse sk JOIN klasse_lehrer kl ON kl.klasse_id = sk.klasse_id "
+            "WHERE sk.student_id = ? AND kl.admin_id = ?", (student_id, admin_id)).fetchone()
+        if not has_class:
+            klasse_id = conn.execute("INSERT INTO klasse (name) VALUES (?)",
+                                     (f"Vorschau – {admin_username}",)).lastrowid
+            conn.execute("INSERT INTO klasse_lehrer (klasse_id, admin_id) VALUES (?, ?)", (klasse_id, admin_id))
+            conn.execute("INSERT INTO student_klasse (student_id, klasse_id) VALUES (?, ?)",
+                         (student_id, klasse_id))
+    return student_id
+
+
+def _free_login(conn, wanted):
+    """`wanted`, or wanted2, wanted3 ... -- free in student and admin alike, since the
+    login tries admin first and would hide a student with the same name."""
+    candidate, n = wanted, 1
+    while conn.execute("SELECT 1 FROM student WHERE username = ? UNION "
+                       "SELECT 1 FROM admin WHERE username = ?", (candidate, candidate)).fetchone():
+        n += 1
+        candidate = f"{wanted}{n}"
+    return candidate
 
 
 def get_student(student_id):
@@ -4395,6 +4461,8 @@ def get_checkpoint_reviews(klasse_id=None, student_id=None, date_from=None,
     excluded by default -- they are the pre-reset grade record, not the current
     one. Pass True to show them as read-only history.
 
+    Sandbox students only show up when the class or the student is filtered for.
+
     date_from/date_to: 'YYYY-MM-DD' (inclusive). date_to is compared against the
     end of that day so a same-day filter is not empty.
 
@@ -4437,6 +4505,10 @@ def get_checkpoint_reviews(klasse_id=None, student_id=None, date_from=None,
     if student_id:
         sql += ' AND ca.student_id = ?'
         params.append(student_id)
+    if not (student_id or klasse_id):
+        # Sandbox students (student.preview_of_admin) are someone clicking through,
+        # not data: out of the queue and the exports unless picked on purpose.
+        sql += ' AND s.preview_of_admin IS NULL'
     if date_from:
         sql += ' AND ca.timestamp >= ?'
         params.append(f'{date_from} 00:00:00')
@@ -5730,7 +5802,7 @@ def auto_fill_all_scheduled_today():
 def log_error(level, message, traceback=None, user_id=None, user_type=None, route=None, method=None, url=None):
     """Log an error to the database."""
     try:
-        with db_session() as conn:
+        with db_session(always_commit=True) as conn:
             conn.execute('''
                 INSERT INTO error_log (level, message, traceback, user_id, user_type, route, method, url, timestamp)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -5831,6 +5903,9 @@ def log_analytics_event(event_type, user_id=None, user_type=None, metadata=None)
         metadata: Dictionary of additional data (will be stored as JSON)
     """
     from analytics_queue import enqueue_event
+
+    if request_is_read_only():
+        return
 
     # Convert metadata to JSON if it's a dict
     metadata_json = json.dumps(metadata) if metadata else None

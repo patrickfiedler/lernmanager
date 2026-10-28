@@ -25,6 +25,7 @@ MANUAL_CHECK = {
     'login',
     'download_material',          # topic material: every logged-in user
     'download_student_artifact',  # permissions.can_see_student
+    'vorschau_beenden',           # only drops the preview keys from the session
 }
 
 # URL parameters that never point at one class or student: any value will do.

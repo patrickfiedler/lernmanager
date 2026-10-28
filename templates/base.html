@@ -24,7 +24,7 @@
     <nav>
         <div class="nav-content">
             <a href="/" class="logo"><img src="{{ url_for('static', filename='favicon-light.svg') }}" alt="" style="height: 1.4em; vertical-align: middle; margin-right: 0.3em;"><span style="padding-left: 5px;">Lernmanager</span></a>
-            {% if session.admin_id %}
+            {% if session.admin_id and not preview %}
             <input type="checkbox" id="nav-toggle">
             <label for="nav-toggle" class="nav-hamburger" aria-label="Menü">
                 <span class="hamburger-icon">☰</span>
@@ -32,7 +32,7 @@
             </label>
             {% endif %}
             <div class="nav-links">
-                {% if session.admin_id %}
+                {% if session.admin_id and not preview %}
                     <a href="{{ url_for('admin_dashboard') }}">Dashboard</a>
                     <a href="{{ url_for('admin_klassen') }}">Klassen</a>
                     <a href="{{ url_for('admin_themen') }}">Themen</a>
@@ -75,6 +75,10 @@
                     <details class="nav-dropdown">
                         <summary>👤 {{ session.admin_username }} ▾</summary>
                         <div class="nav-dropdown-menu">
+                            <form method="POST" action="{{ url_for('admin_vorschau_schueler') }}">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button type="submit" class="nav-dropdown-button">👁 Mein Vorschau-Schüler</button>
+                            </form>
                             <a href="{{ url_for('admin_passwort') }}">Passwort ändern</a>
                             <a href="{{ url_for('logout') }}">Abmelden</a>
                         </div>
@@ -82,7 +86,11 @@
                 {% elif session.student_id %}
                     <a href="{{ url_for('student_settings') }}">⚙️ Einstellungen</a>
                     <span>👤 {{ student_display_name }}</span>
+                    {% if preview %}
+                    <a href="{{ url_for('vorschau_beenden') }}">Vorschau beenden</a>
+                    {% else %}
                     <a href="{{ url_for('logout') }}">Abmelden</a>
+                    {% endif %}
                 {% endif %}
             </div>
         </div>
@@ -90,6 +98,13 @@
     {% endif %}
 
     <div class="container">
+        {% if preview %}
+        <div class="alert alert-info preview-banner">
+            👁 Vorschau als <strong>{{ preview.name }}</strong>
+            -- {{ 'nur ansehen, nichts wird gespeichert' if preview.read_only else 'dein Vorschau-Schüler, alles wird gespeichert' }}.
+            <a href="{{ url_for('vorschau_beenden') }}">Vorschau beenden</a>
+        </div>
+        {% endif %}
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
                 {% for category, message in messages %}

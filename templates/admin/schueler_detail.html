@@ -80,6 +80,18 @@
         </form>
     </div>
 
+    <!-- Student preview: read-only look at the student pages -->
+    {% if can_preview %}
+    <div class="card">
+        <div class="card-header">👁 Schüleransicht</div>
+        <p class="text-muted" style="font-size: 0.9em;">Lernmanager so sehen, wie {{ student.vorname }} ihn sieht. Nur ansehen: Haken, Quiz und Warm-up werden nicht gespeichert.</p>
+        <form method="POST" action="{{ url_for('admin_schueler_vorschau', student_id=student.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-secondary">Als {{ student.vorname }} ansehen</button>
+        </form>
+    </div>
+    {% endif %}
+
     <!-- Demo account: practice without gates -->
     <div class="card">
         <div class="card-header">🎬 Demo-Üben</div>

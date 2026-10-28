@@ -16,7 +16,7 @@ import urllib.request
 import urllib.error
 from functools import wraps
 from datetime import date, datetime
-from flask import Flask, has_request_context, render_template, request, redirect, url_for, session, flash, jsonify, send_from_directory, abort, Response, make_response
+from flask import Flask, has_request_context, render_template, request, redirect, url_for, session, flash, jsonify, send_from_directory, abort, Response, make_response, g
 from flask_wtf.csrf import CSRFProtect
 from flask_compress import Compress
 from werkzeug.utils import secure_filename
@@ -236,6 +236,15 @@ def inject_is_admin():
     """Templates hide admin-only controls for teachers. Hiding is comfort only:
     the routes themselves refuse (permissions.py)."""
     return {'is_admin': 'admin_id' in session and permissions.is_admin()}
+
+
+@app.context_processor
+def inject_preview():
+    """Student pages during a staff preview: student nav + banner (base.html)."""
+    if not _in_student_preview():
+        return {'preview': None}
+    return {'preview': {'name': session.get('student_name', ''),
+                        'read_only': g.get('read_only', False)}}
 
 
 @app.context_processor
@@ -646,6 +655,74 @@ def logout():
     session.clear()
     flash('Auf Wiedersehen! 👋', 'info')
     return redirect(url_for('login'))
+
+
+# ============ Student Preview ============
+# Admin and teachers look at Lernmanager through a student's eyes. The session keeps
+# admin_id and gains student_id + preview_student_id: student routes run as that
+# student, every /admin page keeps working. A real student is read-only
+# (guard_student_preview); the staff member's own sandbox student is not.
+
+_PREVIEW_KEYS = ('student_id', 'student_name', 'student_username', 'preview_student_id')
+
+
+def _in_student_preview():
+    return ('preview_student_id' in session and 'admin_id' in session
+            and (request.endpoint or '').startswith('student_'))
+
+
+@app.route('/admin/schueler/<int:student_id>/vorschau', methods=['POST'])
+@staff_required
+def admin_schueler_vorschau(student_id):
+    student = models.get_student(student_id)
+    if not student or not permissions.can_preview_student(student_id):
+        abort(404)
+    return _start_preview(student)
+
+
+@app.route('/admin/vorschau-schueler', methods=['POST'])
+@staff_required
+def admin_vorschau_schueler():
+    """Own sandbox student: fully clickable, created with its own class on first use.
+    Scoped by construction -- it only ever touches the caller's own sandbox."""
+    staff = permissions.current_staff()
+    student = models.get_student(models.get_or_create_preview_student(staff['id'], staff['username']))
+    return _start_preview(student)
+
+
+def _start_preview(student):
+    session.update(student_id=student['id'], student_name=student['vorname'],
+                   student_username=student['username'], preview_student_id=student['id'])
+    return redirect(url_for('student_dashboard'))
+
+
+@app.route('/vorschau/beenden')
+def vorschau_beenden():
+    student_id = session.get('preview_student_id')
+    for key in _PREVIEW_KEYS:
+        session.pop(key, None)
+    if student_id and 'admin_id' in session:
+        return redirect(url_for('admin_schueler_detail', student_id=student_id))
+    return redirect(url_for('index'))
+
+
+@app.before_request
+def guard_student_preview():
+    """Previewing a real student: GET pages run but keep nothing (models.db_session
+    rolls back), anything else is refused before it runs -- no quiz attempt, no
+    tick, no LLM call on the student's name."""
+    if not _in_student_preview():
+        return None
+    if models.is_preview_student_of(session['preview_student_id'], session['admin_id']):
+        return None
+    g.read_only = True
+    if request.method == 'GET':
+        return None
+    message = 'Vorschau: hier wird nichts gespeichert.'
+    if request.headers.get('Sec-Fetch-Mode') != 'navigate':  # fetch() from page JS
+        return jsonify({'error': message}), 403
+    flash(message, 'info')
+    return redirect(request.referrer or url_for('student_dashboard'))
 
 
 # ============ Network Access Gate ============
@@ -1906,6 +1983,7 @@ def admin_schueler_detail(student_id):
 
     return render_template('admin/schueler_detail.html',
                            student=student,
+                           can_preview=permissions.can_preview_student(student_id),
                            klassen=klassen,
                            all_klassen=all_klassen,
                            tasks=tasks,
