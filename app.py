@@ -5305,18 +5305,21 @@ def _build_completed_topic_list(completed, reopened_by_module, show_archive, kla
     `klassenstufe` is the class's year, or None if it was never set.
 
     Off by default means the latest finished Thema only -- enough to get back to
-    it, not a wall of history. Opting in shows all of them. Either way the list
-    is filtered to the class's own year, so last year's topics stop following a
-    student around.
+    it, not a wall of history -- plus every Thema with a reopened checkpoint,
+    since the student has work waiting there (Patrick 2026-10-28; until then a
+    reopened older Thema needed the archive turned on). Opting in shows all of
+    them. Either way the list is filtered to the class's own year, so last
+    year's topics stop following a student around.
 
-    A reopened checkpoint changes how an entry is *drawn*, never whether it is
-    in the list (Patrick's call): a student who is being asked to redo something
-    should meet it in the same place as everything else they have finished.
+    Reopened entries keep their place in the newest-first order: a student who
+    is being asked to redo something meets it among everything else they have
+    finished.
     """
     entries = [c for c in completed
                if _stufe_matches_klassenstufe(c.get('stufe'), klassenstufe)]
     if not show_archive:
-        entries = entries[:1]
+        entries = [c for i, c in enumerate(entries)
+                   if i == 0 or c['task_id'] in reopened_by_module]
 
     result = []
     for c in entries:

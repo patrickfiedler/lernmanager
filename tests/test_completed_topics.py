@@ -73,12 +73,13 @@ class TestBuildList:
         assert out[1]['reopened'] is True
         assert out[1]['feedback'] == 'Schau dir Aufgabe 3 nochmal an.'
 
-    def test_reopened_does_not_survive_the_default_cutoff(self):
-        # Deliberate: the flag changes how an entry is drawn, not whether it is
-        # in the list. An older reopened topic needs the archive turned on.
-        completed = [topic(3, 'Drittes'), topic(2, 'Zweites')]
-        out = _build_completed_topic_list(completed, {2: {'student_feedback': 'x'}}, False, 7)
-        assert [e['name'] for e in out] == ['Drittes']
+    def test_reopened_survives_the_default_cutoff(self):
+        # The admin hint promises reopened checkpoints show regardless of the
+        # archive switch -- the student has work waiting there.
+        completed = [topic(3, 'Drittes'), topic(2, 'Zweites'), topic(1, 'Erstes')]
+        out = _build_completed_topic_list(completed, {1: {'student_feedback': 'x'}}, False, 7)
+        assert [e['name'] for e in out] == ['Drittes', 'Erstes']
+        assert out[1]['reopened'] is True
 
     def test_is_seilbahn_survives_for_slug_building(self):
         out = _build_completed_topic_list([topic(1, '5 - Thema', is_seilbahn=1)], {}, False, None)
