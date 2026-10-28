@@ -20,10 +20,17 @@ BYTES_FOR = {
 
 def _upload(as_admin, task_id, name, data=None):
     data = data if data is not None else BYTES_FOR[name.rsplit(".", 1)[1].lower()]
-    as_admin.post(f"/admin/thema/{task_id}/material-upload",
-                  data={"file": (io.BytesIO(data), name)},
-                  content_type="multipart/form-data", follow_redirects=True)
-    return next(m for m in models.get_materials(task_id) if m["pfad"].endswith(name))
+    r = as_admin.post(f"/admin/thema/{task_id}/material-upload",
+                      data={"file": (io.BytesIO(data), name)},
+                      content_type="multipart/form-data")
+    # No follow_redirects: a crash on the next page used to end in a redirect loop
+    # via handle_exception, which hid the real error. Show what went wrong instead.
+    with as_admin.session_transaction() as sess:
+        flashes = sess.get("_flashes", [])
+    errors = [e['message'] for e in models.get_error_logs(limit=3)]
+    found = [m for m in models.get_materials(task_id) if m["pfad"].endswith(name)]
+    assert found, (r.status_code, r.headers.get("Location"), flashes, errors)
+    return found[0]
 
 
 def _setup(app, tmp_path):
