@@ -1720,6 +1720,8 @@ def delete_student(student_id):
         conn.execute("DELETE FROM unterricht_student WHERE student_id = ?", (student_id,))
         conn.execute("DELETE FROM artifact_feedback WHERE student_id = ?", (student_id,))
         conn.execute("DELETE FROM student_artifact_file WHERE student_id = ?", (student_id,))
+        conn.execute("DELETE FROM artifact_gate_attempt WHERE student_id = ?", (student_id,))
+        conn.execute("DELETE FROM grading_result WHERE student_id = ?", (student_id,))
         conn.execute("DELETE FROM student WHERE id = ?", (student_id,))
     return disk_filenames
 
