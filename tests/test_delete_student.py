@@ -62,3 +62,18 @@ def test_class_delete_is_all_or_nothing(db):
         models.delete_all_students_in_klasse(klasse_id)
 
     assert models.get_student(first) is not None
+
+
+def test_delete_route_lands_on_class_page(app, as_admin):
+    """The only delete button sits on the student's own page; going back to the
+    referrer showed "Schüler nicht gefunden" right after "Schüler gelöscht"."""
+    app.config["WTF_CSRF_ENABLED"] = False
+    klasse_id = models.create_klasse("7a")
+    student_id = models.create_student("A", "Anna", "u1", "pw")
+    models.add_student_to_klasse(student_id, klasse_id)
+
+    resp = as_admin.post(f"/admin/schueler/{student_id}/loeschen",
+                         headers={"Referer": f"/admin/schueler/{student_id}"})
+
+    assert resp.status_code == 302, resp.status_code
+    assert resp.headers["Location"].endswith(f"/admin/klasse/{klasse_id}"), resp.headers["Location"]

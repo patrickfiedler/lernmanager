@@ -2001,9 +2001,13 @@ def admin_schueler_detail(student_id):
 @app.route('/admin/schueler/<int:student_id>/loeschen', methods=['POST'])
 @admin_required
 def admin_schueler_loeschen(student_id):
+    # Not request.referrer: that is the deleted student's own page.
+    klassen = models.get_student_klassen(student_id)
     _unlink_artifact_files(models.delete_student(student_id))
     flash('Schüler gelöscht.', 'success')
-    return redirect(request.referrer or url_for('admin_klassen'))
+    if klassen:
+        return redirect(url_for('admin_klasse_detail', klasse_id=klassen[0]['id']))
+    return redirect(url_for('admin_klassen'))
 
 
 @app.route('/admin/schueler/<int:student_id>/datenauszug')
