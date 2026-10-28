@@ -1861,7 +1861,8 @@ def get_or_create_preview_student(admin_id, admin_username):
 
     Created on first use, together with its own class „Vorschau – <name>". That is
     an ordinary class linked to the account (klasse_lehrer), so topics are assigned
-    and queued there like anywhere else. A sandbox without such a class gets one here.
+    and queued there like anywhere else. A sandbox without such a class (a promoted
+    student account, promote_student_to_teacher) gets one here.
     """
     with db_session() as conn:
         row = conn.execute("SELECT id FROM student WHERE preview_of_admin = ?", (admin_id,)).fetchone()
@@ -1884,6 +1885,30 @@ def get_or_create_preview_student(admin_id, admin_username):
             conn.execute("INSERT INTO student_klasse (student_id, klasse_id) VALUES (?, ?)",
                          (student_id, klasse_id))
     return student_id
+
+
+def promote_student_to_teacher(username):
+    """A student account becomes a teacher login: same name, same password.
+
+    The student row is kept as the new teacher's sandbox (preview_of_admin) under
+    `<name>.vorschau`, so nothing done on it is lost. Returns (admin_id, sandbox
+    login), or (None, reason) when it cannot be done.
+    """
+    with db_session() as conn:
+        student = conn.execute("SELECT * FROM student WHERE username = ?", (username,)).fetchone()
+        if not student:
+            return None, 'Ein Schülerkonto mit diesem Benutzernamen gibt es nicht.'
+        if student['preview_of_admin'] is not None:
+            return None, 'Das ist ein Vorschau-Schüler, kein Schülerkonto.'
+        if conn.execute("SELECT 1 FROM admin WHERE username = ?", (username,)).fetchone():
+            return None, 'Diesen Benutzernamen hat schon ein Lehrkräfte-Konto.'
+        admin_id = conn.execute(
+            "INSERT INTO admin (username, password_hash, role) VALUES (?, ?, 'teacher')",
+            (username, student['password_hash'])).lastrowid
+        sandbox_login = _free_login(conn, f"{username}.vorschau")
+        conn.execute("UPDATE student SET username = ?, preview_of_admin = ?, demo_practice = 1 "
+                     "WHERE id = ?", (sandbox_login, admin_id, student['id']))
+    return admin_id, sandbox_login
 
 
 def _free_login(conn, wanted):

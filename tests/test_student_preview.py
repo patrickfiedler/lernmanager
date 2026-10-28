@@ -110,3 +110,17 @@ def test_someone_elses_sandbox_is_read_only(app, setup):
     client.post(f"/admin/schueler/{sandbox}/vorschau")
     assert "nichts wird gespeichert" in client.get("/schueler").get_data(as_text=True)
 
+
+def test_promote_student_to_teacher(app, setup):
+    admin_id, sandbox_login = models.promote_student_to_teacher('maxmuster')
+    assert sandbox_login == 'maxmuster.vorschau'
+    # Same login, same password, now a teacher.
+    teacher = models.verify_admin('maxmuster', 'x')
+    assert teacher['id'] == admin_id and teacher['role'] == 'teacher'
+    # The old student row is her sandbox, progress kept, and gets a class she sees.
+    assert models.is_preview_student_of(setup['student'], admin_id)
+    assert models.get_or_create_preview_student(admin_id, 'maxmuster') == setup['student']
+    assert models.get_klasse_ids_for_teacher(admin_id) & models.get_klasse_ids_for_student(setup['student'])
+
+    assert models.promote_student_to_teacher('maxmuster')[0] is None   # no student by that name now
+    assert models.promote_student_to_teacher('maxmuster.vorschau')[0] is None  # sandbox

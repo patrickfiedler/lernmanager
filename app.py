@@ -3108,6 +3108,19 @@ def admin_lehrkraft_neu():
     return redirect(url_for('admin_lehrkraefte'))
 
 
+@app.route('/admin/lehrkraefte/aus-schueler', methods=['POST'])
+@admin_required
+def admin_lehrkraft_aus_schueler():
+    username = request.form.get('username', '').strip()
+    admin_id, detail = models.promote_student_to_teacher(username)
+    if admin_id is None:
+        flash(detail, 'danger')
+    else:
+        flash(f'„{username}“ ist jetzt Lehrkraft, Passwort unverändert. Das alte Schülerkonto '
+              f'ist ihr Vorschau-Schüler „{detail}“. Jetzt unten ihre Klassen anhaken.', 'success')
+    return redirect(url_for('admin_lehrkraefte'))
+
+
 @app.route('/admin/lehrkraft/<int:admin_id>/klassen', methods=['POST'])
 @admin_required
 def admin_lehrkraft_klassen(admin_id):

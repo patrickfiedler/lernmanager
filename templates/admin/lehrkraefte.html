@@ -18,6 +18,20 @@
     </p>
 </div>
 
+<div class="card mb-2">
+    <div class="card-header">⬆️ Schülerkonto zur Lehrkraft machen</div>
+    <form method="POST" action="{{ url_for('admin_lehrkraft_aus_schueler') }}" class="flex gap-1" style="padding: 1rem;"
+          onsubmit="return confirm('Schülerkonto ' + this.username.value + ' zur Lehrkraft machen?');">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="text" name="username" class="form-control" placeholder="Benutzername des Schülerkontos" required style="flex: 1;">
+        <button type="submit" class="btn btn-primary">Umwandeln</button>
+    </form>
+    <p class="text-muted" style="padding: 0 1rem 1rem; margin: 0; font-size: 0.875rem;">
+        Für Kolleginnen, die bisher ein Schülerkonto hatten. Benutzername und Passwort bleiben gleich.
+        Das alte Schülerkonto wird ihr Vorschau-Schüler (Name mit „.vorschau“), sein Fortschritt bleibt erhalten.
+    </p>
+</div>
+
 {% for t in teachers %}
 <div class="card mb-2">
     <div class="card-header flex flex-between flex-center">
