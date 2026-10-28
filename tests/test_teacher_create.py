@@ -39,3 +39,10 @@ def test_login_taken_by_a_student_is_refused(app):
 def test_student_pool_avoids_teacher_logins(app):
     models.create_admin("agilebear", "pw", role='teacher')
     assert "agilebear" in models.get_existing_usernames()
+
+
+def test_umlaut_initials_use_the_plain_letter():
+    from utils import generate_username, ADJECTIVES_BY_LETTER, ANIMALS_BY_LETTER
+    username = generate_username(set(), 'Örtel', 'Übel')
+    assert any(username.startswith(a) for a in ADJECTIVES_BY_LETTER['o'])
+    assert any(username.endswith(t) for t in ANIMALS_BY_LETTER['u'])

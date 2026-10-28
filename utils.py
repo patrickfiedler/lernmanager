@@ -437,6 +437,11 @@ for animal in ANIMALS:
     ANIMALS_BY_LETTER[letter].append(animal)
 
 
+def _plain_initial(name):
+    """First letter without accent, lowercased: 'Özil' -> 'o', 'Émile' -> 'e'."""
+    return unicodedata.normalize('NFKD', name[0])[0].lower()
+
+
 def generate_username(existing_usernames=None, vorname=None, nachname=None):
     """Generate a unique username like 'happypanda'.
 
@@ -448,8 +453,8 @@ def generate_username(existing_usernames=None, vorname=None, nachname=None):
 
     # Try to match initials if name is provided
     if vorname and nachname:
-        vorname_initial = vorname[0].lower()
-        nachname_initial = nachname[0].lower()
+        vorname_initial = _plain_initial(vorname)
+        nachname_initial = _plain_initial(nachname)
 
         # Get adjectives and animals matching the initials
         matching_adjs = ADJECTIVES_BY_LETTER.get(vorname_initial, [])
