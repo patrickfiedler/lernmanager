@@ -1706,35 +1706,44 @@ def move_student_to_klasse(student_id, from_klasse_id, to_klasse_id):
     add_student_to_klasse(student_id, to_klasse_id)
 
 
-def delete_student(student_id):
-    """Delete a student and all associated data. Returns disk filenames of removed artifact uploads (caller must unlink)."""
-    with db_session() as conn:
-        disk_filenames = [r[0] for r in conn.execute(
-            "SELECT disk_filename FROM student_artifact_file WHERE student_id = ?", (student_id,)
-        ).fetchall()]
-        # Tables without ON DELETE CASCADE must be cleaned up explicitly
-        conn.execute(
-            "DELETE FROM analytics_events WHERE user_id = ? AND user_type = 'student'",
-            (student_id,)
-        )
-        conn.execute("DELETE FROM unterricht_student WHERE student_id = ?", (student_id,))
-        conn.execute("DELETE FROM artifact_feedback WHERE student_id = ?", (student_id,))
-        conn.execute("DELETE FROM student_artifact_file WHERE student_id = ?", (student_id,))
-        conn.execute("DELETE FROM artifact_gate_attempt WHERE student_id = ?", (student_id,))
-        conn.execute("DELETE FROM grading_result WHERE student_id = ?", (student_id,))
-        conn.execute("DELETE FROM student WHERE id = ?", (student_id,))
+def _delete_student_rows(conn, student_id):
+    """Delete one student's rows inside the caller's transaction. Returns disk filenames of their artifact uploads."""
+    disk_filenames = [r[0] for r in conn.execute(
+        "SELECT disk_filename FROM student_artifact_file WHERE student_id = ?", (student_id,)
+    ).fetchall()]
+    # Tables without ON DELETE CASCADE must be cleaned up explicitly
+    conn.execute(
+        "DELETE FROM analytics_events WHERE user_id = ? AND user_type = 'student'",
+        (student_id,)
+    )
+    conn.execute("DELETE FROM unterricht_student WHERE student_id = ?", (student_id,))
+    conn.execute("DELETE FROM artifact_feedback WHERE student_id = ?", (student_id,))
+    conn.execute("DELETE FROM student_artifact_file WHERE student_id = ?", (student_id,))
+    conn.execute("DELETE FROM artifact_gate_attempt WHERE student_id = ?", (student_id,))
+    conn.execute("DELETE FROM grading_result WHERE student_id = ?", (student_id,))
+    conn.execute("DELETE FROM student WHERE id = ?", (student_id,))
     return disk_filenames
 
 
+def delete_student(student_id):
+    """Delete a student and all associated data. Returns disk filenames of removed artifact uploads (caller must unlink)."""
+    with db_session() as conn:
+        return _delete_student_rows(conn, student_id)
+
+
 def delete_all_students_in_klasse(klasse_id):
-    """Delete all students in a class (DSGVO year-end cleanup). Returns disk filenames of removed artifact uploads."""
+    """Delete all students in a class (DSGVO year-end cleanup). Returns disk filenames of removed artifact uploads.
+
+    One transaction: if any student fails, nobody is deleted -- otherwise the
+    files of those already gone would be lost from the returned list and stay on disk.
+    """
     with db_session() as conn:
         rows = conn.execute(
             "SELECT student_id FROM student_klasse WHERE klasse_id = ?", (klasse_id,)
         ).fetchall()
-    disk_filenames = []
-    for row in rows:
-        disk_filenames.extend(delete_student(row['student_id']))
+        disk_filenames = []
+        for row in rows:
+            disk_filenames.extend(_delete_student_rows(conn, row['student_id']))
     return disk_filenames
 
 
