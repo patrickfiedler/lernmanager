@@ -159,7 +159,9 @@ def init_db():
                 username TEXT UNIQUE NOT NULL,
                 password_hash TEXT NOT NULL,
                 role TEXT NOT NULL DEFAULT 'admin',  -- admin/teacher, see permissions.py
-                active INTEGER NOT NULL DEFAULT 1  -- 0 = login blocked, row kept for resolved_by etc.
+                active INTEGER NOT NULL DEFAULT 1,  -- 0 = login blocked, row kept for resolved_by etc.
+                nachname TEXT,  -- teachers only, NULL for older accounts (migrate_071)
+                vorname TEXT
             );
 
             -- Classes (Klassen)
@@ -865,7 +867,7 @@ def init_db():
         ''')
 
 
-def create_admin(username, password, role='admin'):
+def create_admin(username, password, role='admin', nachname=None, vorname=None):
     """Create admin/teacher user if not exists. role: 'admin' or 'teacher'."""
     with db_session() as conn:
         existing = conn.execute(
@@ -873,8 +875,9 @@ def create_admin(username, password, role='admin'):
         ).fetchone()
         if not existing:
             conn.execute(
-                "INSERT INTO admin (username, password_hash, role) VALUES (?, ?, ?)",
-                (username, hash_password(password), role)
+                "INSERT INTO admin (username, password_hash, role, nachname, vorname) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (username, hash_password(password), role, nachname, vorname)
             )
             return True
         return False
@@ -949,7 +952,8 @@ def list_teachers():
     """Teacher accounts with their class ids, for admin/lehrkraefte."""
     with db_session() as conn:
         teachers = [dict(r) for r in conn.execute(
-            "SELECT id, username, active FROM admin WHERE role = 'teacher' ORDER BY username"
+            "SELECT id, username, active, nachname, vorname FROM admin WHERE role = 'teacher' "
+            "ORDER BY COALESCE(nachname, username), vorname"
         ).fetchall()]
     for t in teachers:
         t['klasse_ids'] = get_klasse_ids_for_teacher(t['id'])
@@ -1186,9 +1190,11 @@ def get_previous_class_date(klasse_id, current_date):
 # ============ Student functions ============
 
 def get_existing_usernames():
-    """Get all existing student usernames."""
+    """Every taken login, student and admin alike: teachers draw from the same pool,
+    and the login tries admin first, so a student sharing a teacher's name could
+    never log in."""
     with db_session() as conn:
-        rows = conn.execute("SELECT username FROM student").fetchall()
+        rows = conn.execute("SELECT username FROM student UNION SELECT username FROM admin").fetchall()
         return {r['username'] for r in rows}
 
 
@@ -1926,8 +1932,9 @@ def promote_student_to_teacher(username):
         if conn.execute("SELECT 1 FROM admin WHERE username = ?", (username,)).fetchone():
             return None, 'Diesen Benutzernamen hat schon ein Lehrkräfte-Konto.'
         admin_id = conn.execute(
-            "INSERT INTO admin (username, password_hash, role) VALUES (?, ?, 'teacher')",
-            (username, student['password_hash'])).lastrowid
+            "INSERT INTO admin (username, password_hash, role, nachname, vorname) "
+            "VALUES (?, ?, 'teacher', ?, ?)",
+            (username, student['password_hash'], student['nachname'], student['vorname'])).lastrowid
         sandbox_login = _free_login(conn, f"{username}.vorschau")
         conn.execute("UPDATE student SET username = ?, preview_of_admin = ?, demo_practice = 1 "
                      "WHERE id = ?", (sandbox_login, admin_id, student['id']))

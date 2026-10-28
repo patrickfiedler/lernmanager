@@ -677,7 +677,7 @@ def _credentials_group_elements(students, klasse_name, styles):
         textColor=colors.grey
     )
     elements.append(Paragraph(
-        f"Anzahl Schueler: {len(students)} | Lernmanager",
+        f"Anzahl: {len(students)} | Lernmanager",
         footer_style
     ))
 

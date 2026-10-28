@@ -3096,20 +3096,41 @@ def admin_lehrkraefte():
                            klassen=models.get_all_klassen())
 
 
+@app.route('/admin/lehrkraefte/benutzername-vorschlag')
+@admin_required
+def admin_lehrkraft_benutzername_vorschlag():
+    """Pool login matching the initials, as for students -- filled into the form live."""
+    return jsonify({'username': generate_username(
+        models.get_existing_usernames(),
+        request.args.get('vorname', '').strip() or None,
+        request.args.get('nachname', '').strip() or None)})
+
+
 @app.route('/admin/lehrkraefte/neu', methods=['POST'])
 @admin_required
 def admin_lehrkraft_neu():
-    username = request.form.get('username', '').strip()
-    if not username:
-        flash('Bitte einen Benutzernamen eingeben.', 'danger')
+    nachname = request.form.get('nachname', '').strip()
+    vorname = request.form.get('vorname', '').strip()
+    if not nachname or not vorname:
+        flash('Bitte Nachname und Vorname eingeben.', 'danger')
         return redirect(url_for('admin_lehrkraefte'))
-    password = generate_password()
-    if not models.create_admin(username, password, role='teacher'):
+    taken = models.get_existing_usernames()
+    username = (request.form.get('username', '').strip().lower()
+                or generate_username(taken, vorname, nachname))
+    # Checked against students too: create_admin only knows the admin table.
+    if username in taken:
         flash(f'Den Benutzernamen „{username}“ gibt es schon.', 'danger')
         return redirect(url_for('admin_lehrkraefte'))
-    flash(f'Lehrkraft „{username}“ angelegt. Startpasswort: {password} -- '
-          'jetzt notieren, es wird nicht noch einmal angezeigt.', 'success')
-    return redirect(url_for('admin_lehrkraefte'))
+    password = generate_password()
+    models.create_admin(username, password, role='teacher', nachname=nachname, vorname=vorname)
+    pdf_buffer = generate_credentials_pdf(
+        [{'nachname': nachname, 'vorname': vorname, 'username': username, 'password': password}],
+        'Lehrkraft')
+    return Response(
+        pdf_buffer.getvalue(),
+        mimetype='application/pdf',
+        headers={'Content-Disposition': f'attachment; filename=zugangsdaten_lehrkraft_{username}.pdf'}
+    )
 
 
 @app.route('/admin/lehrkraefte/aus-schueler', methods=['POST'])

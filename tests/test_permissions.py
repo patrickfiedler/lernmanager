@@ -250,16 +250,20 @@ def test_checkpoint_review_lists_only_own_classes(own, teacher):
     assert models.get_checkpoint_reviews(checkpoint_id=foreign['checkpoint_id']) == []
 
 
-def test_admin_creates_teacher_who_then_sees_her_class(app):
+def test_admin_creates_teacher_who_then_sees_her_class(app, monkeypatch):
     """End to end through the real login form, not a session shortcut."""
+    import app as app_module
+    password = 'bacado42'  # the real one is only in the PDF
+    monkeypatch.setattr(app_module, 'generate_password', lambda: password)
     app.config["WTF_CSRF_ENABLED"] = False
     klasse = models.create_klasse("7b")
     models.create_klasse("8a")
     admin = app.test_client()
     with admin.session_transaction() as sess:
         sess["admin_id"] = 1
-    resp = admin.post('/admin/lehrkraefte/neu', data={'username': 'kollegin'}, follow_redirects=True)
-    password = re.search(r'Startpasswort: (\w+)', resp.get_data(as_text=True)).group(1)
+    resp = admin.post('/admin/lehrkraefte/neu',
+                      data={'nachname': 'Bauer', 'vorname': 'Anna', 'username': 'kollegin'})
+    assert resp.mimetype == 'application/pdf'
     teacher_id = models.verify_admin('kollegin', password)['id']
     admin.post(f'/admin/lehrkraft/{teacher_id}/klassen', data={'klasse_ids': [klasse]})
 

@@ -7,14 +7,18 @@
 
 <div class="card mb-2">
     <div class="card-header">➕ Neue Lehrkraft</div>
-    <form method="POST" action="{{ url_for('admin_lehrkraft_neu') }}" class="flex gap-1" style="padding: 1rem;">
+    <form method="POST" action="{{ url_for('admin_lehrkraft_neu') }}" id="new-teacher" class="flex gap-1" style="padding: 1rem; flex-wrap: wrap;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <input type="text" name="username" class="form-control" placeholder="Benutzername" required style="flex: 1;">
+        <input type="text" name="nachname" class="form-control" placeholder="Nachname" required style="flex: 1;">
+        <input type="text" name="vorname" class="form-control" placeholder="Vorname" required style="flex: 1;">
+        <input type="text" name="username" class="form-control" placeholder="Benutzername (Vorschlag)" style="flex: 1;">
+        <button type="button" id="new-username" class="btn btn-secondary" title="Anderen Benutzernamen vorschlagen">🎲</button>
         <button type="submit" class="btn btn-primary">Anlegen</button>
     </form>
     <p class="text-muted" style="padding: 0 1rem 1rem; margin: 0; font-size: 0.875rem;">
-        Das Startpasswort erscheint einmal nach dem Anlegen. Die Lehrkraft ändert es selbst unter „Passwort ändern“.
-        Sie sieht nur die Klassen, die hier angehakt sind.
+        Der Benutzername kommt aus demselben Pool wie bei Schülern und lässt sich ändern.
+        Anlegen lädt die Zugangsdaten als PDF herunter (Seite danach neu laden, um die Lehrkraft unten zu sehen).
+        Die Lehrkraft ändert ihr Passwort selbst unter „Passwort ändern“. Sie sieht nur die Klassen, die hier angehakt sind.
     </p>
 </div>
 
@@ -35,7 +39,7 @@
 {% for t in teachers %}
 <div class="card mb-2">
     <div class="card-header flex flex-between flex-center">
-        <span>{{ t.username }}{% if not t.active %} <span class="badge badge-warning">deaktiviert</span>{% endif %}</span>
+        <span>{% if t.nachname %}{{ t.nachname }}, {{ t.vorname }} ({{ t.username }}){% else %}{{ t.username }}{% endif %}{% if not t.active %} <span class="badge badge-warning">deaktiviert</span>{% endif %}</span>
         <span class="flex gap-1">
             <form method="POST" action="{{ url_for('admin_lehrkraft_passwort', admin_id=t.id) }}" onsubmit="return confirm('Neues Passwort für {{ t.username }} erzeugen?');">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -65,4 +69,28 @@
 {% else %}
 <p class="text-muted">Noch keine Lehrkräfte angelegt.</p>
 {% endfor %}
+{% endblock %}
+
+{% block scripts %}
+// Suggest a pool login once both names are in; a username typed by hand is kept.
+(function () {
+    const form = document.getElementById('new-teacher');
+    const user = form.elements.username;
+    let typedByHand = false;
+    user.addEventListener('input', () => { typedByHand = user.value !== ''; });
+
+    async function suggest(force) {
+        const nachname = form.elements.nachname.value.trim();
+        const vorname = form.elements.vorname.value.trim();
+        if (!nachname || !vorname || (typedByHand && !force)) return;
+        const params = new URLSearchParams({nachname, vorname});
+        const resp = await fetch('{{ url_for("admin_lehrkraft_benutzername_vorschlag") }}?' + params);
+        if (!resp.ok) return;
+        user.value = (await resp.json()).username;
+        typedByHand = false;
+    }
+    form.elements.nachname.addEventListener('change', () => suggest(false));
+    form.elements.vorname.addEventListener('change', () => suggest(false));
+    document.getElementById('new-username').addEventListener('click', () => suggest(true));
+})();
 {% endblock %}
