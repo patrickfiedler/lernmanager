@@ -347,8 +347,8 @@ def test_admin_creates_teacher_who_then_sees_her_class(app, monkeypatch):
     password = 'bacado42'  # the real one is only in the PDF
     monkeypatch.setattr(app_module, 'generate_password', lambda: password)
     app.config["WTF_CSRF_ENABLED"] = False
-    klasse = models.create_klasse("7b")
-    models.create_klasse("8a")
+    klasse = models.create_klasse("Eigenklasse")
+    models.create_klasse("Fremdklasse")
     admin = app.test_client()
     with admin.session_transaction() as sess:
         sess["admin_id"] = 1
@@ -361,7 +361,7 @@ def test_admin_creates_teacher_who_then_sees_her_class(app, monkeypatch):
     colleague = app.test_client()
     colleague.post('/login', data={'username': 'kollegin', 'password': password})
     html = colleague.get('/admin/klassen').get_data(as_text=True)
-    assert '7b' in html and '8a' not in html
+    assert 'Eigenklasse' in html and 'Fremdklasse' not in html
     assert colleague.get('/admin/lehrkraefte').status_code == 404
 
     admin.post(f'/admin/lehrkraft/{teacher_id}/aktiv')
