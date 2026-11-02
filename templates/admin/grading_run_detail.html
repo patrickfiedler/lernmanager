@@ -43,7 +43,20 @@
 {# Slips come after the review: during it they sit below the students. #}
 {% set files_card %}
 {% if not whole_run %}
-<p class="text-muted mb-2">Dieser Lauf enthält auch Schüler anderer Klassen. Hier stehen nur deine; Notenliste und Zettel gibt es beim Admin.</p>
+<div class="card mb-2">
+    <div class="card-header">📄 Bewertungsdateien für deine Schüler</div>
+    <div style="padding: 0.75rem 1rem;">
+        <p class="text-muted" style="margin-top: 0;">Dieser Lauf enthält auch Schüler anderer Klassen. Die Dateien entstehen frisch aus deinen geprüften Punkten und enthalten nur deine Schüler.</p>
+        <div style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
+            {% for name, label in report_labels %}
+            <form method="POST" action="{{ url_for('admin_grading_run_own_report', run_id=run.id, filename=name) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-secondary btn-sm">{{ label }}</button>
+            </form>
+            {% endfor %}
+        </div>
+    </div>
+</div>
 {% elif reports or run.graded_at %}
 <div class="card mb-2">
     <div class="card-header">📄 Bewertungsdateien</div>

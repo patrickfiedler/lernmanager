@@ -1369,7 +1369,7 @@ def admin_grading_run_detail(run_id):
 
     return render_template(
         'admin/grading_run_detail.html', run=run, results=results, reviewable=reviewable,
-        open_results=open_results,
+        open_results=open_results, report_labels=models._GRADING_REPORT_LABELS,
         non_submitters=non_submitters, no_conflict=no_conflict, needs_decision=needs_decision,
         whole_run=whole_run, job_status=job_status,
         override_rate=models.get_grading_run_override_rate(run_id) if whole_run else None,
@@ -1661,6 +1661,23 @@ def download_grading_report(run_id, filename):
     if not os.path.isfile(os.path.join(reports_dir, filename)):
         abort(404)
     return send_from_directory(reports_dir, filename, as_attachment=True)
+
+
+@app.route('/admin/grading-run/<int:run_id>/eigene-datei/<filename>', methods=['POST'])
+@staff_required
+def admin_grading_run_own_report(run_id, filename):
+    """A report file with only this teacher's students, for a run shared with other
+    classes. Built fresh and handed over: reports/ holds the whole run."""
+    run = permissions.require_grading_run(run_id)
+    if not run or filename not in models._GRADING_REPORT_FILES:
+        abort(404)
+    content, error = models.render_grading_report_for(
+        run, permissions.visible_grading_results(run_id), filename)
+    if error:
+        flash(error, 'danger')
+        return redirect(url_for('admin_grading_run_detail', run_id=run_id))
+    return Response(content, mimetype='text/csv' if filename.endswith('.csv') else 'text/html',
+                    headers={'Content-Disposition': f'attachment; filename="{filename}"'})
 
 
 @app.route('/admin/grading/verlauf')

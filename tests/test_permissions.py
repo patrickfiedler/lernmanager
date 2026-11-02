@@ -302,6 +302,23 @@ def test_review_queue_stays_inside_her_classes(mixed_run):
     assert '/ 2' in client.get(f"/admin/grading-result/{results['eva']}/review").get_data(as_text=True)
 
 
+def test_teacher_gets_slips_with_only_her_students(mixed_run, monkeypatch):
+    client, run, results = mixed_run
+    sent = {}
+
+    def fake(payload):
+        sent.update(payload)
+        return {'files': {'print_slips.html': '<html>zettel</html>'}}, None
+
+    monkeypatch.setattr(models, '_request_grading_reports', fake)
+    monkeypatch.setattr(models.config, 'GRADING_SERVICE_URL', 'http://service')
+    resp = client.post(f'/admin/grading-run/{run}/eigene-datei/print_slips.html')
+    assert resp.status_code == 200 and b'zettel' in resp.data
+    assert {s['student_id'] for s in sent['students']} == {'eigen.emma', 'eigen.eva'}
+    assert 'job_id' not in sent
+    assert client.post(f'/admin/grading-run/{run}/eigene-datei/x.exe').status_code == 404
+
+
 def test_teacher_cannot_delete_a_run(mixed_run):
     client, run, _ = mixed_run
     assert client.post(f'/admin/grading-run/{run}/loeschen').status_code in (302, 403, 404)

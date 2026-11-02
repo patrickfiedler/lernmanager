@@ -7550,13 +7550,15 @@ def grading_reports_written_at(run_id):
     return datetime.fromtimestamp(os.path.getmtime(path)).strftime('%Y-%m-%dT%H:%M:%S')
 
 
-def reviewed_grading_students(run_id):
+def reviewed_grading_students(run_id, results=None):
     """The run's results as grading-with-llm POST /reports entries: per
     criterion the reviewed score (teacher_score, else llm_score) and the
     teacher's own slip text; names, Klasse and Seilbahn from the roster, same
     lookup as the upload manifest. Discarded/superseded results are left out
-    -- they are not what the student sees."""
-    results = [r for r in list_grading_results(run_id) if r['status'] not in ('discarded', 'superseded')]
+    -- they are not what the student sees. results: the rows to send, when the
+    caller may not see the whole run (permissions.visible_grading_results)."""
+    results = [r for r in (list_grading_results(run_id) if results is None else results)
+               if r['status'] not in ('discarded', 'superseded')]
     roster = {m['login']: m for m in match_netzwerk_logins([r['netzwerk_id'] for r in results])}
     students = []
     for r in results:
@@ -7602,6 +7604,25 @@ def _request_grading_reports(payload):
         return None, f'Bewertungsdienst hat abgelehnt (HTTP {e.code}).'
     except (urllib.error.URLError, OSError, TimeoutError, ValueError):
         return None, 'Bewertungsdienst nicht erreichbar.'
+
+
+def render_grading_report_for(run, results, filename):
+    """One report file covering only `results`, for a teacher in a run shared
+    with other classes. Returned, never written to reports/: those files cover
+    the whole run. No job_id, so it teaches the service's result store nothing
+    -- the release already does that. Returns (content, None) or (None, why)."""
+    if not config.GRADING_SERVICE_URL:
+        return None, 'Bewertungsdienst ist nicht konfiguriert.'
+    students = reviewed_grading_students(run['id'], results)
+    if not students:
+        return None, 'Keine Ergebnisse, aus denen Dateien entstehen könnten.'
+    body, error = _request_grading_reports({'rubric': run['rubric'], 'students': students})
+    if error:
+        return None, error
+    content = (body.get('files') or {}).get(filename)
+    if not isinstance(content, str):
+        return None, 'Bewertungsdienst hat diese Datei nicht geliefert.'
+    return content, None
 
 
 def regenerate_grading_reports(run_id):
