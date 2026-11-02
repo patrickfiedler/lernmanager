@@ -189,4 +189,16 @@ document.querySelectorAll('.criterion-row').forEach(row => {
     });
     updateRow(row);
 });
+
+// ← Zurück and ← Zur Übersicht are plain links: without this they drop what was typed.
+let unsavedChanges = false;
+const reviewForm = document.getElementById('review-form');
+reviewForm.addEventListener('input', () => { unsavedChanges = true; });
+reviewForm.addEventListener('submit', () => { unsavedChanges = false; });
+window.addEventListener('beforeunload', (event) => {
+    if (unsavedChanges) {
+        event.preventDefault();
+        event.returnValue = '';
+    }
+});
 {% endblock %}
