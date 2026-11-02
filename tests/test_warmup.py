@@ -494,6 +494,65 @@ def test_teacher_switches_demo_practice_on_and_off(app, client, as_admin):
     assert models.get_student(student_id)["demo_practice"] == 0
 
 
+# Nach Checkpoint
+
+def _practice_client(app, student_id):
+    client = app.test_client()
+    with client.session_transaction() as sess:
+        sess["student_id"] = student_id
+    return client
+
+
+def _embedded_questions(html):
+    return json.loads(html.split("const questions = ", 1)[1].split(";\n", 1)[0])
+
+
 def test_cooldown_is_at_least_two_weeks():
     import config
     assert config.CHECKPOINT_PRACTICE_DELAY_DAYS >= 14
+
+
+def test_practice_one_checkpoint_all_questions_in_order(app, db):
+    student_id = models.create_student("Test", "Schüler", "cpmode", "pw123")
+    task_id, subtask_id = _checkpoint(student_id)
+    _finish_checkpoint(student_id, task_id, subtask_id)
+    key = _practice_key(student_id)
+
+    html = _practice_client(app, student_id).get(
+        f"/schueler/ueben?mode=checkpoint&checkpoint={key}").get_data(as_text=True)
+    assert [q["question_index"] for q in _embedded_questions(html)] == \
+        list(range(len(MIXED_QUIZ["questions"])))
+
+
+def _practice_key(student_id):
+    from app import _practice_checkpoints
+    pool = models.get_warmup_question_pool(student_id, include_short_answer=True)
+    return _practice_checkpoints(pool)[0]["key"]
+
+
+def test_checkpoint_tab_before_picking_shows_no_questions(app, db):
+    student_id = models.create_student("Test", "Schüler", "cppick", "pw123")
+    task_id, subtask_id = _checkpoint(student_id)
+    _finish_checkpoint(student_id, task_id, subtask_id)
+    html = _practice_client(app, student_id).get(
+        "/schueler/ueben?mode=checkpoint").get_data(as_text=True)
+    assert "Checkpoint wählen" in html
+    assert 'id="question-card"' not in html
+
+
+def test_checkpoint_in_cooldown_is_not_offered(app, db):
+    student_id = models.create_student("Test", "Schüler", "cpcool", "pw123")
+    task_id, subtask_id = _checkpoint(student_id)
+    _finish_checkpoint(student_id, task_id, subtask_id, timestamp=None)
+    assert models.get_warmup_question_pool(student_id, include_short_answer=True) == []
+
+
+def test_two_themen_of_one_name_get_separate_keys():
+    from app import _practice_checkpoints
+    def item(subtask_id, task_id):
+        return {"subtask_id": subtask_id, "task_id": task_id, "topic_name": "Redox",
+                "question_index": 0,
+                "checkpoint": {"beschreibung": "### CP", "reihenfolge": 0}}
+    keys = [c["key"] for c in _practice_checkpoints([item(1, 1), item(2, 2)])]
+    assert keys == ["redox-1", "redox-2"]
+

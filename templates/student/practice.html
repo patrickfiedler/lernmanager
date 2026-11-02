@@ -16,6 +16,8 @@
        class="btn {% if mode == 'schwaechen' %}btn-primary{% else %}btn-secondary{% endif %}">Schwächen</a>
     <a href="{{ url_for('student_practice', mode='thema') }}"
        class="btn {% if mode == 'thema' %}btn-primary{% else %}btn-secondary{% endif %}">Nach Thema</a>
+    <a href="{{ url_for('student_practice', mode='checkpoint') }}"
+       class="btn {% if mode == 'checkpoint' %}btn-primary{% else %}btn-secondary{% endif %}">Nach Checkpoint</a>
 </div>
 
 {% if practice_sessions_today >= 2 %}
@@ -47,6 +49,31 @@
 </div>
 {% endif %}
 
+{% if mode == 'checkpoint' %}
+<div class="card mb-2" style="padding: 0.75rem;">
+    {% if checkpoints %}
+    <form method="GET" action="{{ url_for('student_practice') }}" class="flex gap-1 flex-center">
+        <input type="hidden" name="mode" value="checkpoint">
+        <select name="checkpoint" class="form-control" onchange="this.form.submit()" style="max-width: 400px;">
+            <option value="">Checkpoint wählen...</option>
+            {% for group in checkpoints|groupby('topic_name') %}
+            <optgroup label="{{ group.grouper }}">
+                {% for c in group.list %}
+                <option value="{{ c.key }}" {% if selected_checkpoint and selected_checkpoint.key == c.key %}selected{% endif %}>{{ c.titel }} ({{ c.questions|length }} {{ 'Frage' if c.questions|length == 1 else 'Fragen' }})</option>
+                {% endfor %}
+            </optgroup>
+            {% endfor %}
+        </select>
+    </form>
+    {% endif %}
+    <p class="text-muted mb-0" style="margin-top: 0.5rem;">
+        Ein Checkpoint erscheint hier {{ delay_days }} Tage nach deinem Abschluss. Fragen,
+        die noch offen sind oder nicht zählen, fehlen hier.
+    </p>
+</div>
+{% endif %}
+
+{% if questions_json != '[]' %}
 <div id="practice-container">
     <!-- Score -->
     <div class="flex flex-between mb-1">
@@ -72,11 +99,12 @@
         <h2 class="text-center" id="summary-title"></h2>
         <p class="text-center" style="font-size: 1.25rem;" id="summary-score"></p>
         <div class="text-center mt-2 flex gap-1" style="justify-content: center;">
-            <a href="{{ url_for('student_practice', mode=mode, thema=selected_topic or '') }}" class="btn btn-primary">🔄 Nochmal</a>
+            <a href="{{ url_for('student_practice', mode=mode, thema=selected_topic or '', checkpoint=selected_checkpoint.key if selected_checkpoint else '') }}" class="btn btn-primary">🔄 Nochmal</a>
             <a href="{{ url_for('student_dashboard') }}" class="btn btn-secondary">Zum Dashboard →</a>
         </div>
     </div>
 </div>
+{% endif %}
 {% endblock %}
 
 {% block scripts %}
@@ -437,6 +465,6 @@
         return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     }
 
-    renderQuestion();
+    if (questions.length) renderQuestion();     // "Nach Checkpoint" before anything is picked
 })();
 {% endblock %}

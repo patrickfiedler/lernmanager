@@ -8300,6 +8300,30 @@ def student_warmup_finish():
     return jsonify({'ok': True})
 
 
+def _practice_checkpoints(pool):
+    """The checkpoints in a practice pool, in Thema order, each with its questions in
+    their order on the checkpoint. `key` is slug + running number: unique even for two
+    Themen of one name, and no subtask id in a student URL."""
+    groups = {}
+    for item in pool:
+        if 'checkpoint' in item:
+            groups.setdefault(item['subtask_id'], []).append(item)
+    ordered = sorted(groups.values(), key=lambda items: (
+        items[0]['topic_name'], items[0]['task_id'], items[0]['checkpoint']['reihenfolge']))
+
+    seen_per_slug, checkpoints = {}, []
+    for items in ordered:
+        slug = slugify(items[0]['topic_name'])
+        seen_per_slug[slug] = seen_per_slug.get(slug, 0) + 1
+        checkpoints.append({
+            'key': f'{slug}-{seen_per_slug[slug]}',
+            'topic_name': items[0]['topic_name'],
+            'titel': aufgabe_titel(items[0]['checkpoint']['beschreibung']),
+            'questions': sorted(items, key=lambda item: item['question_index']),
+        })
+    return checkpoints
+
+
 @app.route('/schueler/ueben')
 @student_required
 def student_practice():
@@ -8317,19 +8341,26 @@ def student_practice():
     # Collect unique topic names for the topic selector
     topic_names = sorted(set(q['topic_name'] for q in pool))
 
+    checkpoints = _practice_checkpoints(pool)
+    selected_checkpoint = next((c for c in checkpoints
+                                if c['key'] == request.args.get('checkpoint')), None)
+
     # Filter by topic if requested
     if mode == 'thema' and topic_slug:
         pool = [q for q in pool if slugify(q['topic_name']) == topic_slug]
 
     # Select questions based on mode. Thema mode is deliberate focused review,
     # so it gets longer sessions than the quick-dip random/schwaechen modes.
-    if mode == 'schwaechen':
+    if mode == 'checkpoint':
+        # All of it, in the checkpoint's own order -- no selection and no session limit.
+        questions = selected_checkpoint['questions'] if selected_checkpoint else []
+    elif mode == 'schwaechen':
         questions = models.select_warmup_questions(student_id, pool, difficulty='hard', count=5, respect_intervals=False)
     else:
         count = 10 if mode == 'thema' and topic_slug else 5
         questions = models.select_warmup_questions(student_id, pool, difficulty='mixed', count=count, respect_intervals=False)
 
-    if not questions:
+    if not questions and mode != 'checkpoint':
         flash('Keine passenden Fragen gefunden.', 'info')
         return redirect(url_for('student_practice', mode='random'))
 
@@ -8338,6 +8369,8 @@ def student_practice():
     return render_template('student/practice.html', student=student,
                            questions_json=questions_json, mode=mode,
                            topic_names=topic_names, selected_topic=topic_slug,
+                           checkpoints=checkpoints, selected_checkpoint=selected_checkpoint,
+                           delay_days=config.CHECKPOINT_PRACTICE_DELAY_DAYS,
                            pool_size=len(pool), shown_count=len(questions),
                            practice_sessions_today=practice_sessions_today,
                            llm_enabled=config.LLM_ENABLED)

@@ -8379,7 +8379,7 @@ def get_grading_run_override_rate(run_id):
 
 def _quiz_json_to_pool_entries(task_id, subtask_id, quiz_json, topic_name, completed_at=None,
                                student_path=None, fach=None, allow_short_answer=False,
-                               only_indices=None):
+                               only_indices=None, checkpoint=None):
     """Parse one quiz_json blob into warmup pool entries, filtering out
     question types too slow for a quick warm-up (short_answer, long_answer)
     and questions tagged for a path above the student's own.
@@ -8390,6 +8390,9 @@ def _quiz_json_to_pool_entries(task_id, subtask_id, quiz_json, topic_name, compl
 
     only_indices, if given, admits just those question positions (checkpoints:
     the questions whose score is final, see get_warmup_question_pool).
+
+    checkpoint, if given, is the source subtask row: its title and place in the Thema
+    go on each entry for the practice mode that picks one checkpoint.
 
     ordering and matching stay in: both grade deterministically in
     quiz_grading.py, so neither costs an LLM call or a noticeable wait."""
@@ -8421,6 +8424,9 @@ def _quiz_json_to_pool_entries(task_id, subtask_id, quiz_json, topic_name, compl
         }
         if completed_at is not None:
             entry['completed_at'] = completed_at
+        if checkpoint is not None:
+            entry['checkpoint'] = {'beschreibung': checkpoint['beschreibung'],
+                                   'reihenfolge': checkpoint['reihenfolge']}
         entries.append(entry)
     return entries
 
@@ -8513,6 +8519,7 @@ def get_warmup_question_pool(student_id, include_short_answer=False):
                           ).strftime('%Y-%m-%d %H:%M:%S')
         finished_checkpoints = conn.execute('''
             SELECT sub.id as subtask_id, sub.task_id, sub.quiz_json,
+                   sub.beschreibung, sub.reihenfolge,
                    t.name as topic_name, t.fach, ca.question_scores_json
             FROM checkpoint_attempt ca
             JOIN subtask sub ON sub.id = ca.checkpoint_id
@@ -8551,7 +8558,8 @@ def get_warmup_question_pool(student_id, include_short_answer=False):
             pool.extend(_quiz_json_to_pool_entries(
                 sub['task_id'], sub['subtask_id'], sub['quiz_json'], sub['topic_name'],
                 student_path=student_path, fach=sub['fach'],
-                allow_short_answer=include_short_answer, only_indices=settled))
+                allow_short_answer=include_short_answer, only_indices=settled,
+                checkpoint=sub))
 
         # 3. Class-unlocked topics → questions for students in that class,
         #    regardless of whether the topic was ever assigned to the student.
@@ -8609,14 +8617,15 @@ def get_warmup_question_pool(student_id, include_short_answer=False):
             seen = {(e['task_id'], e['subtask_id'], e['question_index']) for e in pool}
             assigned_quizzes = conn.execute('''
                 SELECT t.id as task_id, NULL as subtask_id, t.quiz_json,
-                       t.name as topic_name, t.fach, NULL as checkpoint_type
+                       t.name as topic_name, t.fach, NULL as checkpoint_type,
+                       NULL as beschreibung, NULL as reihenfolge
                 FROM student_task st
                 JOIN task t ON t.id = st.task_id
                 WHERE st.student_id = ?
                   AND t.quiz_json IS NOT NULL AND t.quiz_json != ''
                 UNION ALL
                 SELECT sub.task_id, sub.id, sub.quiz_json,
-                       t.name, t.fach, sub.checkpoint_type
+                       t.name, t.fach, sub.checkpoint_type, sub.beschreibung, sub.reihenfolge
                 FROM student_task st
                 JOIN task t ON t.id = st.task_id
                 JOIN subtask sub ON sub.task_id = t.id
@@ -8628,7 +8637,8 @@ def get_warmup_question_pool(student_id, include_short_answer=False):
                 entries = _quiz_json_to_pool_entries(
                     q['task_id'], q['subtask_id'], q['quiz_json'], q['topic_name'],
                     student_path=student_path, fach=q['fach'],
-                    allow_short_answer=include_short_answer and q['checkpoint_type'] is not None)
+                    allow_short_answer=include_short_answer and q['checkpoint_type'] is not None,
+                    checkpoint=q if q['checkpoint_type'] else None)
                 pool.extend(e for e in entries
                             if (e['task_id'], e['subtask_id'], e['question_index']) not in seen)
 
