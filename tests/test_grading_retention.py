@@ -3,6 +3,8 @@ import os
 import re
 from unittest.mock import patch
 
+import pytest
+
 import config
 import models
 
@@ -11,6 +13,11 @@ def _csrf_token(client):
     resp = client.get('/admin')
     match = re.search(r'name="csrf-token" content="([^"]+)"', resp.get_data(as_text=True))
     return match.group(1)
+
+
+@pytest.fixture(autouse=True)
+def _no_keep_days(monkeypatch):
+    monkeypatch.setattr(config, 'GRADING_MEDIA_KEEP_DAYS', 0)
 
 
 def _setup(job_id="job-ret"):

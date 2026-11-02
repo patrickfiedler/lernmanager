@@ -15,11 +15,19 @@
     <h1>
         {% if result.student_id %}{{ result.nachname }}, {{ result.vorname }}{% else %}{{ result.netzwerk_id }} (nicht zugeordnet){% endif %}
         {% if position %}<span class="text-muted" style="font-size: 1rem;">{{ position }} / {{ queue_total }}</span>{% endif %}
-        {% if remaining_flagged %}<span class="badge badge-warning">{{ remaining_flagged }} zur Prüfung markiert</span>{% endif %}
+        {% if remaining_open %}<span class="badge badge-warning">noch {{ remaining_open }} offen</span>{% else %}<span class="badge badge-success">alle geprüft</span>{% endif %}
     </h1>
     <a href="{{ url_for('admin_grading_run_detail', run_id=run.id) }}" class="btn btn-secondary">← Zur Übersicht</a>
 </div>
 <p class="text-muted" style="margin-top: -0.5rem;">{% if run.klasse_name %}{{ run.klasse_name }} · {% endif %}{{ run.rubric }} · {{ result.document_file or '—' }}</p>
+
+{% if queue_total %}<progress value="{{ queue_total - remaining_open }}" max="{{ queue_total }}" style="width: 100%;" class="mb-2"></progress>{% endif %}
+
+<p class="mb-2" style="font-size: 0.9rem;">
+    {% if hints.unconfirmed %}<span style="border-left: 3px solid #dc2626; padding-left: 0.4rem;">⚠️ {{ hints.unconfirmed }} Kriterium/Kriterien musst du bestätigen</span>{% endif %}
+    {% if hints.zero %}<span style="border-left: 3px solid #f59e0b; padding-left: 0.4rem; margin-left: 0.5rem;">{{ hints.zero }} mit 0 Punkten: genauer ansehen</span>{% endif %}
+    {% if not hints.unconfirmed and not hints.zero %}<span style="color: #166534;">👍 Keine Auffälligkeiten, kurzer Blick genügt</span>{% endif %}
+</p>
 
 {% if supersede_conflict %}
 <div class="card mb-2" style="border: 1px solid #f59e0b;">
@@ -49,9 +57,9 @@
             <div class="card-header">🖼️ Bilder ({{ result.media|selectattr('graded')|list|length }} an die KI gegeben)</div>
             <div style="padding: 0.75rem; display: flex; flex-wrap: wrap; gap: 0.5rem;">
                 {% for m in result.media %}
-                <a href="{{ url_for('download_grading_media', relpath=m.file) }}" target="_blank" style="display: block;">
+                <a href="{{ url_for('download_grading_media', relpath=m.file) }}" target="_blank" class="media-thumb" style="display: block;">
                     <img src="{{ url_for('download_grading_media', relpath=m.file) }}" alt="{{ m.source }}"
-                         style="width: 100px; height: 100px; object-fit: cover; border-radius: 4px; border: 1px solid #d1d5db;">
+                         style="width: 120px; height: 120px; object-fit: contain; background: #f3f4f6; border-radius: 4px; border: 1px solid #d1d5db;">
                     <small class="text-muted" style="display: block; text-align: center;">{{ m.source }}</small>
                 </a>
                 {% else %}
@@ -135,14 +143,31 @@
             </div>
             <div class="flex gap-1">
                 <button type="submit" name="action" value="save" class="btn btn-secondary">Speichern</button>
-                <button type="submit" name="action" value="save_next" class="btn btn-primary">Speichern & Weiter →</button>
+                <button type="submit" name="action" value="save_next" class="btn btn-primary">Geprüft, weiter →</button>
             </div>
         </div>
     </form>
 </div>
+<dialog id="media-dialog" style="max-width: 95vw; max-height: 95vh; padding: 0.5rem; border: none; border-radius: 6px;">
+    <img id="media-dialog-img" alt="" style="max-width: 90vw; max-height: 85vh; display: block; margin: 0 auto;">
+    <form method="dialog" style="text-align: right; margin-top: 0.5rem;"><button class="btn btn-secondary btn-sm">Schließen (Esc)</button></form>
+</dialog>
 {% endblock %}
 
 {% block scripts %}
+// Full view in place: a new tab would lose the place in the queue.
+const mediaDialog = document.getElementById('media-dialog');
+document.querySelectorAll('.media-thumb').forEach(link => {
+    link.addEventListener('click', event => {
+        event.preventDefault();
+        document.getElementById('media-dialog-img').src = link.href;
+        mediaDialog.showModal();
+    });
+});
+mediaDialog.addEventListener('click', event => {
+    if (event.target === mediaDialog) mediaDialog.close();
+});
+
 const textbausteine = {{ (run.textbausteine or {})|tojson }};
 
 // Same lookup as grading-with-llm's print_slip_generator._pick_phrase: exact

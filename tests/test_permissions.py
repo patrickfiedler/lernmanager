@@ -302,9 +302,38 @@ def test_review_queue_stays_inside_her_classes(mixed_run):
     assert '/ 2' in client.get(f"/admin/grading-result/{results['eva']}/review").get_data(as_text=True)
 
 
+def test_teacher_cannot_delete_a_run(mixed_run):
+    client, run, _ = mixed_run
+    assert client.post(f'/admin/grading-run/{run}/loeschen').status_code in (302, 403, 404)
+    assert models.get_grading_run(run)
+
+
+def test_audit_log_and_undo_stay_inside_her_classes(mixed_run, monkeypatch):
+    monkeypatch.setattr(models, 'regenerate_grading_reports', lambda run_id: (True, 'ok'))
+    client, run, results = mixed_run
+    with models.grading_audit(None, 'discard', [results['fritz'], results['emma']]):
+        models.discard_grading_result(results['fritz'])
+        models.discard_grading_result(results['emma'])
+    rows = {r['grading_result_id']: r for r in models.list_grading_audit(run)}
+
+    html = client.get(f'/admin/grading/verlauf?run={run}').get_data(as_text=True)
+    assert 'Emma' in html and 'Fritz' not in html
+    resp = client.post('/admin/grading/verlauf/rueckgaengig',
+                       data={'audit_id': rows[results['fritz']]['id']})
+    assert resp.status_code == 404
+
+    client.post('/admin/grading/verlauf/rueckgaengig',
+                data={'audit_id': rows[results['emma']]['id'], 'scope': 'batch'})
+    status = {r['id']: r['status'] for r in models.list_grading_results(run)}
+    assert status[results['emma']] == 'imported'
+    assert status[results['fritz']] == 'discarded'
+
+
 def test_bulk_release_leaves_other_classes_alone(mixed_run, monkeypatch):
     monkeypatch.setattr(models, 'regenerate_grading_reports', lambda run_id: (True, 'ok'))
     client, run, results = mixed_run
+    for name in ('emma', 'eva'):
+        client.post(f"/admin/grading-result/{results[name]}/review", data={'action': 'save'})
     client.post(f'/admin/grading-run/{run}/release-bulk')
     status = {r['id']: r['status'] for r in models.list_grading_results(run)}
     assert status[results['emma']] == status[results['eva']] == 'active'

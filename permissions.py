@@ -112,11 +112,21 @@ def _grading_run_for_teacher(run, results):
 
 
 def visible_grading_runs():
-    runs = models.list_grading_runs()
+    scoped = ((run, visible_grading_results(run['id'])) for run in models.list_grading_runs())
+    return [dict(run if is_admin() else _grading_run_for_teacher(run, results),
+                 open_count=sum(1 for r in results if models.grading_result_is_open(r)))
+            for run, results in scoped if results or is_admin()]
+
+
+def visible_grading_audit(run_id=None):
+    """Log rows of the given run, or of all runs. A teacher sees the rows about
+    her students, the admin everything -- including deleted runs."""
+    rows = models.list_grading_audit(run_id)
     if is_admin():
-        return runs
-    scoped = ((run, visible_grading_results(run['id'])) for run in runs)
-    return [_grading_run_for_teacher(run, results) for run, results in scoped if results]
+        return rows
+    seen = {r['id'] for run in {row['grading_run_id'] for row in rows}
+            for r in visible_grading_results(run)}
+    return [row for row in rows if row['grading_result_id'] in seen]
 
 
 def require_grading_run(run_id):

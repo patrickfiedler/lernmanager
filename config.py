@@ -187,3 +187,6 @@ LLM_ENABLED = bool(LLM_API_KEY)
 GRADING_SERVICE_URL = os.environ.get('GRADING_SERVICE_URL', '')
 GRADING_SERVICE_TOKEN = os.environ.get('GRADING_SERVICE_TOKEN', '')
 GRADING_SERVICE_CALLBACK_SECRET = os.environ.get('GRADING_SERVICE_CALLBACK_SECRET', '')
+# Days a settled grading run keeps its media, so a decision can still be undone
+# with the student's work in view (models.maybe_auto_purge_grading_run).
+GRADING_MEDIA_KEEP_DAYS = 14

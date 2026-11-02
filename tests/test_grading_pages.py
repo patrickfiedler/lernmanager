@@ -69,6 +69,10 @@ def test_page_a_release_bulk_action(app, client, as_admin):
                                               [{"name": "X", "score": 1, "max_score": 1}])
     token = _csrf_token(as_admin)
 
+    as_admin.post(f'/admin/grading-run/{run_id}/release-bulk', data={"csrf_token": token})
+    assert models.get_grading_result(result_id)["status"] == "imported"  # nobody looked yet
+
+    models.save_grading_result_review(result_id, models.get_grading_result(result_id)["criteria"])
     resp = as_admin.post(f'/admin/grading-run/{run_id}/release-bulk',
                           data={"csrf_token": token}, follow_redirects=True)
     assert resp.status_code == 200
@@ -80,8 +84,9 @@ def test_release_bulk_sends_corrections_to_the_service(app, client, as_admin, mo
     grading service's result store (grading-with-llm request 2026-09-18)."""
     klasse_id, task_id, run_id = _setup()
     s1 = _student("Mueller", "Anna", "mueller.anna")
-    models.create_grading_result(run_id, task_id, s1, "mueller.anna",
-                                 [{"name": "X", "score": 1, "max_score": 1}])
+    r1 = models.create_grading_result(run_id, task_id, s1, "mueller.anna",
+                                      [{"name": "X", "score": 1, "max_score": 1}])
+    models.save_grading_result_review(r1, models.get_grading_result(r1)["criteria"])
     synced = []
     monkeypatch.setattr(models, "regenerate_grading_reports",
                         lambda rid: synced.append(rid) or (True, "ok"))

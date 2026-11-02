@@ -6,7 +6,7 @@
 <div class="flex flex-between flex-center mb-2">
     <h1>🎯 Bewertungsläufe</h1>
     {% if is_admin %}
-    <a href="{{ url_for('admin_grading_upload') }}" class="btn btn-primary">📤 Neue Bewertung hochladen</a>
+    <a href="{{ url_for('admin_grading_upload') }}" class="btn btn-secondary">📤 Neue Bewertung hochladen</a>
     {% endif %}
 </div>
 
@@ -25,11 +25,10 @@
                     <th>Name</th>
                     <th>Thema</th>
                     <th>Klasse</th>
-                    <th>Suchmuster</th>
-                    <th>Anbieter</th>
-                    <th>Importiert</th>
+                    <th>Offen</th>
                     <th>Schüler</th>
-                    <th>Markiert</th>
+                    <th>Importiert</th>
+                    {% if is_admin %}<th>Suchmuster</th><th>Anbieter</th>{% endif %}
                 </tr>
             </thead>
             <tbody>
@@ -38,11 +37,13 @@
                     <td><a href="{{ url_for('admin_grading_run_detail', run_id=run.id) }}">{{ run.display_name }}</a></td>
                     <td>{{ run.task_name }}</td>
                     <td>{{ run.klasse_name or run.collection.get('Class') or '— (mehrere Klassen)' }}</td>
+                    <td>{% if run.open_count %}<a href="{{ url_for('admin_grading_run_detail', run_id=run.id) }}" class="btn btn-sm btn-primary">{{ run.open_count }} prüfen</a>{% else %}✅{% endif %}</td>
+                    <td>{{ run.total_students }}</td>
+                    <td>{{ run.imported_at }}</td>
+                    {% if is_admin %}
                     <td>{% if run.collection.get('Pattern(s)') %}<code>{{ run.collection['Pattern(s)'] }}</code>{% else %}—{% endif %}</td>
                     <td>{{ run.provider }}{% if run.model %} · {{ run.model }}{% endif %}</td>
-                    <td>{{ run.imported_at }}</td>
-                    <td>{{ run.total_students }}</td>
-                    <td>{{ run.flagged_count }}</td>
+                    {% endif %}
                 </tr>
                 {% endfor %}
             </tbody>
@@ -50,4 +51,5 @@
     </div>
 </div>
 {% endif %}
+<p class="mt-2"><a href="{{ url_for('admin_grading_audit') }}">🕓 Gesamter Verlauf</a></p>
 {% endblock %}

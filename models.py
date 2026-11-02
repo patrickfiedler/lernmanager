@@ -3,6 +3,7 @@ import os
 import re
 import sys
 from hashlib import sha256
+import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from urllib.parse import urlparse
@@ -824,6 +825,27 @@ def init_db():
                 FOREIGN KEY (released_by) REFERENCES admin(id),
                 FOREIGN KEY (superseded_by_id) REFERENCES grading_result(id)
             );
+
+            -- Who decided what, with the state before/after, so it can be undone.
+            -- No foreign keys: the log outlives a deleted run (migrate_072).
+            CREATE TABLE IF NOT EXISTS grading_audit (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                at TEXT NOT NULL,
+                admin_id INTEGER,
+                actor TEXT,
+                action TEXT NOT NULL,
+                batch_id TEXT NOT NULL,
+                grading_run_id INTEGER NOT NULL,
+                run_name TEXT,
+                grading_result_id INTEGER,
+                student_id INTEGER,
+                summary TEXT,
+                before_json TEXT,
+                after_json TEXT,
+                undone_by INTEGER
+            );
+            CREATE INDEX IF NOT EXISTS idx_grading_audit_run ON grading_audit(grading_run_id);
+            CREATE INDEX IF NOT EXISTS idx_grading_audit_student ON grading_audit(student_id);
 
             CREATE INDEX IF NOT EXISTS idx_grading_result_run ON grading_result(grading_run_id);
             CREATE INDEX IF NOT EXISTS idx_grading_result_student ON grading_result(student_id);
@@ -1733,6 +1755,7 @@ def _delete_student_rows(conn, student_id):
     conn.execute("DELETE FROM student_artifact_file WHERE student_id = ?", (student_id,))
     conn.execute("DELETE FROM artifact_gate_attempt WHERE student_id = ?", (student_id,))
     conn.execute("DELETE FROM grading_result WHERE student_id = ?", (student_id,))
+    conn.execute("DELETE FROM grading_audit WHERE student_id = ?", (student_id,))
     conn.execute("DELETE FROM student WHERE id = ?", (student_id,))
     return disk_filenames
 
@@ -7201,29 +7224,58 @@ def purge_grading_run_media(run_id):
     with db_session() as conn:
         conn.execute("UPDATE grading_result SET document_text = NULL WHERE grading_run_id = ?", (run_id,))
 
-    if config.GRADING_SERVICE_URL and run.get('job_id'):
-        req = urllib.request.Request(
-            f"{config.GRADING_SERVICE_URL}/jobs/{run['job_id']}",
-            method='DELETE',
-            headers={'Authorization': f"Bearer {config.GRADING_SERVICE_TOKEN}"},
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=15):
-                pass
-        except (urllib.error.URLError, OSError, TimeoutError):
-            pass  # already gone, or service unreachable -- not fatal, see docstring
-
+    _delete_grading_job(run.get('job_id'))  # failure is not fatal here, see docstring
     mark_grading_run_media_purged(run_id)
 
 
+def _delete_grading_job(job_id):
+    """Drop the job and its files on the grading service. False if the service
+    could not be reached (or refused); nothing to do counts as done."""
+    if not config.GRADING_SERVICE_URL or not job_id:
+        return True
+    req = urllib.request.Request(
+        f"{config.GRADING_SERVICE_URL}/jobs/{job_id}",
+        method='DELETE',
+        headers={'Authorization': f"Bearer {config.GRADING_SERVICE_TOKEN}"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15):
+            return True
+    except urllib.error.HTTPError as e:
+        return e.code == 404  # already gone
+    except (urllib.error.URLError, OSError, TimeoutError):
+        return False
+
+
+def _grading_run_last_decision(run):
+    """When the last decision on this run fell, as a datetime."""
+    with db_session() as conn:
+        row = conn.execute("SELECT MAX(at) AS at FROM grading_audit WHERE grading_run_id = ?",
+                           (run['id'],)).fetchone()
+    stamp = (row['at'] or run.get('imported_at') or '')[:19].replace(' ', 'T')
+    try:
+        return datetime.fromisoformat(stamp)
+    except ValueError:
+        return datetime.min
+
+
 def maybe_auto_purge_grading_run(run_id):
-    """Call after any action that can settle a run (release/discard) --
-    purges media immediately once nothing is left to review, rather than
-    waiting for a separate sweep job (spec §7 calls a time-based sweep a
-    'backstop', not the primary mechanism)."""
+    """Purges the media of a settled run once config.GRADING_MEDIA_KEEP_DAYS have
+    passed since its last decision -- undoing a decision is worth little if the
+    work it was about is already gone. Called after release/discard and, for runs
+    nobody touches again, from purge_settled_grading_runs()."""
     run = get_grading_run(run_id)
-    if run and not run.get('media_purged_at') and is_grading_run_settled(run_id):
+    if not run or run.get('media_purged_at') or not is_grading_run_settled(run_id):
+        return
+    keep = timedelta(days=config.GRADING_MEDIA_KEEP_DAYS)
+    if datetime.now() - _grading_run_last_decision(run) >= keep:
         purge_grading_run_media(run_id)
+
+
+def purge_settled_grading_runs():
+    """Sweep for the delay above. There is no scheduler; the run list calls this."""
+    for run in list_grading_runs():
+        maybe_auto_purge_grading_run(run['id'])
 
 
 def get_grading_run_by_job_id(job_id):
@@ -7532,6 +7584,26 @@ def reviewed_grading_students(run_id):
     return students
 
 
+def _request_grading_reports(payload):
+    """POST /reports. Returns (response body, None) or (None, why it failed)."""
+    req = urllib.request.Request(
+        f"{config.GRADING_SERVICE_URL}/reports",
+        data=json.dumps(payload).encode('utf-8'),
+        method='POST',
+        headers={
+            'Authorization': f'Bearer {config.GRADING_SERVICE_TOKEN}',
+            'Content-Type': 'application/json',
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            return json.loads(resp.read()), None
+    except urllib.error.HTTPError as e:
+        return None, f'Bewertungsdienst hat abgelehnt (HTTP {e.code}).'
+    except (urllib.error.URLError, OSError, TimeoutError, ValueError):
+        return None, 'Bewertungsdienst nicht erreichbar.'
+
+
 def regenerate_grading_reports(run_id):
     """
     Rebuild this run's report files (print slips, grades.csv, summary.md) from
@@ -7557,24 +7629,11 @@ def regenerate_grading_reports(run_id):
     if not students:
         return False, 'Keine Ergebnisse, aus denen Dateien entstehen könnten.'
 
-    req = urllib.request.Request(
-        f"{config.GRADING_SERVICE_URL}/reports",
-        data=json.dumps({'rubric': run['rubric'], 'job_id': run['job_id'],
-                         'students': students}).encode('utf-8'),
-        method='POST',
-        headers={
-            'Authorization': f'Bearer {config.GRADING_SERVICE_TOKEN}',
-            'Content-Type': 'application/json',
-        },
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            body = json.loads(resp.read())
-        files = body.get('files') or {}
-    except urllib.error.HTTPError as e:
-        return False, f'Bewertungsdienst hat abgelehnt (HTTP {e.code}) -- Dateien unverändert.'
-    except (urllib.error.URLError, OSError, TimeoutError, ValueError):
-        return False, 'Bewertungsdienst nicht erreichbar -- Dateien unverändert.'
+    body, error = _request_grading_reports({'rubric': run['rubric'], 'job_id': run['job_id'],
+                                            'students': students})
+    if error:
+        return False, f'{error} Dateien unverändert.'
+    files = body.get('files') or {}
 
     dest_dir = _grading_reports_dir(run_id)
     os.makedirs(dest_dir, exist_ok=True)
@@ -7900,6 +7959,170 @@ def discard_grading_run(run_id):
         )
 
 
+def delete_grading_run(run_id, admin_id):
+    """Remove a run for good: results, every file here, the job on the service.
+    Lernmanager shows students no grading_result, so this takes nothing from
+    them; printed slips are out of reach anyway. A result this run had replaced
+    gets its place back -- otherwise the student would have no active one left.
+    Returns False if the service could not be reached: its copy then stays."""
+    import shutil
+    run = get_grading_run(run_id)
+    if run is None:
+        return True
+    results = list_grading_results(run_id)
+    released = sum(1 for r in results if r['released_at'])
+    with db_session() as conn:
+        replaced = [row['id'] for row in conn.execute(
+            "SELECT id FROM grading_result WHERE grading_run_id != ? AND superseded_by_id IN "
+            "(SELECT id FROM grading_result WHERE grading_run_id = ?)", (run_id, run_id))]
+        conn.execute("UPDATE grading_result SET superseded_by_id = NULL WHERE superseded_by_id IN "
+                     "(SELECT id FROM grading_result WHERE grading_run_id = ?)", (run_id,))
+        conn.execute("DELETE FROM grading_result WHERE grading_run_id = ?", (run_id,))
+        conn.execute("DELETE FROM grading_run WHERE id = ?", (run_id,))
+        # OR IGNORE: the one-active-per-artifact index, should two have been replaced.
+        conn.executemany("UPDATE OR IGNORE grading_result SET status = 'active' WHERE id = ?",
+                         [(i,) for i in replaced])
+        _insert_grading_audit(conn, admin_id, 'delete_run', uuid.uuid4().hex, run_id, run['display_name'],
+                              summary=f"{len(results)} Ergebnisse, davon {released} freigegeben")
+    shutil.rmtree(os.path.join(_grading_upload_dir(), str(run_id)), ignore_errors=True)
+    return _delete_grading_job(run['job_id'])
+
+
+# --- Audit log + undo (migrate_072, Patrick 2026-11-02) ---
+
+_GRADING_SNAPSHOT_COLUMNS = ('status', 'criteria_json', 'teacher_total_score', 'reviewed_at',
+                             'released_at', 'released_by', 'superseded_by_id')
+
+GRADING_AUDIT_LABELS = {
+    'review': 'Geprüft', 'release': 'Freigegeben', 'release_bulk': 'Sammel-Freigabe',
+    'discard': 'Verworfen', 'discard_run': 'Lauf verworfen', 'supersede': 'Bewertung ersetzt',
+    'undo': 'Rückgängig gemacht', 'delete_run': 'Lauf gelöscht',
+}
+
+
+def _grading_snapshots(conn, result_ids):
+    ids = list(result_ids)
+    if not ids:
+        return {}
+    rows = conn.execute(
+        f"SELECT id, grading_run_id, student_id, {', '.join(_GRADING_SNAPSHOT_COLUMNS)} "
+        f"FROM grading_result WHERE id IN ({', '.join('?' * len(ids))})", ids).fetchall()
+    return {row['id']: dict(row) for row in rows}
+
+
+def _snapshot_state(snapshot):
+    return {c: snapshot[c] for c in _GRADING_SNAPSHOT_COLUMNS}
+
+
+def _insert_grading_audit(conn, admin_id, action, batch_id, run_id, run_name=None, result_id=None,
+                          student_id=None, summary=None, before=None, after=None):
+    actor = conn.execute("SELECT COALESCE(NULLIF(TRIM(COALESCE(vorname, '') || ' ' || COALESCE(nachname, '')), ''), "
+                         "username) AS name FROM admin WHERE id = ?", (admin_id,)).fetchone()
+    return conn.execute(
+        "INSERT INTO grading_audit (at, admin_id, actor, action, batch_id, grading_run_id, run_name, "
+        "grading_result_id, student_id, summary, before_json, after_json) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (now_local('%Y-%m-%dT%H:%M:%S'), admin_id, actor['name'] if actor else None, action, batch_id,
+         run_id, run_name, result_id, student_id, summary,
+         json.dumps(before) if before else None, json.dumps(after) if after else None)
+    ).lastrowid
+
+
+def _audit_summary(before, after):
+    """What changed, in words: status and total, the two things a teacher decides."""
+    labels = {'imported': 'importiert', 'under_review': 'in Prüfung', 'corrected': 'in Prüfung',
+              'active': 'freigegeben', 'discarded': 'verworfen', 'superseded': 'ersetzt'}
+    parts = []
+    if before['status'] != after['status']:
+        parts.append(f"{labels.get(before['status'], before['status'])} -> "
+                     f"{labels.get(after['status'], after['status'])}")
+    if before['teacher_total_score'] != after['teacher_total_score']:
+        parts.append(f"Punkte {before['teacher_total_score'] if before['teacher_total_score'] is not None else 'KI'} "
+                     f"-> {after['teacher_total_score'] if after['teacher_total_score'] is not None else 'KI'}")
+    return ', '.join(parts)
+
+
+@contextmanager
+def grading_audit(admin_id, action, result_ids):
+    """Wrap a decision: every result it changed gets one log row with its state
+    before and after, all under one batch_id. Results that came out unchanged
+    leave no row, so a bulk action's skipped students are not logged as decided."""
+    ids = list(result_ids)
+    with db_session() as conn:
+        before = _grading_snapshots(conn, ids)
+    yield
+    batch_id = uuid.uuid4().hex
+    with db_session() as conn:
+        after = _grading_snapshots(conn, ids)
+        for result_id, old in before.items():
+            new = after.get(result_id)
+            if not new or _snapshot_state(old) == _snapshot_state(new):
+                continue
+            run = conn.execute("SELECT name FROM grading_run WHERE id = ?", (old['grading_run_id'],)).fetchone()
+            _insert_grading_audit(conn, admin_id, action, batch_id, old['grading_run_id'],
+                                  run['name'] if run else None, result_id, old['student_id'],
+                                  _audit_summary(old, new), _snapshot_state(old), _snapshot_state(new))
+
+
+def list_grading_audit(run_id=None):
+    """Log rows, newest first, with the student's name while they still exist."""
+    where, params = ("WHERE a.grading_run_id = ?", (run_id,)) if run_id else ("", ())
+    with db_session() as conn:
+        rows = conn.execute(
+            "SELECT a.*, s.nachname, s.vorname, gr.task_id AS run_task_id, t.name AS task_name "
+            "FROM grading_audit a LEFT JOIN student s ON s.id = a.student_id "
+            "LEFT JOIN grading_run gr ON gr.id = a.grading_run_id LEFT JOIN task t ON t.id = gr.task_id "
+            f"{where} ORDER BY a.id DESC", params).fetchall()
+    out = []
+    for row in rows:
+        entry = dict(row)
+        entry['label'] = GRADING_AUDIT_LABELS.get(row['action'], row['action'])
+        entry['can_undo'] = bool(row['before_json']) and row['action'] != 'undo' and not row['undone_by']
+        out.append(entry)
+    return out
+
+
+def undo_grading_decisions(audit_ids, admin_id):
+    """Put results back to their state before the given log rows. A row is skipped
+    when the result has moved on since: undoing it would throw away the later
+    decision, so that one has to be undone first. Returns (undone, skipped, run_ids)."""
+    ids = list(audit_ids)
+    if not ids:
+        return 0, 0, set()
+    batch_id = uuid.uuid4().hex
+    undone = skipped = 0
+    run_ids = set()
+    with db_session() as conn:
+        rows = conn.execute(
+            f"SELECT * FROM grading_audit WHERE id IN ({', '.join('?' * len(ids))}) "
+            "AND before_json IS NOT NULL AND action != 'undo' AND undone_by IS NULL", ids).fetchall()
+        # Newest first, and whoever gives up 'active' before whoever takes it back:
+        # a supersede changed two results, and only one of them may be active at a time.
+        rows = sorted(rows, key=lambda r: (json.loads(r['before_json'])['status'] == 'active', -r['id']))
+        for row in rows:
+            before, after = json.loads(row['before_json']), json.loads(row['after_json'])
+            current = _grading_snapshots(conn, [row['grading_result_id']]).get(row['grading_result_id'])
+            if not current or _snapshot_state(current) != after:
+                skipped += 1
+                continue
+            assignments = ', '.join(f"{c} = ?" for c in _GRADING_SNAPSHOT_COLUMNS)
+            try:
+                conn.execute(f"UPDATE grading_result SET {assignments} WHERE id = ?",
+                             [before[c] for c in _GRADING_SNAPSHOT_COLUMNS] + [row['grading_result_id']])
+            except sqlite3.IntegrityError:  # someone else holds 'active' for this student + topic
+                skipped += 1
+                continue
+            undo_id = _insert_grading_audit(
+                conn, admin_id, 'undo', batch_id, row['grading_run_id'], row['run_name'],
+                row['grading_result_id'], row['student_id'],
+                f"{GRADING_AUDIT_LABELS.get(row['action'], row['action'])}: {_audit_summary(after, before)}",
+                after, before)
+            conn.execute("UPDATE grading_audit SET undone_by = ? WHERE id = ?", (undo_id, row['id']))
+            undone += 1
+            run_ids.add(row['grading_run_id'])
+    return undone, skipped, run_ids
+
+
 def is_non_submitter_result(result):
     """True for the sync path's zero-score placeholder row for an empty
     folder (processor.py's 'No document files found' case) -- these have no
@@ -7967,14 +8190,36 @@ def get_grading_run_review_queue(run_id, results=None):
 
 
 def get_next_in_review_queue(run_id, current_result_id, results=None):
-    """The next result after current_result_id in the live queue order, or
-    None at the end (Page B redirects back to Page A there)."""
+    """The next result still open after current_result_id in the live queue
+    order, or None at the end (Page B redirects back to Page A there). Stepping
+    back to fix one student must not walk through everyone already checked."""
     queue = get_grading_run_review_queue(run_id, results)
     ids = [r['id'] for r in queue]
-    if current_result_id not in ids:
-        return queue[0] if queue else None
-    idx = ids.index(current_result_id)
-    return queue[idx + 1] if idx + 1 < len(queue) else None
+    later = queue[ids.index(current_result_id) + 1:] if current_result_id in ids else queue
+    return next((r for r in later if grading_result_is_open(r)), None)
+
+
+def grading_result_is_open(result):
+    """A student the teacher still has to look at (Patrick 2026-11-02: every
+    student, one by one). Never opened, or an always-review criterion still
+    unconfirmed. Not the same as result_needs_attention, which says where to look
+    and keeps saying so for a zero the teacher has already agreed with."""
+    if (not result['student_id'] or is_non_submitter_result(result)
+            or result['status'] not in ('imported', 'under_review', 'corrected')):
+        return False
+    return not result.get('reviewed_at') or any(
+        c.get('review_required') and not c.get('confirmed') for c in result['criteria'])
+
+
+def grading_result_hints(result):
+    """Counts for the badges on the student table and the review page."""
+    criteria = result['criteria']
+    return {
+        'unconfirmed': sum(1 for c in criteria if c.get('review_required') and not c.get('confirmed')),
+        'zero': sum(1 for c in criteria if c.get('llm_score') == 0 and c.get('reused') != 'teacher'),
+        'reused': sum(1 for c in criteria if c.get('reused') == 'teacher'),
+        'changed': sum(1 for c in criteria if c.get('overridden') or c.get('teacher_feedback')),
+    }
 
 
 def get_grading_run_override_rate(run_id):

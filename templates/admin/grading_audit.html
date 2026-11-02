@@ -1,0 +1,58 @@
+{% extends 'base.html' %}
+
+{% block title %}Verlauf Bewertungen - Lernmanager{% endblock %}
+
+{% block content %}
+<div class="flex flex-between flex-center mb-2">
+    <h1>🕓 Verlauf{% if run %}: {{ run.display_name }}{% endif %}</h1>
+    {% if run %}
+    <a href="{{ url_for('admin_grading_run_detail', run_id=run.id) }}" class="btn btn-secondary">← Zurück zum Lauf</a>
+    {% else %}
+    <a href="{{ url_for('admin_grading_runs') }}" class="btn btn-secondary">← Zurück zu Bewertungen</a>
+    {% endif %}
+</div>
+
+{% if not entries %}
+<div class="card"><p class="text-muted" style="padding: 1rem; margin: 0;">Noch keine Entscheidungen.</p></div>
+{% else %}
+<div class="card">
+    <div style="overflow-x: auto;">
+        <table class="table" style="margin: 0;">
+            <thead>
+                <tr><th>Wann</th><th>Wer</th>{% if not run %}<th>Lauf</th>{% endif %}<th>Schüler</th><th>Was</th><th>Änderung</th><th></th></tr>
+            </thead>
+            <tbody>
+                {% set batch_sizes = {} %}
+                {% for e in entries %}
+                {% if e.can_undo %}{% set _ = batch_sizes.update({e.batch_id: batch_sizes.get(e.batch_id, 0) + 1}) %}{% endif %}
+                {% endfor %}
+                {% for e in entries %}
+                <tr {% if e.undone_by %}style="opacity: 0.55;"{% endif %}>
+                    <td style="white-space: nowrap;">{{ e.at|replace('T', ' ') }}</td>
+                    <td>{{ e.actor or '—' }}</td>
+                    {% if not run %}<td>{{ e.run_name or e.task_name or ('Lauf ' ~ e.grading_run_id) }}</td>{% endif %}
+                    <td>{% if e.nachname %}{{ e.nachname }}, {{ e.vorname }}{% else %}—{% endif %}</td>
+                    <td>{{ e.label }}{% if e.undone_by %} <span class="badge">zurückgenommen</span>{% endif %}</td>
+                    <td>{{ e.summary or '' }}</td>
+                    <td style="white-space: nowrap;">
+                        {% if e.can_undo %}
+                        <form method="POST" action="{{ url_for('admin_grading_audit_undo') }}" style="display: inline;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="audit_id" value="{{ e.id }}">
+                            {% if run %}<input type="hidden" name="run" value="{{ run.id }}">{% endif %}
+                            <button type="submit" class="btn btn-sm btn-secondary">Rückgängig</button>
+                            {% if batch_sizes[e.batch_id] > 1 %}
+                            <button type="submit" name="scope" value="batch" class="btn btn-sm btn-secondary"
+                                    onclick="return confirm('Alle {{ batch_sizes[e.batch_id] }} Entscheidungen dieses Schritts zurücknehmen?');">Ganzer Schritt ({{ batch_sizes[e.batch_id] }})</button>
+                            {% endif %}
+                        </form>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

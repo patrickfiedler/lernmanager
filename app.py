@@ -792,6 +792,7 @@ def admin_dashboard():
 
     return render_template('admin/dashboard.html', klassen=klassen, tasks=tasks,
                           klassen_heute=klassen_heute,
+                          open_grading_runs=[r for r in permissions.visible_grading_runs() if r['open_count']],
                           disk_total=format_bytes(disk_total), disk_used=format_bytes(disk_used),
                           disk_free=format_bytes(disk_free), disk_percent=disk_percent,
                           disk_status_label=disk_status_label, disk_status_class=disk_status_class)
@@ -1308,6 +1309,7 @@ def admin_grading_runs():
     """Overview list of grading_run rows -- the entry point into
     grading_run_detail, which previously had no link pointing at it from
     anywhere in the nav (found while building the multi-class redesign)."""
+    models.purge_settled_grading_runs()
     return render_template('admin/grading_runs.html', runs=permissions.visible_grading_runs())
 
 
@@ -1358,8 +1360,16 @@ def admin_grading_run_detail(run_id):
     # itself (no local status column, see task_plan.md § Decisions).
     job_status = _grading_job_status(run['job_id']) if not run['graded_at'] else None
 
+    queue = models.get_grading_run_review_queue(run_id, results)
+    open_results = [r for r in queue if models.grading_result_is_open(r)]
+    open_ids = {r['id'] for r in open_results}
+    for r in reviewable:
+        r['is_open'] = r['id'] in open_ids
+        r['hints'] = models.grading_result_hints(r)
+
     return render_template(
         'admin/grading_run_detail.html', run=run, results=results, reviewable=reviewable,
+        open_results=open_results,
         non_submitters=non_submitters, no_conflict=no_conflict, needs_decision=needs_decision,
         whole_run=whole_run, job_status=job_status,
         override_rate=models.get_grading_run_override_rate(run_id) if whole_run else None,
@@ -1385,10 +1395,26 @@ def admin_grading_run_retry_job(run_id):
 @app.route('/admin/grading-run/<int:run_id>/discard', methods=['POST'])
 @admin_required
 def admin_grading_run_discard(run_id):
-    models.discard_grading_run(run_id)
+    with models.grading_audit(session['admin_id'], 'discard_run',
+                              [r['id'] for r in models.list_grading_results(run_id)]):
+        models.discard_grading_run(run_id)
     flash('Bewertungslauf verworfen (bereits freigegebene Ergebnisse bleiben sichtbar).', 'success')
     models.maybe_auto_purge_grading_run(run_id)
     return redirect(url_for('admin_grading_run_detail', run_id=run_id))
+
+
+@app.route('/admin/grading-run/<int:run_id>/loeschen', methods=['POST'])
+@admin_required
+def admin_grading_run_delete(run_id):
+    """For good, unlike discard: gone from the list, every file with it."""
+    if not models.get_grading_run(run_id):
+        flash('Bewertungslauf nicht gefunden.', 'danger')
+    elif models.delete_grading_run(run_id, session['admin_id']):
+        flash('Bewertungslauf gelöscht.', 'success')
+    else:
+        flash('Bewertungslauf hier gelöscht, aber der Bewertungsdienst war nicht erreichbar: '
+              'seine Kopie der Dateien liegt noch dort.', 'warning')
+    return redirect(url_for('admin_grading_runs'))
 
 
 @app.route('/admin/grading-run/<int:run_id>/release-bulk', methods=['POST'])
@@ -1396,14 +1422,19 @@ def admin_grading_run_discard(run_id):
 def admin_grading_run_release_bulk(run_id):
     permissions.require_grading_run(run_id)
     released = skipped = 0
-    for r in permissions.visible_grading_results(run_id):
-        if r['status'] not in ('imported', 'under_review', 'corrected'):
-            continue
-        try:
-            models.release_grading_result(r['id'], session['admin_id'])
-            released += 1
-        except ValueError:
-            skipped += 1
+    results = permissions.visible_grading_results(run_id)
+    with models.grading_audit(session['admin_id'], 'release_bulk', [r['id'] for r in results]):
+        for r in results:
+            if r['status'] not in ('imported', 'under_review', 'corrected'):
+                continue
+            if models.grading_result_is_open(r):  # every student is looked at first
+                skipped += 1
+                continue
+            try:
+                models.release_grading_result(r['id'], session['admin_id'])
+                released += 1
+            except ValueError:
+                skipped += 1
     flash(f'{released} Ergebnis(se) freigegeben. {skipped} übersprungen (Konflikt oder offene Prüfung).',
           'success' if released else 'warning')
     if released:
@@ -1454,7 +1485,8 @@ def admin_grading_result_confirm(result_id):
         flash('Ergebnis nicht gefunden.', 'danger')
         return redirect(url_for('admin_klassen'))
     try:
-        models.release_grading_result(result_id, session['admin_id'])
+        with models.grading_audit(session['admin_id'], 'release', [result_id]):
+            models.release_grading_result(result_id, session['admin_id'])
         flash('Bestätigt.', 'success')
     except ValueError as e:
         flash(f'Konnte nicht bestätigt werden: {e}', 'danger')
@@ -1470,7 +1502,8 @@ def admin_grading_result_discard(result_id):
     if not result:
         flash('Ergebnis nicht gefunden.', 'danger')
         return redirect(url_for('admin_klassen'))
-    models.discard_grading_result(result_id)
+    with models.grading_audit(session['admin_id'], 'discard', [result_id]):
+        models.discard_grading_result(result_id)
     flash('Verworfen.', 'success')
     models.maybe_auto_purge_grading_run(result['grading_run_id'])
     return redirect(url_for('admin_grading_run_detail', run_id=result['grading_run_id']))
@@ -1516,7 +1549,8 @@ def admin_grading_result_review(result_id):
                 entry['confirmed'] = (request.form.get(f'confirmed_{i}') == 'on'
                                       or teacher_score != c.get('llm_score'))
             criteria.append(entry)
-        models.save_grading_result_review(result_id, criteria)
+        with models.grading_audit(session['admin_id'], 'review', [result_id]):
+            models.save_grading_result_review(result_id, criteria)
 
         if action == 'save_next':
             nxt = models.get_next_in_review_queue(run['id'], result_id, own_results)
@@ -1532,7 +1566,7 @@ def admin_grading_result_review(result_id):
     queue = models.get_grading_run_review_queue(run['id'], own_results)
     queue_ids = [r['id'] for r in queue]
     position = queue_ids.index(result_id) + 1 if result_id in queue_ids else None
-    remaining_flagged = sum(1 for r in queue if r['id'] != result_id and models.result_needs_attention(r))
+    remaining_open = sum(1 for r in queue if models.grading_result_is_open(r))
     prev_result = queue[queue_ids.index(result_id) - 1] if position and position > 1 else None
 
     supersede_conflict = None
@@ -1543,7 +1577,7 @@ def admin_grading_result_review(result_id):
 
     return render_template(
         'admin/grading_review.html', result=result, run=run, position=position,
-        queue_total=len(queue), remaining_flagged=remaining_flagged,
+        queue_total=len(queue), remaining_open=remaining_open, hints=models.grading_result_hints(result),
         prev_result=prev_result, supersede_conflict=supersede_conflict,
     )
 
@@ -1573,12 +1607,14 @@ def admin_grading_result_supersede(result_id):
         winner = request.form.get('winner')
         active_run_id = active['grading_run_id']
         if winner == 'challenger':
-            models.supersede_grading_result(active['id'], result_id)
-            models.release_grading_result(result_id, session['admin_id'])
+            with models.grading_audit(session['admin_id'], 'supersede', [active['id'], result_id]):
+                models.supersede_grading_result(active['id'], result_id)
+                models.release_grading_result(result_id, session['admin_id'])
             flash('Neue Bewertung übernommen.', 'success')
             _sync_grading_reports(run['id'])
         else:
-            models.discard_grading_result(result_id)
+            with models.grading_audit(session['admin_id'], 'discard', [result_id]):
+                models.discard_grading_result(result_id)
             flash('Bestehende Bewertung behalten.', 'success')
         models.maybe_auto_purge_grading_run(run['id'])
         models.maybe_auto_purge_grading_run(active_run_id)
@@ -1625,6 +1661,45 @@ def download_grading_report(run_id, filename):
     if not os.path.isfile(os.path.join(reports_dir, filename)):
         abort(404)
     return send_from_directory(reports_dir, filename, as_attachment=True)
+
+
+@app.route('/admin/grading/verlauf')
+@staff_required
+def admin_grading_audit():
+    """Who decided what. ?run=<id> narrows to one run; without it, everything
+    this user may see, which for the admin includes deleted runs."""
+    run = None
+    run_id = request.args.get('run', type=int)
+    if run_id:
+        run = permissions.require_grading_run(run_id)
+        if not run:
+            flash('Bewertungslauf nicht gefunden.', 'danger')
+            return redirect(url_for('admin_grading_runs'))
+    return render_template('admin/grading_audit.html', run=run, entries=permissions.visible_grading_audit(run_id))
+
+
+@app.route('/admin/grading/verlauf/rueckgaengig', methods=['POST'])
+@staff_required
+def admin_grading_audit_undo():
+    """One decision, or the whole step it belongs to (batch). Only rows this user can
+    see in the log -- a teacher's batch undo leaves other classes' students alone."""
+    entries = permissions.visible_grading_audit()
+    audit_id = request.form.get('audit_id', type=int)
+    entry = next((e for e in entries if e['id'] == audit_id), None)
+    if not entry:
+        abort(404)
+    ids = ([e['id'] for e in entries if e['batch_id'] == entry['batch_id']]
+           if request.form.get('scope') == 'batch' else [audit_id])
+    undone, skipped, run_ids = models.undo_grading_decisions(ids, session['admin_id'])
+    if undone:
+        flash(f'{undone} Entscheidung(en) rückgängig gemacht.', 'success')
+    if skipped:
+        flash(f'{skipped} übersprungen: dort wurde danach schon weiter entschieden. '
+              'Die neuere Entscheidung zuerst zurücknehmen.', 'warning')
+    for run_id in run_ids:
+        _sync_grading_reports(run_id)  # printed slips must not keep the undone scores
+    target = request.form.get('run', type=int)
+    return redirect(url_for('admin_grading_audit', run=target) if target else url_for('admin_grading_audit'))
 
 
 @app.route('/admin/klasse/<int:klasse_id>/llm-feedback', methods=['POST'])

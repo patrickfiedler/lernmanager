@@ -5,6 +5,17 @@
 {% block content %}
 <h1 class="mb-2">📊 Dashboard</h1>
 
+{% if open_grading_runs %}
+<div class="card mb-2">
+    <div class="card-header">🎯 Bewertungen warten auf dich</div>
+    <div style="padding: 0.75rem 1rem; display: flex; flex-wrap: wrap; gap: 0.5rem;">
+        {% for run in open_grading_runs %}
+        <a href="{{ url_for('admin_grading_run_detail', run_id=run.id) }}" class="btn btn-primary">{{ run.display_name }}: {{ run.open_count }} prüfen</a>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
 <div class="grid grid-3">
     <div class="card">
         <div class="card-header">📁 Klassen</div>
