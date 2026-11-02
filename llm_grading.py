@@ -116,10 +116,10 @@ FALLBACK_RESULT = {
 REASONING_MODEL_MARKERS = ('qwen', 'deepseek-r1', 'o1', 'o3')
 
 
-def _reasoning_kwargs():
+def _reasoning_kwargs(model=None):
     """Extra kwargs for chat.completions.create() — reasoning_effort only when
-    LLM_MODEL matches a known reasoning-model family (see NOTE above)."""
-    model_id = (config.LLM_MODEL or '').lower()
+    the model (default LLM_MODEL) matches a known reasoning-model family (see NOTE above)."""
+    model_id = (model or config.LLM_MODEL or '').lower()
     if any(marker in model_id for marker in REASONING_MODEL_MARKERS):
         return {"reasoning_effort": "none"}
     return {}
@@ -253,11 +253,17 @@ def _judgment_confidence(response):
 
 
 def _call_llm(question_text, expected_or_rubric, student_answer, system_prompt=SYSTEM_PROMPT,
-              timeout=None, want_confidence=False):
+              timeout=None, want_confidence=False, model=None, backend=None):
     """Send grading request to LLM and parse JSON response.
 
     timeout defaults to config.LLM_TIMEOUT; callers grading something slower than a
     short practice answer pass their own (see grade_answer).
+
+    model defaults to config.LLM_MODEL. Passed explicitly only by comparison tools
+    (scripts/tutor_playground.py) that grade with several models at once -- setting
+    the global per call would let parallel threads grade with each other's model.
+    backend, same tools only: (client, create_kwargs) in place of _get_client() and
+    _reasoning_kwargs() -- another provider (OpenRouter) next to OVH in one process.
 
     want_confidence asks the provider for logprobs so the verdict token's probability
     can be recorded (migrate_052). OVH accepts logprobs only with top_logprobs <= 1.
@@ -288,12 +294,13 @@ def _call_llm(question_text, expected_or_rubric, student_answer, system_prompt=S
     # call even raised -- then the fallback below paid it again. A student is watching
     # a spinner while this runs; the retry that helps here is the explicit one below
     # (ask again without logprobs), not three silent repeats of the same slow request.
-    client = _get_client().with_options(max_retries=0)
+    client = (backend[0] if backend else _get_client()).with_options(max_retries=0)
+    provider_kwargs = backend[1] if backend else _reasoning_kwargs(model)
     budget = config.LLM_TIMEOUT if timeout is None else timeout
 
     def _create(attempt_timeout, **extra):
         return client.chat.completions.create(
-            model=config.LLM_MODEL,
+            model=model or config.LLM_MODEL,
             max_tokens=150,
             temperature=0,
             response_format={"type": "json_object"},
@@ -302,7 +309,7 @@ def _call_llm(question_text, expected_or_rubric, student_answer, system_prompt=S
                 {"role": "user", "content": user_prompt},
             ],
             timeout=attempt_timeout,
-            **_reasoning_kwargs(),
+            **provider_kwargs,
             **extra,
         )
 
