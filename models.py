@@ -7949,21 +7949,22 @@ def _review_queue_sort_key(result):
     return (bucket, name)
 
 
-def get_grading_run_review_queue(run_id):
+def get_grading_run_review_queue(run_id, results=None):
     """Ordered list of grading_results for Page B's queue -- excludes
     non-submitters (handled on Page A) and anything already active/discarded/
-    superseded (nothing left to review)."""
+    superseded (nothing left to review). results: the rows to queue, when the
+    caller may not see the whole run (permissions.visible_grading_results)."""
     reviewable = [
-        r for r in list_grading_results(run_id)
+        r for r in (list_grading_results(run_id) if results is None else results)
         if not is_non_submitter_result(r) and r['status'] in ('imported', 'under_review', 'corrected')
     ]
     return sorted(reviewable, key=_review_queue_sort_key)
 
 
-def get_next_in_review_queue(run_id, current_result_id):
+def get_next_in_review_queue(run_id, current_result_id, results=None):
     """The next result after current_result_id in the live queue order, or
     None at the end (Page B redirects back to Page A there)."""
-    queue = get_grading_run_review_queue(run_id)
+    queue = get_grading_run_review_queue(run_id, results)
     ids = [r['id'] for r in queue]
     if current_result_id not in ids:
         return queue[0] if queue else None

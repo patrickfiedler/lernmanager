@@ -29,8 +29,18 @@ MANUAL_CHECK = {
 }
 
 # URL parameters that never point at one class or student: any value will do.
-UNSCOPED_PARAMS = {'task_id', 'material_id', 'datum', 'question_index',
-                   'checkpoint_id', 'filename', 'relpath'}
+UNSCOPED_PARAMS = {'task_id', 'material_id', 'datum', 'question_index', 'checkpoint_id'}
+
+
+def _grading_run(job_id, task, *students):
+    """A run with one reviewable result per (student, netzwerk_id)."""
+    run = models.create_grading_run(job_id, None, task, "r", "local", None, len(students))
+    results = [models.create_grading_result(
+        run, task, student, login, [{"name": "K", "llm_score": 1, "max_score": 1}],
+        llm_total_score=1, llm_max_score=1, document_file="a.docx",
+        media=[{"file": f"{run}/{login}/001.jpg", "source": "a.docx"}])
+        for student, login in students]
+    return run, results
 
 
 @pytest.fixture
@@ -56,12 +66,14 @@ def teacher(app):
                                                session_uid="f1")
     flag = models.create_checkpoint_flag(sub, 0, 'student', student_id=student, session_uid="f1",
                                          checkpoint_attempt_id=attempt)
+    run, (result,) = _grading_run("fremd", task, (student, "fremd.fritz"))
     client = app.test_client()
     with client.session_transaction() as sess:
         sess["admin_id"] = teacher['id']
     return client, {'klasse_id': other, 'student_id': student, 'unterricht_id': unterricht,
                     'attempt_id': attempt, 'answer_id': answer, 'flag_id': flag,
-                    'checkpoint_id': sub}
+                    'checkpoint_id': sub, 'run_id': run, 'result_id': result,
+                    'relpath': f'{run}/fremd.fritz/001.jpg', 'filename': 'grades.csv'}
 
 
 @pytest.fixture
@@ -80,8 +92,10 @@ def own(app, teacher):
     models.create_checkpoint_answer(student, sub, "e1", 0, 1, "a", True, "", "llm")
     models.create_checkpoint_attempt(student, sub, task, "quiz", "kern", score=2, session_uid="e1")
     unterricht = models.create_or_get_unterricht(klasse, '2026-10-26')
+    run, (result,) = _grading_run("eigen", task, (student, "eigen.emma"))
     return client, {'klasse_id': klasse, 'student_id': student, 'task_id': task,
-                    'unterricht_id': unterricht, 'datum': '2026-10-26'}
+                    'unterricht_id': unterricht, 'datum': '2026-10-26',
+                    'run_id': run, 'result_id': result}
 
 
 def _admin_rules():
@@ -248,6 +262,83 @@ def test_checkpoint_review_lists_only_own_classes(own, teacher):
     admin.post('/admin/checkpoint-pruefung/zuruecksetzen',
                data={'checkpoint_id': foreign['checkpoint_id']})
     assert models.get_checkpoint_reviews(checkpoint_id=foreign['checkpoint_id']) == []
+
+
+@pytest.fixture
+def mixed_run(own, teacher):
+    """One run across her class and a foreign one, plus an unmatched login."""
+    client, ids = own
+    _, foreign = teacher
+    second = models.create_student("Eigen", "Eva", "eigeneva", "x")
+    models.add_student_to_klasse(second, ids['klasse_id'])
+    models.assign_task_to_student(second, ids['klasse_id'], ids['task_id'])
+    run, (emma, eva, fritz, unmatched) = _grading_run(
+        "gemischt", ids['task_id'], (ids['student_id'], "eigen.emma"), (second, "eigen.eva"),
+        (foreign['student_id'], "fremd.fritz"), (None, "unbekannt"))
+    return client, run, {'emma': emma, 'eva': eva, 'fritz': fritz, 'unmatched': unmatched}
+
+
+def test_teacher_sees_only_her_students_in_a_shared_run(mixed_run):
+    client, run, results = mixed_run
+    html = client.get(f'/admin/grading-run/{run}').get_data(as_text=True)
+    assert 'Emma' in html and 'Eva' in html
+    assert 'Fritz' not in html and 'unbekannt' not in html
+    assert 'anderer Klassen' in html
+    assert client.get(f"/admin/grading-result/{results['fritz']}/review").status_code == 404
+    assert client.get(f"/admin/grading-result/{results['unmatched']}/review").status_code == 404
+    assert client.get(f'/admin/grading-run/{run}/bericht/grades.csv').status_code == 404
+    assert client.post(f'/admin/grading-run/{run}/berichte-neu').status_code == 404
+    listed = next(r for r in models.list_grading_runs() if r['id'] == run)
+    assert listed['total_students'] == 4
+    assert '<td>2</td>' in client.get('/admin/grading/runs').get_data(as_text=True)
+
+
+def test_review_queue_stays_inside_her_classes(mixed_run):
+    client, run, results = mixed_run
+    resp = client.post(f"/admin/grading-result/{results['emma']}/review", data={'action': 'skip'})
+    assert resp.location.endswith(f"/grading-result/{results['eva']}/review")
+    resp = client.post(f"/admin/grading-result/{results['eva']}/review", data={'action': 'skip'})
+    assert resp.location.endswith(f'/grading-run/{run}')
+    assert '/ 2' in client.get(f"/admin/grading-result/{results['eva']}/review").get_data(as_text=True)
+
+
+def test_bulk_release_leaves_other_classes_alone(mixed_run, monkeypatch):
+    monkeypatch.setattr(models, 'regenerate_grading_reports', lambda run_id: (True, 'ok'))
+    client, run, results = mixed_run
+    client.post(f'/admin/grading-run/{run}/release-bulk')
+    status = {r['id']: r['status'] for r in models.list_grading_results(run)}
+    assert status[results['emma']] == status[results['eva']] == 'active'
+    assert status[results['fritz']] == 'imported'
+    assert status[results['unmatched']] == 'imported'
+
+
+def test_teacher_gets_media_of_her_students_only(mixed_run, tmp_path, monkeypatch):
+    monkeypatch.setattr(models.config, 'UPLOAD_FOLDER', str(tmp_path))
+    client, run, _ = mixed_run
+    for login in ('eigen.emma', 'fremd.fritz'):
+        folder = tmp_path / 'grading' / str(run) / login
+        folder.mkdir(parents=True)
+        (folder / '001.jpg').write_bytes(b'bild')
+    assert client.get(f'/grading-medien/{run}/eigen.emma/001.jpg').status_code == 200
+    assert client.get(f'/grading-medien/{run}/fremd.fritz/001.jpg').status_code == 404
+    assert client.get(f'/grading-medien/{run}/eigen.emma/../fremd.fritz/001.jpg').status_code == 404
+
+
+def test_teacher_owns_reports_when_the_whole_run_is_hers(own, tmp_path, monkeypatch):
+    monkeypatch.setattr(models.config, 'UPLOAD_FOLDER', str(tmp_path))
+    client, ids = own
+    reports = tmp_path / 'grading' / str(ids['run_id']) / 'reports'
+    reports.mkdir(parents=True)
+    (reports / 'grades.csv').write_text('x')
+    assert client.get(f"/admin/grading-run/{ids['run_id']}/bericht/grades.csv").status_code == 200
+
+
+def test_artifact_before_assignment_counts_by_the_students_classes(own):
+    """No student_task row for that topic: the result must not vanish from her view."""
+    client, ids = own
+    unassigned = models.create_task("Noch nicht zugewiesen", "", "", "MBI", "5", "pflicht")
+    run, (result,) = _grading_run("frueh", unassigned, (ids['student_id'], "eigen.emma"))
+    assert client.get(f'/admin/grading-result/{result}/review').status_code == 200
 
 
 def test_admin_creates_teacher_who_then_sees_her_class(app, monkeypatch):

@@ -12,12 +12,14 @@
     {% endif %}
 </div>
 
+{% if is_admin %}
 <form method="POST" action="{{ url_for('admin_grading_run_rename', run_id=run.id) }}" class="flex flex-center mb-2" style="gap: 0.5rem;">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label for="run-name">Name</label>
     <input type="text" id="run-name" name="name" value="{{ run.name or '' }}" placeholder="{{ run.display_name }}" maxlength="200" style="flex: 1; max-width: 28rem;">
     <button type="submit" class="btn btn-sm btn-secondary">Speichern</button>
 </form>
+{% endif %}
 
 <div class="card mb-2">
     <div class="card-header">📋 Import-Übersicht</div>
@@ -41,10 +43,12 @@
                             <span class="badge badge-warning">⚠️ Bewertungsdienst nicht erreichbar</span>
                         {% elif job_status.status == 'failed' %}
                             <span class="badge badge-danger">❌ fehlgeschlagen{% if job_status.error %}: {{ job_status.error }}{% endif %}</span>
+                            {% if is_admin %}
                             <form method="POST" action="{{ url_for('admin_grading_run_retry_job', run_id=run.id) }}" style="display: inline;">
                                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                 <button type="submit" class="btn btn-sm btn-secondary">🔄 Erneut versuchen</button>
                             </form>
+                            {% endif %}
                         {% elif job_status.status == 'queued' %}
                             <span class="badge badge-warning">⏳ wartet in der Warteschlange</span>
                         {% elif job_status.status == 'running' %}
@@ -63,7 +67,9 @@
     </div>
 </div>
 
-{% if reports or run.graded_at %}
+{% if not whole_run %}
+<p class="text-muted mb-2">Dieser Lauf enthält auch Schüler anderer Klassen. Hier stehen nur deine; Notenliste und Zettel gibt es beim Admin.</p>
+{% elif reports or run.graded_at %}
 <div class="card mb-2">
     <div class="card-header">📄 Bewertungsdateien</div>
     <div style="padding: 0.75rem 1rem;">
@@ -195,6 +201,7 @@
     </table>
 </div>
 
+{% if is_admin %}
 <details class="card mt-2" style="border: 1px solid #fca5a5;">
     <summary class="card-header" style="cursor: pointer; background: #fff1f2; color: #991b1b;">⚠️ Gefahrenzone</summary>
     <div style="padding: 1rem;">
@@ -219,4 +226,5 @@
         {% endif %}
     </div>
 </details>
+{% endif %}
 {% endblock %}

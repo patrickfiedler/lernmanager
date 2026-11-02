@@ -76,6 +76,79 @@ def require_checkpoint(kind, row_id):
         abort(404)
 
 
+def can_see_grading_result(result):
+    """One rubric spans several classes, so a grading run has no class of its own:
+    the student's result decides. Same rule as can_see_student_topic; an artifact
+    handed in before the topic was assigned has no topic row, then the student's
+    classes count. An unmatched login (no student) stays with the admin."""
+    ids = visible_klasse_ids()
+    if ids is None:
+        return True
+    student_id = result['student_id']
+    if student_id is None:
+        return False
+    klassen = (models.get_klasse_ids_for_student_topic(student_id, result['task_id'])
+               or models.get_klasse_ids_for_student(student_id))
+    return bool(ids & klassen)
+
+
+def visible_grading_results(run_id):
+    return [r for r in models.list_grading_results(run_id) if can_see_grading_result(r)]
+
+
+def can_see_whole_grading_run(run_id):
+    """Report files cover every student of the run; a class list cannot be cut down."""
+    return is_admin() or all(can_see_grading_result(r) for r in models.list_grading_results(run_id))
+
+
+def _grading_run_for_teacher(run, results):
+    """The run's own counts and class would tell her about other classes."""
+    run = dict(run, total_students=len(results),
+               flagged_count=sum(1 for r in results if r['flagged']),
+               zero_score_count=sum(1 for r in results if r['llm_total_score'] == 0))
+    if run['klasse_id'] and not can_see_klasse(run['klasse_id']):
+        run.update(klasse_id=None, klasse_name=None)
+    return run
+
+
+def visible_grading_runs():
+    runs = models.list_grading_runs()
+    if is_admin():
+        return runs
+    scoped = ((run, visible_grading_results(run['id'])) for run in runs)
+    return [_grading_run_for_teacher(run, results) for run, results in scoped if results]
+
+
+def require_grading_run(run_id):
+    """The run as this user may see it. An admin gets None for an unknown id (the
+    route flashes); a teacher gets 404 for that and for a run without her students."""
+    run = models.get_grading_run(run_id)
+    if is_admin():
+        return run
+    results = visible_grading_results(run_id) if run else None
+    if not results:
+        abort(404)
+    return _grading_run_for_teacher(run, results)
+
+
+def require_grading_result(result_id):
+    if is_admin():
+        return
+    result = models.get_grading_result(result_id)
+    if not result or not can_see_grading_result(result):
+        abort(404)
+
+
+def require_grading_media(relpath):
+    """relpath is '<run_id>/<netzwerk_id>/<file>', exactly a result's media 'file'."""
+    if is_admin():
+        return
+    run_id = relpath.split('/')[0]
+    results = visible_grading_results(int(run_id)) if run_id.isdigit() else []
+    if not any(m.get('file') == relpath for r in results for m in r['media']):
+        abort(404)
+
+
 def require_klasse(klasse_id):
     if not can_see_klasse(klasse_id):
         abort(404)

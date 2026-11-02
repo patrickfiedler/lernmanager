@@ -5,7 +5,9 @@
 {% block content %}
 <div class="flex flex-between flex-center mb-2">
     <h1>🎯 Bewertungsläufe</h1>
+    {% if is_admin %}
     <a href="{{ url_for('admin_grading_upload') }}" class="btn btn-primary">📤 Neue Bewertung hochladen</a>
+    {% endif %}
 </div>
 
 {% if not runs %}

@@ -1303,12 +1303,12 @@ def admin_grading_upload_complete():
 
 
 @app.route('/admin/grading/runs')
-@admin_required
+@staff_required
 def admin_grading_runs():
     """Overview list of grading_run rows -- the entry point into
     grading_run_detail, which previously had no link pointing at it from
     anywhere in the nav (found while building the multi-class redesign)."""
-    return render_template('admin/grading_runs.html', runs=models.list_grading_runs())
+    return render_template('admin/grading_runs.html', runs=permissions.visible_grading_runs())
 
 
 @app.route('/admin/grading-run/<int:run_id>/name', methods=['POST'])
@@ -1324,14 +1324,15 @@ def admin_grading_run_rename(run_id):
 # --- Page A: grading_run_detail (teacher-review-ui.md §2 -- class-level view) ---
 
 @app.route('/admin/grading-run/<int:run_id>')
-@admin_required
+@staff_required
 def admin_grading_run_detail(run_id):
-    run = models.get_grading_run(run_id)
+    run = permissions.require_grading_run(run_id)
     if not run:
         flash('Bewertungslauf nicht gefunden.', 'danger')
         return redirect(url_for('admin_klassen'))
 
-    results = models.list_grading_results(run_id)
+    results = permissions.visible_grading_results(run_id)
+    whole_run = permissions.can_see_whole_grading_run(run_id)
     non_submitters = [r for r in results if models.is_non_submitter_result(r)]
     reviewable = [r for r in results if not models.is_non_submitter_result(r)]
 
@@ -1360,10 +1361,11 @@ def admin_grading_run_detail(run_id):
     return render_template(
         'admin/grading_run_detail.html', run=run, results=results, reviewable=reviewable,
         non_submitters=non_submitters, no_conflict=no_conflict, needs_decision=needs_decision,
-        override_rate=models.get_grading_run_override_rate(run_id), job_status=job_status,
-        reports=models.list_grading_reports(run_id),
+        whole_run=whole_run, job_status=job_status,
+        override_rate=models.get_grading_run_override_rate(run_id) if whole_run else None,
+        reports=models.list_grading_reports(run_id) if whole_run else [],
         corrected_count=models.count_grading_results_corrected(
-            run_id, since=models.grading_reports_written_at(run_id)),
+            run_id, since=models.grading_reports_written_at(run_id)) if whole_run else 0,
     )
 
 
@@ -1390,11 +1392,11 @@ def admin_grading_run_discard(run_id):
 
 
 @app.route('/admin/grading-run/<int:run_id>/release-bulk', methods=['POST'])
-@admin_required
+@staff_required
 def admin_grading_run_release_bulk(run_id):
-    run = models.get_grading_run(run_id)
+    permissions.require_grading_run(run_id)
     released = skipped = 0
-    for r in models.list_grading_results(run_id):
+    for r in permissions.visible_grading_results(run_id):
         if r['status'] not in ('imported', 'under_review', 'corrected'):
             continue
         try:
@@ -1430,20 +1432,23 @@ def _sync_grading_reports(run_id):
 
 
 @app.route('/admin/grading-run/<int:run_id>/berichte-neu', methods=['POST'])
-@admin_required
+@staff_required
 def admin_grading_run_regenerate_reports(run_id):
     """Slips, grades.csv and summary.md from the reviewed scores
     (models.regenerate_grading_reports)."""
+    if not permissions.can_see_whole_grading_run(run_id):
+        abort(404)
     ok, message = models.regenerate_grading_reports(run_id)
     flash(message, 'success' if ok else 'danger')
     return redirect(url_for('admin_grading_run_detail', run_id=run_id))
 
 
 @app.route('/admin/grading-result/<int:result_id>/confirm', methods=['POST'])
-@admin_required
+@staff_required
 def admin_grading_result_confirm(result_id):
     """One-click release for non-submitters (teacher-review-ui.md §4) --
     no media to review, routing them through Page B is pure friction."""
+    permissions.require_grading_result(result_id)
     result = models.get_grading_result(result_id)
     if not result:
         flash('Ergebnis nicht gefunden.', 'danger')
@@ -1458,8 +1463,9 @@ def admin_grading_result_confirm(result_id):
 
 
 @app.route('/admin/grading-result/<int:result_id>/discard', methods=['POST'])
-@admin_required
+@staff_required
 def admin_grading_result_discard(result_id):
+    permissions.require_grading_result(result_id)
     result = models.get_grading_result(result_id)
     if not result:
         flash('Ergebnis nicht gefunden.', 'danger')
@@ -1473,13 +1479,15 @@ def admin_grading_result_discard(result_id):
 # --- Page B: grading_review (teacher-review-ui.md §3-5 -- per-student review flow) ---
 
 @app.route('/admin/grading-result/<int:result_id>/review', methods=['GET', 'POST'])
-@admin_required
+@staff_required
 def admin_grading_result_review(result_id):
+    permissions.require_grading_result(result_id)
     result = models.get_grading_result(result_id)
     if not result:
         flash('Ergebnis nicht gefunden.', 'danger')
         return redirect(url_for('admin_klassen'))
-    run = models.get_grading_run(result['grading_run_id'])
+    run = permissions.require_grading_run(result['grading_run_id'])
+    own_results = permissions.visible_grading_results(run['id'])
 
     if request.method == 'POST':
         action = request.form.get('action', 'save')
@@ -1487,7 +1495,7 @@ def admin_grading_result_review(result_id):
         if action == 'skip':
             # Advances without writing anything (teacher-review-ui.md §4) --
             # distinct from Speichern & Weiter, which does persist edits first.
-            nxt = models.get_next_in_review_queue(run['id'], result_id)
+            nxt = models.get_next_in_review_queue(run['id'], result_id, own_results)
             if nxt:
                 return redirect(url_for('admin_grading_result_review', result_id=nxt['id']))
             return redirect(url_for('admin_grading_run_detail', run_id=run['id']))
@@ -1509,7 +1517,9 @@ def admin_grading_result_review(result_id):
         models.save_grading_result_review(result_id, criteria)
 
         if action == 'save_next':
-            nxt = models.get_next_in_review_queue(run['id'], result_id)
+            # Fresh rows: the save above changes this result's queue bucket.
+            nxt = models.get_next_in_review_queue(run['id'], result_id,
+                                                  permissions.visible_grading_results(run['id']))
             if nxt:
                 return redirect(url_for('admin_grading_result_review', result_id=nxt['id']))
             flash('Prüfung abgeschlossen -- zurück zur Übersicht.', 'success')
@@ -1519,7 +1529,7 @@ def admin_grading_result_review(result_id):
         return redirect(url_for('admin_grading_result_review', result_id=result_id))
 
     result = models.get_grading_result(result_id)  # re-fetch: GET always shows latest saved state
-    queue = models.get_grading_run_review_queue(run['id'])
+    queue = models.get_grading_run_review_queue(run['id'], own_results)
     queue_ids = [r['id'] for r in queue]
     position = queue_ids.index(result_id) + 1 if result_id in queue_ids else None
     remaining_flagged = sum(1 for r in queue if r['id'] != result_id and models.result_needs_attention(r))
@@ -1539,7 +1549,7 @@ def admin_grading_result_review(result_id):
 
 
 @app.route('/admin/grading-result/<int:result_id>/supersede', methods=['GET', 'POST'])
-@admin_required
+@staff_required
 def admin_grading_result_supersede(result_id):
     """
     Resolve a supersede conflict (spec §7): two grading_results exist for the
@@ -1547,6 +1557,7 @@ def admin_grading_result_supersede(result_id):
     one radio choice picks the winner -- never a silent bulk-overwrite of an
     existing active run.
     """
+    permissions.require_grading_result(result_id)
     challenger = models.get_grading_result(result_id)
     if not challenger:
         flash('Ergebnis nicht gefunden.', 'danger')
@@ -1577,12 +1588,13 @@ def admin_grading_result_supersede(result_id):
 
 
 @app.route('/grading-medien/<path:relpath>')
-@admin_required
+@staff_required
 def download_grading_media(relpath):
     """Serve a graded image copied locally at import time (models._copy_grading_media,
     teacher-review-ui.md §6) -- admin-gated, inline (not an attachment) so it
     renders in Page B's gallery. relpath is '<run_id>/<netzwerk_id>/<filename>',
     exactly the 'file' field stored on each grading_result media entry."""
+    permissions.require_grading_media(relpath)
     upload_dir = os.path.abspath(models._grading_upload_dir())
     directory, filename = os.path.split(relpath)
     full_dir = os.path.abspath(os.path.join(upload_dir, directory))
@@ -1597,7 +1609,7 @@ def download_grading_media(relpath):
 
 
 @app.route('/admin/grading-run/<int:run_id>/bericht/<filename>')
-@admin_required
+@staff_required
 def download_grading_report(run_id, filename):
     """Serve one report file the grading service produced for this run,
     copied locally at import time (models._copy_grading_reports).
@@ -1607,7 +1619,7 @@ def download_grading_report(run_id, filename):
     filename whitelist lives in models -- an arbitrary name must never reach
     the path, and reports/ is the only part of the run's upload dir that
     survives the media purge."""
-    if filename not in models._GRADING_REPORT_FILES:
+    if not permissions.can_see_whole_grading_run(run_id) or filename not in models._GRADING_REPORT_FILES:
         abort(404)
     reports_dir = models._grading_reports_dir(run_id)
     if not os.path.isfile(os.path.join(reports_dir, filename)):
