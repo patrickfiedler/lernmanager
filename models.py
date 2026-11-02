@@ -8505,8 +8505,8 @@ def get_warmup_question_pool(student_id, include_short_answer=False):
         # Before 2026-10-01 the whole checkpoint came in with the first attempt, and
         # a student could practise an owed question, read the answer, and go back.
         #
-        # And only once the sitting has settled too: the teacher has looked at it, or
-        # config.CHECKPOINT_PRACTICE_DELAY_DAYS have passed (reasons there).
+        # And only once config.CHECKPOINT_PRACTICE_DELAY_DAYS have passed since the
+        # sitting (reasons there). Here, not in a mode: every mode reads this pool.
         # Via now_local, the clock every stored timestamp uses -- not datetime.now().
         settled_before = (datetime.strptime(now_local(), '%Y-%m-%d %H:%M:%S')
                           - timedelta(days=config.CHECKPOINT_PRACTICE_DELAY_DAYS)
@@ -8519,7 +8519,7 @@ def get_warmup_question_pool(student_id, include_short_answer=False):
             JOIN task t ON t.id = sub.task_id
             WHERE ca.student_id = ?
               AND ca.superseded_at IS NULL
-              AND (ca.reviewed_at IS NOT NULL OR ca.timestamp <= ?)
+              AND ca.timestamp <= ?
               AND sub.quiz_json IS NOT NULL AND sub.quiz_json != ''
             ORDER BY ca.id
         ''', (student_id, settled_before)).fetchall()

@@ -378,9 +378,8 @@ def test_question_the_teacher_sent_back_leaves_the_practice_pool(db):
     assert _pool_indices(student_id) == all_indices
 
 
-def test_fresh_checkpoint_waits_until_reviewed_or_a_week_old(db):
-    """The score of a fresh sitting can still change: the teacher sends a question
-    back when looking at it. So practice waits for that look, or for the delay."""
+def test_a_teachers_review_does_not_shorten_the_cooldown(db):
+    """Practice shows solutions, so the delay holds even after the teacher has looked."""
     student_id = models.create_student("Test", "Schüler", "cpfresh", "pw123")
     task_id, subtask_id = _checkpoint(student_id)
     attempt_id = _finish_checkpoint(student_id, task_id, subtask_id, timestamp=None)  # now
@@ -389,7 +388,7 @@ def test_fresh_checkpoint_waits_until_reviewed_or_a_week_old(db):
     with models.db_session() as conn:
         conn.execute("UPDATE checkpoint_attempt SET reviewed_at = ? WHERE id = ?",
                      (models.now_local(), attempt_id))
-    assert _pool_indices(student_id) == list(range(len(MIXED_QUIZ["questions"])))
+    assert _pool_indices(student_id) == []
 
 
 def test_delay_boundary(db):
@@ -493,3 +492,8 @@ def test_teacher_switches_demo_practice_on_and_off(app, client, as_admin):
 
     as_admin.post(f"/admin/schueler/{student_id}/demo-ueben", data={})
     assert models.get_student(student_id)["demo_practice"] == 0
+
+
+def test_cooldown_is_at_least_two_weeks():
+    import config
+    assert config.CHECKPOINT_PRACTICE_DELAY_DAYS >= 14

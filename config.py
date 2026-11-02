@@ -136,12 +136,12 @@ LLM_TIMEOUT = 5  # seconds (quiz grading — short answers)
 LLM_CHECKPOINT_TIMEOUT = 15
 LLM_ARTIFACT_TIMEOUT = 60  # seconds (artifact checklist — up to 20 criteria)
 
-# Days until a finished checkpoint's questions may be practised, unless the teacher
-# has looked at the sitting first (reviewed_at). Practice shows the solution, and a
-# question is most often sent back when the sitting is reviewed -- so this is the
-# window in which "the score is final" can still turn out wrong. Waiting costs
-# little: retrieval practice works better after a gap than straight away.
-CHECKPOINT_PRACTICE_DELAY_DAYS = 7
+# Days until a finished checkpoint's questions may be practised. Practice shows the
+# solution, so this is the cooldown on solutions (Patrick, 2026-11-02: at least 14
+# days; a teacher's review no longer shortens it). It also covers the window in which
+# "the score is final" can still turn out wrong, and retrieval practice works better
+# after a gap than straight away.
+CHECKPOINT_PRACTICE_DELAY_DAYS = 14
 
 # Floor for the shortened retry after a logprobs timeout (llm_grading._call_llm).
 # The retry gets what is left of the budget, so a call that spent all of it would
