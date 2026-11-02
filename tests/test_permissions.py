@@ -36,7 +36,7 @@ def _grading_run(job_id, task, *students):
     """A run with one reviewable result per (student, netzwerk_id)."""
     run = models.create_grading_run(job_id, None, task, "r", "local", None, len(students))
     results = [models.create_grading_result(
-        run, task, student, login, [{"name": "K", "llm_score": 1, "max_score": 1}],
+        run, task, student, login, [{"name": "K", "score": 1, "max_score": 1}],
         llm_total_score=1, llm_max_score=1, document_file="a.docx",
         media=[{"file": f"{run}/{login}/001.jpg", "source": "a.docx"}])
         for student, login in students]

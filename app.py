@@ -1512,7 +1512,9 @@ def admin_grading_result_review(result_id):
             if f'teacher_feedback_{i}' in request.form:
                 entry['teacher_feedback'] = request.form[f'teacher_feedback_{i}'].strip()[:500]
             if c.get('review_required'):
-                entry['confirmed'] = request.form.get(f'confirmed_{i}') == 'on'
+                # Changing the score is the stronger form of confirming (spec §4).
+                entry['confirmed'] = (request.form.get(f'confirmed_{i}') == 'on'
+                                      or teacher_score != c.get('llm_score'))
             criteria.append(entry)
         models.save_grading_result_review(result_id, criteria)
 

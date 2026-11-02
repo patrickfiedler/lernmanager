@@ -95,17 +95,32 @@ def test_get_next_in_review_queue(db):
 
 def test_confirming_a_flagged_result_does_not_jump_over_the_others(db):
     klasse_id, task_id, run_id, _ = _setup()
-    flagged = [{"name": "Bild", "llm_score": 1, "max_score": 1, "review_required": True}]
+    flagged = [{"name": "Bild", "score": 1, "max_score": 1, "review_required": True}]
     ids = {name: models.create_grading_result(run_id, task_id, _student(name, "X", f"{name.lower()}.x"),
                                               f"{name.lower()}.x", flagged)
            for name in ("Anna", "Bert", "Carl")}
     ids["Dora"] = models.create_grading_result(run_id, task_id, _student("Dora", "X", "dora.x"), "dora.x",
-                                               [{"name": "Bild", "llm_score": 1, "max_score": 1}])
+                                               [{"name": "Bild", "score": 1, "max_score": 1}])
 
     models.save_grading_result_review(ids["Anna"], [dict(flagged[0], teacher_score=1, confirmed=True)])
 
     assert models.get_next_in_review_queue(run_id, ids["Anna"])["id"] == ids["Bert"]
     assert [r["nachname"] for r in models.get_grading_run_review_queue(run_id)] == ["Anna", "Bert", "Carl", "Dora"]
+
+
+def test_changing_the_score_confirms_a_review_required_criterion(app, as_admin):
+    app.config["WTF_CSRF_ENABLED"] = False
+    klasse_id, task_id, run_id, _ = _setup()
+    criterion = {"name": "Bild", "score": 1, "max_score": 3, "review_required": True}
+    changed, untouched = (
+        models.create_grading_result(run_id, task_id, _student(login, "X", login), login, [criterion])
+        for login in ("mueller.anna", "schulz.ben"))
+
+    as_admin.post(f"/admin/grading-result/{changed}/review", data={"action": "save", "teacher_score_0": "2"})
+    as_admin.post(f"/admin/grading-result/{untouched}/review", data={"action": "save", "teacher_score_0": "1"})
+
+    assert models.get_grading_result(changed)["criteria"][0]["confirmed"] is True
+    assert models.get_grading_result(untouched)["criteria"][0]["confirmed"] is False
 
 
 def test_override_rate_none_when_unreviewed(db):
