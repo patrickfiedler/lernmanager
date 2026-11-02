@@ -211,6 +211,7 @@
                 <tr><td>{{ label }}</td><td>{{ value }}</td></tr>
                 {% endfor %}
                 <tr><td>Rubric</td><td><code>{{ run.rubric }}</code></td></tr>
+                {% if is_admin %}<tr><td>Sichtbar für</td><td>{% for v in viewers %}{{ v.name }} ({{ v.count }} von {{ results|length }} Schülern){% if not loop.last %}, {% endif %}{% else %}nur Admin{% endfor %}</td></tr>{% endif %}
                 {% if is_admin %}<tr><td>Anbieter / Modell</td><td>{{ run.provider }}{% if run.model %} / {{ run.model }}{% endif %}</td></tr>{% endif %}
                 <tr><td>Importiert</td><td>{{ run.imported_at }}</td></tr>
                 <tr>

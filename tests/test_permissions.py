@@ -319,6 +319,31 @@ def test_teacher_gets_slips_with_only_her_students(mixed_run, monkeypatch):
     assert client.post(f'/admin/grading-run/{run}/eigene-datei/x.exe').status_code == 404
 
 
+def test_admin_sees_which_teacher_sees_a_run(mixed_run, teacher):
+    client, run, _ = mixed_run
+    with client.session_transaction() as sess:
+        teacher_id = sess['admin_id']
+    with models.db_session() as conn:
+        admin = conn.execute("SELECT id FROM admin WHERE role = 'admin' LIMIT 1").fetchone()
+        username = conn.execute("SELECT username FROM admin WHERE id = ?", (teacher_id,)).fetchone()['username']
+        admin_id = admin['id'] if admin else conn.execute(
+            "INSERT INTO admin (username, password_hash) VALUES ('chef', 'x')").lastrowid
+    with client.session_transaction() as sess:
+        sess['admin_id'] = admin_id
+    assert f'{username} (2/4)' in client.get('/admin/grading/runs').get_data(as_text=True)
+    assert f'{username} (2 von 4 Schülern)' in client.get(f'/admin/grading-run/{run}').get_data(as_text=True)
+
+    with models.db_session() as conn:
+        conn.execute("UPDATE admin SET active = 0 WHERE id = ?", (teacher_id,))
+    assert username not in client.get('/admin/grading/runs').get_data(as_text=True).split('Sichtbar für')[1]
+
+
+def test_teacher_sees_no_reverse_lookup(mixed_run):
+    client, run, _ = mixed_run
+    assert 'Sichtbar für' not in client.get('/admin/grading/runs').get_data(as_text=True)
+    assert 'Sichtbar für' not in client.get(f'/admin/grading-run/{run}').get_data(as_text=True)
+
+
 def test_teacher_cannot_delete_a_run(mixed_run):
     client, run, _ = mixed_run
     assert client.post(f'/admin/grading-run/{run}/loeschen').status_code in (302, 403, 404)

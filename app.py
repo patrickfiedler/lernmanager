@@ -1370,6 +1370,7 @@ def admin_grading_run_detail(run_id):
     return render_template(
         'admin/grading_run_detail.html', run=run, results=results, reviewable=reviewable,
         open_results=open_results, report_labels=models._GRADING_REPORT_LABELS,
+        viewers=permissions.grading_run_viewers(results) if permissions.is_admin() else [],
         non_submitters=non_submitters, no_conflict=no_conflict, needs_decision=needs_decision,
         whole_run=whole_run, job_status=job_status,
         override_rate=models.get_grading_run_override_rate(run_id) if whole_run else None,

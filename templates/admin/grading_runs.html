@@ -28,7 +28,7 @@
                     <th>Offen</th>
                     <th>Schüler</th>
                     <th>Importiert</th>
-                    {% if is_admin %}<th>Suchmuster</th><th>Anbieter</th>{% endif %}
+                    {% if is_admin %}<th>Sichtbar für</th><th>Suchmuster</th><th>Anbieter</th>{% endif %}
                 </tr>
             </thead>
             <tbody>
@@ -41,6 +41,7 @@
                     <td>{{ run.total_students }}</td>
                     <td>{{ run.imported_at }}</td>
                     {% if is_admin %}
+                    <td>{% for v in run.viewers %}{{ v.name }} ({{ v.count }}/{{ run.total_students }}){% if not loop.last %}<br>{% endif %}{% else %}<span class="text-muted">nur Admin</span>{% endfor %}</td>
                     <td>{% if run.collection.get('Pattern(s)') %}<code>{{ run.collection['Pattern(s)'] }}</code>{% else %}—{% endif %}</td>
                     <td>{{ run.provider }}{% if run.model %} · {{ run.model }}{% endif %}</td>
                     {% endif %}

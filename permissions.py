@@ -82,18 +82,33 @@ def can_see_grading_result(result):
     handed in before the topic was assigned has no topic row, then the student's
     classes count. An unmatched login (no student) stays with the admin."""
     ids = visible_klasse_ids()
-    if ids is None:
-        return True
+    return ids is None or bool(ids & _grading_result_klassen(result))
+
+
+def _grading_result_klassen(result):
     student_id = result['student_id']
     if student_id is None:
-        return False
-    klassen = (models.get_klasse_ids_for_student_topic(student_id, result['task_id'])
-               or models.get_klasse_ids_for_student(student_id))
-    return bool(ids & klassen)
+        return set()
+    return (models.get_klasse_ids_for_student_topic(student_id, result['task_id'])
+            or models.get_klasse_ids_for_student(student_id))
 
 
 def visible_grading_results(run_id):
     return [r for r in models.list_grading_results(run_id) if can_see_grading_result(r)]
+
+
+def grading_run_viewers(results):
+    """Reverse lookup for the admin: which active teachers see these results of a
+    run, and how many of them. Same rule as can_see_grading_result, read from the
+    other side. Deactivated accounts are left out, they cannot log in."""
+    klassen = [_grading_result_klassen(r) for r in results]
+    viewers = []
+    for teacher in models.list_teachers():
+        count = sum(1 for k in klassen if teacher['klasse_ids'] & k)
+        if teacher['active'] and count:
+            name = ' '.join(n for n in (teacher['vorname'], teacher['nachname']) if n)
+            viewers.append({'name': name or teacher['username'], 'count': count})
+    return viewers
 
 
 def can_see_whole_grading_run(run_id):
@@ -114,7 +129,8 @@ def _grading_run_for_teacher(run, results):
 def visible_grading_runs():
     scoped = ((run, visible_grading_results(run['id'])) for run in models.list_grading_runs())
     return [dict(run if is_admin() else _grading_run_for_teacher(run, results),
-                 open_count=sum(1 for r in results if models.grading_result_is_open(r)))
+                 open_count=sum(1 for r in results if models.grading_result_is_open(r)),
+                 viewers=grading_run_viewers(results) if is_admin() else [])
             for run, results in scoped if results or is_admin()]
 
 
