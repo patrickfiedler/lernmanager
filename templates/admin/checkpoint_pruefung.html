@@ -75,13 +75,17 @@
    a claim about the whole class and was previously only answerable by opening every
    session and holding the pattern in your head. #}
 <div class="checkpoint-tabs">
-    <a class="checkpoint-tab {{ 'is-active' if ansicht != 'fragen' }}"
+    <a class="checkpoint-tab {{ 'is-active' if ansicht == 'sitzungen' }}"
        href="{{ url_for('admin_checkpoint_pruefung', **dict(request.args, ansicht='sitzungen')) }}">
         Sitzungen <span class="checkpoint-tab-count">{{ sessions|length }}</span>
     </a>
     <a class="checkpoint-tab {{ 'is-active' if ansicht == 'fragen' }}"
        href="{{ url_for('admin_checkpoint_pruefung', **dict(request.args, ansicht='fragen')) }}">
         Fragen <span class="checkpoint-tab-count">{{ questions|length }}</span>
+    </a>
+    <a class="checkpoint-tab {{ 'is-active' if ansicht == 'angefangen' }}"
+       href="{{ url_for('admin_checkpoint_pruefung', **dict(request.args, ansicht='angefangen')) }}">
+        Angefangen <span class="checkpoint-tab-count">{{ unfinished|length }}</span>
     </a>
 </div>
 
@@ -103,6 +107,8 @@
 
 {% if ansicht == "fragen" %}
 {% include "admin/_checkpoint_questions.html" %}
+{% elif ansicht == "angefangen" %}
+{% include "admin/_checkpoint_unfinished.html" %}
 {% else %}
 <div class="flex flex-between flex-center mb-2" style="gap: 1rem; flex-wrap: wrap;">
     <p class="text-muted" style="margin: 0;">

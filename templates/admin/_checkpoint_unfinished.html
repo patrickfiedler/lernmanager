@@ -1,0 +1,47 @@
+{# Started, not finished. Read-only on purpose: without an attempt there is no score
+   to change, and the student can still go on. #}
+<p class="text-muted">
+    Noch nicht abgeschlossene Checkpoints. Hier gibt es keine Punkte: Die Schüler:innen
+    können weiterarbeiten, gewertet wird erst beim Abschluss. Filter „ungeprüft“ und
+    „gemeldet“ gelten hier nicht.
+</p>
+{% if not unfinished %}
+<div class="card"><p style="padding: 1rem;">Keine angefangenen Checkpoints für diese Auswahl.</p></div>
+{% endif %}
+{% for s in unfinished %}
+<details class="card mt-2 unfinished-sitting">
+    <summary class="unfinished-summary">
+        <strong>{{ s.student_name }}</strong>
+        · {{ s.task_name or 'Gelöschtes Thema' }} · {{ s.titel }}
+        <span class="text-muted">
+            · {{ s.done }} von {{ s.questions|length }} Fragen erledigt
+            · zuletzt {{ s.last_seen[:16] }}
+        </span>
+    </summary>
+    <div class="unfinished-body">
+        {% for q in s.questions %}
+        <div class="unfinished-question">
+            <p><strong>F{{ q.nr }}</strong> {{ q.text }} <span class="unfinished-status">{{ q.status }}</span></p>
+            {% for a in q.attempts %}
+            <div class="unfinished-attempt">
+                <span class="text-muted">Versuch {{ loop.index }}: {{ a.verdict }}</span>
+                {% if a.answer %}<div class="unfinished-answer">{{ a.answer }}</div>{% endif %}
+                {% if a.hint %}<div class="text-muted">💡 {{ a.hint }}</div>{% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        {% endfor %}
+    </div>
+</details>
+{% endfor %}
+<style>
+.unfinished-summary { padding: 0.6rem 0.75rem; cursor: pointer; }
+.unfinished-body { padding: 0 0.75rem 0.75rem; }
+.unfinished-question { padding: 0.5rem 0; border-top: 1px solid #f3f4f6; }
+.unfinished-question p { margin: 0 0 0.25rem; }
+.unfinished-status { font-size: 0.8rem; background: #e5e7eb; color: #374151;
+                     border-radius: 0.25rem; padding: 0.05rem 0.35rem; }
+.unfinished-attempt { margin: 0.25rem 0 0.25rem 1rem; font-size: 0.9rem; }
+.unfinished-answer { white-space: pre-wrap; background: #f9fafb; border-radius: 4px;
+                     padding: 0.3rem 0.5rem; }
+</style>

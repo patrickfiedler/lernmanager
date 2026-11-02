@@ -233,6 +233,22 @@ def test_teacher_removes_student_from_class_account_stays(own):
     assert models.get_student(ids['student_id']) is not None
 
 
+def test_unfinished_checkpoints_list_only_own_classes(own, teacher):
+    client, ids = own
+    _, foreign = teacher
+    with models.db_session() as conn:   # the fixtures' finished attempts would hide the work
+        conn.execute("UPDATE checkpoint_attempt SET superseded_at = '2000-01-01 00:00:00'")
+        own_checkpoint = conn.execute("SELECT id FROM subtask WHERE task_id = ?",
+                                      (ids['task_id'],)).fetchone()['id']
+    for student_id, checkpoint_id in ((ids['student_id'], own_checkpoint),
+                                      (foreign['student_id'], foreign['checkpoint_id'])):
+        models.create_checkpoint_answer(student_id, checkpoint_id, f"halb-{student_id}", 0,
+                                        1, "halb", False, "", "llm")
+    html = client.get('/admin/checkpoint-pruefung?ansicht=angefangen').get_data(as_text=True)
+    assert 'Emma' in html
+    assert 'Fritz' not in html
+
+
 def test_deactivated_teacher_is_logged_out(own):
     client, _ = own
     with models.db_session() as conn:

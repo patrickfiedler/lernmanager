@@ -3721,6 +3721,40 @@ def _mark_question_routine(entry):
     )
 
 
+def _build_unfinished_sittings(sittings):
+    """Display model of the Angefangen tab: every question of each sitting, the
+    untouched ones too, because what is still missing is the point of looking."""
+    for sitting in sittings:
+        quiz = json.loads(sitting['quiz_json'] or '{}')
+        by_question = {}
+        for answer in sitting['answers']:
+            by_question.setdefault(answer['question_index'], []).append(answer)
+        rows = []
+        questions = quiz.get('questions', [])
+        # A deleted Aufgabe has no quiz left, only the questions that were answered.
+        for index in (range(len(questions)) or sorted(set(by_question) | sitting['flagged'])):
+            answers = by_question.get(index, [])
+            if questions:
+                question = questions[index]
+            else:
+                question = json.loads((answers[0]['question_snapshot_json'] if answers else None)
+                                      or '{}')
+            if any(a['correct'] == 1 for a in answers):
+                status = 'richtig'
+            elif any(a['gave_up'] for a in answers):
+                status = 'aufgegeben'
+            elif index in sitting['flagged']:
+                status = 'gemeldet'
+            else:
+                status = 'in Arbeit' if answers else 'noch nicht beantwortet'
+            rows.append({'nr': index + 1, 'text': question.get('text', ''), 'status': status,
+                         'attempts': [_checkpoint_attempt_row(question, a) for a in answers]})
+        sitting['questions'] = rows
+        sitting['done'] = sum(r['status'] in ('richtig', 'aufgegeben', 'gemeldet') for r in rows)
+        sitting['titel'] = aufgabe_titel(sitting['subtask_name'] or '') or 'Gelöschte Aufgabe'
+    return sittings
+
+
 def _build_checkpoint_sessions(attempts):
     """Assemble the review UI's display model: each checkpoint session with its
     per-question answer log, duplicate flags and a suggested score."""
@@ -3881,6 +3915,10 @@ def admin_checkpoint_pruefung():
     # show its count either way, and it is pure aggregation over data already loaded.
     questions = checkpoint_questions.build_question_view(sessions)
 
+    unfinished = _build_unfinished_sittings(models.get_unfinished_checkpoint_sittings(
+        **{key: filters[key] for key in ('klasse_id', 'student_id', 'checkpoint_id',
+                                         'date_from', 'date_to', 'klasse_ids', 'limit')}))
+
     # What each batch button would actually touch, counted here so both can name a
     # real number instead of the broader "has duplicates" badge. The three numbers
     # differ on purpose: a flagged duplicate that cannot move the score is
@@ -3894,10 +3932,12 @@ def admin_checkpoint_pruefung():
     return render_template('admin/checkpoint_pruefung.html',
                            sessions=sessions,
                            questions=questions,
+                           unfinished=unfinished,
                            # Which grouping is on screen. A query arg, not a session
                            # preference: the tab has to survive being linked to and
                            # bookmarked, and every filter already lives in the URL.
-                           ansicht=('fragen' if request.args.get('ansicht') == 'fragen'
+                           ansicht=(request.args.get('ansicht')
+                                    if request.args.get('ansicht') in ('fragen', 'angefangen')
                                     else 'sitzungen'),
                            unsure_confidence=checkpoint_questions.UNSURE_CONFIDENCE,
                            klassen=permissions.visible_klassen(),
@@ -6893,6 +6933,19 @@ def _counted_scores(attempt):
             if attempt.get('question_scores_json') else None)
 
 
+def _checkpoint_attempt_row(question, answer):
+    """One logged answer as the student review and the teacher's look at unfinished
+    work both show it."""
+    return {
+        'answer': _checkpoint_answer_display(question, answer['answer_text']),
+        'verdict': ('aufgegeben' if answer['gave_up'] else
+                    'gemeldet' if answer['grader'] == 'flagged' else
+                    'richtig' if answer['correct'] == 1 else
+                    'noch nicht richtig' if answer['correct'] == 0 else 'nicht bewertet'),
+        'hint': answer['hint_text'] if answer.get('hint_status') in ('ok', 'melden') else None,
+    }
+
+
 def _checkpoint_review(subtask, attempt):
     """Everything the read-only review page shows about one finished session.
 
@@ -6945,14 +6998,7 @@ def _checkpoint_review(subtask, attempt):
                                                      flags.get(index), index in capped)),
             'final_answer': next((_checkpoint_answer_display(question, a['answer_text'])
                                   for a in reversed(answers) if a['answer_text']), None),
-            'attempts': [{
-                'answer': _checkpoint_answer_display(question, a['answer_text']),
-                'verdict': ('aufgegeben' if a['gave_up'] else
-                            'gemeldet' if a['grader'] == 'flagged' else
-                            'richtig' if a['correct'] == 1 else
-                            'noch nicht richtig' if a['correct'] == 0 else 'nicht bewertet'),
-                'hint': a['hint_text'] if a.get('hint_status') in ('ok', 'melden') else None,
-            } for a in answers],
+            'attempts': [_checkpoint_attempt_row(question, a) for a in answers],
             'hints_seen': question_hints[:hints_seen],
         })
 

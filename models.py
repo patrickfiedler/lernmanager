@@ -5308,6 +5308,82 @@ def get_started_checkpoint_ids(student_id):
     return {r['checkpoint_id'] for r in rows}
 
 
+def get_unfinished_checkpoint_sittings(klasse_id=None, student_id=None, checkpoint_id=None,
+                                       date_from=None, date_to=None, klasse_ids=None,
+                                       limit=300):
+    """Started, not finished: the teacher's read-only look, newest activity first.
+
+    Same scope rules as get_checkpoint_reviews. The dates apply to the last activity,
+    so a filter never cuts one sitting in half. Returns dicts with the student and
+    checkpoint names plus `answers` and `flagged` (question indices). Never in the
+    exports: a sitting without an attempt has no score to export.
+    """
+    scope, params = '', []
+    if checkpoint_id:
+        scope += ' AND r.checkpoint_id = ?'
+        params.append(checkpoint_id)
+    if student_id:
+        scope += ' AND r.student_id = ?'
+        params.append(student_id)
+    if klasse_id:
+        scope += """ AND EXISTS (SELECT 1 FROM student_klasse sk
+                                  WHERE sk.student_id = r.student_id AND sk.klasse_id = ?)"""
+        params.append(klasse_id)
+    if klasse_ids is not None:
+        scope += f""" AND EXISTS (SELECT 1 FROM student_task st
+                                   WHERE st.student_id = r.student_id AND st.task_id = sub.task_id
+                                     AND st.klasse_id IN ({','.join('?' * len(klasse_ids))}))"""
+        params.extend(klasse_ids)
+    if not (student_id or klasse_id):
+        scope += ' AND s.preview_of_admin IS NULL'
+
+    joins = """JOIN student s ON s.id = r.student_id
+               LEFT JOIN subtask sub ON sub.id = r.checkpoint_id"""
+    with db_session() as conn:
+        answers = conn.execute(f"""
+            SELECT r.* FROM checkpoint_answer r {joins}
+            WHERE {_unfinished_checkpoint_rows('timestamp')} {scope}
+            ORDER BY r.timestamp, r.id
+        """, params).fetchall()
+        flags = conn.execute(f"""
+            SELECT r.student_id, r.checkpoint_id, r.question_index, r.created_at
+            FROM checkpoint_flag r {joins}
+            WHERE r.status != 'abgelehnt' AND r.student_id IS NOT NULL
+              AND {_unfinished_checkpoint_rows('created_at')} {scope}
+        """, params).fetchall()
+
+        sittings = {}
+        def sitting(row):
+            return sittings.setdefault((row['student_id'], row['checkpoint_id']), {
+                'student_id': row['student_id'], 'checkpoint_id': row['checkpoint_id'],
+                'answers': [], 'flagged': set(), 'last_seen': ''})
+        for row in answers:
+            entry = sitting(row)
+            entry['answers'].append(dict(row))
+            entry['last_seen'] = max(entry['last_seen'], row['timestamp'])
+        for row in flags:
+            entry = sitting(row)
+            entry['flagged'].add(row['question_index'])
+            entry['last_seen'] = max(entry['last_seen'], row['created_at'])
+
+        kept = [e for e in sittings.values()
+                if (not date_from or e['last_seen'][:10] >= date_from)
+                and (not date_to or e['last_seen'][:10] <= date_to)]
+        kept = sorted(kept, key=lambda e: e['last_seen'], reverse=True)[:limit]
+        for entry in kept:
+            names = conn.execute("""
+                SELECT s.vorname, s.nachname, t.name AS task_name,
+                       sub.beschreibung AS subtask_name, sub.quiz_json
+                FROM student s
+                LEFT JOIN subtask sub ON sub.id = ?
+                LEFT JOIN task t ON t.id = sub.task_id
+                WHERE s.id = ?
+            """, (entry['checkpoint_id'], entry['student_id'])).fetchone()
+            entry.update(dict(names))
+            entry['student_name'] = f"{names['vorname']} {names['nachname']}"
+    return kept
+
+
 def get_checkpoints_awaiting_retry(student_id):
     """Checkpoint id (= subtask.id) -> the questions this student still owes there.
 
