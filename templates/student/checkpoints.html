@@ -21,13 +21,15 @@
         <div class="cp-row">
             <div class="cp-main">
                 <div class="cp-title">
-                    {% if cp.status == 'erledigt' %}✅{% elif cp.status == 'wiederholen' %}🔁{% elif cp.status == 'neu_geoeffnet' %}🔄{% elif cp.status == 'vorlaeufig' %}⏳{% else %}⬜{% endif %}
+                    {% if cp.status == 'erledigt' %}✅{% elif cp.status == 'wiederholen' %}🔁{% elif cp.status == 'neu_geoeffnet' %}🔄{% elif cp.status == 'vorlaeufig' %}⏳{% elif cp.status == 'begonnen' %}▶{% else %}⬜{% endif %}
                     {{ cp.titel }}
                     {% if cp.kern %}<span class="cp-badge cp-kern" title="Kern-Checkpoint">Kern</span>{% endif %}
                 </div>
                 <div class="cp-note">
                     {% if cp.status == 'offen' %}
                         Noch nicht bearbeitet.
+                    {% elif cp.status == 'begonnen' %}
+                        Angefangen. Du machst dort weiter, wo du aufgehört hast.
                     {% elif cp.status == 'wiederholen' %}
                         {{ 'Frage' if cp.owed|length == 1 else 'Fragen' }}
                         {% for o in cp.owed %}{{ o.nr }}{% if not loop.last %}, {% endif %}{% endfor %}
@@ -45,9 +47,9 @@
             </div>
             <div class="cp-action">
                 {% if cp.position %}
-                <a class="btn {% if cp.status in ('offen', 'wiederholen', 'neu_geoeffnet') %}btn-primary{% else %}btn-secondary{% endif %}"
+                <a class="btn {% if cp.status in ('offen', 'begonnen', 'wiederholen', 'neu_geoeffnet') %}btn-primary{% else %}btn-secondary{% endif %}"
                    href="{{ url_for('student_quiz_subtask', slug=cp.slug, position=cp.position) }}">
-                    {% if cp.status == 'offen' %}Starten →{% elif cp.status == 'wiederholen' %}Nachholen →{% elif cp.status == 'neu_geoeffnet' %}Weiter →{% else %}Ansehen →{% endif %}
+                    {% if cp.status == 'offen' %}Starten →{% elif cp.status == 'wiederholen' %}Nachholen →{% elif cp.status in ('neu_geoeffnet', 'begonnen') %}Weiter →{% else %}Ansehen →{% endif %}
                 </a>
                 {% endif %}
             </div>

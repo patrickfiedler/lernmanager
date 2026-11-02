@@ -6713,30 +6713,29 @@ def _checkpoint_progress(subtask_id):
     return progress
 
 
-def _has_live_checkpoint_progress(subtask_id):
-    """Whether this browser session already holds progress for this checkpoint.
-
-    The resume path (_resume_checkpoint_progress) may only run when it does not:
-    the cookie is the newer record of the two while a sitting is live, and it holds
-    the one thing the log cannot give back -- hints taken since the last answer.
-    """
-    return session.get('checkpoint_progress', {}).get(str(subtask_id)) is not None
-
-
 def _resume_checkpoint_progress(student_id, subtask_id, progress):
-    """Fill an empty progress dict from the answer log, if there is a sitting to
-    resume. Returns the set of question indices that are already finished
-    (solved, given up or reported), empty when there is nothing to resume."""
+    """Bring the progress dict in line with the answer log. Returns the set of question
+    indices that are already finished (solved, given up or reported), empty when the
+    log holds no unfinished sitting.
+
+    Runs on every opening, not only with an empty cookie: a surviving cookie used to
+    skip this, so leaving and coming back put every question on screen again. The log
+    decides, because it also knows what happened in another browser. Only hints stay
+    from the cookie -- one taken since the last answer is not in the log yet.
+    """
     resumed = models.resume_unfinished_checkpoint_session(student_id, subtask_id)
     if not resumed:
         return set()
 
     progress['session_uid'] = resumed['session_uid']
+    for field in ('attempts', 'solved', 'gave_up', 'flagged', 'llm_errors'):
+        progress[field] = {}
     done = set()
     for index, state in resumed['questions'].items():
         qidx = str(index)
         progress['attempts'][qidx] = state['attempts']
-        progress['hints_used'][qidx] = state['hints_used']
+        progress['hints_used'][qidx] = max(state['hints_used'],
+                                           progress['hints_used'].get(qidx, 0))
         if state['solved']:
             progress['solved'][qidx] = True
         if state['gave_up']:
@@ -6744,7 +6743,7 @@ def _resume_checkpoint_progress(student_id, subtask_id, progress):
         if state['flagged']:
             progress['flagged'][qidx] = True
         if state['llm_errors']:
-            progress.setdefault('llm_errors', {})[qidx] = state['llm_errors']
+            progress['llm_errors'][qidx] = state['llm_errors']
         if state['solved'] or state['gave_up'] or state['flagged']:
             done.add(index)
     return done
@@ -7051,9 +7050,7 @@ def _handle_checkpoint_quiz(student, task, slug, subtask, position, klasse):
     # browser data at logout) picks up where it stopped, instead of making the
     # student redo questions they already solved -- Chemie's requirement of
     # 2026-09-01, and the reason a checkpoint's hardness is completeness, not time.
-    # Only when the cookie is empty: a live sitting is the newer record.
-    done = (set() if _has_live_checkpoint_progress(subtask['id'])
-            else _resume_checkpoint_progress(student['id'], subtask['id'], progress))
+    done = _resume_checkpoint_progress(student['id'], subtask['id'], progress)
     progress['retry'] = bool(retry_indices)
     progress['retry_flag_ids'] = [f['id'] for f in retry_flags]
     # Which of the redone questions may not score 3. Per question, not per session:
@@ -7134,6 +7131,7 @@ def student_checkpoints():
     rows = models.get_student_checkpoint_overview(student_id)
     owed = models.get_checkpoints_awaiting_retry(student_id)
     reopened_ids = {r['checkpoint_id'] for r in models.get_reopened_checkpoint_topics(student_id)}
+    started_ids = models.get_started_checkpoint_ids(student_id)
 
     # Position within the Thema, worked out per Thema with the same helper the Thema
     # page uses -- the student-facing URL is a position among VISIBLE subtasks, which
@@ -7168,7 +7166,7 @@ def student_checkpoints():
         elif row['checkpoint_id'] in reopened_ids:
             status = 'neu_geoeffnet'
         elif not attempt:
-            status = 'offen'
+            status = 'begonnen' if row['checkpoint_id'] in started_ids else 'offen'
         elif provisional:
             status = 'vorlaeufig'
         else:
@@ -7201,7 +7199,7 @@ def student_checkpoints():
                            'checkpoints': [entry]})
 
     offen = sum(1 for g in groups for c in g['checkpoints']
-                if c['status'] in ('offen', 'wiederholen', 'neu_geoeffnet'))
+                if c['status'] in ('offen', 'begonnen', 'wiederholen', 'neu_geoeffnet'))
     return render_template('student/checkpoints.html', student=student,
                            groups=groups, offen=offen)
 

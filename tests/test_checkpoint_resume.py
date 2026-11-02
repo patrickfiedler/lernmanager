@@ -191,3 +191,45 @@ def test_a_sitting_that_lost_only_its_last_click_can_still_be_finished(app, clie
                          json={"slug": SLUG, "subtask_id": subtask_id}).get_json()
     assert finish["score"] == 3
     assert len(models.get_checkpoint_attempts_for_student(student_id)) == 1
+
+
+def test_coming_back_with_the_cookie_alive_also_resumes(app, client):
+    """Leaving the page, or logging in again without logging out, keeps the cookie."""
+    app.config["WTF_CSRF_ENABLED"] = False
+    student_id, subtask_id = _checkpoint(client)
+    client.get(URL)
+    _answer(client, subtask_id, 0)
+
+    body = client.get(URL).get_data(as_text=True)
+    assert "Frage eins" not in body
+    assert "1 von 3 Fragen" in body
+
+
+def test_a_hint_since_the_last_answer_survives_coming_back(app, client):
+    app.config["WTF_CSRF_ENABLED"] = False
+    student_id, subtask_id = _checkpoint(client)
+    client.get(URL)
+    _answer(client, subtask_id, 0, answer=[1])
+    with client.session_transaction() as sess:
+        progress = sess["checkpoint_progress"]
+        progress[str(subtask_id)]["hints_used"]["0"] = 1
+        sess["checkpoint_progress"] = progress
+
+    client.get(URL)
+    with client.session_transaction() as sess:
+        state = sess["checkpoint_progress"][str(subtask_id)]
+    assert state["hints_used"]["0"] == 1
+    assert state["attempts"]["0"] == 1
+
+
+def test_a_stale_cookie_learns_what_another_browser_did(app, client):
+    app.config["WTF_CSRF_ENABLED"] = False
+    student_id, subtask_id = _checkpoint(client)
+    client.get(URL)
+    with client.session_transaction() as sess:
+        stale = sess["checkpoint_progress"]
+    _answer(client, subtask_id, 0)
+    with client.session_transaction() as sess:
+        sess["checkpoint_progress"] = stale
+
+    assert "Frage eins" not in client.get(URL).get_data(as_text=True)

@@ -5279,6 +5279,35 @@ def resume_unfinished_checkpoint_session(student_id, checkpoint_id):
         return {'session_uid': session_uid, 'questions': questions}
 
 
+def _unfinished_checkpoint_rows(time_col):
+    """WHERE fragment over alias `r` (checkpoint_answer or checkpoint_flag): work
+    no attempt has scored yet, newer than the last teacher reset, on a checkpoint
+    without a standing attempt. The last part leaves out a redo of owed questions,
+    which belongs to its finished session."""
+    return f"""r.checkpoint_attempt_id IS NULL
+        AND r.{time_col} > COALESCE((SELECT MAX(old.superseded_at) FROM checkpoint_attempt old
+                                     WHERE old.student_id = r.student_id
+                                       AND old.checkpoint_id = r.checkpoint_id), '')
+        AND NOT EXISTS (SELECT 1 FROM checkpoint_attempt live
+                        WHERE live.student_id = r.student_id
+                          AND live.checkpoint_id = r.checkpoint_id
+                          AND live.superseded_at IS NULL)"""
+
+
+def get_started_checkpoint_ids(student_id):
+    """Checkpoints this student began and has not finished."""
+    with db_session() as conn:
+        rows = conn.execute(f"""
+            SELECT r.checkpoint_id FROM checkpoint_answer r
+            WHERE r.student_id = ? AND {_unfinished_checkpoint_rows('timestamp')}
+            UNION
+            SELECT r.checkpoint_id FROM checkpoint_flag r
+            WHERE r.student_id = ? AND r.status != 'abgelehnt'
+              AND {_unfinished_checkpoint_rows('created_at')}
+        """, (student_id, student_id)).fetchall()
+    return {r['checkpoint_id'] for r in rows}
+
+
 def get_checkpoints_awaiting_retry(student_id):
     """Checkpoint id (= subtask.id) -> the questions this student still owes there.
 

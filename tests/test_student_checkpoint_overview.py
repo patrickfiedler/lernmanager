@@ -144,3 +144,20 @@ def test_another_students_result_is_not_shown(data, client, app):
         quiz_snapshot_json=json.dumps(QUIZ), session_uid="sess-other")
 
     assert "3 von 3 Punkten" not in _get(client, data)
+
+
+def test_a_started_checkpoint_says_so(client, data):
+    models.create_checkpoint_answer(
+        data["student_id"], data["checkpoint_id"], "sess-1", 0, attempt_no=1,
+        answer_text="halb", correct=0, feedback=None, grader="llm")
+    html = _get(client, data)
+    assert "Angefangen" in html and "Weiter →" in html
+    assert "Noch nicht bearbeitet" not in html
+
+
+def test_finishing_ends_started(client, data):
+    models.create_checkpoint_answer(
+        data["student_id"], data["checkpoint_id"], "sess-1", 0, attempt_no=1,
+        answer_text="ganz", correct=1, feedback=None, grader="llm")
+    _sit(data)
+    assert "Angefangen" not in _get(client, data)
