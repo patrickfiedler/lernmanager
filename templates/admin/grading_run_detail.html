@@ -2,6 +2,18 @@
 
 {% block title %}Bewertungslauf {{ run.display_name }} - Lernmanager{% endblock %}
 
+{% macro klasse_select(r) %}
+                    <form method="POST" action="{{ url_for('admin_grading_result_klasse', result_id=r.id) }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <select name="klasse_id" onchange="this.form.submit()" aria-label="Klasse für {{ r.nachname or r.netzwerk_id }}" style="max-width: 9rem;">
+                            <option value="">automatisch</option>
+                            {% for k in all_klassen %}
+                            <option value="{{ k.id }}" {% if r.klasse_id == k.id %}selected{% endif %}>{{ k.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </form>
+{% endmacro %}
+
 {% block content %}
 <div class="flex flex-between flex-center mb-2">
     <h1>🎯 {{ run.task_name }}{% if run.klasse_name %} — {{ run.klasse_name }}{% endif %}</h1>
@@ -116,6 +128,7 @@
             {% for r in non_submitters %}
             <tr>
                 <td>{{ r.nachname or '—' }}, {{ r.vorname or '' }}{% if not r.student_id %}<span class="badge badge-warning">nicht zugeordnet ({{ r.netzwerk_id }})</span>{% endif %}</td>
+                {% if is_admin %}<td style="width: 1%;">{{ klasse_select(r) }}</td>{% endif %}
                 <td style="width: 1%; white-space: nowrap;">
                     {% if r.status == 'active' %}
                     <span class="badge badge-success">✅ freigegeben</span>
@@ -176,15 +189,7 @@
                 <td>{{ r.teacher_total_score if r.teacher_total_score is not none else '—' }}</td>
                 {% if is_admin %}
                 <td>
-                    <form method="POST" action="{{ url_for('admin_grading_result_klasse', result_id=r.id) }}">
-                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <select name="klasse_id" onchange="this.form.submit()" aria-label="Klasse für {{ r.nachname or r.netzwerk_id }}" style="max-width: 9rem;">
-                            <option value="">automatisch</option>
-                            {% for k in all_klassen %}
-                            <option value="{{ k.id }}" {% if r.klasse_id == k.id %}selected{% endif %}>{{ k.name }}</option>
-                            {% endfor %}
-                        </select>
-                    </form>
+                    {{ klasse_select(r) }}
                 </td>
                 {% endif %}
                 <td>

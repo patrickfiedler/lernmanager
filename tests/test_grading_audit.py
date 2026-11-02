@@ -173,6 +173,7 @@ def test_media_kept_for_undo_until_keep_days_passed(db, monkeypatch):
 
 
 def test_pages_and_routes(app, client, as_admin, monkeypatch):
+    monkeypatch.setitem(app.config, 'WTF_CSRF_ENABLED', False)
     run_id, _, ids = _run()
     html = client.get(f'/admin/grading-run/{run_id}').get_data(as_text=True)
     assert 'noch zu prüfen' in html and 'Prüfung starten' in html
@@ -194,7 +195,8 @@ def test_pages_and_routes(app, client, as_admin, monkeypatch):
     assert 'Lauf gelöscht' in client.get('/admin/grading/verlauf').get_data(as_text=True)
 
 
-def test_admin_assigns_class_and_can_undo_it(app, client, as_admin):
+def test_admin_assigns_class_and_can_undo_it(app, client, as_admin, monkeypatch):
+    monkeypatch.setitem(app.config, 'WTF_CSRF_ENABLED', False)
     run_id, _, ids = _run(job_id="klasse")
     klasse = models.create_klasse("9z")
     client.post(f"/admin/grading-result/{ids['Anna']}/klasse", data={'klasse_id': klasse})
@@ -215,3 +217,15 @@ def test_undo_of_a_row_from_before_the_klasse_column(db):
             del state['klasse_id']
             conn.execute(f"UPDATE grading_audit SET {column} = ? WHERE id = ?", (json.dumps(state), row['id']))
     assert models.undo_grading_decisions([row['id']], _admin())[:2] == (1, 0)
+
+
+def test_non_submitter_row_offers_the_class_too(app, client, as_admin):
+    """Keine Abgabe is what puts a foreign run in front of a teacher, too."""
+    run_id, task_id, _ = _run(job_id="leer", names=("Anna",))
+    sid = models.create_student("Leer", "X", "uleer", "pw", netzwerk_id="leer.x")
+    rid = models.create_grading_result(run_id, task_id, sid, "leer.x", CRIT, error="No document files found")
+    assert models.is_non_submitter_result(models.get_grading_result(rid))
+    klasse = models.create_klasse("Altklasse")
+    html = client.get(f'/admin/grading-run/{run_id}').get_data(as_text=True)
+    assert f'/admin/grading-result/{rid}/klasse' in html
+    assert f'<option value="{klasse}"' in html and 'Altklasse' in html  # macro sees the page's klassen
