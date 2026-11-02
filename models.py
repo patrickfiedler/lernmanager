@@ -7925,21 +7925,26 @@ def is_pre_reviewed_result(result):
     return bool(result['criteria']) and all(c.get('reused') == 'teacher' for c in result['criteria'])
 
 
+def _flagged_at_import(result):
+    """result_needs_attention as it stood before any review: ignores 'confirmed'."""
+    return any(c.get('reused') != 'teacher' and (c.get('review_required') or c.get('llm_score') == 0)
+               for c in result['criteria'])
+
+
 def _review_queue_sort_key(result):
     """Flagged-first ordering for Page B (teacher-review-ui.md §4): (1) error
-    rows on a real submission, (2) unconfirmed always-review criteria or any
-    zero-score criterion, (3) alphabetical, (4) results the result store
-    returned entirely pre-reviewed (every criterion reused: teacher). Recomputed per page load rather
-    than frozen at queue start (spec's stated ideal) -- see task_plan.md's
-    2g/2h known-gaps note for why that's an acceptable MVP simplification
-    here: the only input that changes mid-review is 'confirmed', and a
-    result leaving bucket 2 because a teacher just confirmed it is a mild
-    reshuffle, not the "queue points at a gone/superseded row" hazard the
-    freeze was really guarding against (R3)."""
+    rows on a real submission, (2) always-review criteria or any zero-score
+    criterion, (3) alphabetical, (4) results the result store returned entirely
+    pre-reviewed (every criterion reused: teacher).
+
+    Built only from what reviewing does not change, so the order holds through
+    a sitting without being stored (the spec's "frozen at queue start"). It
+    used to read 'confirmed': a confirmed result moved behind the other flagged
+    ones, and "next" then jumped over all of them."""
     is_real_error = bool(result.get('error')) and not is_non_submitter_result(result)
     if is_real_error:
         bucket = 0
-    elif result_needs_attention(result):
+    elif _flagged_at_import(result):
         bucket = 1
     elif is_pre_reviewed_result(result):
         bucket = 3  # Patrick 2026-09-29: stays in the queue, last

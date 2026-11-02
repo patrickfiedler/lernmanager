@@ -1517,9 +1517,7 @@ def admin_grading_result_review(result_id):
         models.save_grading_result_review(result_id, criteria)
 
         if action == 'save_next':
-            # Fresh rows: the save above changes this result's queue bucket.
-            nxt = models.get_next_in_review_queue(run['id'], result_id,
-                                                  permissions.visible_grading_results(run['id']))
+            nxt = models.get_next_in_review_queue(run['id'], result_id, own_results)
             if nxt:
                 return redirect(url_for('admin_grading_result_review', result_id=nxt['id']))
             flash('Prüfung abgeschlossen -- zurück zur Übersicht.', 'success')

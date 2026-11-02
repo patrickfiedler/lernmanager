@@ -93,6 +93,21 @@ def test_get_next_in_review_queue(db):
     assert models.get_next_in_review_queue(run_id, r2) is None
 
 
+def test_confirming_a_flagged_result_does_not_jump_over_the_others(db):
+    klasse_id, task_id, run_id, _ = _setup()
+    flagged = [{"name": "Bild", "llm_score": 1, "max_score": 1, "review_required": True}]
+    ids = {name: models.create_grading_result(run_id, task_id, _student(name, "X", f"{name.lower()}.x"),
+                                              f"{name.lower()}.x", flagged)
+           for name in ("Anna", "Bert", "Carl")}
+    ids["Dora"] = models.create_grading_result(run_id, task_id, _student("Dora", "X", "dora.x"), "dora.x",
+                                               [{"name": "Bild", "llm_score": 1, "max_score": 1}])
+
+    models.save_grading_result_review(ids["Anna"], [dict(flagged[0], teacher_score=1, confirmed=True)])
+
+    assert models.get_next_in_review_queue(run_id, ids["Anna"])["id"] == ids["Bert"]
+    assert [r["nachname"] for r in models.get_grading_run_review_queue(run_id)] == ["Anna", "Bert", "Carl", "Dora"]
+
+
 def test_override_rate_none_when_unreviewed(db):
     klasse_id, task_id, run_id, _ = _setup()
     sid = _student("Mueller", "Anna", "mueller.anna")
