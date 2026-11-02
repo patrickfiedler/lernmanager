@@ -3,6 +3,22 @@ import pytest
 import config
 import models
 from app import app as flask_app
+from werkzeug.security import generate_password_hash
+
+
+@pytest.fixture(autouse=True)
+def _no_real_service_and_cheap_hash(request, monkeypatch):
+    """Every test starts without a grading service: several set the URL directly,
+    and without this reset it leaked into later tests, which then waited on the
+    real host. monkeypatch restores both values after the test, however they were set.
+
+    The real password hash costs 0.11 s and fixtures create accounts in nearly
+    every test. test_password_hash.py checks the real one (marker real_hash)."""
+    monkeypatch.setattr(config, 'GRADING_SERVICE_URL', '')
+    monkeypatch.setattr(config, 'GRADING_SERVICE_TOKEN', '')
+    if not request.node.get_closest_marker('real_hash'):
+        monkeypatch.setattr(models, 'generate_password_hash',
+                            lambda password: generate_password_hash(password, method='pbkdf2:sha256:1'))
 
 
 @pytest.fixture
