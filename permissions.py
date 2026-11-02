@@ -80,12 +80,16 @@ def can_see_grading_result(result):
     """One rubric spans several classes, so a grading run has no class of its own:
     the student's result decides. Same rule as can_see_student_topic; an artifact
     handed in before the topic was assigned has no topic row, then the student's
-    classes count. An unmatched login (no student) stays with the admin."""
+    classes count. An unmatched login (no student) stays with the admin. The admin
+    can fix the class by hand: a move or a wrongly filed student would otherwise show
+    a foreign run to the new teacher (grading_result.klasse_id)."""
     ids = visible_klasse_ids()
     return ids is None or bool(ids & _grading_result_klassen(result))
 
 
 def _grading_result_klassen(result):
+    if result['klasse_id']:  # set by hand on the run page, wins over everything
+        return {result['klasse_id']}
     student_id = result['student_id']
     if student_id is None:
         return set()

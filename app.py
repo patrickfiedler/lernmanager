@@ -1371,6 +1371,7 @@ def admin_grading_run_detail(run_id):
         'admin/grading_run_detail.html', run=run, results=results, reviewable=reviewable,
         open_results=open_results, report_labels=models._GRADING_REPORT_LABELS,
         viewers=permissions.grading_run_viewers(results) if permissions.is_admin() else [],
+        all_klassen=models.get_all_klassen() if permissions.is_admin() else [],
         non_submitters=non_submitters, no_conflict=no_conflict, needs_decision=needs_decision,
         whole_run=whole_run, job_status=job_status,
         override_rate=models.get_grading_run_override_rate(run_id) if whole_run else None,
@@ -1507,6 +1508,22 @@ def admin_grading_result_discard(result_id):
         models.discard_grading_result(result_id)
     flash('Verworfen.', 'success')
     models.maybe_auto_purge_grading_run(result['grading_run_id'])
+    return redirect(url_for('admin_grading_run_detail', run_id=result['grading_run_id']))
+
+
+@app.route('/admin/grading-result/<int:result_id>/klasse', methods=['POST'])
+@admin_required
+def admin_grading_result_klasse(result_id):
+    result = models.get_grading_result(result_id)
+    if not result:
+        flash('Ergebnis nicht gefunden.', 'danger')
+        return redirect(url_for('admin_grading_runs'))
+    klasse_id = request.form.get('klasse_id', type=int)
+    if klasse_id and not models.get_klasse(klasse_id):
+        abort(404)
+    with models.grading_audit(session['admin_id'], 'assign_klasse', [result_id]):
+        models.set_grading_result_klasse(result_id, klasse_id)
+    flash('Klasse zugeordnet.', 'success')
     return redirect(url_for('admin_grading_run_detail', run_id=result['grading_run_id']))
 
 

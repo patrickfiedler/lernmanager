@@ -143,6 +143,7 @@
                 <th>Hinweise</th>
                 <th>KI</th>
                 <th>Lehrkraft</th>
+                {% if is_admin %}<th title="Welche Klasse das Ergebnis sieht. Für Klassenwechsel oder falsch einsortierte Schüler.">Klasse</th>{% endif %}
                 <th>Aktionen</th>
             </tr>
         </thead>
@@ -173,6 +174,19 @@
                 </td>
                 <td>{{ r.llm_total_score }} / {{ r.llm_max_score }}</td>
                 <td>{{ r.teacher_total_score if r.teacher_total_score is not none else '—' }}</td>
+                {% if is_admin %}
+                <td>
+                    <form method="POST" action="{{ url_for('admin_grading_result_klasse', result_id=r.id) }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <select name="klasse_id" onchange="this.form.submit()" aria-label="Klasse für {{ r.nachname or r.netzwerk_id }}" style="max-width: 9rem;">
+                            <option value="">automatisch</option>
+                            {% for k in all_klassen %}
+                            <option value="{{ k.id }}" {% if r.klasse_id == k.id %}selected{% endif %}>{{ k.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </form>
+                </td>
+                {% endif %}
                 <td>
                     {% if r.status in ('imported', 'under_review', 'corrected') and r.student_id %}
                     <a href="{{ url_for('admin_grading_result_review', result_id=r.id) }}" class="btn btn-sm {{ 'btn-primary' if r.is_open else 'btn-secondary' }}">Prüfen</a>

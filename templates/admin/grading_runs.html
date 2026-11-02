@@ -41,7 +41,7 @@
                     <td>{{ run.total_students }}</td>
                     <td>{{ run.imported_at }}</td>
                     {% if is_admin %}
-                    <td>{% for v in run.viewers %}{{ v.name }} ({{ v.count }}/{{ run.total_students }}){% if not loop.last %}<br>{% endif %}{% else %}<span class="text-muted">nur Admin</span>{% endfor %}</td>
+                    <td>{% for v in run.viewers %}{% if v.count == 1 and run.total_students > 1 %}<span class="badge badge-warning" title="Sieht nur einen Schüler: Klassenwechsel oder falsch einsortiert?">{{ v.name }} (1/{{ run.total_students }})</span>{% else %}{{ v.name }} ({{ v.count }}/{{ run.total_students }}){% endif %}{% if not loop.last %}<br>{% endif %}{% else %}<span class="text-muted">nur Admin</span>{% endfor %}</td>
                     <td>{% if run.collection.get('Pattern(s)') %}<code>{{ run.collection['Pattern(s)'] }}</code>{% else %}—{% endif %}</td>
                     <td>{{ run.provider }}{% if run.model %} · {{ run.model }}{% endif %}</td>
                     {% endif %}

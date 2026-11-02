@@ -1,4 +1,5 @@
 """Audit log, undo, full run delete and the review-every-student state."""
+import json
 import os
 import re
 from unittest.mock import patch
@@ -191,3 +192,26 @@ def test_pages_and_routes(app, client, as_admin, monkeypatch):
     client.post(f'/admin/grading-run/{run_id}/loeschen')
     assert models.get_grading_run(run_id) is None
     assert 'Lauf gelöscht' in client.get('/admin/grading/verlauf').get_data(as_text=True)
+
+
+def test_admin_assigns_class_and_can_undo_it(app, client, as_admin):
+    run_id, _, ids = _run(job_id="klasse")
+    klasse = models.create_klasse("9z")
+    client.post(f"/admin/grading-result/{ids['Anna']}/klasse", data={'klasse_id': klasse})
+    assert models.get_grading_result(ids['Anna'])['klasse_id'] == klasse
+    row = models.list_grading_audit(run_id)[0]
+    assert row['label'] == 'Klasse zugeordnet'
+    assert models.undo_grading_decisions([row['id']], _admin())[0] == 1
+    assert models.get_grading_result(ids['Anna'])['klasse_id'] is None
+
+
+def test_undo_of_a_row_from_before_the_klasse_column(db):
+    run_id, _, ids = _run(job_id="alt")
+    _save(ids["Anna"])
+    row = models.list_grading_audit(run_id)[0]
+    with models.db_session() as conn:
+        for column in ('before_json', 'after_json'):
+            state = json.loads(row[column])
+            del state['klasse_id']
+            conn.execute(f"UPDATE grading_audit SET {column} = ? WHERE id = ?", (json.dumps(state), row['id']))
+    assert models.undo_grading_decisions([row['id']], _admin())[:2] == (1, 0)

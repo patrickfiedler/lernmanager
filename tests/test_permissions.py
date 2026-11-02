@@ -338,6 +338,21 @@ def test_admin_sees_which_teacher_sees_a_run(mixed_run, teacher):
     assert username not in client.get('/admin/grading/runs').get_data(as_text=True).split('Sichtbar für')[1]
 
 
+def test_hand_set_class_decides_who_sees_a_result(mixed_run, teacher):
+    client, run, results = mixed_run
+    _, foreign = teacher
+    models.set_grading_result_klasse(results['emma'], foreign['klasse_id'])
+    html = client.get(f'/admin/grading-run/{run}').get_data(as_text=True)
+    assert 'Eva' in html and 'Emma' not in html
+    assert client.get(f"/admin/grading-result/{results['emma']}/review").status_code == 404
+
+    models.set_grading_result_klasse(results['emma'], None)
+    assert 'Emma' in client.get(f'/admin/grading-run/{run}').get_data(as_text=True)
+    assert client.post(f"/admin/grading-result/{results['emma']}/klasse",
+                       data={'klasse_id': foreign['klasse_id']}).status_code != 200
+    assert models.get_grading_result(results['emma'])['klasse_id'] is None
+
+
 def test_teacher_sees_no_reverse_lookup(mixed_run):
     client, run, _ = mixed_run
     assert 'Sichtbar für' not in client.get('/admin/grading/runs').get_data(as_text=True)

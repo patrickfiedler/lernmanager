@@ -817,6 +817,7 @@ def init_db():
                 released_at TEXT,
                 released_by INTEGER,
                 superseded_by_id INTEGER,
+                klasse_id INTEGER,  -- set by hand, overrides the visibility rule (migrate_073)
                 created_at TEXT NOT NULL,
                 UNIQUE(grading_run_id, netzwerk_id),
                 FOREIGN KEY (grading_run_id) REFERENCES grading_run(id) ON DELETE CASCADE,
@@ -8012,12 +8013,12 @@ def delete_grading_run(run_id, admin_id):
 # --- Audit log + undo (migrate_072, Patrick 2026-11-02) ---
 
 _GRADING_SNAPSHOT_COLUMNS = ('status', 'criteria_json', 'teacher_total_score', 'reviewed_at',
-                             'released_at', 'released_by', 'superseded_by_id')
+                             'released_at', 'released_by', 'superseded_by_id', 'klasse_id')
 
 GRADING_AUDIT_LABELS = {
     'review': 'Geprüft', 'release': 'Freigegeben', 'release_bulk': 'Sammel-Freigabe',
     'discard': 'Verworfen', 'discard_run': 'Lauf verworfen', 'supersede': 'Bewertung ersetzt',
-    'undo': 'Rückgängig gemacht', 'delete_run': 'Lauf gelöscht',
+    'undo': 'Rückgängig gemacht', 'delete_run': 'Lauf gelöscht', 'assign_klasse': 'Klasse zugeordnet',
 }
 
 
@@ -8060,7 +8061,15 @@ def _audit_summary(before, after):
     if before['teacher_total_score'] != after['teacher_total_score']:
         parts.append(f"Punkte {before['teacher_total_score'] if before['teacher_total_score'] is not None else 'KI'} "
                      f"-> {after['teacher_total_score'] if after['teacher_total_score'] is not None else 'KI'}")
+    if before.get('klasse_id') != after.get('klasse_id'):
+        parts.append('Klasse geändert')
     return ', '.join(parts)
+
+
+def set_grading_result_klasse(result_id, klasse_id):
+    """Which class's teacher sees this result. None = back to the normal rule."""
+    with db_session() as conn:
+        conn.execute("UPDATE grading_result SET klasse_id = ? WHERE id = ?", (klasse_id, result_id))
 
 
 @contextmanager
@@ -8123,13 +8132,14 @@ def undo_grading_decisions(audit_ids, admin_id):
         for row in rows:
             before, after = json.loads(row['before_json']), json.loads(row['after_json'])
             current = _grading_snapshots(conn, [row['grading_result_id']]).get(row['grading_result_id'])
-            if not current or _snapshot_state(current) != after:
+            # Compare and restore what the row recorded: older rows know fewer columns.
+            if not current or any(current[c] != after[c] for c in after):
                 skipped += 1
                 continue
-            assignments = ', '.join(f"{c} = ?" for c in _GRADING_SNAPSHOT_COLUMNS)
+            assignments = ', '.join(f"{c} = ?" for c in before)
             try:
                 conn.execute(f"UPDATE grading_result SET {assignments} WHERE id = ?",
-                             [before[c] for c in _GRADING_SNAPSHOT_COLUMNS] + [row['grading_result_id']])
+                             list(before.values()) + [row['grading_result_id']])
             except sqlite3.IntegrityError:  # someone else holds 'active' for this student + topic
                 skipped += 1
                 continue
