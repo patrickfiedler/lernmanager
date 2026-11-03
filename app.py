@@ -16,6 +16,7 @@ import urllib.request
 import urllib.error
 from functools import wraps
 from datetime import date, datetime
+import click
 from flask import Flask, has_request_context, render_template, request, redirect, url_for, session, flash, jsonify, send_from_directory, abort, Response, make_response, g
 from flask_wtf.csrf import CSRFProtect
 from flask_compress import Compress
@@ -8622,6 +8623,21 @@ def cli_auto_attendance():
         return
     for r in results:
         print(f"{r['klasse_name']}: {r['present']} present, {r['absent']} absent, {r['skipped']} skipped")
+
+
+@app.cli.command('grading-dokumente-nachholen')
+@click.argument('run_ids', nargs=-1, type=int, required=True)
+def cli_backfill_grading_documents(run_ids):
+    """Download + Vorschau für ältere Bewertungsläufe nachholen (Lauf-IDs).
+
+    On the server, with the service's env:
+    sudo -u lernmanager bash -c 'cd /opt/lernmanager && set -a && . ./.env && venv/bin/flask --app app grading-dokumente-nachholen 5 6'
+    """
+    init_app()
+    for run_id in run_ids:
+        print(f"Lauf {run_id}: läuft (etwa 5 s je Schüler) ...", flush=True)
+        updated, error = models.backfill_grading_documents(run_id)
+        print(f"Lauf {run_id}: {error}" if error else f"Lauf {run_id}: {updated} Ergebnis(se) ergänzt")
 
 
 def init_app():

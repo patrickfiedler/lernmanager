@@ -7597,6 +7597,56 @@ def _copy_grading_document(run_id, job_id, netzwerk_id, doc):
     return stored
 
 
+def backfill_grading_documents(run_id, timeout=1800):
+    """
+    Fetch document + preview pages for a run imported before the service sent
+    them (Patrick, 2026-11-03: wanted for selected older runs). Asks the service
+    to prepare them (POST /jobs/<id>/documents, minutes for a class -- hence a
+    CLI command, not a page behind nginx's 90 s), then copies them like the
+    import does. Only results without a document are touched, so running it
+    twice is harmless.
+
+    Returns (updated_count, error_message_or_None).
+    """
+    run = get_grading_run(run_id)
+    if run is None:
+        return 0, 'Lauf nicht gefunden'
+    if run.get('media_purged_at'):
+        return 0, 'Medien dieses Laufs sind schon gelöscht, der Job auf dem Bewertungsrechner auch'
+    if not config.GRADING_SERVICE_URL:
+        return 0, 'GRADING_SERVICE_URL ist nicht gesetzt'
+
+    def _call(path, method='GET'):
+        req = urllib.request.Request(
+            f"{config.GRADING_SERVICE_URL}/jobs/{run['job_id']}{path}", method=method,
+            headers={'Authorization': f'Bearer {config.GRADING_SERVICE_TOKEN}'})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read())
+
+    try:
+        _call('/documents', method='POST')
+        students = _call('/results').get('students', [])
+    except urllib.error.HTTPError as e:
+        return 0, f'Bewertungsdienst antwortet {e.code}'
+    except (urllib.error.URLError, OSError, TimeoutError, ValueError) as e:
+        return 0, f'Bewertungsdienst nicht erreichbar: {e}'
+
+    docs = {s.get('student_id'): s.get('document') for s in students}
+    updated = 0
+    for result in list_grading_results(run_id):
+        if result.get('document') or not docs.get(result['netzwerk_id']):
+            continue
+        document = _copy_grading_document(run_id, run['job_id'], result['netzwerk_id'],
+                                          docs[result['netzwerk_id']])
+        if document is None:
+            continue
+        with db_session() as conn:
+            conn.execute("UPDATE grading_result SET document_json = ? WHERE id = ?",
+                         (json.dumps(document), result['id']))
+        updated += 1
+    return updated, None
+
+
 def _grading_reports_dir(run_id):
     """Sibling of the per-student media dirs, one level down so the purge can
     tell them apart: instance/uploads/grading/<run_id>/reports/."""

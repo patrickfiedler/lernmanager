@@ -3,6 +3,7 @@ WebP preview pages, copied from the grading service at import time (decision
 2026-11-03). urllib.request.urlopen is mocked; no real network.
 """
 import io
+import json
 import os
 from unittest.mock import patch
 
@@ -137,3 +138,41 @@ def test_review_page_names_why_there_is_no_file(as_admin):
     html = _review_page(as_admin, {'file': None, 'skipped': 'too_large', 'pages': [],
                                    'pages_total': 0, 'preview_error': 'Keine Vorschau für .sb3'})
     assert 'über 20 MB' in html and 'Keine Vorschau für .sb3' in html
+
+
+def test_backfill_fills_only_results_without_document(tmp_path, db):
+    _setup(tmp_path)
+    import uuid
+    task_id = models.create_task("thema-" + uuid.uuid4().hex, "d", "l", "MBI", "6", "pflicht")
+    run_id = models.create_grading_run("job-alt", None, task_id, "r", "local", None, 2)
+    leer = models.create_grading_result(run_id, task_id, None, "mueller.anna", [])
+    schon = models.create_grading_result(run_id, task_id, None, "schulz.ben", [],
+                                         document={'file': 'x', 'pages': []})
+    results = {'students': [{'student_id': 'mueller.anna', 'document': DOC},
+                            {'student_id': 'schulz.ben', 'document': DOC}]}
+    seen = []
+
+    def fake(req, timeout=None):
+        seen.append((req.get_method(), req.full_url))
+        if req.full_url.endswith('/documents'):
+            return _FakeResponse(b'{"prepared": 2}')
+        if req.full_url.endswith('/results'):
+            return _FakeResponse(json.dumps(results).encode())
+        return _FakeResponse(b'bytes')
+
+    with patch("models.urllib.request.urlopen", side_effect=fake):
+        assert models.backfill_grading_documents(run_id) == (1, None)
+    assert seen[0] == ('POST', 'http://10.8.0.3:8420/jobs/job-alt/documents')
+    assert models.get_grading_result(leer)['document']['file'].endswith('/dokument/abgabe.pptx')
+    assert models.get_grading_result(schon)['document'] == {'file': 'x', 'pages': []}
+
+
+def test_backfill_refuses_purged_run(tmp_path, db):
+    _setup(tmp_path)
+    task_id = models.create_task("thema-purged", "d", "l", "MBI", "6", "pflicht")
+    run_id = models.create_grading_run("job-weg", None, task_id, "r", "local", None, 1)
+    models.mark_grading_run_media_purged(run_id)
+    with patch("models.urllib.request.urlopen") as mock_open:
+        updated, error = models.backfill_grading_documents(run_id)
+    mock_open.assert_not_called()
+    assert updated == 0 and 'gelöscht' in error
