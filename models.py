@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import shutil
 import sys
 from hashlib import sha256
 import uuid
@@ -818,6 +819,7 @@ def init_db():
                 released_by INTEGER,
                 superseded_by_id INTEGER,
                 klasse_id INTEGER,  -- set by hand, overrides the visibility rule (migrate_073)
+                document_json TEXT,  -- graded document: download + preview pages (migrate_074)
                 created_at TEXT NOT NULL,
                 UNIQUE(grading_run_id, netzwerk_id),
                 FOREIGN KEY (grading_run_id) REFERENCES grading_run(id) ON DELETE CASCADE,
@@ -7520,6 +7522,67 @@ def _copy_grading_media(run_id, job_id, netzwerk_id, media_list):
     return copied
 
 
+_GRADING_PAGE_NAME = re.compile(r'^page-\d{3}\.webp$')
+
+
+def _copy_grading_document(run_id, job_id, netzwerk_id, doc):
+    """
+    Copy the document the grading service graded best (download copy, images
+    shrunk) and its WebP preview pages into
+    instance/uploads/grading/<run_id>/<netzwerk_id>/dokument/ -- decision
+    shared-decisions/decisions/2026-11-03-bestes-dokument-wird-an-lernmanager-
+    ausgeliefert.md. Import time for the same reason as _copy_grading_media,
+    and inside the student's dir so purge_grading_run_media takes it along.
+
+    Returns the dict stored in grading_result.document_json, with 'file' and
+    'pages' rewritten to local relpaths (the form download_grading_media
+    takes), or None when the service sent no document (older service, no
+    file found). A failed copy keeps the entry and says so in 'skipped' /
+    'preview_error', so the review page can name the reason.
+    """
+    if not doc or not config.GRADING_SERVICE_URL:
+        return None
+    if not _SAFE_NETZWERK_ID.match(netzwerk_id or ''):
+        return None
+    dest_dir = os.path.join(_grading_upload_dir(), str(run_id), netzwerk_id, 'dokument')
+    os.makedirs(dest_dir, exist_ok=True)
+    base_url = f"{config.GRADING_SERVICE_URL}/jobs/{job_id}/document/{netzwerk_id}"
+    relbase = f"{run_id}/{netzwerk_id}/dokument"
+
+    def _fetch(url, dest):
+        req = urllib.request.Request(url, headers={
+            'Authorization': f'Bearer {config.GRADING_SERVICE_TOKEN}',
+        })
+        with urllib.request.urlopen(req, timeout=60) as resp, open(dest, 'wb') as f:
+            shutil.copyfileobj(resp, f)
+
+    stored = {
+        'file': None, 'size': doc.get('size'), 'slimmed': bool(doc.get('slimmed')),
+        'skipped': doc.get('skipped'), 'pages': [], 'pages_total': doc.get('pages_total') or 0,
+        'preview_error': doc.get('preview_error'),
+    }
+    # The name goes into a path: basename only, and never one of our own names.
+    name = os.path.basename(doc.get('file') or '')
+    if name and not _GRADING_PAGE_NAME.match(name):
+        try:
+            _fetch(base_url, os.path.join(dest_dir, name))
+            stored['file'] = f"{relbase}/{name}"
+        except (urllib.error.URLError, OSError, TimeoutError):
+            stored['skipped'] = 'copy_failed'
+
+    for page in doc.get('pages') or []:
+        page = os.path.basename(page or '')
+        if not _GRADING_PAGE_NAME.match(page):
+            continue
+        try:
+            _fetch(f"{base_url}/pages/{page}", os.path.join(dest_dir, page))
+        except (urllib.error.URLError, OSError, TimeoutError):
+            stored['preview_error'] = 'Vorschau ließ sich nicht übertragen'
+            break
+        stored['pages'].append(f"{relbase}/{page}")
+    return stored
+
+
 def _grading_reports_dir(run_id):
     """Sibling of the per-student media dirs, one level down so the purge can
     tell them apart: instance/uploads/grading/<run_id>/reports/."""
@@ -7860,6 +7923,7 @@ def import_grading_callback(job_id, provider, model, graded_at, students, rubric
         if total_score == 0:
             zero_score_count += 1
         media = _copy_grading_media(run['id'], job_id, netzwerk_id, s.get('media') or [])
+        document = _copy_grading_document(run['id'], job_id, netzwerk_id, s.get('document'))
         create_grading_result(
             grading_run_id=run['id'], task_id=result_task_id, student_id=student_id,
             netzwerk_id=netzwerk_id, criteria=s.get('criteria', []),
@@ -7867,6 +7931,7 @@ def import_grading_callback(job_id, provider, model, graded_at, students, rubric
             confidence=s.get('confidence'), error=s.get('error'),
             document_file=s.get('document_file'), media=media,
             media_skipped=s.get('media_skipped'), document_text=s.get('document_text'),
+            document=document,
         )
         imported += 1
 
@@ -7890,7 +7955,7 @@ def import_grading_callback(job_id, provider, model, graded_at, students, rubric
 def create_grading_result(grading_run_id, task_id, student_id, netzwerk_id, criteria,
                            llm_total_score=None, llm_max_score=None, flagged=False,
                            confidence=None, error=None, document_file=None,
-                           media=None, media_skipped=None, document_text=None):
+                           media=None, media_skipped=None, document_text=None, document=None):
     """
     Create one grading_result row (status='imported'). `criteria` is the list
     of per-criterion dicts from students/*.json, reshaped into the review-UI
@@ -7929,11 +7994,12 @@ def create_grading_result(grading_run_id, task_id, student_id, netzwerk_id, crit
         cursor = conn.execute(
             "INSERT INTO grading_result (grading_run_id, task_id, student_id, netzwerk_id, status, "
             "llm_total_score, llm_max_score, flagged, confidence, error, criteria_json, document_file, "
-            "media_json, media_skipped_json, document_text, created_at) "
-            "VALUES (?, ?, ?, ?, 'imported', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "media_json, media_skipped_json, document_text, document_json, created_at) "
+            "VALUES (?, ?, ?, ?, 'imported', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (grading_run_id, task_id, student_id, netzwerk_id, llm_total_score, llm_max_score,
              1 if flagged else 0, confidence, error, criteria_json, document_file,
-             json.dumps(media or []), json.dumps(media_skipped or []), document_text, created_at)
+             json.dumps(media or []), json.dumps(media_skipped or []), document_text,
+             json.dumps(document) if document else None, created_at)
         )
         return cursor.lastrowid
 
@@ -7943,6 +8009,7 @@ def _row_to_grading_result(row):
     d['criteria'] = json.loads(d['criteria_json'])
     d['media'] = json.loads(d.pop('media_json') or '[]')
     d['media_skipped'] = json.loads(d.pop('media_skipped_json') or '[]')
+    d['document'] = json.loads(d.pop('document_json', None) or 'null')
     del d['criteria_json']
     d['flagged'] = bool(d['flagged'])
     return d
