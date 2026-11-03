@@ -29,7 +29,7 @@
                 {% for e in entries %}
                 <tr {% if e.undone_by %}style="opacity: 0.55;"{% endif %}>
                     <td style="white-space: nowrap;">{{ e.at|replace('T', ' ') }}</td>
-                    <td>{{ e.actor or '—' }}</td>
+                    <td>{{ e.actor or ('beim Import' if e.action == 'unchanged' else '—') }}</td>
                     {% if not run %}<td>{{ e.run_name or e.task_name or ('Lauf ' ~ e.grading_run_id) }}</td>{% endif %}
                     <td>{% if e.nachname %}{{ e.nachname }}, {{ e.vorname }}{% else %}—{% endif %}</td>
                     <td>{{ e.label }}{% if e.undone_by %} <span class="badge">zurückgenommen</span>{% endif %}</td>

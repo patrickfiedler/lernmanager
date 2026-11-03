@@ -7574,6 +7574,8 @@ def _copy_grading_document(run_id, job_id, netzwerk_id, doc):
         'file': None, 'size': doc.get('size'), 'slimmed': bool(doc.get('slimmed')),
         'skipped': doc.get('skipped'), 'pages': [], 'pages_total': doc.get('pages_total') or 0,
         'preview_error': doc.get('preview_error'),
+        # Identity of the graded file, for "unchanged since reviewed" (request 2026-11-03).
+        'sha256': doc.get('sha256'), 'rubric_version': doc.get('rubric_version'),
     }
     # The name goes into a path: basename only, and never one of our own names.
     name = os.path.basename(doc.get('file') or '')
@@ -7989,7 +7991,7 @@ def import_grading_callback(job_id, provider, model, graded_at, students, rubric
             zero_score_count += 1
         media = _copy_grading_media(run['id'], job_id, netzwerk_id, s.get('media') or [])
         document = _copy_grading_document(run['id'], job_id, netzwerk_id, s.get('document'))
-        create_grading_result(
+        result_id = create_grading_result(
             grading_run_id=run['id'], task_id=result_task_id, student_id=student_id,
             netzwerk_id=netzwerk_id, criteria=s.get('criteria', []),
             llm_total_score=total_score, llm_max_score=max_score, flagged=flagged,
@@ -7999,6 +8001,9 @@ def import_grading_callback(job_id, provider, model, graded_at, students, rubric
             document=document,
         )
         imported += 1
+        if find_reviewed_identical_result(student_id, result_task_id, run['id'], document):
+            with grading_audit(None, 'unchanged', [result_id]):
+                discard_grading_result(result_id)
 
     # Once per callback, not per student: these are run-level files. Runs
     # unconditionally so a retried delivery repairs a partial first copy.
@@ -8015,6 +8020,48 @@ def import_grading_callback(job_id, provider, model, graded_at, students, rubric
              run['id'])
         )
     return run['id']
+
+
+def _same_document(old_doc, new_doc):
+    """True when new_doc is exactly the file already reviewed in old_doc, graded
+    against the same rubric version (Patrick 2026-11-03: same hash = looked at)."""
+    # None never counts as equal: older runs and the old service send no values.
+    if not old_doc or not new_doc:
+        return False
+    if old_doc.get('sha256') and old_doc.get('rubric_version'):
+        return (old_doc['sha256'] == new_doc.get('sha256')
+                and old_doc['rubric_version'] == new_doc.get('rubric_version'))
+    return False
+
+
+def find_reviewed_identical_result(student_id, task_id, run_id, document):
+    """An earlier result (another run) of this student and task that the teacher
+    has settled and whose graded file is byte-identical, or None. Settled =
+    released, or reviewed and nothing left open. Newest first."""
+    if not student_id or not document:
+        return None
+    with db_session() as conn:
+        rows = conn.execute(
+            "SELECT * FROM grading_result WHERE student_id = ? AND task_id = ? AND grading_run_id != ? "
+            "AND status IN ('active', 'under_review', 'corrected') AND document_json IS NOT NULL "
+            "ORDER BY id DESC", (student_id, task_id, run_id)).fetchall()
+    for row in rows:
+        old = _row_to_grading_result(row)
+        if old['status'] != 'active' and (not old.get('reviewed_at') or grading_result_is_open(old)):
+            continue
+        if _same_document(old['document'], document):
+            return old
+    return None
+
+
+def unchanged_result_ids(run_id):
+    """Ids of this run's results set aside at import as unchanged, and still set aside."""
+    with db_session() as conn:
+        return {row[0] for row in conn.execute(
+            "SELECT DISTINCT a.grading_result_id FROM grading_audit a "
+            "JOIN grading_result r ON r.id = a.grading_result_id "
+            "WHERE a.grading_run_id = ? AND a.action = 'unchanged' AND r.status = 'discarded'",
+            (run_id,))}
 
 
 def create_grading_result(grading_run_id, task_id, student_id, netzwerk_id, criteria,
@@ -8256,6 +8303,7 @@ GRADING_AUDIT_LABELS = {
     'review': 'Geprüft', 'release': 'Freigegeben', 'release_bulk': 'Sammel-Freigabe',
     'discard': 'Verworfen', 'discard_run': 'Lauf verworfen', 'supersede': 'Bewertung ersetzt',
     'undo': 'Rückgängig gemacht', 'delete_run': 'Lauf gelöscht', 'assign_klasse': 'Klasse zugeordnet',
+    'unchanged': 'Unverändert, schon geprüft',
 }
 
 

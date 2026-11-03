@@ -1379,6 +1379,7 @@ def admin_grading_run_detail(run_id):
         reports=models.list_grading_reports(run_id) if whole_run else [],
         corrected_count=models.count_grading_results_corrected(
             run_id, since=models.grading_reports_written_at(run_id)) if whole_run else 0,
+        unchanged_count=len(models.unchanged_result_ids(run_id) & {r['id'] for r in results}),
     )
 
 
