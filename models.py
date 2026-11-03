@@ -163,7 +163,8 @@ def init_db():
                 role TEXT NOT NULL DEFAULT 'admin',  -- admin/teacher, see permissions.py
                 active INTEGER NOT NULL DEFAULT 1,  -- 0 = login blocked, row kept for resolved_by etc.
                 nachname TEXT,  -- teachers only, NULL for older accounts (migrate_071)
-                vorname TEXT
+                vorname TEXT,
+                grading_view TEXT NOT NULL DEFAULT 'ki'  -- review page: ki/vorschau/beides (migrate_075)
             );
 
             -- Classes (Klassen)
@@ -946,6 +947,19 @@ def get_admin(admin_id):
     with db_session() as conn:
         row = conn.execute("SELECT * FROM admin WHERE id = ?", (admin_id,)).fetchone()
         return dict(row) if row else None
+
+
+GRADING_VIEWS = ('ki', 'vorschau', 'beides')
+
+
+def set_admin_grading_view(admin_id, view):
+    """Remember which view the review page opens with. Unknown values are
+    ignored, so a stale form can never store something the page cannot show."""
+    if view not in GRADING_VIEWS:
+        return False
+    with db_session() as conn:
+        conn.execute("UPDATE admin SET grading_view = ? WHERE id = ?", (view, admin_id))
+    return True
 
 
 def get_klasse_ids_for_teacher(admin_id):

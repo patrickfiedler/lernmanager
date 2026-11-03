@@ -1600,6 +1600,17 @@ def admin_grading_result_review(result_id):
     )
 
 
+@app.route('/admin/grading/ansicht', methods=['POST'])
+@staff_required
+def admin_grading_view():
+    """AJAX from the review page's view switch: KI-Sicht / Vorschau / beides.
+    Kept in the account (admin.grading_view), not in the browser -- school PCs
+    wipe browser storage on logout. Always the caller's own account."""
+    if not models.set_admin_grading_view(session['admin_id'], request.form.get('view')):
+        return jsonify({'error': 'unknown view'}), 400
+    return jsonify({'status': 'ok'})
+
+
 @app.route('/admin/grading-result/<int:result_id>/supersede', methods=['GET', 'POST'])
 @staff_required
 def admin_grading_result_supersede(result_id):

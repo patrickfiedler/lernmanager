@@ -99,3 +99,14 @@ def test_document_survives_the_round_trip_through_the_db(tmp_path, db):
     assert models.get_grading_result(rid)['document'] == stored
     rid2 = models.create_grading_result(run_id, task_id, None, "y", [])
     assert models.get_grading_result(rid2)['document'] is None
+
+
+def test_grading_view_is_kept_per_account(app, as_admin):
+    app.config["WTF_CSRF_ENABLED"] = False
+    with as_admin.session_transaction() as sess:
+        admin_id = sess["admin_id"]
+    assert models.get_admin(admin_id)['grading_view'] == 'ki'
+    assert as_admin.post('/admin/grading/ansicht', data={'view': 'beides'}).status_code == 200
+    assert models.get_admin(admin_id)['grading_view'] == 'beides'
+    assert as_admin.post('/admin/grading/ansicht', data={'view': '<script>'}).status_code == 400
+    assert models.get_admin(admin_id)['grading_view'] == 'beides'
