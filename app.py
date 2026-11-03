@@ -8627,7 +8627,8 @@ def cli_auto_attendance():
 
 @app.cli.command('grading-dokumente-nachholen')
 @click.argument('run_ids', nargs=-1, type=int, required=True)
-def cli_backfill_grading_documents(run_ids):
+@click.option('--erneut', is_flag=True, help='Auch Ergebnisse ersetzen, die schon ein Dokument haben.')
+def cli_backfill_grading_documents(run_ids, erneut):
     """Download + Vorschau für ältere Bewertungsläufe nachholen (Lauf-IDs).
 
     On the server, with the service's env:
@@ -8636,7 +8637,7 @@ def cli_backfill_grading_documents(run_ids):
     init_app()
     for run_id in run_ids:
         print(f"Lauf {run_id}: läuft (etwa 5 s je Schüler) ...", flush=True)
-        updated, error = models.backfill_grading_documents(run_id)
+        updated, error = models.backfill_grading_documents(run_id, again=erneut)
         print(f"Lauf {run_id}: {error}" if error else f"Lauf {run_id}: {updated} Ergebnis(se) ergänzt")
 
 

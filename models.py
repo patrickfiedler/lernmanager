@@ -7597,14 +7597,15 @@ def _copy_grading_document(run_id, job_id, netzwerk_id, doc):
     return stored
 
 
-def backfill_grading_documents(run_id, timeout=1800):
+def backfill_grading_documents(run_id, timeout=1800, again=False):
     """
     Fetch document + preview pages for a run imported before the service sent
     them (Patrick, 2026-11-03: wanted for selected older runs). Asks the service
     to prepare them (POST /jobs/<id>/documents, minutes for a class -- hence a
     CLI command, not a page behind nginx's 90 s), then copies them like the
     import does. Only results without a document are touched, so running it
-    twice is harmless.
+    twice is harmless -- unless again=True, which replaces every document (for
+    previews that failed on the service, 2026-11-03).
 
     Returns (updated_count, error_message_or_None).
     """
@@ -7634,7 +7635,7 @@ def backfill_grading_documents(run_id, timeout=1800):
     docs = {s.get('student_id'): s.get('document') for s in students}
     updated = 0
     for result in list_grading_results(run_id):
-        if result.get('document') or not docs.get(result['netzwerk_id']):
+        if (result.get('document') and not again) or not docs.get(result['netzwerk_id']):
             continue
         document = _copy_grading_document(run_id, run['job_id'], result['netzwerk_id'],
                                           docs[result['netzwerk_id']])

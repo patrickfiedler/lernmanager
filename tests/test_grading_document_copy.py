@@ -166,6 +166,10 @@ def test_backfill_fills_only_results_without_document(tmp_path, db):
     assert models.get_grading_result(leer)['document']['file'].endswith('/dokument/abgabe.pptx')
     assert models.get_grading_result(schon)['document'] == {'file': 'x', 'pages': []}
 
+    with patch("models.urllib.request.urlopen", side_effect=fake):
+        assert models.backfill_grading_documents(run_id, again=True) == (2, None)
+    assert models.get_grading_result(schon)['document']['file'].endswith('/dokument/abgabe.pptx')
+
 
 def test_backfill_refuses_purged_run(tmp_path, db):
     _setup(tmp_path)
