@@ -110,3 +110,30 @@ def test_grading_view_is_kept_per_account(app, as_admin):
     assert models.get_admin(admin_id)['grading_view'] == 'beides'
     assert as_admin.post('/admin/grading/ansicht', data={'view': '<script>'}).status_code == 400
     assert models.get_admin(admin_id)['grading_view'] == 'beides'
+
+
+def _review_page(as_admin, document, purged=False):
+    import uuid
+    task_id = models.create_task("thema-" + uuid.uuid4().hex, "d", "l", "MBI", "6", "pflicht")
+    run_id = models.create_grading_run(uuid.uuid4().hex, None, task_id, "r", "local", None, 1)
+    rid = models.create_grading_result(run_id, task_id, None, "x", [{"name": "K", "score": 1, "max_score": 1}],
+                                       document_file="abgabe.pptx", document=document)
+    if purged:
+        models.mark_grading_run_media_purged(run_id)
+    return as_admin.get(f'/admin/grading-result/{rid}/review').get_data(as_text=True)
+
+
+def test_review_page_offers_download_and_pages(as_admin):
+    html = _review_page(as_admin, dict(DOC, file="1/x/dokument/abgabe.pptx",
+                                       pages=["1/x/dokument/page-001.webp"], pages_total=3))
+    assert 'data-view="ki"' in html
+    assert '/grading-medien/1/x/dokument/abgabe.pptx' in html and 'Bilder verkleinert' in html
+    assert '/grading-medien/1/x/dokument/page-001.webp' in html
+    assert 'Weitere 2 Seite(n) nur in der Datei' in html
+
+
+def test_review_page_names_why_there_is_no_file(as_admin):
+    assert 'Keine Datei übernommen' in _review_page(as_admin, None)
+    html = _review_page(as_admin, {'file': None, 'skipped': 'too_large', 'pages': [],
+                                   'pages_total': 0, 'preview_error': 'Keine Vorschau für .sb3'})
+    assert 'über 20 MB' in html and 'Keine Vorschau für .sb3' in html

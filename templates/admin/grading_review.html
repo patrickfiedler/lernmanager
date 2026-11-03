@@ -39,8 +39,70 @@
 </div>
 {% endif %}
 
+<style>
+/* The panel's data-view decides what shows: KI-Sicht, Vorschau, or both stacked. */
+#doc-panel[data-view="ki"] .view-preview,
+#doc-panel[data-view="vorschau"] .view-ki { display: none; }
+.view-switch { display: inline-flex; border: 1px solid #d1d5db; border-radius: 6px; overflow: hidden; }
+.view-switch button { font: inherit; font-size: 0.85rem; padding: 0.25rem 0.6rem; border: 0; background: white; cursor: pointer; }
+.view-switch button + button { border-left: 1px solid #d1d5db; }
+#doc-panel[data-view="ki"] .view-switch [data-view="ki"],
+#doc-panel[data-view="vorschau"] .view-switch [data-view="vorschau"],
+#doc-panel[data-view="beides"] .view-switch [data-view="beides"] { background: #2563eb; color: white; }
+</style>
+{% set doc = result.document %}
+{% set files_gone = run.media_purged_at %}
 <div class="grid grid-2" style="align-items: start;">
-    <div style="position: sticky; top: 0.5rem;">
+    <div style="position: sticky; top: 0.5rem;" id="doc-panel" data-view="{{ grading_view }}">
+        <div class="flex flex-between flex-center mb-1" style="gap: 0.5rem; flex-wrap: wrap;">
+            <div class="view-switch" role="group" aria-label="Ansicht">
+                <button type="button" data-view="ki">✨ KI-Sicht</button>
+                <button type="button" data-view="vorschau">🖼️ Vorschau</button>
+                <button type="button" data-view="beides">Beides</button>
+            </div>
+            <span style="font-size: 0.9rem;">
+            {% if doc and doc.file and not files_gone %}
+                <a href="{{ url_for('download_grading_media', relpath=doc.file) }}">⬇️ {{ doc.file.rsplit('/', 1)[-1] }}</a>
+                {% if doc.slimmed %}<small class="text-muted">(Bilder verkleinert)</small>{% endif %}
+            {% elif files_gone %}
+                <span class="text-muted">⬇️ Datei nach Ablauf der Frist gelöscht</span>
+            {% elif not doc %}
+                <span class="text-muted">⬇️ Keine Datei übernommen</span>
+            {% elif doc.skipped == 'too_large' %}
+                <span style="color: #92400e;">⬇️ Datei über 20 MB, liegt im Scan-Ordner</span>
+            {% else %}
+                <span style="color: #92400e;">⬇️ Datei ließ sich nicht übertragen</span>
+            {% endif %}
+            </span>
+        </div>
+
+        <div class="card mb-2 view-preview">
+            <div class="card-header">🖼️ Abgabe ({{ result.document_file or '—' }})</div>
+            {% if doc and doc.pages and not files_gone %}
+            <p class="text-muted" style="font-size: 0.8rem; margin: 0; padding: 0.5rem 0.75rem 0;">
+                Mit LibreOffice gerendert, kann von Word/PowerPoint abweichen. Im Zweifel die Datei öffnen.
+            </p>
+            <div style="padding: 0.75rem; max-height: 70vh; overflow: auto; display: flex; flex-direction: column; gap: 0.75rem;">
+                {% for page in doc.pages %}
+                <a href="{{ url_for('download_grading_media', relpath=page) }}" target="_blank" title="Seite {{ loop.index }} groß öffnen">
+                    <img src="{{ url_for('download_grading_media', relpath=page) }}" alt="Seite {{ loop.index }}" loading="lazy"
+                         style="width: 100%; border: 1px solid #d1d5db; border-radius: 4px; background: white;">
+                </a>
+                {% endfor %}
+                {% if doc.pages_total > doc.pages|length %}
+                <p class="text-muted" style="margin: 0;">Weitere {{ doc.pages_total - doc.pages|length }} Seite(n) nur in der Datei.</p>
+                {% endif %}
+            </div>
+            {% else %}
+            <p class="text-muted" style="padding: 0.75rem; margin: 0;">
+                {% if files_gone %}Vorschau nach Ablauf der Frist gelöscht.
+                {% elif not doc %}Keine Vorschau übernommen. Für ältere Läufe: <code>flask grading-dokumente-nachholen {{ run.id }}</code>.
+                {% else %}Keine Vorschau: {{ doc.preview_error or 'unbekannter Grund' }}.{% endif %}
+            </p>
+            {% endif %}
+        </div>
+
+        <div class="view-ki">
         <div class="card mb-2">
             <div class="card-header">📄 Was die KI gelesen hat</div>
             {% if result.document_text %}
@@ -80,6 +142,7 @@
             {% endif %}
         </div>
         {% endif %}
+        </div>
     </div>
 
     <form method="POST" id="review-form">
@@ -213,6 +276,21 @@ document.querySelectorAll('.criterion-row').forEach(row => {
         el.addEventListener('input', () => { updateRow(row); recompute(); });
     });
     updateRow(row);
+});
+
+// View switch: shows at once, saved to the account in the background
+// (school PCs wipe browser storage). A failed save only costs the next start view.
+const docPanel = document.getElementById('doc-panel');
+docPanel.querySelectorAll('.view-switch button').forEach(button => {
+    button.addEventListener('click', () => {
+        docPanel.dataset.view = button.dataset.view;
+        const body = new FormData();
+        body.append('view', button.dataset.view);
+        fetch('{{ url_for("admin_grading_view") }}', {
+            method: 'POST', body,
+            headers: {'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').content},
+        }).catch(() => {});
+    });
 });
 
 // ← Zurück and ← Zur Übersicht are plain links: without this they drop what was typed.

@@ -1597,6 +1597,9 @@ def admin_grading_result_review(result_id):
         'admin/grading_review.html', result=result, run=run, position=position,
         queue_total=len(queue), remaining_open=remaining_open, hints=models.grading_result_hints(result),
         prev_result=prev_result, supersede_conflict=supersede_conflict,
+        # The saved choice always wins; where a preview is missing the page says
+        # why (Patrick, 2026-11-03: older runs get documents backfilled).
+        grading_view=models.get_admin(session['admin_id'])['grading_view'],
     )
 
 
