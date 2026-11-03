@@ -38,7 +38,9 @@ def _grading_run(job_id, task, *students):
     results = [models.create_grading_result(
         run, task, student, login, [{"name": "K", "score": 1, "max_score": 1}],
         llm_total_score=1, llm_max_score=1, document_file="a.docx",
-        media=[{"file": f"{run}/{login}/001.jpg", "source": "a.docx"}])
+        media=[{"file": f"{run}/{login}/001.jpg", "source": "a.docx"}],
+        document={"file": f"{run}/{login}/dokument/a.docx", "slimmed": True,
+                  "pages": [f"{run}/{login}/dokument/page-001.webp"], "pages_total": 1})
         for student, login in students]
     return run, results
 
@@ -424,6 +426,22 @@ def test_teacher_gets_media_of_her_students_only(mixed_run, tmp_path, monkeypatc
     assert client.get(f'/grading-medien/{run}/eigen.emma/001.jpg').status_code == 200
     assert client.get(f'/grading-medien/{run}/fremd.fritz/001.jpg').status_code == 404
     assert client.get(f'/grading-medien/{run}/eigen.emma/../fremd.fritz/001.jpg').status_code == 404
+
+
+def test_teacher_gets_documents_of_her_students_only(mixed_run, tmp_path, monkeypatch):
+    monkeypatch.setattr(models.config, 'UPLOAD_FOLDER', str(tmp_path))
+    client, run, _ = mixed_run
+    for login in ('eigen.emma', 'fremd.fritz'):
+        folder = tmp_path / 'grading' / str(run) / login / 'dokument'
+        folder.mkdir(parents=True)
+        (folder / 'a.docx').write_bytes(b'PK-doc')
+        (folder / 'page-001.webp').write_bytes(b'RIFF')
+    doc = client.get(f'/grading-medien/{run}/eigen.emma/dokument/a.docx')
+    assert doc.status_code == 200 and 'attachment' in doc.headers['Content-Disposition']
+    page = client.get(f'/grading-medien/{run}/eigen.emma/dokument/page-001.webp')
+    assert page.status_code == 200 and page.headers['Content-Disposition'].startswith('inline')
+    for path in ('fremd.fritz/dokument/a.docx', 'fremd.fritz/dokument/page-001.webp'):
+        assert client.get(f'/grading-medien/{run}/{path}').status_code == 404
 
 
 def test_teacher_owns_reports_when_the_whole_run_is_hers(own, tmp_path, monkeypatch):

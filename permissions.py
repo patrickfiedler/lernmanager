@@ -169,13 +169,20 @@ def require_grading_result(result_id):
         abort(404)
 
 
+def _grading_result_files(result):
+    """Every local file a result points at: graded images, the document, its pages."""
+    doc = result.get('document') or {}
+    return ([m.get('file') for m in result['media']]
+            + [doc.get('file')] + list(doc.get('pages') or []))
+
+
 def require_grading_media(relpath):
-    """relpath is '<run_id>/<netzwerk_id>/<file>', exactly a result's media 'file'."""
+    """relpath is '<run_id>/<netzwerk_id>/...', exactly one of _grading_result_files."""
     if is_admin():
         return
     run_id = relpath.split('/')[0]
     results = visible_grading_results(int(run_id)) if run_id.isdigit() else []
-    if not any(m.get('file') == relpath for r in results for m in r['media']):
+    if not any(relpath in _grading_result_files(r) for r in results):
         abort(404)
 
 

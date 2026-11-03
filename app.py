@@ -1641,13 +1641,20 @@ def admin_grading_result_supersede(result_id):
     return render_template('admin/grading_supersede.html', challenger=challenger, active=active, run=run)
 
 
+_INLINE_IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.gif', '.webp'}
+
+
 @app.route('/grading-medien/<path:relpath>')
 @staff_required
 def download_grading_media(relpath):
-    """Serve a graded image copied locally at import time (models._copy_grading_media,
-    teacher-review-ui.md §6) -- admin-gated, inline (not an attachment) so it
-    renders in Page B's gallery. relpath is '<run_id>/<netzwerk_id>/<filename>',
-    exactly the 'file' field stored on each grading_result media entry."""
+    """Serve a file copied locally at import time: a graded image
+    (models._copy_grading_media, teacher-review-ui.md §6), the graded document or
+    one of its preview pages (models._copy_grading_document). relpath is exactly
+    a 'file'/'pages' entry stored on the grading_result.
+
+    Raster images inline, so the gallery and preview can show them; everything
+    else as a download. The document is whatever the student handed in -- an
+    .html or .svg served inline would run its script as the teacher here."""
     permissions.require_grading_media(relpath)
     upload_dir = os.path.abspath(models._grading_upload_dir())
     directory, filename = os.path.split(relpath)
@@ -1659,7 +1666,8 @@ def download_grading_media(relpath):
         abort(404)
     if not os.path.isfile(os.path.join(full_dir, filename)):
         abort(404)
-    return send_from_directory(full_dir, filename, as_attachment=False)
+    inline = os.path.splitext(filename)[1].lower() in _INLINE_IMAGE_EXTS
+    return send_from_directory(full_dir, filename, as_attachment=not inline)
 
 
 @app.route('/admin/grading-run/<int:run_id>/bericht/<filename>')
