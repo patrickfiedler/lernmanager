@@ -37,7 +37,7 @@ import key_combos
 import checkpoint_questions
 import checkpoint_overview
 from utils import generate_username, generate_password, allowed_file, file_extension, material_pfad, material_filename, content_matches_extension, generate_credentials_pdf, generate_credentials_pdf_grouped, generate_name_username_pdf, generate_student_self_report_pdf, generate_class_report_pdf, generate_student_report_pdf, slugify, format_bytes, is_ip_allowed, is_within_time_window, parse_netzwerk_csv, split_tasks_by_stufe, stufe_sort_key, normalize_markdown_lists
-from import_task import validate_task_structure, check_duplicate, import_task as do_import_task, overwrite_task_from_import, ValidationError
+from import_task import validate_task_structure, check_duplicate, import_task as do_import_task, overwrite_task_from_import, ValidationError, zip_entry_for
 
 app = Flask(__name__)
 app.secret_key = config.SECRET_KEY
@@ -2495,8 +2495,9 @@ def _extract_import_zip_files(tmp_id, imported_targets):
 
     imported_targets is a list of (task_id, task_dict) for the topics that were
     actually created or overwritten -- a topic whose import failed gets no files.
-    ZIP entries are bare filenames; on disk each topic's files go in its own
-    folder, so two topics may ship the same filename without clobbering.
+    ZIP entries are bare filenames, or `<unit_slug>/<name>` when two topics in
+    one zip ship different files under one name (zip_entry_for). On disk each
+    topic's files go in its own folder either way.
     Returns the list of extracted filenames (bare, as the teacher named them).
     """
     if not tmp_id:
@@ -2513,7 +2514,11 @@ def _extract_import_zip_files(tmp_id, imported_targets):
             for task_id, task_data in imported_targets:
                 unit_slug = (models.get_task(task_id) or {}).get('unit_slug')
                 for mat in task_data.get('materials', []):
-                    if mat.get('typ') == 'datei' and mat.get('pfad') in zip_names:
+                    # Zip folder = slug in the JSON (what MBI packed); disk folder
+                    # = slug of the topic that received it (may differ on overwrite).
+                    entry = (zip_entry_for(zip_names, mat.get('pfad'), task_data.get('unit_slug'))
+                             if mat.get('typ') == 'datei' else None)
+                    if entry:
                         # Second line of defence behind validate_task_structure:
                         # nothing reaches UPLOAD_FOLDER that download_material
                         # would not serve safely.
@@ -2529,7 +2534,7 @@ def _extract_import_zip_files(tmp_id, imported_targets):
                         if os.path.commonpath([upload_dir, dest]) != upload_dir:
                             continue
                         os.makedirs(os.path.dirname(dest), exist_ok=True)
-                        with zf.open(mat['pfad']) as src, open(dest, 'wb') as dst:
+                        with zf.open(entry) as src, open(dest, 'wb') as dst:
                             dst.write(src.read())
                         extracted.append(mat['pfad'])
     finally:
@@ -2642,7 +2647,8 @@ def admin_themen_import():
                 mat['pfad']
                 for td in task_list
                 for mat in td['task'].get('materials', [])
-                if mat.get('typ') == 'datei' and mat.get('pfad') not in bundled_set
+                if mat.get('typ') == 'datei'
+                and not zip_entry_for(bundled_set, mat.get('pfad'), td['task'].get('unit_slug'))
             ]
             if missing:
                 errors.append(f"Fehlende Dateien im ZIP: {', '.join(missing)}")
@@ -2657,7 +2663,9 @@ def admin_themen_import():
                             if mat.get('typ') != 'datei':
                                 continue
                             ok, sniffed = content_matches_extension(
-                                mat['pfad'], zf.read(mat['pfad'])
+                                mat['pfad'],
+                                zf.read(zip_entry_for(bundled_set, mat['pfad'],
+                                                      td['task'].get('unit_slug')))
                             )
                             if not ok:
                                 errors.append(

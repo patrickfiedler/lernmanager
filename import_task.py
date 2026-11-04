@@ -67,6 +67,19 @@ def load_task_zip(filepath):
         raise ValidationError("Ungültige ZIP-Datei.")
 
 
+def zip_entry_for(zip_names, pfad, unit_slug=None):
+    """Zip entry holding a topic's material file, or None.
+
+    A combined zip (regular topic + Seilbahn twin) may ship two different files
+    under one name; each then sits in a `<unit_slug>/` folder (MBI request
+    2026-10-28). The folder entry wins, the bare name is the fallback.
+    The stored and displayed pfad stays the bare name either way.
+    """
+    if unit_slug and f'{unit_slug}/{pfad}' in zip_names:
+        return f'{unit_slug}/{pfad}'
+    return pfad if pfad in zip_names else None
+
+
 def extract_zip_materials(zip_path, task_data, task_id=None, unit_slug=None, dry_run=False):
     """Copy material files from ZIP to UPLOAD_FOLDER. Returns list of extracted filenames.
 
@@ -76,10 +89,13 @@ def extract_zip_materials(zip_path, task_data, task_id=None, unit_slug=None, dry
     """
     extracted = []
     upload_root = Path(config.UPLOAD_FOLDER).resolve()
+    task = task_data.get('task', {})
     with zipfile.ZipFile(zip_path) as zf:
         zip_names = set(zf.namelist())
-        for mat in task_data.get('task', {}).get('materials', []):
-            if mat.get('typ') == 'datei' and mat.get('pfad') in zip_names:
+        for mat in task.get('materials', []):
+            entry = (zip_entry_for(zip_names, mat.get('pfad'), task.get('unit_slug'))
+                     if mat.get('typ') == 'datei' else None)
+            if entry:
                 # Second line of defence behind validate_task_structure: nothing
                 # reaches UPLOAD_FOLDER that the download route would not serve safely.
                 if not allowed_file(mat['pfad']):
@@ -97,7 +113,7 @@ def extract_zip_materials(zip_path, task_data, task_id=None, unit_slug=None, dry
                 if upload_root not in dest.parents:
                     continue
                 dest.parent.mkdir(parents=True, exist_ok=True)
-                dest.write_bytes(zf.read(mat['pfad']))
+                dest.write_bytes(zf.read(entry))
                 extracted.append(mat['pfad'])
     return extracted
 
@@ -1100,10 +1116,12 @@ Examples:
             data, bundled = load_task_zip(args.file)
             validate_task_structure(data)
             bundled_set = set(bundled)
+            task = data.get('task', {})
             missing = [
                 mat['pfad']
-                for mat in data.get('task', {}).get('materials', [])
-                if mat.get('typ') == 'datei' and mat.get('pfad') not in bundled_set
+                for mat in task.get('materials', [])
+                if mat.get('typ') == 'datei'
+                and not zip_entry_for(bundled_set, mat.get('pfad'), task.get('unit_slug'))
             ]
             if missing:
                 print(f"Error: Fehlende Dateien im ZIP: {', '.join(missing)}", file=sys.stderr)
