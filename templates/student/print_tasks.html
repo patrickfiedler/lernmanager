@@ -72,6 +72,7 @@
         .task-materials ul { margin: 0.25rem 0 0 0; padding-left: 1.25rem; }
         .task-materials li { margin: 0.15rem 0; }
         .task-materials a { color: #1d4ed8; }
+        .task-materials .mat-hint { color: #6b7280; font-size: 0.85em; }
         .print-btn {
             display: inline-block;
             margin-bottom: 1.5rem;
@@ -84,7 +85,8 @@
         @media print {
             .print-btn { display: none; }
             body { padding: 0; }
-            .task-materials a::after { content: " (" attr(href) ")"; font-size: 0.8em; color: #6b7280; }
+            /* Only full URLs help on paper; an app-internal path like /material/12/download does not. */
+            .task-materials a[href^="http"]::after { content: " (" attr(href) ")"; font-size: 0.8em; color: #6b7280; }
         }
     </style>
 </head>
@@ -113,8 +115,11 @@
             <li>
                 {% if m.typ == 'link' %}
                 <a href="{{ m.pfad }}">{{ label }}</a>
+                {% elif m.school_only and not client_school_ok %}
+                {# Same gate as download_material: outside the school network a link would only 403. #}
+                📄 {{ label }} <span class="mat-hint">(nur im Schulnetz)</span>
                 {% else %}
-                📄 {{ label }}
+                📄 <a href="{{ url_for('download_material', material_id=m.id) }}" target="_blank">{{ label }}</a>
                 {% endif %}
             </li>
             {% endfor %}

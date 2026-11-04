@@ -2410,7 +2410,8 @@ def admin_thema_drucken(task_id):
     for sub in subtasks:
         sub['materials'] = models.get_materials_for_subtask(task_id, sub['id'])
     return render_template('student/print_tasks.html', task=task, subtasks=subtasks, single=False,
-                           topic_materials=models.get_materials(task_id))
+                           topic_materials=models.get_materials(task_id),
+                           client_school_ok=_client_in_school_network())
 
 
 @app.route('/admin/thema/<int:task_id>/export')
@@ -7990,7 +7991,8 @@ def student_print_topic(slug):
     models.apply_material_variants(student_id, klasse['id'], models.get_task(task['task_id']),
                                    subtasks, topic_materials, *(sub['materials'] for sub in subtasks))
     return render_template('student/print_tasks.html', task=task, subtasks=subtasks, single=False,
-                           topic_materials=topic_materials)
+                           topic_materials=topic_materials,
+                           client_school_ok=_client_in_school_network())
 
 
 @app.route('/schueler/thema/<slug>/aufgabe-<int:position>/drucken')
@@ -8009,7 +8011,8 @@ def student_print_subtask(slug, position):
     models.apply_material_variants(student_id, klasse['id'], models.get_task(task['task_id']),
                                    [subtask], topic_materials, subtask['materials'])
     return render_template('student/print_tasks.html', task=task, subtasks=[subtask], single=True,
-                           topic_materials=topic_materials)
+                           topic_materials=topic_materials,
+                           client_school_ok=_client_in_school_network())
 
 
 @app.route('/schueler/unterricht/<int:unterricht_id>/selbstbewertung', methods=['POST'])
