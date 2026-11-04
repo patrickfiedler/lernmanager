@@ -39,7 +39,7 @@ MAX_CONTENT_LENGTH = 64 * 1024 * 1024  # 64 MB max upload
 # "01_Startklar_Vorlage.docx"), so docx/pptx must be storable as materials.
 # They arrived through the ZIP import, which used to check nothing at all.
 INLINE_EXTENSIONS = {'pdf', 'png', 'jpg', 'jpeg', 'gif'}
-DOWNLOAD_EXTENSIONS = {'docx', 'pptx', 'odt', 'odp', 'sb3', 'zip'}
+DOWNLOAD_EXTENSIONS = {'docx', 'pptx', 'xlsx', 'odt', 'odp', 'ods', 'sb3', 'zip'}
 ALLOWED_EXTENSIONS = INLINE_EXTENSIONS | DOWNLOAD_EXTENSIONS
 
 # Subject and level options

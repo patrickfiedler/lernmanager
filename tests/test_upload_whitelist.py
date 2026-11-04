@@ -42,6 +42,8 @@ def test_allowed_file_follows_config():
     assert allowed_file("skript.pdf")
     assert allowed_file("Vorlage.docx")      # template_material needs this
     assert allowed_file("praesentation.pptx")
+    assert allowed_file("Daten.xlsx")        # spreadsheet templates (Kl.7 Unit 4)
+    assert allowed_file("Daten.ods")
     assert not allowed_file("payload.py")
     assert not allowed_file("evil.html")
     assert not allowed_file("boom.sh")
@@ -111,6 +113,27 @@ def test_zip_extraction_skips_disallowed_even_if_validation_bypassed(tmp_path):
     assert extracted == ["ok.pdf"]
     assert not (tmp_path / "uploads" / "thema-7" / "evil.html").exists()
     assert (tmp_path / "uploads" / "thema-7" / "ok.pdf").exists()
+
+
+def test_zip_extraction_stores_spreadsheet_materials(tmp_path):
+    """Kl.7 Unit 4 ships an .xlsx dataset/template inside the bundle."""
+    from tests.test_content_sniffing import XLSX, ODS
+    config.UPLOAD_FOLDER = str(tmp_path / "uploads")
+    (tmp_path / "uploads").mkdir()
+    zip_path = tmp_path / "b.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("Daten.xlsx", XLSX)
+        zf.writestr("Daten.ods", ODS)
+    task_data = {"task": {"materials": [
+        {"typ": "datei", "pfad": "Daten.xlsx"},
+        {"typ": "datei", "pfad": "Daten.ods"},
+    ]}}
+    import_task.validate_task_structure({"task": {
+        "name": "T", "fach": "MBI", "stufe": "7", "beschreibung": "x",
+        "subtasks": [{"beschreibung": "### A", "path": "wanderweg"}],
+        **task_data["task"]}})  # must not raise
+    extracted = import_task.extract_zip_materials(str(zip_path), task_data, task_id=7)
+    assert sorted(extracted) == ["Daten.ods", "Daten.xlsx"]
 
 
 def test_manual_upload_accepts_docx_and_rejects_script(as_admin, app, tmp_path):

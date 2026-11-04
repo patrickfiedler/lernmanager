@@ -44,6 +44,8 @@ PPTX = _zip({"ppt/presentation.xml": "<p:presentation/>", "[Content_Types].xml":
 SB3 = _zip({"project.json": '{"targets": []}'})
 ODT = _zip({"mimetype": "application/vnd.oasis.opendocument.text", "content.xml": "<x/>"})
 ODP = _zip({"mimetype": "application/vnd.oasis.opendocument.presentation", "content.xml": "<x/>"})
+XLSX = _zip({"xl/workbook.xml": "<workbook/>", "[Content_Types].xml": "<x/>"})
+ODS = _zip({"mimetype": "application/vnd.oasis.opendocument.spreadsheet", "content.xml": "<x/>"})
 PLAIN_ZIP = _zip({"readme.txt": "hello"})
 
 
@@ -67,6 +69,8 @@ def test_sniff_separates_the_zip_family():
     assert sniff_type(SB3) == "sb3"
     assert sniff_type(ODT) == "odt"
     assert sniff_type(ODP) == "odp"
+    assert sniff_type(XLSX) == "xlsx"
+    assert sniff_type(ODS) == "ods"
     assert sniff_type(PLAIN_ZIP) == "zip"
 
 
@@ -88,6 +92,10 @@ def test_match_rejects_disagreement():
     assert not ok and sniffed == "pptx"
     ok, sniffed = content_matches_extension("bild.png", PDF)
     assert not ok and sniffed == "pdf"
+    ok, sniffed = content_matches_extension("Daten.xlsx", DOCX)
+    assert not ok and sniffed == "docx"
+    assert content_matches_extension("Daten.xlsx", XLSX) == (True, "xlsx")
+    assert content_matches_extension("Daten.ods", ODS) == (True, "ods")
 
 
 def test_match_is_lenient_where_it_cannot_know():
