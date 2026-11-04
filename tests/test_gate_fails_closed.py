@@ -18,7 +18,7 @@ import models
 
 
 def test_checkable_formats_are_the_ones_dispatch_handles():
-    assert set(artifact_checker.CHECKABLE_FORMATS) == {'.pptx', '.odp', '.docx', '.odt', '.sb3'}
+    assert set(artifact_checker.CHECKABLE_FORMATS) == {'.pptx', '.odp', '.docx', '.odt', '.xlsx', '.sb3'}
 
 
 def test_unknown_format_fails_closed():

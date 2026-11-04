@@ -14,7 +14,7 @@ from difflib import SequenceMatcher
 # The formats check_gate can actually inspect. A gate configured for anything
 # else cannot be checked at all, and import_task refuses such a config -- it
 # imports this rather than repeating the list, so the two cannot drift.
-CHECKABLE_FORMATS = ('.pptx', '.odp', '.docx', '.odt', '.sb3')
+CHECKABLE_FORMATS = ('.pptx', '.odp', '.docx', '.odt', '.xlsx', '.sb3')
 
 
 def check_gate(file_bytes: bytes, filename: str, gate_config: dict, load_template=None) -> dict:
@@ -37,6 +37,8 @@ def check_gate(file_bytes: bytes, filename: str, gate_config: dict, load_templat
         return _check_presentation(file_bytes, ext, gate_config, load_template)
     if ext in ('.docx', '.odt'):
         return _check_document(file_bytes, ext, gate_config, load_template)
+    if ext == '.xlsx':
+        return _check_spreadsheet(file_bytes, gate_config, load_template)
     if ext == '.sb3':
         return _check_scratch(file_bytes, gate_config)
     return {
@@ -116,12 +118,12 @@ def _result(issues: list, matches: list = None, warnings: list = None) -> dict:
 # Region names as an author would write them, mapped to block regions.
 _RULE_REGIONS = {
     'body': 'body', 'slide': 'slide', 'slides': 'slide', 'notes': 'notes',
-    'header': 'header', 'footer': 'footer',
+    'header': 'header', 'footer': 'footer', 'sheet': 'sheet', 'tabelle': 'sheet',
 }
 
 _REGION_LABELS = {
     'body': 'im Dokument', 'slide': 'auf den Folien', 'notes': 'in den Notizen',
-    'header': 'in der Kopfzeile', 'footer': 'in der Fußzeile',
+    'header': 'in der Kopfzeile', 'footer': 'in der Fußzeile', 'sheet': 'in der Tabelle',
 }
 
 
@@ -221,6 +223,24 @@ def _normalized(text: str) -> str:
     return ' '.join(text.split()).lower()
 
 
+def _template_blocks(config: dict, load_template, warnings: list):
+    """Blocks of config['template_material'], or None plus a warning.
+
+    Fails soft: a teacher's file rename must never fail a student's gate.
+    """
+    name = config.get('template_material')
+    if name and load_template:
+        try:
+            data = load_template(name)
+            if data:
+                import artifact_processor
+                return artifact_processor.extract_artifact_blocks(data, name)
+        except Exception:
+            pass
+    warnings.append("Vorlage zum Vergleich nicht gefunden")
+    return None
+
+
 def _check_added_words(blocks: list, config: dict, load_template,
                        issues: list, matches: list, warnings: list):
     """min_added_words: how much of this is the student's, not the template's.
@@ -240,19 +260,8 @@ def _check_added_words(blocks: list, config: dict, load_template,
     if not min_added:
         return
 
-    name = config.get('template_material')
-    template_blocks = None
-    if name and load_template:
-        try:
-            data = load_template(name)
-            if data:
-                import artifact_processor
-                template_blocks = artifact_processor.extract_artifact_blocks(data, name)
-        except Exception:
-            template_blocks = None
-
+    template_blocks = _template_blocks(config, load_template, warnings)
     if template_blocks is None:
-        warnings.append("Vorlage zum Vergleich nicht gefunden")
         return
 
     baseline = {_normalized(b['text']) for b in template_blocks if b['text']}
@@ -393,6 +402,92 @@ def _check_document(file_bytes: bytes, ext: str, config: dict, load_template=Non
     _check_text_rules(blocks, config, issues, matches, warnings)
     _check_added_words(blocks, config, load_template, issues, matches, warnings)
 
+    return _result(issues, matches, warnings)
+
+
+def _plural(n: int, one: str, many: str) -> str:
+    return f"{n} {one if n == 1 else many}"
+
+
+def _added_cells(blocks: list, template_blocks: list) -> int:
+    """How many of the student's cells are their own work, not the template's.
+
+    By position, not by content as _check_added_words does: in a table the
+    place is the meaning, and a "2" the student typed is theirs even if the
+    template has a "2" elsewhere. A template cell the student changed counts --
+    filling placeholders in a dataset template is the actual work.
+
+    Keyed on the sheet's number, not its name: renaming "Tabelle1" to "Noten"
+    must not turn every template cell into an added one.
+    """
+    def key(b):
+        return (b.get('index'), b['ref'])
+
+    def content(b):
+        return (_normalized(b['text']), b.get('formula'))
+
+    template = {key(b): content(b) for b in template_blocks if b['kind'] == 'cell'}
+    return sum(1 for b in blocks
+               if b['kind'] == 'cell' and template.get(key(b)) != content(b))
+
+
+def _check_spreadsheet(file_bytes: bytes, config: dict, load_template=None) -> dict:
+    """Check filled cells, formulas and charts in an .xlsx workbook.
+
+    config keys:
+      format (list[str]) — accepted extensions, checked by caller
+      min_cells (int) — filled cells, all sheets
+      min_added_cells (int) — cells not taken over from template_material
+      min_formulas (int) — cells holding a formula, not a typed number
+      min_charts (int)
+      chart_types (list[str]) — at least one chart of one of these types:
+        säule, balken, linie, kreis, punkt, fläche, netz, blase
+      required_text / forbidden_text — see _check_text_rules; kind: cell
+        scopes to cell contents, kind: chart to chart titles
+    """
+    import artifact_processor
+    try:
+        blocks = artifact_processor.extract_xlsx_blocks(file_bytes)
+    except Exception:
+        return {'passed': False, 'message': 'Datei konnte nicht gelesen werden',
+                'details': ['Ungültige .xlsx-Datei'], 'matches': []}
+
+    issues, matches, warnings = [], [], []
+    cells = [b for b in blocks if b['kind'] == 'cell']
+    charts = [b for b in blocks if b['kind'] == 'chart']
+
+    def at_least(count, key, too_few, ok):
+        need = config.get(key, 0)
+        if not need:
+            return
+        if count < need:
+            issues.append(f"{too_few} ({count}, erwartet: {need})")
+        else:
+            matches.append(f"{ok} ✓")
+
+    at_least(len(cells), 'min_cells', 'Zu wenig ausgefüllte Zellen',
+             _plural(len(cells), 'Zelle ausgefüllt', 'Zellen ausgefüllt'))
+    formulas = sum(1 for b in cells if 'formula' in b)
+    at_least(formulas, 'min_formulas', 'Zu wenig Formeln',
+             _plural(formulas, 'Formel', 'Formeln'))
+    at_least(len(charts), 'min_charts', 'Zu wenig Diagramme',
+             _plural(len(charts), 'Diagramm', 'Diagramme'))
+
+    wanted = [str(t).strip().lower() for t in config.get('chart_types', []) if str(t).strip()]
+    if wanted:
+        if any(b['chart_type'] in wanted for b in charts):
+            matches.append(f"Diagrammart passt ({', '.join(wanted)}) ✓")
+        else:
+            issues.append(f"Kein Diagramm der Art: {' oder '.join(wanted)}")
+
+    if config.get('min_added_cells'):
+        template_blocks = _template_blocks(config, load_template, warnings)
+        if template_blocks is not None:
+            added = _added_cells(blocks, template_blocks)
+            at_least(added, 'min_added_cells', 'Zu wenig eigene Einträge',
+                     _plural(added, 'eigene Zelle', 'eigene Zellen'))
+
+    _check_text_rules(blocks, config, issues, matches, warnings)
     return _result(issues, matches, warnings)
 
 

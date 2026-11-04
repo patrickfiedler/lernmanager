@@ -3,7 +3,7 @@
 All functions operate on bytes in memory — no temp files, no disk storage.
 This satisfies the DSGVO requirement that original files never persist server-side.
 
-Supported formats: .pptx, .odp, .docx, .odt, .sb3
+Supported formats: .pptx, .odp, .docx, .odt, .xlsx, .sb3
 """
 
 import io
@@ -20,18 +20,19 @@ import xml.etree.ElementTree as ET
 # appear somewhere". Everything the old flat-string extraction knew and threw
 # away (list item, speaker note, slide number) survives here.
 #
-#   region: body | slide | notes | header | footer | alt-text | comment
+#   region: body | slide | notes | header | footer | alt-text | comment | sheet
 #   kind:   heading | paragraph | list-item | table-cell | title | caption
-#           | alt-text | image
-#   index:  slide/page number, where the format has one
+#           | alt-text | image | cell | chart
+#   index:  slide/page/sheet number, where the format has one
+#   sheet, ref, formula, chart_type: on .xlsx blocks only (extract_xlsx_blocks)
 #   level:  1-6, on kind='heading' only
 #
 # Deliberately not modelled: nesting depth, style names, geometry, formatting.
 # Nothing needs them, and each would be a surface to maintain.
 
-REGIONS = ('body', 'slide', 'notes', 'header', 'footer', 'alt-text', 'comment')
+REGIONS = ('body', 'slide', 'notes', 'header', 'footer', 'alt-text', 'comment', 'sheet')
 KINDS = ('heading', 'paragraph', 'list-item', 'table-cell', 'title', 'caption',
-         'alt-text', 'image')
+         'alt-text', 'image', 'cell', 'chart')
 
 
 def block(text: str, region: str = 'body', kind: str = 'paragraph',
@@ -57,6 +58,12 @@ def _render_line(b: dict) -> str:
     """One block as one line of the flat string: headings keep their # markers."""
     if b['kind'] == 'heading':
         return f"{'#' * min(b.get('level', 1), 6)} {b['text']}"
+    if b['kind'] == 'cell':
+        if 'formula' in b:
+            return f"{b['ref']}: ={b['formula'] or '(geteilte Formel)'} → {b['text']}"
+        return f"{b['ref']}: {b['text']}"
+    if b['kind'] == 'chart':
+        return f"Diagramm ({b['chart_type'] or 'Typ unbekannt'}): {b['text'] or '(ohne Titel)'}"
     return b['text']
 
 
@@ -84,13 +91,20 @@ def render_text(blocks: list) -> str:
     for b in blocks:
         if b['kind'] in _UNRENDERED_KINDS or b['region'] in _UNRENDERED_REGIONS:
             continue
-        if not b['text']:
+        # A chart without a title is still a chart; a formula cell whose
+        # result is empty still carries the formula.
+        if not b['text'] and b['kind'] not in ('chart', 'cell'):
             continue
         index = b.get('index')
         if index != current:
             if lines:
                 sections.append('\n'.join(lines))
-            lines = [f"[Folie {index}]"] if index is not None else []
+            if index is None:
+                lines = []
+            elif 'sheet' in b:
+                lines = [f"[Blatt {b['sheet']}]"]
+            else:
+                lines = [f"[Folie {index}]"]
             current = index
         lines.append(_render_line(b))
     if lines:
@@ -668,6 +682,142 @@ def extract_sb3(file_bytes: bytes, filename: str = '') -> str:
     return '\n\n'.join(sections)
 
 
+# --- .xlsx ---
+#
+# Read straight from the ZIP like the other formats; no openpyxl. Excel stores a
+# formula and its last computed value side by side (<f> and <v>), so both are
+# available without recalculating anything.
+
+_X = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
+_X_REL = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
+_PKG_REL = 'http://schemas.openxmlformats.org/package/2006/relationships'
+_C = 'http://schemas.openxmlformats.org/drawingml/2006/chart'
+_A = 'http://schemas.openxmlformats.org/drawingml/2006/main'
+
+# Chart element in <c:plotArea> -> the name a unit author writes in chart_types.
+_CHART_TYPES = {
+    'lineChart': 'linie', 'line3DChart': 'linie',
+    'pieChart': 'kreis', 'pie3DChart': 'kreis', 'doughnutChart': 'kreis', 'ofPieChart': 'kreis',
+    'scatterChart': 'punkt', 'areaChart': 'fläche', 'area3DChart': 'fläche',
+    'radarChart': 'netz', 'bubbleChart': 'blase',
+}
+
+
+def _xlsx_rels(z, part: str) -> list:
+    """(type, target part) for each relationship of a part, targets resolved."""
+    folder, name = part.rsplit('/', 1)
+    rels_name = f'{folder}/_rels/{name}.rels'
+    if rels_name not in z.namelist():
+        return []
+    out = []
+    for rel in ET.fromstring(z.read(rels_name)).findall(f'{{{_PKG_REL}}}Relationship'):
+        target = rel.get('Target', '')
+        if rel.get('TargetMode') == 'External':
+            continue
+        path = target.lstrip('/') if target.startswith('/') else f'{folder}/{target}'
+        parts = []
+        for p in path.split('/'):
+            if p == '..':
+                parts.pop() if parts else None
+            elif p and p != '.':
+                parts.append(p)
+        out.append((rel.get('Type', '').rsplit('/', 1)[-1], '/'.join(parts), rel.get('Id')))
+    return out
+
+
+def _xlsx_shared_strings(z) -> list:
+    if 'xl/sharedStrings.xml' not in z.namelist():
+        return []
+    root = ET.fromstring(z.read('xl/sharedStrings.xml'))
+    # Plain <si><t>, or rich text split into runs <si><r><t>. Not iter(): that
+    # would also pick up <rPh>, phonetic help that is not part of the text.
+    return [''.join(t.text or '' for t in si.findall(f'{{{_X}}}t') + si.findall(f'{{{_X}}}r/{{{_X}}}t'))
+            for si in root.findall(f'{{{_X}}}si')]
+
+
+def _xlsx_cell_value(c, shared: list) -> str:
+    kind = c.get('t', 'n')
+    if kind == 'inlineStr':
+        return ''.join(t.text or '' for t in c.iter(f'{{{_X}}}t'))
+    v = c.find(f'{{{_X}}}v')
+    raw = v.text if v is not None and v.text is not None else ''
+    if kind == 's':
+        try:
+            return shared[int(raw)]
+        except (ValueError, IndexError):
+            return ''
+    if kind == 'b':
+        return {'1': 'WAHR', '0': 'FALSCH'}.get(raw, raw)
+    return raw
+
+
+def _xlsx_chart_block(root, index: int, sheet: str) -> dict:
+    plot = root.find(f'.//{{{_C}}}plotArea')
+    chart_type = ''
+    for child in (plot if plot is not None else []):
+        local = child.tag.rsplit('}', 1)[-1]
+        if local in ('barChart', 'bar3DChart'):
+            d = child.find(f'{{{_C}}}barDir')
+            chart_type = 'balken' if d is not None and d.get('val') == 'bar' else 'säule'
+        elif local in _CHART_TYPES:
+            chart_type = _CHART_TYPES[local]
+        if chart_type:
+            break
+    title = root.find(f'{{{_C}}}chart/{{{_C}}}title')
+    title_text = ' '.join(t.text or '' for t in title.iter(f'{{{_A}}}t')).strip() if title is not None else ''
+    b = block(title_text, 'sheet', 'chart', index)
+    b['sheet'] = sheet
+    b['chart_type'] = chart_type
+    return b
+
+
+def extract_xlsx_blocks(file_bytes: bytes) -> list:
+    """Blocks for an .xlsx workbook: one per filled cell, one per chart.
+
+    Cell block: text = the value as stored (numbers unformatted, "3.4"), plus
+    ref ("B12"), sheet (name) and formula (without "=", only on formula cells;
+    "" on the followers of a shared formula, whose text lives on the first cell).
+
+    Charts are found by following sheet -> drawing -> chart relationships, not by
+    listing xl/charts/: a part nothing points to is not on any sheet (see
+    _count_images for the .odp template that taught us this).
+    """
+    blocks = []
+    with zipfile.ZipFile(io.BytesIO(file_bytes)) as z:
+        shared = _xlsx_shared_strings(z)
+        targets = {rid: path for _, path, rid in _xlsx_rels(z, 'xl/workbook.xml')}
+        workbook = ET.fromstring(z.read('xl/workbook.xml'))
+        sheets = workbook.findall(f'{{{_X}}}sheets/{{{_X}}}sheet')
+        for index, sheet in enumerate(sheets, start=1):
+            name = sheet.get('name', f'Blatt {index}')
+            part = targets.get(sheet.get(f'{{{_X_REL}}}id'))
+            if not part or part not in z.namelist():
+                continue
+            root = ET.fromstring(z.read(part))
+            for c in root.iter(f'{{{_X}}}c'):
+                f = c.find(f'{{{_X}}}f')
+                value = _xlsx_cell_value(c, shared)
+                if f is None and not value.strip():
+                    continue
+                b = block(value, 'sheet', 'cell', index)
+                b['sheet'] = name
+                b['ref'] = c.get('r', '')
+                if f is not None:
+                    b['formula'] = f.text or ''
+                blocks.append(b)
+            for rel_type, drawing, _ in _xlsx_rels(z, part):
+                if rel_type != 'drawing' or drawing not in z.namelist():
+                    continue
+                for chart_type, chart, _ in _xlsx_rels(z, drawing):
+                    if chart_type == 'chart' and chart in z.namelist():
+                        blocks.append(_xlsx_chart_block(ET.fromstring(z.read(chart)), index, name))
+    return blocks
+
+
+def extract_xlsx(file_bytes: bytes) -> str:
+    return render_text(extract_xlsx_blocks(file_bytes))
+
+
 # --- Format dispatch ---
 
 ACCEPTED_FORMATS = {
@@ -675,6 +825,7 @@ ACCEPTED_FORMATS = {
     '.odp':  extract_odp,
     '.docx': extract_docx,
     '.odt':  extract_odt,
+    '.xlsx': extract_xlsx,
     '.sb3':  extract_sb3,
 }
 
@@ -683,6 +834,7 @@ _BLOCK_EXTRACTORS = {
     '.odp':  extract_odp_blocks,
     '.docx': extract_docx_blocks,
     '.odt':  extract_odt_blocks,
+    '.xlsx': extract_xlsx_blocks,
 }
 
 
