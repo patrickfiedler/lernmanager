@@ -36,18 +36,18 @@
                     <a href="{{ url_for('admin_dashboard') }}">Dashboard</a>
                     <a href="{{ url_for('admin_klassen') }}">Klassen</a>
                     <a href="{{ url_for('admin_themen') }}">Themen</a>
+                    {% if is_admin %}
                     <details class="nav-dropdown">
                         <summary>Bewertung ▾</summary>
                         <div class="nav-dropdown-menu">
-                            {% if is_admin %}
                             <a href="{{ url_for('admin_grading_upload') }}">KI-Bewertung hochladen</a>
-                            {% endif %}
                             <a href="{{ url_for('admin_grading_runs') }}">Bewertungsläufe</a>
-                            {% if is_admin %}
                             <a href="{{ url_for('admin_bewertung_netzwerk_ids') }}">Schülerdaten abgleichen</a>
-                            {% endif %}
                         </div>
                     </details>
+                    {% else %}
+                    <a href="{{ url_for('admin_grading_runs') }}">Bewertung</a>
+                    {% endif %}
                     <details class="nav-dropdown">
                         <summary>Auswertung ▾</summary>
                         <div class="nav-dropdown-menu">
