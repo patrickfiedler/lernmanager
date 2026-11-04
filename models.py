@@ -7650,6 +7650,58 @@ def backfill_grading_documents(run_id, timeout=1800, again=False):
     return updated, None
 
 
+def backfill_grading_identity(run_id, zip_path, rubric_version):
+    """
+    Give a run graded before the service sent sha256 + rubric_version (run 9,
+    handoff 2026-11-03) its document identity, from the zip of the student
+    files Patrick uploaded. Only then can a later unchanged re-submission be
+    set aside as already reviewed (find_reviewed_identical_result).
+
+    rubric_version is passed in: it is a hash of the rubric's files on the
+    grading host, and only the teacher can say the current one grades like the
+    one this run used. A file is matched by <netzwerk_id>/.../<document_file>
+    anywhere in the zip. Missing or ambiguous -> skipped, never guessed: a
+    wrong match would hide a student from review. Existing document_json keeps
+    its file + previews, only the two identity fields are set.
+
+    Returns (updated_count, skipped [(netzwerk_id, reason)], error_or_None).
+    """
+    import zipfile
+    if not re.fullmatch(r'[0-9a-f]{16}', rubric_version or ''):
+        return 0, [], 'Rubrik-Fassung muss 16 Hex-Zeichen sein'
+    if get_grading_run(run_id) is None:
+        return 0, [], 'Lauf nicht gefunden'
+    try:
+        zf = zipfile.ZipFile(zip_path)
+    except (OSError, zipfile.BadZipFile) as e:
+        return 0, [], f'Zip nicht lesbar: {e}'
+
+    with zf:
+        files = [n.split('/') for n in zf.namelist() if not n.endswith('/')]
+        updated, skipped = 0, []
+        for result in list_grading_results(run_id):
+            login, name = result['netzwerk_id'], os.path.basename(result.get('document_file') or '')
+            if not name:
+                skipped.append((login, 'kein bewertetes Dokument im Lauf'))
+                continue
+            hits = [p for p in files if p[-1] == name and login in p[:-1]]
+            if len(hits) != 1:
+                skipped.append((login, f'{name}: {len(hits)} Treffer im Zip'))
+                continue
+            digest = sha256()
+            with zf.open('/'.join(hits[0])) as f:
+                for chunk in iter(lambda: f.read(1 << 20), b''):
+                    digest.update(chunk)
+            document = result.get('document') or {
+                'file': None, 'pages': [], 'pages_total': 0, 'skipped': 'identity_only'}
+            document.update(sha256=digest.hexdigest(), rubric_version=rubric_version)
+            with db_session() as conn:
+                conn.execute("UPDATE grading_result SET document_json = ? WHERE id = ?",
+                             (json.dumps(document), result['id']))
+            updated += 1
+    return updated, skipped, None
+
+
 def _grading_reports_dir(run_id):
     """Sibling of the per-student media dirs, one level down so the purge can
     tell them apart: instance/uploads/grading/<run_id>/reports/."""

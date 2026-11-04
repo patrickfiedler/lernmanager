@@ -8632,14 +8632,36 @@ def cli_auto_attendance():
 def cli_backfill_grading_documents(run_ids, erneut):
     """Download + Vorschau für ältere Bewertungsläufe nachholen (Lauf-IDs).
 
-    On the server, with the service's env:
-    sudo -u lernmanager bash -c 'cd /opt/lernmanager && set -a && . ./.env && venv/bin/flask --app app grading-dokumente-nachholen 5 6'
+    On the server, with the service's env (systemd parses .env; `. ./.env` in
+    bash breaks on unquoted values with spaces):
+    sudo systemd-run --pipe --wait -p User=lernmanager -p WorkingDirectory=/opt/lernmanager -p EnvironmentFile=/opt/lernmanager/.env /opt/lernmanager/venv/bin/flask --app app grading-dokumente-nachholen 5 6
     """
     init_app()
     for run_id in run_ids:
         print(f"Lauf {run_id}: läuft (etwa 5 s je Schüler) ...", flush=True)
         updated, error = models.backfill_grading_documents(run_id, again=erneut)
         print(f"Lauf {run_id}: {error}" if error else f"Lauf {run_id}: {updated} Ergebnis(se) ergänzt")
+
+
+@app.cli.command('grading-kennung-nachtragen')
+@click.argument('run_id', type=int)
+@click.argument('zip_path', type=click.Path(exists=True, dir_okay=False))
+@click.option('--fassung', required=True, help='rubric_version (16 Hex) der heutigen Rubrik, vom Bewertungsrechner.')
+def cli_backfill_grading_identity(run_id, zip_path, fassung):
+    """sha256 + Rubrik-Fassung für einen alten Lauf aus dem Abgaben-Zip nachtragen.
+
+    Danach gilt eine unveränderte Neuabgabe als schon geprüft. --fassung nur, wenn
+    die Rubrik seit dem Lauf nichts an der Bewertung geändert hat.
+    Needs no .env (no service call):
+    cd /opt/lernmanager && sudo -u lernmanager venv/bin/flask --app app grading-kennung-nachtragen 9 /tmp/lauf9.zip --fassung <hex>
+    """
+    init_app()
+    updated, skipped, error = models.backfill_grading_identity(run_id, zip_path, fassung)
+    if error:
+        raise click.ClickException(error)
+    for login, reason in skipped:
+        print(f"  übersprungen {login}: {reason}")
+    print(f"Lauf {run_id}: {updated} Ergebnis(se) ergänzt, {len(skipped)} übersprungen")
 
 
 def init_app():

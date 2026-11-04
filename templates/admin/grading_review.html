@@ -68,6 +68,8 @@
                 <span class="text-muted">⬇️ Datei nach Ablauf der Frist gelöscht</span>
             {% elif not doc %}
                 <span class="text-muted">⬇️ Keine Datei übernommen</span>
+            {% elif doc.skipped == 'identity_only' %}
+                <span class="text-muted">⬇️ Nur Prüfsumme aus dem Zip nachgetragen, keine Datei</span>
             {% elif doc.skipped == 'too_large' %}
                 <span style="color: #92400e;">⬇️ Datei über 20 MB, liegt im Scan-Ordner</span>
             {% else %}
@@ -96,7 +98,7 @@
             {% else %}
             <p class="text-muted" style="padding: 0.75rem; margin: 0;">
                 {% if files_gone %}Vorschau nach Ablauf der Frist gelöscht.
-                {% elif not doc %}Keine Vorschau übernommen. Für ältere Läufe: <code>flask grading-dokumente-nachholen {{ run.id }}</code>.
+                {% elif not doc or doc.skipped == 'identity_only' %}Keine Vorschau übernommen. Für ältere Läufe: <code>flask grading-dokumente-nachholen {{ run.id }}</code>.
                 {% else %}Keine Vorschau: {{ doc.preview_error or 'unbekannter Grund' }}.{% endif %}
             </p>
             {% endif %}

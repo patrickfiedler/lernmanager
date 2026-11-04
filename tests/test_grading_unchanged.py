@@ -86,3 +86,56 @@ def test_undo_puts_it_back_in_the_queue(first_run):
     models.undo_grading_decisions([log[0]['id']], None)
     assert models.get_grading_result(second['id'])['status'] == 'imported'
     assert models.unchanged_result_ids(run_id) == set()
+
+
+# Retrofit for runs graded before the service sent the identity (handoff 2026-11-03, run 9).
+
+def _zip(tmp_path, entries):
+    import zipfile
+    path = tmp_path / "abgaben.zip"
+    with zipfile.ZipFile(path, "w") as zf:
+        for name, data in entries.items():
+            zf.writestr(name, data)
+    return str(path)
+
+
+@pytest.fixture
+def old_run(db, no_download):
+    """A settled run whose result has no document identity, like run 9."""
+    klasse_id = models.create_klasse("5a")
+    task_id = models.create_task("Deckblatt", "d", "lz", "MBI", "5", "pflicht")
+    models.create_student("Mueller", "Anna", "uanna", "pw", netzwerk_id="mueller.anna")
+    run_id = models.create_grading_run("job-old", klasse_id, task_id, "deckblatt", "ollama", None)
+    models.import_grading_callback(job_id="job-old", provider="ollama", model="m",
+                                   graded_at="2026-10-01T10:00:00Z",
+                                   students=[dict(_student(None), document_file="deckblatt.docx")])
+    _settle(models.list_grading_results(run_id)[0])
+    return run_id, task_id, klasse_id
+
+
+def test_retrofit_lets_unchanged_resubmission_be_set_aside(old_run, tmp_path):
+    import hashlib
+    run_id, task_id, klasse_id = old_run
+    zip_path = _zip(tmp_path, {"Abgaben/mueller.anna/Word/deckblatt.docx": b"datei"})
+    updated, skipped, error = models.backfill_grading_identity(run_id, zip_path, "1" * 16)
+    assert (updated, skipped, error) == (1, [], None)
+    doc = {"sha256": hashlib.sha256(b"datei").hexdigest(), "rubric_version": "1" * 16}
+    _, new = _run("job-new", task_id, klasse_id, doc)
+    assert new['status'] == 'discarded'
+
+
+@pytest.mark.parametrize("entries", [
+    {},                                                     # missing
+    {"mueller.anna/a/deckblatt.docx": b"1",
+     "mueller.anna/b/deckblatt.docx": b"2"},                # ambiguous
+    {"schmidt.paul/deckblatt.docx": b"1"},                  # other student's folder
+])
+def test_retrofit_skips_missing_or_ambiguous(old_run, tmp_path, entries):
+    run_id = old_run[0]
+    updated, skipped, _ = models.backfill_grading_identity(run_id, _zip(tmp_path, entries), "1" * 16)
+    assert updated == 0 and len(skipped) == 1
+    assert models.list_grading_results(run_id)[0]['document'] is None
+
+
+def test_retrofit_refuses_bad_version(old_run, tmp_path):
+    assert models.backfill_grading_identity(old_run[0], _zip(tmp_path, {}), "abc")[2]
