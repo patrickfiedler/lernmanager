@@ -8656,11 +8656,13 @@ def cli_backfill_grading_identity(run_id, zip_path, fassung):
     cd /opt/lernmanager && sudo -u lernmanager venv/bin/flask --app app grading-kennung-nachtragen 9 /tmp/lauf9.zip --fassung <hex>
     """
     init_app()
-    updated, skipped, error = models.backfill_grading_identity(run_id, zip_path, fassung)
+    updated, skipped, fallbacks, error = models.backfill_grading_identity(run_id, zip_path, fassung)
     if error:
         raise click.ClickException(error)
     for login, reason in skipped:
         print(f"  übersprungen {login}: {reason}")
+    for login, note in fallbacks:
+        print(f"  einzige Datei genommen {login}: {note}")
     print(f"Lauf {run_id}: {updated} Ergebnis(se) ergänzt, {len(skipped)} übersprungen")
 
 

@@ -4,6 +4,7 @@ import re
 import shutil
 import sys
 from hashlib import sha256
+import unicodedata
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta
@@ -7664,32 +7665,45 @@ def backfill_grading_identity(run_id, zip_path, rubric_version):
     wrong match would hide a student from review. Existing document_json keeps
     its file + previews, only the two identity fields are set.
 
-    Returns (updated_count, skipped [(netzwerk_id, reason)], error_or_None).
+    Names compare case- and Unicode-form-insensitively. If the name is not
+    found but the student's folder holds exactly one file, that file is taken
+    (the zip is the upload, so it is the one graded) and listed as fallback.
+
+    Returns (updated_count, skipped [(netzwerk_id, reason)],
+             fallbacks [(netzwerk_id, 'expected -> taken')], error_or_None).
     """
     import zipfile
     if not re.fullmatch(r'[0-9a-f]{16}', rubric_version or ''):
-        return 0, [], 'Rubrik-Fassung muss 16 Hex-Zeichen sein'
+        return 0, [], [], 'Rubrik-Fassung muss 16 Hex-Zeichen sein'
     if get_grading_run(run_id) is None:
-        return 0, [], 'Lauf nicht gefunden'
+        return 0, [], [], 'Lauf nicht gefunden'
     try:
         zf = zipfile.ZipFile(zip_path)
     except (OSError, zipfile.BadZipFile) as e:
-        return 0, [], f'Zip nicht lesbar: {e}'
+        return 0, [], [], f'Zip nicht lesbar: {e}'
+
+    def _key(s):  # zips from Mac/Windows differ in umlaut form and case
+        return unicodedata.normalize('NFC', s).casefold()
 
     with zf:
-        files = [n.split('/') for n in zf.namelist() if not n.endswith('/')]
-        updated, skipped = 0, []
+        # (original member name, normalised path parts)
+        files = [(n, [_key(p) for p in n.split('/')]) for n in zf.namelist() if not n.endswith('/')]
+        updated, skipped, fallbacks = 0, [], []
         for result in list_grading_results(run_id):
             login, name = result['netzwerk_id'], os.path.basename(result.get('document_file') or '')
             if not name:
                 skipped.append((login, 'kein bewertetes Dokument im Lauf'))
                 continue
-            hits = [p for p in files if p[-1] == name and login in p[:-1]]
+            in_folder = [(n, p) for n, p in files if _key(login) in p[:-1]]
+            hits = [n for n, p in in_folder if p[-1] == _key(name)]
+            if not hits and len(in_folder) == 1:  # name differs, but only one file to have graded
+                hits = [in_folder[0][0]]
+                fallbacks.append((login, f'{name} -> {hits[0]}'))
             if len(hits) != 1:
-                skipped.append((login, f'{name}: {len(hits)} Treffer im Zip'))
+                skipped.append((login, f'{name}: {len(hits)} Treffer, {len(in_folder)} Datei(en) im Ordner'))
                 continue
             digest = sha256()
-            with zf.open('/'.join(hits[0])) as f:
+            with zf.open(hits[0]) as f:
                 for chunk in iter(lambda: f.read(1 << 20), b''):
                     digest.update(chunk)
             document = result.get('document') or {
@@ -7699,7 +7713,7 @@ def backfill_grading_identity(run_id, zip_path, rubric_version):
                 conn.execute("UPDATE grading_result SET document_json = ? WHERE id = ?",
                              (json.dumps(document), result['id']))
             updated += 1
-    return updated, skipped, None
+    return updated, skipped, fallbacks, None
 
 
 def _grading_reports_dir(run_id):

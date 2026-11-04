@@ -117,8 +117,7 @@ def test_retrofit_lets_unchanged_resubmission_be_set_aside(old_run, tmp_path):
     import hashlib
     run_id, task_id, klasse_id = old_run
     zip_path = _zip(tmp_path, {"Abgaben/mueller.anna/Word/deckblatt.docx": b"datei"})
-    updated, skipped, error = models.backfill_grading_identity(run_id, zip_path, "1" * 16)
-    assert (updated, skipped, error) == (1, [], None)
+    assert models.backfill_grading_identity(run_id, zip_path, "1" * 16) == (1, [], [], None)
     doc = {"sha256": hashlib.sha256(b"datei").hexdigest(), "rubric_version": "1" * 16}
     _, new = _run("job-new", task_id, klasse_id, doc)
     assert new['status'] == 'discarded'
@@ -128,14 +127,27 @@ def test_retrofit_lets_unchanged_resubmission_be_set_aside(old_run, tmp_path):
     {},                                                     # missing
     {"mueller.anna/a/deckblatt.docx": b"1",
      "mueller.anna/b/deckblatt.docx": b"2"},                # ambiguous
+    {"mueller.anna/entwurf.docx": b"1",
+     "mueller.anna/final.docx": b"2"},                      # name differs, several files
     {"schmidt.paul/deckblatt.docx": b"1"},                  # other student's folder
 ])
 def test_retrofit_skips_missing_or_ambiguous(old_run, tmp_path, entries):
     run_id = old_run[0]
-    updated, skipped, _ = models.backfill_grading_identity(run_id, _zip(tmp_path, entries), "1" * 16)
+    updated, skipped, _, _ = models.backfill_grading_identity(run_id, _zip(tmp_path, entries), "1" * 16)
     assert updated == 0 and len(skipped) == 1
     assert models.list_grading_results(run_id)[0]['document'] is None
 
 
 def test_retrofit_refuses_bad_version(old_run, tmp_path):
-    assert models.backfill_grading_identity(old_run[0], _zip(tmp_path, {}), "abc")[2]
+    assert models.backfill_grading_identity(old_run[0], _zip(tmp_path, {}), "abc")[3]
+
+
+@pytest.mark.parametrize("member, fallback", [
+    ("Klasse 5a/Mueller.Anna/DECKBLATT.docx", False),       # case differs
+    ("mueller.anna/Deckblatt_Anna_Müller.docx", True),      # name differs, only file
+])
+def test_retrofit_tolerates_case_and_single_file(old_run, tmp_path, member, fallback):
+    _, skipped, fallbacks, _ = models.backfill_grading_identity(
+        old_run[0], _zip(tmp_path, {member: b"datei"}), "1" * 16)
+    assert skipped == [] and bool(fallbacks) == fallback
+    assert models.list_grading_results(old_run[0])[0]['document']['sha256']
