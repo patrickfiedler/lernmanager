@@ -2810,7 +2810,7 @@ def admin_thema_detail(task_id):
         flash('Thema nicht gefunden.', 'danger')
         return redirect(url_for('admin_themen'))
     subtasks = models.get_subtasks(task_id)
-    materials = models.get_materials(task_id)
+    materials = models.add_material_klassen(models.get_materials(task_id))
     material_assignments = models.get_material_subtask_assignments(task_id)
     building_on_text, arriving_at_text = _connections_to_admin_fields(task.get('connections_json'))
     delete_impact = models.get_task_deletion_impact(task_id)
@@ -5669,13 +5669,13 @@ def student_klasse(slug):
 
         # Load materials filtered by current Aufgabe
         if current_subtask:
-            materials = models.get_materials_for_subtask(task['task_id'], current_subtask['id'])
+            materials = models.get_materials_for_subtask(task['task_id'], current_subtask['id'], klasse_id)
         else:
-            materials = models.get_materials(task['task_id'])
+            materials = models.get_materials(task['task_id'], klasse_id)
 
     # Material variants: {fall.1} in the texts becomes this student's picture, and
     # the list marks it. `task` here is the student_task row, hence get_task().
-    topic_materials = models.get_materials(task['task_id'])
+    topic_materials = models.get_materials(task['task_id'], klasse_id)
     models.apply_material_variants(student_id, klasse_id, models.get_task(task['task_id']),
                                    all_subtasks, topic_materials, materials)
 
@@ -7994,8 +7994,8 @@ def student_print_topic(slug):
         return redirect(url_for('student_dashboard'))
     subtasks = models.get_visible_subtasks_for_student(student_id, klasse['id'], task['task_id'])
     for sub in subtasks:
-        sub['materials'] = models.get_materials_for_subtask(task['task_id'], sub['id'])
-    topic_materials = models.get_materials(task['task_id'])
+        sub['materials'] = models.get_materials_for_subtask(task['task_id'], sub['id'], klasse['id'])
+    topic_materials = models.get_materials(task['task_id'], klasse['id'])
     models.apply_material_variants(student_id, klasse['id'], models.get_task(task['task_id']),
                                    subtasks, topic_materials, *(sub['materials'] for sub in subtasks))
     return render_template('student/print_tasks.html', task=task, subtasks=subtasks, single=False,
@@ -8014,8 +8014,8 @@ def student_print_subtask(slug, position):
     subtask = _resolve_subtask_by_position(subtasks, position)
     if not subtask:
         return redirect(url_for('student_klasse', slug=slug))
-    subtask['materials'] = models.get_materials_for_subtask(task['task_id'], subtask['id'])
-    topic_materials = models.get_materials(task['task_id'])
+    subtask['materials'] = models.get_materials_for_subtask(task['task_id'], subtask['id'], klasse['id'])
+    topic_materials = models.get_materials(task['task_id'], klasse['id'])
     models.apply_material_variants(student_id, klasse['id'], models.get_task(task['task_id']),
                                    [subtask], topic_materials, subtask['materials'])
     return render_template('student/print_tasks.html', task=task, subtasks=[subtask], single=True,

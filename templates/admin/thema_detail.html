@@ -222,6 +222,9 @@
                 {% if mat.attribution %}
                 <small class="text-muted">© {{ mat.attribution }}</small>
                 {% endif %}
+                {% if mat.klassen %}
+                <small class="badge" title="Schüler anderer Klassen sehen dieses Material nicht (per Import gesetzt)">nur: {{ mat.klassen|join(', ') }}</small>
+                {% endif %}
                 {% if mat.typ == 'datei' %}
                 <button class="btn btn-sm mat-schulnetz" data-mat-id="{{ mat.id }}" data-school-only="{{ 1 if mat.school_only else 0 }}"
                         onclick="toggleMaterialSchulnetz({{ mat.id }})"

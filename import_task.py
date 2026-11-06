@@ -539,6 +539,7 @@ def validate_task_structure(data, warnings=None):
 
     errors.extend(_inline_image_errors(task))
     _validate_material_variants(task, errors)
+    _validate_material_klassen(task, errors)
 
     # Validate topic-level quiz
     if 'quiz' in task and task['quiz']:
@@ -548,6 +549,37 @@ def validate_task_structure(data, warnings=None):
         raise ValidationError("\n".join(errors))
 
     return True
+
+
+def _resolve_klassen(names):
+    """Class names -> (ids, errors). Exact match only: a name that hits no class
+    or two classes is an error, never a guess -- the material exists to keep a
+    group's link away from the others (MBI request 2026-11-06)."""
+    by_name = {}
+    for k in models.get_all_klassen():
+        by_name.setdefault(k['name'], []).append(k['id'])
+    ids, errors = [], []
+    for name in names:
+        hits = by_name.get(name, [])
+        if len(hits) == 1:
+            ids.append(hits[0])
+        else:
+            errors.append(f"Klasse '{name}' {'nicht gefunden' if not hits else 'mehrdeutig'}")
+    return ids, errors
+
+
+def _validate_material_klassen(task, errors):
+    """`klassen` on a material: list of existing class names, or absent."""
+    for i, mat in enumerate(task.get('materials') or [], 1):
+        if not isinstance(mat, dict) or 'klassen' not in mat:
+            continue
+        names = mat['klassen']
+        if (not isinstance(names, list) or not names
+                or not all(isinstance(n, str) and n.strip() for n in names)):
+            errors.append(f"Material {i}: 'klassen' muss eine nicht-leere Liste von Klassennamen sein")
+            continue
+        _, errs = _resolve_klassen(names)
+        errors.extend(f"Material {i} ('{mat.get('pfad', '?')}'): {e}" for e in errs)
 
 
 def _validate_material_variants(task, errors):
@@ -796,6 +828,7 @@ def _create_materials(task_id, materials_data, subtask_id_by_position):
             mat.get('attribution'),
             mat.get('school_only', False),
             mat.get('label'),
+            _resolve_klassen(mat['klassen'])[0] if mat.get('klassen') else None,
         )
         if mat.get('subtask_indices'):
             assigned_ids = [

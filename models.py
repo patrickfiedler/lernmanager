@@ -305,6 +305,7 @@ def init_db():
                 attribution TEXT,  -- photographer/source credit
                 school_only INTEGER NOT NULL DEFAULT 0,  -- 1=only downloadable from school network (network gate)
                 label TEXT,  -- migrate_063: short name ("Bild A") that replaces {key.N} placeholders
+                klasse_ids TEXT,  -- migrate_076: JSON list of klasse ids that see it, NULL = all
                 FOREIGN KEY (task_id) REFERENCES task(id) ON DELETE CASCADE
             );
 
@@ -2447,7 +2448,7 @@ def export_task_to_dict(task_id):
     else:
 
         subtasks = get_subtasks(task_id)
-        materials = get_materials(task_id)
+        materials = add_material_klassen(get_materials(task_id))
         material_assignments = get_material_subtask_assignments(task_id)
 
         # Build subtask ID -> reihenfolge lookup
@@ -2494,6 +2495,8 @@ def export_task_to_dict(task_id):
             }
             if material.get('label'):
                 mat_data['label'] = material['label']
+            if material['klassen']:
+                mat_data['klassen'] = material['klassen']
             # Include subtask_indices if material has specific assignments
             assigned_subtask_ids = material_assignments.get(material['id'])
             if assigned_subtask_ids:
@@ -3104,14 +3107,24 @@ def update_subtasks_from_import(task_id, subtasks_data):
 
 # ============ Material functions ============
 
-def get_materials(task_id):
-    """Get materials for a task."""
+# A material with klasse_ids is shown only to those classes (MBI request
+# 2026-11-06, one Etherpad per Lerngruppe). Student pages pass the class the
+# topic was given through -- not every class of the student -- so a student in
+# two classes sees what belongs to this topic's class. Admin pages pass nothing.
+_MATERIAL_KLASSE_FILTER = (
+    " AND (m.klasse_ids IS NULL"
+    " OR EXISTS (SELECT 1 FROM json_each(m.klasse_ids) WHERE value = ?))"
+)
+
+
+def get_materials(task_id, klasse_id=None):
+    """Get materials for a task; with klasse_id only those this class sees."""
+    sql, params = "SELECT * FROM material m WHERE m.task_id = ?", [task_id]
+    if klasse_id is not None:
+        sql += _MATERIAL_KLASSE_FILTER
+        params.append(klasse_id)
     with db_session() as conn:
-        rows = conn.execute(
-            "SELECT * FROM material WHERE task_id = ?",
-            (task_id,)
-        ).fetchall()
-        return [dict(r) for r in rows]
+        return [dict(r) for r in conn.execute(sql, params).fetchall()]
 
 
 # A domain whitelist blocks every request a page makes, not only the page itself.
@@ -3178,13 +3191,15 @@ def get_material(material_id):
         return dict(row) if row else None
 
 
-def create_material(task_id, typ, pfad, beschreibung='', attribution=None, school_only=False, label=None):
-    """Create a material."""
+def create_material(task_id, typ, pfad, beschreibung='', attribution=None, school_only=False, label=None,
+                    klasse_ids=None):
+    """Create a material. klasse_ids: classes that see it, None/[] = all."""
     with db_session() as conn:
         cursor = conn.execute(
-            "INSERT INTO material (task_id, typ, pfad, beschreibung, attribution, school_only, label) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (task_id, typ, pfad, beschreibung, attribution, 1 if school_only else 0, label or None)
+            "INSERT INTO material (task_id, typ, pfad, beschreibung, attribution, school_only, label, klasse_ids) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (task_id, typ, pfad, beschreibung, attribution, 1 if school_only else 0, label or None,
+             json.dumps(sorted(klasse_ids)) if klasse_ids else None)
         )
         return cursor.lastrowid
 
@@ -3415,23 +3430,38 @@ def update_material_beschreibung(material_id, beschreibung):
         conn.execute("UPDATE material SET beschreibung = ? WHERE id = ?", (beschreibung, material_id))
 
 
-def get_materials_for_subtask(task_id, subtask_id):
+def add_material_klassen(materials):
+    """Set m['klassen'] = names of the classes a restricted material is shown to
+    ([] = all), for the admin list and the export. A deleted class shows as '#id'."""
+    names = {k['id']: k['name'] for k in get_all_klassen()}
+    for m in materials:
+        ids = json.loads(m['klasse_ids']) if m.get('klasse_ids') else []
+        m['klassen'] = [names.get(i, f'#{i}') for i in ids]
+    return materials
+
+
+def get_materials_for_subtask(task_id, subtask_id, klasse_id=None):
     """Get materials visible for a specific Aufgabe.
 
     A material is visible if:
     - It has NO rows in material_subtask (= visible everywhere, backward compatible)
     - OR it has a row linking it to this specific subtask
+    With klasse_id, also only those this class sees (see get_materials).
     """
-    with db_session() as conn:
-        rows = conn.execute('''
+    sql = '''
             SELECT m.* FROM material m WHERE m.task_id = ?
             AND (
                 NOT EXISTS (SELECT 1 FROM material_subtask ms WHERE ms.material_id = m.id)
                 OR
                 EXISTS (SELECT 1 FROM material_subtask ms WHERE ms.material_id = m.id AND ms.subtask_id = ?)
             )
-        ''', (task_id, subtask_id)).fetchall()
-        return [dict(r) for r in rows]
+        '''
+    params = [task_id, subtask_id]
+    if klasse_id is not None:
+        sql += _MATERIAL_KLASSE_FILTER
+        params.append(klasse_id)
+    with db_session() as conn:
+        return [dict(r) for r in conn.execute(sql, params).fetchall()]
 
 
 def get_material_subtask_assignments(task_id):
