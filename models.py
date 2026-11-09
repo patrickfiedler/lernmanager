@@ -340,6 +340,7 @@ def init_db():
             CREATE TABLE IF NOT EXISTS class_practice_unlock (
                 klasse_id INTEGER NOT NULL,
                 task_id INTEGER NOT NULL,
+                include_checkpoints INTEGER NOT NULL DEFAULT 0,  -- migrate_077
                 PRIMARY KEY (klasse_id, task_id)
             );
 
@@ -3594,22 +3595,34 @@ def assign_task_to_student(student_id, klasse_id, task_id, rolle='primary',
 
 
 def get_practice_unlocked_task_ids(klasse_id):
-    """Return set of task_ids unlocked for practice in this class."""
+    """{task_id: include_checkpoints} for the topics unlocked for practice in this class."""
     with db_session() as conn:
         rows = conn.execute(
-            "SELECT task_id FROM class_practice_unlock WHERE klasse_id = ?",
+            "SELECT task_id, include_checkpoints FROM class_practice_unlock WHERE klasse_id = ?",
             (klasse_id,)
+        ).fetchall()
+    return {r['task_id']: bool(r['include_checkpoints']) for r in rows}
+
+
+def get_task_ids_with_checkpoint_questions():
+    """Topic ids with at least one checkpoint that carries questions."""
+    with db_session() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT task_id FROM subtask WHERE checkpoint_type IS NOT NULL "
+            "AND quiz_json IS NOT NULL AND quiz_json != ''"
         ).fetchall()
     return {r['task_id'] for r in rows}
 
 
-def set_practice_unlock_for_class(klasse_id, task_id, unlocked):
-    """Insert or delete a class_practice_unlock row for this class+topic."""
+def set_practice_unlock_for_class(klasse_id, task_id, unlocked, include_checkpoints=False):
+    """Insert/update or delete a class_practice_unlock row for this class+topic."""
     with db_session() as conn:
         if unlocked:
             conn.execute(
-                "INSERT OR IGNORE INTO class_practice_unlock (klasse_id, task_id) VALUES (?, ?)",
-                (klasse_id, task_id)
+                "INSERT INTO class_practice_unlock (klasse_id, task_id, include_checkpoints) "
+                "VALUES (?, ?, ?) ON CONFLICT (klasse_id, task_id) "
+                "DO UPDATE SET include_checkpoints = excluded.include_checkpoints",
+                (klasse_id, task_id, int(include_checkpoints))
             )
         else:
             conn.execute(
@@ -8857,19 +8870,26 @@ def get_warmup_question_pool(student_id, include_short_answer=False):
                 topic['task_id'], None, topic['quiz_json'], topic['name'],
                 student_path=student_path, fach=topic['fach']))
 
+        # Checkpoints only where the teacher ticked include_checkpoints: practice
+        # shows the solution, so this is for a class that will not sit them here
+        # (e.g. worked on paper). Otherwise graded questions come only via 2b.
         unlocked_subtasks = conn.execute('''
-            SELECT DISTINCT sub.id as subtask_id, sub.task_id, sub.quiz_json,
+            SELECT sub.id as subtask_id, sub.task_id, sub.quiz_json,
                    sub.path, sub.path_model, sub.fork_group, sub.fork_branch,
+                   sub.checkpoint_type, sub.beschreibung, sub.reihenfolge,
                    t.name as topic_name, t.fach
-            FROM student_klasse sk
-            JOIN class_practice_unlock cpu ON cpu.klasse_id = sk.klasse_id
-            JOIN task t ON t.id = cpu.task_id
-            JOIN subtask sub ON sub.task_id = t.id
-            WHERE sk.student_id = ?
+            FROM subtask sub
+            JOIN task t ON t.id = sub.task_id
+            WHERE sub.task_id IN (
+                    SELECT cpu.task_id FROM student_klasse sk
+                    JOIN class_practice_unlock cpu ON cpu.klasse_id = sk.klasse_id
+                    WHERE sk.student_id = ?
+                      AND (sub.checkpoint_type IS NULL OR cpu.include_checkpoints = 1))
               AND sub.quiz_json IS NOT NULL AND sub.quiz_json != ''
               AND COALESCE(sub.is_intro, 0) = 0
-              AND sub.checkpoint_type IS NULL  -- graded: only via 2b, once settled
         ''', (student_id,)).fetchall()
+        unlocked_excluded = get_excluded_questions(
+            [s['subtask_id'] for s in unlocked_subtasks if s['checkpoint_type']])
 
         for sub in unlocked_subtasks:
             if (sub['task_id'], sub['subtask_id']) in seen_task_ids:
@@ -8881,9 +8901,15 @@ def get_warmup_question_pool(student_id, include_short_answer=False):
                 continue
             if sub['fork_group'] and fork_choices.get(sub['fork_group']) != sub['fork_branch']:
                 continue
-            pool.extend(_quiz_json_to_pool_entries(
+            is_checkpoint = sub['checkpoint_type'] is not None
+            # A question taken out of the grading is broken or misplaced (as in 2b).
+            excluded = unlocked_excluded.get(sub['subtask_id'], {})
+            pool.extend(e for e in _quiz_json_to_pool_entries(
                 sub['task_id'], sub['subtask_id'], sub['quiz_json'], sub['topic_name'],
-                student_path=student_path, fach=sub['fach']))
+                student_path=student_path, fach=sub['fach'],
+                allow_short_answer=include_short_answer and is_checkpoint,
+                checkpoint=sub if is_checkpoint else None)
+                if e['question_index'] not in excluded)
 
         # 4. Demo accounts (student.demo_practice, set by the teacher): every question
         #    of every assigned Thema, checkpoints included -- no attempt, no review,

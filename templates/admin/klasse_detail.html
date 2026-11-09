@@ -96,7 +96,19 @@
         <tbody>
         {% for task in tasks if task.id in practice_unlocked_ids %}
         <tr>
-            <td>{{ task.fach }} ({{ task.stufe }}): {{ task.name }}</td>
+            <td>{{ task.fach }} ({{ task.stufe }}): {{ task.name }}
+                {% if practice_unlocked_ids[task.id] %}<span class="badge">inkl. Checkpoints</span>{% endif %}</td>
+            <td style="width: 1%;">
+                {% if task.id in checkpoint_task_ids %}
+                <form method="POST" action="{{ url_for('admin_klasse_ueben_freischalten', klasse_id=klasse.id) }}" style="white-space: nowrap;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="task_id" value="{{ task.id }}">
+                    <input type="hidden" name="action" value="unlock">
+                    <input type="hidden" name="include_checkpoints" value="{{ '0' if practice_unlocked_ids[task.id] else '1' }}">
+                    <button type="submit" class="btn btn-sm btn-secondary">{{ 'Ohne Checkpoints' if practice_unlocked_ids[task.id] else 'Mit Checkpoints' }}</button>
+                </form>
+                {% endif %}
+            </td>
             <td style="width: 1%;">
                 <form method="POST" action="{{ url_for('admin_klasse_ueben_freischalten', klasse_id=klasse.id) }}" style="white-space: nowrap;">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -114,11 +126,20 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="action" value="unlock">
         <div class="flex gap-1">
-            <select name="task_id" class="form-control" style="flex: 1;" required>
+            <select name="task_id" id="practice-unlock-task" class="form-control" style="flex: 1;" required
+                    data-checkpoint-ids="{{ checkpoint_task_ids | list | tojson | forceescape }}">
                 <option value="">-- Thema wählen --</option>
                 {{ thema_opts.thema_options(themen_exact, themen_other, practice_unlocked_ids) }}
             </select>
             <button type="submit" class="btn btn-secondary">Freischalten</button>
+        </div>
+        {# Shown by the script below only when the chosen Thema has checkpoint questions. #}
+        <div id="practice-unlock-checkpoints" hidden style="margin-top: 0.5rem;">
+            <label>
+                <input type="checkbox" name="include_checkpoints" value="1">
+                Checkpoint-Fragen einschließen
+            </label>
+            <small class="text-muted" style="display: block;">Checkpoint-Fragen zeigen im Üben-Modus die Lösung -- nur einschließen, wenn die Klasse diese Checkpoints nicht mehr im Lernmanager schreibt.</small>
         </div>
     </form>
     <small class="text-muted">Quizfragen erscheinen im Üben-Modus der Schüler, ohne den Lernfortschritt zu ändern.</small>
@@ -383,6 +404,17 @@ const mvAlle = document.getElementById('mv-alle');
 if (mvAlle) {
     mvAlle.addEventListener('change', function() {
         document.querySelectorAll('.mv-student-cb').forEach(cb => cb.checked = this.checked);
+    });
+}
+
+// Practice unlock: offer "Checkpoint-Fragen einschließen" only for a Thema that has some.
+const unlockSelect = document.getElementById('practice-unlock-task');
+if (unlockSelect) {
+    const withCheckpoints = new Set(JSON.parse(unlockSelect.dataset.checkpointIds));
+    const box = document.getElementById('practice-unlock-checkpoints');
+    unlockSelect.addEventListener('change', function() {
+        box.hidden = !withCheckpoints.has(Number(this.value));
+        if (box.hidden) box.querySelector('input').checked = false;  // no stale tick
     });
 }
 {% endblock %}

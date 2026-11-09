@@ -936,6 +936,7 @@ def admin_klasse_detail(klasse_id):
                            unterricht=unterricht, schedule=schedule,
                            has_queue=bool(queue), sidequests=sidequests,
                            practice_unlocked_ids=practice_unlocked_ids,
+                           checkpoint_task_ids=models.get_task_ids_with_checkpoint_questions(),
                            andere_klassen=andere_klassen)
 
 
@@ -2026,7 +2027,9 @@ def admin_klasse_ueben_freischalten(klasse_id):
     action = request.form.get('action', 'unlock')
     if task_id:
         unlocked = action == 'unlock'
-        models.set_practice_unlock_for_class(klasse_id, int(task_id), unlocked)
+        models.set_practice_unlock_for_class(
+            klasse_id, int(task_id), unlocked,
+            include_checkpoints=request.form.get('include_checkpoints') == '1')
         msg = 'Fragen freigeschaltet. ✅' if unlocked else 'Freischaltung aufgehoben.'
         flash(msg, 'success')
     return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id))

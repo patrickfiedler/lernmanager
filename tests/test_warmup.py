@@ -424,6 +424,27 @@ def test_practice_unlock_does_not_admit_checkpoint_questions(db):
     assert models.get_warmup_question_pool(student_id, include_short_answer=True) == []
 
 
+def test_practice_unlock_with_checkpoints_admits_them_without_attempt(db):
+    """include_checkpoints: the class worked on paper and will not sit the checkpoint
+    here -- its questions come in at once, minus those taken out of the grading."""
+    student_id = models.create_student("Test", "Schüler", "cpunlock2", "pw123")
+    task_id, subtask_id = _checkpoint(student_id)
+    with models.db_session() as conn:
+        klasse_id = conn.execute("SELECT klasse_id FROM student_klasse WHERE student_id = ?",
+                                 (student_id,)).fetchone()["klasse_id"]
+    models.set_practice_unlock_for_class(klasse_id, task_id, True, include_checkpoints=True)
+    pool = models.get_warmup_question_pool(student_id, include_short_answer=True)
+    indices = sorted(e["question_index"] for e in pool if e["subtask_id"] == subtask_id)
+    assert indices and all("checkpoint" in e for e in pool)
+    # free text stays out of the warm-up
+    warmup = models.get_warmup_question_pool(student_id)
+    assert all(e["question"].get("type") != "short_answer" for e in warmup)
+    # switching it off again keeps the topic unlocked but drops the checkpoint
+    models.set_practice_unlock_for_class(klasse_id, task_id, True, include_checkpoints=False)
+    assert models.get_practice_unlocked_task_ids(klasse_id) == {task_id: False}
+    assert models.get_warmup_question_pool(student_id, include_short_answer=True) == []
+
+
 def test_superseded_checkpoint_attempt_stays_out(db):
     """A reopened checkpoint ("Fortschritte zurücksetzen") is not finished anymore."""
     student_id = models.create_student("Test", "Schüler", "cpreset", "pw123")
