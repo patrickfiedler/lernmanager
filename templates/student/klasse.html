@@ -243,7 +243,11 @@
                         <button type="submit" class="btn btn-primary">Speichern</button>
                     </div>
                     {% if sammeln.eigene_zeile %}
+                    {% if sammeln.eigene_zeile.abgelehnt %}
+                    <p style="margin: 0.5rem 0 0;">❌ Die Lehrkraft hat deine Zeile nicht freigegeben. Ändere sie und speichere neu.</p>
+                    {% else %}
                     <p style="margin: 0.5rem 0 0;">✅ Gespeichert{% if sammeln.eigene_zeile.wartet %} – die Lehrkraft gibt deine Zeile bald frei.{% else %} und freigegeben.{% endif %}</p>
+                    {% endif %}
                     {% endif %}
                 </form>
                 {% endif %}

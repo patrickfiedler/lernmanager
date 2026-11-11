@@ -1,6 +1,10 @@
 """Zeilen sammeln: the teacher approves each line (Patrick 2026-11-11).
 
     sammel_zeile.text_frei   the approved text; NULL = never approved
+    sammel_zeile.abgelehnt   1 = teacher rejected the current text (nonsense)
+    sammel_zeile_log         every save and every teacher decision, for audit:
+                             a rejected line is never deleted, and a later
+                             edit by the student does not erase it
 
 Download and copy box hand out only text_frei. A student may add or change
 their line at any time (late entries after a missed lesson); the change waits
@@ -30,6 +34,26 @@ def run():
         else:
             conn.execute("ALTER TABLE sammel_zeile ADD COLUMN text_frei TEXT")
             print("  Added sammel_zeile.text_frei.")
+        if 'abgelehnt' in cols:
+            print("  sammel_zeile.abgelehnt already exists, skipping.")
+        else:
+            conn.execute("ALTER TABLE sammel_zeile ADD COLUMN abgelehnt INTEGER NOT NULL DEFAULT 0")
+            print("  Added sammel_zeile.abgelehnt.")
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS sammel_zeile_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                klasse_id INTEGER NOT NULL,
+                sammel_id TEXT NOT NULL,
+                student_id INTEGER NOT NULL,
+                aktion TEXT NOT NULL,
+                text TEXT,
+                admin_id INTEGER,
+                zeit TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_sammel_zeile_log_klasse "
+                     "ON sammel_zeile_log(klasse_id, sammel_id, student_id)")
+        print("  sammel_zeile_log table ready.")
         conn.commit()
     finally:
         conn.close()

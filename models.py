@@ -737,10 +737,25 @@ def init_db():
                 text TEXT NOT NULL,
                 geaendert TEXT NOT NULL DEFAULT (datetime('now','localtime')),
                 text_frei TEXT,  -- migrate_079: text approved by the teacher, NULL = never approved
+                abgelehnt INTEGER NOT NULL DEFAULT 0,  -- migrate_079: teacher rejected the current text
                 UNIQUE (klasse_id, sammel_id, student_id),
                 FOREIGN KEY (klasse_id) REFERENCES klasse(id) ON DELETE CASCADE,
                 FOREIGN KEY (student_id) REFERENCES student(id) ON DELETE CASCADE
             );
+
+            -- migrate_079: audit log of every save and teacher decision (no FKs: outlives the line)
+            CREATE TABLE IF NOT EXISTS sammel_zeile_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                klasse_id INTEGER NOT NULL,
+                sammel_id TEXT NOT NULL,
+                student_id INTEGER NOT NULL,
+                aktion TEXT NOT NULL,  -- gespeichert / geloescht / freigegeben / abgelehnt / zurueckgenommen
+                text TEXT,
+                admin_id INTEGER,
+                zeit TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_sammel_zeile_log_klasse
+                ON sammel_zeile_log(klasse_id, sammel_id, student_id);
 
             CREATE TABLE IF NOT EXISTS artifact_gate_attempt (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1791,6 +1806,7 @@ def _delete_student_rows(conn, student_id):
     conn.execute("DELETE FROM student_artifact_file WHERE student_id = ?", (student_id,))
     conn.execute("DELETE FROM artifact_gate_attempt WHERE student_id = ?", (student_id,))
     conn.execute("DELETE FROM sammel_zeile WHERE student_id = ?", (student_id,))
+    conn.execute("DELETE FROM sammel_zeile_log WHERE student_id = ?", (student_id,))
     conn.execute("DELETE FROM grading_result WHERE student_id = ?", (student_id,))
     conn.execute("DELETE FROM grading_audit WHERE student_id = ?", (student_id,))
     conn.execute("DELETE FROM student WHERE id = ?", (student_id,))
@@ -9177,15 +9193,23 @@ def clean_sammel_text(raw):
     return text if text.strip() else ''
 
 
+_SAMMEL_WARTET_SQL = "(z.abgelehnt = 0 AND (z.text_frei IS NULL OR z.text_frei != z.text))"
+
+
+def _log_sammel(conn, klasse_id, sammel_id, student_id, aktion, text=None, admin_id=None):
+    conn.execute(
+        "INSERT INTO sammel_zeile_log (klasse_id, sammel_id, student_id, aktion, text, admin_id) "
+        "VALUES (?, ?, ?, ?, ?, ?)", (klasse_id, sammel_id, student_id, aktion, text, admin_id))
+
+
 def get_sammel_zeile(klasse_id, sammel_id, student_id):
-    """This student's own line as {'text', 'wartet'}, or None. `wartet`: not approved in this form yet."""
+    """This student's own line as {'text', 'wartet', 'abgelehnt'}, or None."""
     with db_session() as conn:
         row = conn.execute(
-            "SELECT text, text_frei FROM sammel_zeile WHERE klasse_id = ? AND sammel_id = ? AND student_id = ?",
+            f"SELECT z.text, z.abgelehnt, {_SAMMEL_WARTET_SQL} AS wartet FROM sammel_zeile z "
+            "WHERE z.klasse_id = ? AND z.sammel_id = ? AND z.student_id = ?",
             (klasse_id, sammel_id, student_id)).fetchone()
-    if not row:
-        return None
-    return {'text': row['text'], 'wartet': row['text'] != row['text_frei']}
+    return {'text': row['text'], 'wartet': bool(row['wartet']), 'abgelehnt': bool(row['abgelehnt'])} if row else None
 
 
 def set_sammel_zeile(klasse_id, sammel_id, student_id, raw):
@@ -9193,15 +9217,19 @@ def set_sammel_zeile(klasse_id, sammel_id, student_id, raw):
     text = clean_sammel_text(raw)
     with db_session() as conn:
         if not text:
-            conn.execute(
+            deleted = conn.execute(
                 "DELETE FROM sammel_zeile WHERE klasse_id = ? AND sammel_id = ? AND student_id = ?",
-                (klasse_id, sammel_id, student_id))
+                (klasse_id, sammel_id, student_id)).rowcount
+            if deleted:
+                _log_sammel(conn, klasse_id, sammel_id, student_id, 'geloescht')
             return None
+        # A new text is a new question to the teacher: a rejection does not carry over.
         conn.execute("""
             INSERT INTO sammel_zeile (klasse_id, sammel_id, student_id, text) VALUES (?, ?, ?, ?)
             ON CONFLICT (klasse_id, sammel_id, student_id)
-            DO UPDATE SET text = excluded.text, geaendert = datetime('now','localtime')
+            DO UPDATE SET text = excluded.text, abgelehnt = 0, geaendert = datetime('now','localtime')
         """, (klasse_id, sammel_id, student_id, text))
+        _log_sammel(conn, klasse_id, sammel_id, student_id, 'gespeichert', text)
         return text
 
 
@@ -9230,21 +9258,29 @@ def get_sammel_zeilen_for_klasse(klasse_id):
     without a line -- a hint for "complete enough?", never a lock.
     """
     with db_session() as conn:
-        rows = conn.execute("""
-            SELECT z.id, z.sammel_id, z.student_id, z.text, z.text_frei, z.geaendert,
-                   s.vorname, s.nachname, (z.text_frei IS NULL OR z.text_frei != z.text) AS wartet
+        rows = conn.execute(f"""
+            SELECT z.id, z.sammel_id, z.student_id, z.text, z.text_frei, z.abgelehnt, z.geaendert,
+                   s.vorname, s.nachname, {_SAMMEL_WARTET_SQL} AS wartet
             FROM sammel_zeile z JOIN student s ON s.id = z.student_id
             WHERE z.klasse_id = ?
-            ORDER BY z.sammel_id, wartet DESC, s.nachname, s.vorname
+            ORDER BY z.sammel_id, wartet DESC, z.abgelehnt DESC, s.nachname, s.vorname
         """, (klasse_id,)).fetchall()
+        log = conn.execute(
+            "SELECT sammel_id, student_id, aktion, text, zeit FROM sammel_zeile_log "
+            "WHERE klasse_id = ? ORDER BY id DESC", (klasse_id,)).fetchall()
         roster = conn.execute("""
             SELECT s.id, s.vorname, s.nachname FROM student s
             JOIN student_klasse sk ON sk.student_id = s.id
             WHERE sk.klasse_id = ? ORDER BY s.nachname, s.vorname
         """, (klasse_id,)).fetchall()
+    verlauf = {}
+    for e in log:
+        verlauf.setdefault((e['sammel_id'], e['student_id']), []).append(dict(e))
     grouped = {}
     for r in rows:
-        grouped.setdefault(r['sammel_id'], []).append(dict(r))
+        zeile = dict(r)
+        zeile['verlauf'] = verlauf.get((r['sammel_id'], r['student_id']), [])
+        grouped.setdefault(r['sammel_id'], []).append(zeile)
     result = {}
     for sammel_id, zeilen in grouped.items():
         have = {z['student_id'] for z in zeilen}
@@ -9256,16 +9292,39 @@ def get_sammel_zeilen_for_klasse(klasse_id):
     return result
 
 
-def approve_sammel_zeilen(klasse_id, sammel_id):
-    """Teacher approves every waiting line of one collection. Returns how many."""
+def approve_sammel_zeilen(klasse_id, sammel_id, admin_id=None):
+    """Teacher approves every waiting line of one collection (rejected ones stay out). Returns how many."""
     with db_session() as conn:
-        return conn.execute(
-            "UPDATE sammel_zeile SET text_frei = text WHERE klasse_id = ? AND sammel_id = ? "
-            "AND (text_frei IS NULL OR text_frei != text)",
-            (klasse_id, sammel_id)).rowcount
+        rows = conn.execute(
+            f"SELECT z.id, z.student_id, z.text FROM sammel_zeile z "
+            f"WHERE z.klasse_id = ? AND z.sammel_id = ? AND {_SAMMEL_WARTET_SQL}",
+            (klasse_id, sammel_id)).fetchall()
+        for r in rows:
+            conn.execute("UPDATE sammel_zeile SET text_frei = text WHERE id = ?", (r['id'],))
+            _log_sammel(conn, klasse_id, sammel_id, r['student_id'], 'freigegeben', r['text'], admin_id)
+        return len(rows)
 
 
-def delete_sammel_zeile(zeile_id, klasse_id):
-    """Teacher removes one line. Scoped to the class so a foreign id does nothing."""
+def set_sammel_zeile_abgelehnt(zeile_id, klasse_id, abgelehnt, admin_id=None):
+    """Teacher rejects the current text (kept, logged, never shown to the class) or takes that back.
+
+    Scoped to the class so a foreign id does nothing. The rejected text leaves the
+    data even if it was approved by mistake; an earlier, different approved
+    version of the line stays in.
+    """
     with db_session() as conn:
-        conn.execute("DELETE FROM sammel_zeile WHERE id = ? AND klasse_id = ?", (zeile_id, klasse_id))
+        row = conn.execute("SELECT sammel_id, student_id, text FROM sammel_zeile WHERE id = ? AND klasse_id = ?",
+                           (zeile_id, klasse_id)).fetchone()
+        if not row:
+            return False
+        if abgelehnt:
+            conn.execute("UPDATE sammel_zeile SET abgelehnt = 1, "
+                         "text_frei = CASE WHEN text_frei = text THEN NULL ELSE text_frei END WHERE id = ?",
+                         (zeile_id,))
+        else:
+            conn.execute("UPDATE sammel_zeile SET abgelehnt = 0 WHERE id = ?", (zeile_id,))
+        _log_sammel(conn, klasse_id, row['sammel_id'], row['student_id'],
+                    'abgelehnt' if abgelehnt else 'zurueckgenommen', row['text'], admin_id)
+        return True
+
+

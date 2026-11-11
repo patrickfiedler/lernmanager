@@ -173,21 +173,39 @@ def test_rows_survive_reimport(db):
     assert models.get_sammel_texte(k, 'schulweg') == ['Z9;1']
 
 
-def test_teacher_sees_names_and_deletes_only_in_own_class(app, as_admin):
+def test_teacher_rejects_nonsense_kept_for_audit_hidden_from_class(app, client, as_admin):
     k7a, k7b = models.create_klasse('7a'), models.create_klasse('7b')
     task_id = import_task.import_task(_data())
     anna = _student('anna', k7a, task_id)
-    models.set_sammel_zeile(k7a, 'schulweg', anna, 'Unsinn')
-    models.approve_sammel_zeilen(k7a, 'schulweg')
-    zeile_id = models.get_sammel_zeilen_for_klasse(k7a)['schulweg']['zeilen'][0]['id']
+    ben = _student('ben', k7a, task_id)
+    models.set_sammel_zeile(k7a, 'schulweg', anna, 'Z9;10')
+    models.set_sammel_zeile(k7a, 'schulweg', ben, 'Unsinn')
+    models.approve_sammel_zeilen(k7a, 'schulweg')            # waved through by mistake
+    zeilen = {z['text']: z for z in models.get_sammel_zeilen_for_klasse(k7a)['schulweg']['zeilen']}
+    unsinn_id, anna_id = zeilen['Unsinn']['id'], zeilen['Z9;10']['id']
 
+    as_admin.post(f'/admin/klasse/{k7b}/sammel-zeile/{unsinn_id}/ablehnen')  # wrong class: nothing
+    assert 'Unsinn' in models.get_sammel_texte(k7a, 'schulweg')
+    as_admin.post(f'/admin/klasse/{k7a}/sammel-zeile/{unsinn_id}/ablehnen')
+    assert models.get_sammel_texte(k7a, 'schulweg') == ['Z9;10']
+
+    # Kept for audit, and a later edit does not erase it
+    models.set_sammel_zeile(k7a, 'schulweg', ben, 'B2;5')
     html = as_admin.get(f'/admin/klasse/{k7a}').get_data(as_text=True)
-    assert 'Unsinn' in html and 'anna' in html
+    assert 'abgelehnt: <code>Unsinn</code>' in html and 'sammel-zeile/' + str(unsinn_id) + '/loeschen' not in html
 
-    as_admin.post(f'/admin/klasse/{k7b}/sammel-zeile/{zeile_id}/loeschen')  # wrong class: nothing
-    assert models.get_sammel_texte(k7a, 'schulweg') == ['Unsinn']
-    as_admin.post(f'/admin/klasse/{k7a}/sammel-zeile/{zeile_id}/loeschen')
-    assert models.get_sammel_texte(k7a, 'schulweg') == []
+    # Changed approved line rejected: the approved version stays in the data
+    models.set_sammel_zeile(k7a, 'schulweg', anna, 'Quatsch')
+    models.set_sammel_zeile_abgelehnt(anna_id, k7a, True)
+    models.approve_sammel_zeilen(k7a, 'schulweg')              # skips rejected, takes ben's B2;5
+    assert sorted(models.get_sammel_texte(k7a, 'schulweg')) == ['B2;5', 'Z9;10']
+
+    _login(client, anna)
+    html = client.get('/schueler/thema/tabellen?aufgabe=1').get_data(as_text=True)
+    assert 'nicht freigegeben' in html
+
+    models.set_sammel_zeile_abgelehnt(anna_id, k7a, False)    # take back: waits again
+    assert models.get_sammel_zeilen_for_klasse(k7a)['schulweg']['wartend'] == 1
 
 
 def test_deleting_student_deletes_their_line(db):
@@ -227,7 +245,7 @@ def test_lines_wait_for_approval_late_entry_and_change(app, client, as_admin):
     models.set_sammel_zeile(k, 'schulweg', carl, 'B7;20')   # absent last lesson
     assert sorted(models.get_sammel_texte(k, 'schulweg')) == ['A1;5', 'Z9;10']
     html = as_admin.get(f'/admin/klasse/{k}').get_data(as_text=True)
-    assert '2 warten auf Freigabe' in html and 'bisher: <code>Z9;10</code>' in html
+    assert '2 warten auf Freigabe' in html and 'in den Daten: <code>Z9;10</code>' in html
 
     assert models.approve_sammel_zeilen(k, 'schulweg') == 2
     assert sorted(models.get_sammel_texte(k, 'schulweg')) == ['A1;5', 'B7;20', 'Z9;12']

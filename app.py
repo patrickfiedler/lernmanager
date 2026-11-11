@@ -2040,17 +2040,20 @@ def admin_klasse_ueben_freischalten(klasse_id):
 @staff_required
 def admin_sammlung_freigeben(klasse_id):
     permissions.require_klasse(klasse_id)
-    n = models.approve_sammel_zeilen(klasse_id, request.form.get('sammel_id', ''))
+    n = models.approve_sammel_zeilen(klasse_id, request.form.get('sammel_id', ''), session.get('admin_id'))
     flash(f'{n} Zeile{"" if n == 1 else "n"} freigegeben.', 'success')
     return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id) + '#gesammelte-zeilen')
 
 
-@app.route('/admin/klasse/<int:klasse_id>/sammel-zeile/<int:zeile_id>/loeschen', methods=['POST'])
+@app.route('/admin/klasse/<int:klasse_id>/sammel-zeile/<int:zeile_id>/ablehnen', methods=['POST'])
 @staff_required
-def admin_sammel_zeile_loeschen(klasse_id, zeile_id):
+def admin_sammel_zeile_ablehnen(klasse_id, zeile_id):
+    """Reject (or take the rejection back). Never deletes: the line stays for audit."""
     permissions.require_klasse(klasse_id)
-    models.delete_sammel_zeile(zeile_id, klasse_id)
-    flash('Zeile gelöscht.', 'success')
+    abgelehnt = request.form.get('abgelehnt', '1') == '1'
+    if models.set_sammel_zeile_abgelehnt(zeile_id, klasse_id, abgelehnt, session.get('admin_id')):
+        flash('Zeile abgelehnt. Die Klasse sieht sie nicht.' if abgelehnt
+              else 'Ablehnung zurückgenommen, Zeile wartet auf Freigabe.', 'success')
     return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id) + '#gesammelte-zeilen')
 
 

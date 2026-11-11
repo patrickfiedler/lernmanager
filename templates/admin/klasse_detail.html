@@ -363,7 +363,7 @@
 <details class="card mt-2" id="gesammelte-zeilen" {% if wartend_gesamt %}open{% endif %}>
     <summary class="card-header" style="cursor: pointer;">📝 Gesammelte Zeilen{% if wartend_gesamt %} – {{ wartend_gesamt }} warten auf Freigabe{% endif %}</summary>
     <div style="padding: 1rem;">
-        <p class="text-muted">Die Klasse sieht nur freigegebene Zeilen. Prüfen: einigermaßen vollständig, kein Unsinn. Tippfehler bleiben drin, die räumen die Schüler in Excel auf.</p>
+        <p class="text-muted">Die Klasse sieht nur freigegebene Zeilen. Prüfen: einigermaßen vollständig, kein Unsinn. Tippfehler bleiben drin, die räumen die Schüler in Excel auf. Unsinn ablehnen: die Zeile bleibt mit Verlauf hier gespeichert, die Klasse sieht sie nie.</p>
         {% for sammel_id, s in sammel_zeilen.items() %}
         <h4>{{ sammel_id }} <span class="text-muted">({{ s.zeilen|length }} Zeilen, {{ s.wartend }} wartend)</span></h4>
         {% if s.fehlen %}<p><strong>Fehlt noch ({{ s.fehlen|length }}):</strong> {{ s.fehlen|join(', ') }}</p>{% endif %}
@@ -381,14 +381,25 @@
             <tr{% if z.wartet %} style="background: #fef9c3;"{% endif %}>
                 <td>{{ z.nachname }}, {{ z.vorname }}</td>
                 <td><code style="white-space: pre-wrap;">{{ z.text }}</code>
-                    {% if z.wartet and z.text_frei is not none %}<br><span class="text-muted">bisher: <code>{{ z.text_frei }}</code></span>{% endif %}</td>
-                <td>{% if not z.wartet %}freigegeben{% elif z.text_frei is none %}neu{% else %}geändert{% endif %}</td>
+                    {% if (z.wartet or z.abgelehnt) and z.text_frei is not none and z.text_frei != z.text %}<br><span class="text-muted">in den Daten: <code>{{ z.text_frei }}</code></span>{% endif %}
+                    {% if z.verlauf|length > 1 %}
+                    <details><summary class="text-muted" style="cursor: pointer;">Verlauf ({{ z.verlauf|length }})</summary>
+                        <ul class="text-muted" style="margin: 0.25rem 0;">
+                        {% for e in z.verlauf %}<li>{{ e.zeit }} {{ e.aktion }}{% if e.text is not none %}: <code>{{ e.text }}</code>{% endif %}</li>{% endfor %}
+                        </ul>
+                    </details>
+                    {% endif %}</td>
+                <td>{% if z.abgelehnt %}❌ abgelehnt{% elif not z.wartet %}freigegeben{% elif z.text_frei is none %}neu{% else %}geändert{% endif %}</td>
                 <td class="text-muted">{{ z.geaendert }}</td>
                 <td>
-                    <form method="post" action="{{ url_for('admin_sammel_zeile_loeschen', klasse_id=klasse.id, zeile_id=z.id) }}"
-                          onsubmit='return confirm({{ ("Zeile von " ~ z.vorname ~ " löschen?")|tojson }});'>
+                    <form method="post" action="{{ url_for('admin_sammel_zeile_ablehnen', klasse_id=klasse.id, zeile_id=z.id) }}">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <button type="submit" class="btn btn-small btn-danger">Löschen</button>
+                        {% if z.abgelehnt %}
+                        <input type="hidden" name="abgelehnt" value="0">
+                        <button type="submit" class="btn btn-small btn-secondary">Ablehnung zurücknehmen</button>
+                        {% else %}
+                        <button type="submit" class="btn btn-small btn-danger">Ablehnen</button>
+                        {% endif %}
                     </form>
                 </td>
             </tr>
