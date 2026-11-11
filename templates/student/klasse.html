@@ -227,6 +227,41 @@
             </div>
 
 
+            <!-- Zeilen sammeln: directly under the steps that ask for it -->
+            {% if sammeln %}
+            <div class="card sammeln-box" style="margin: 1rem 0; padding: 1rem;">
+                {% if sammeln.eintragen %}
+                <form method="post" action="{{ url_for('student_sammel_zeile', slug=task|topic_slug, position=sammeln.position) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <label for="sammel-zeile"><strong>✏️ Deine Zeile</strong></label>
+                    <p class="text-muted" style="margin: 0.25rem 0;">Nur du siehst und änderst deine Zeile.</p>
+                    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                        <input type="text" id="sammel-zeile" name="zeile" maxlength="{{ sammeln.max_len }}"
+                               value="{{ sammeln.eigene_zeile or '' }}"
+                               placeholder="{{ sammeln.eintragen.hinweis or '' }}"
+                               autocomplete="off" style="flex: 1; min-width: 12rem;">
+                        <button type="submit" class="btn btn-primary">Speichern</button>
+                    </div>
+                    {% if sammeln.eigene_zeile %}<p style="margin: 0.5rem 0 0;">✅ Gespeichert</p>{% endif %}
+                </form>
+                {% endif %}
+                {% if sammeln.download %}
+                <div style="margin-top: {{ '1rem' if sammeln.eintragen else '0' }};">
+                    <p class="text-muted" style="margin: 0 0 0.5rem;">{{ sammeln.anzahl }} Zeile{{ '' if sammeln.anzahl == 1 else 'n' }} aus deiner Klasse</p>
+                    {% if sammeln.anzeige in ('textfeld', 'beides') %}
+                    <label for="sammel-daten"><strong>📋 Daten zum Kopieren</strong></label>
+                    <textarea id="sammel-daten" readonly wrap="off" spellcheck="false"
+                              rows="{{ [[sammeln.anzahl + 2, 6]|max, 20]|min }}"
+                              style="display: block; width: 100%; font-family: monospace; margin: 0.25rem 0 0.5rem;">{{ sammeln.textfeld }}</textarea>
+                    {% endif %}
+                    {% if sammeln.anzeige in ('datei', 'beides') %}
+                    <a class="btn btn-primary" href="{{ url_for('student_sammel_download', slug=task|topic_slug, position=sammeln.position) }}">⬇️ {{ sammeln.download.dateiname or (sammeln.download.id ~ '.txt') }} herunterladen</a>
+                    {% endif %}
+                </div>
+                {% endif %}
+            </div>
+            {% endif %}
+
             <!-- Materials Section (collapsible, default open) -->
             {% if materials %}
             <details class="materials-toggle mt-2" open>
@@ -307,39 +342,6 @@
                     </ul>
                 </div>
             </details>
-            {% endif %}
-            {% if sammeln %}
-            <div class="card sammeln-box" style="margin: 1rem 0; padding: 1rem;">
-                {% if sammeln.eintragen %}
-                <form method="post" action="{{ url_for('student_sammel_zeile', slug=task|topic_slug, position=sammeln.position) }}">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <label for="sammel-zeile"><strong>✏️ Deine Zeile</strong></label>
-                    <p class="text-muted" style="margin: 0.25rem 0;">Nur du siehst und änderst deine Zeile.</p>
-                    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                        <input type="text" id="sammel-zeile" name="zeile" maxlength="{{ sammeln.max_len }}"
-                               value="{{ sammeln.eigene_zeile or '' }}"
-                               placeholder="{{ sammeln.eintragen.hinweis or '' }}"
-                               autocomplete="off" style="flex: 1; min-width: 12rem;">
-                        <button type="submit" class="btn btn-primary">Speichern</button>
-                    </div>
-                    {% if sammeln.eigene_zeile %}<p style="margin: 0.5rem 0 0;">✅ Gespeichert</p>{% endif %}
-                </form>
-                {% endif %}
-                {% if sammeln.download %}
-                <div style="margin-top: {{ '1rem' if sammeln.eintragen else '0' }};">
-                    <p class="text-muted" style="margin: 0 0 0.5rem;">{{ sammeln.anzahl }} Zeile{{ '' if sammeln.anzahl == 1 else 'n' }} aus deiner Klasse</p>
-                    {% if sammeln.anzeige in ('textfeld', 'beides') %}
-                    <label for="sammel-daten"><strong>📋 Daten zum Kopieren</strong></label>
-                    <textarea id="sammel-daten" readonly wrap="off" spellcheck="false"
-                              rows="{{ [[sammeln.anzahl + 2, 6]|max, 20]|min }}"
-                              style="display: block; width: 100%; font-family: monospace; margin: 0.25rem 0 0.5rem;">{{ sammeln.textfeld }}</textarea>
-                    {% endif %}
-                    {% if sammeln.anzeige in ('datei', 'beides') %}
-                    <a class="btn btn-primary" href="{{ url_for('student_sammel_download', slug=task|topic_slug, position=sammeln.position) }}">⬇️ {{ sammeln.download.dateiname or (sammeln.download.id ~ '.txt') }} herunterladen</a>
-                    {% endif %}
-                </div>
-                {% endif %}
-            </div>
             {% endif %}
             {% if active_subtask and active_subtask.tipps %}
             <details class="tipps-toggle" open>
