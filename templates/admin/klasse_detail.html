@@ -381,6 +381,7 @@
             <tr{% if z.wartet %} style="background: #fef9c3;"{% endif %}>
                 <td>{{ z.nachname }}, {{ z.vorname }}</td>
                 <td><code style="white-space: pre-wrap;">{{ z.text }}</code>
+                    {% if z.formel %}<span class="badge" style="background: #fef3c7; color: #92400e;" title="Beginnt eine Zelle mit = + - @, kann Excel sie als Formel ausführen (z. B. Link). Prüfen, ggf. ablehnen.">⚠️ Formel?</span>{% endif %}
                     {% if (z.wartet or z.abgelehnt) and z.text_frei is not none and z.text_frei != z.text %}<br><span class="text-muted">in den Daten: <code>{{ z.text_frei }}</code></span>{% endif %}
                     {% if z.verlauf|length > 1 %}
                     <details><summary class="text-muted" style="cursor: pointer;">Verlauf ({{ z.verlauf|length }})</summary>

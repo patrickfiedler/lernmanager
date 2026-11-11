@@ -9202,6 +9202,20 @@ def _log_sammel(conn, klasse_id, sammel_id, student_id, aktion, text=None, admin
         "VALUES (?, ?, ?, ?, ?, ?)", (klasse_id, sammel_id, student_id, aktion, text, admin_id))
 
 
+# A cell Excel may read as a formula once the line is split into columns:
+# starts with = or @, or + / - followed by something that is not a number.
+_FORMEL_ZELLE = re.compile(r'^\s*(?:[=@]|[+-]\s*[^\d\s.,])')
+
+
+def sammel_formel_verdacht(text):
+    """Light hint for the teacher: does any cell of this line look like a spreadsheet formula?
+
+    Cells split on ; , and tab, the way the class will split them. A plain
+    negative number (-5) is not suspicious. Hint only -- the line stays as typed.
+    """
+    return any(_FORMEL_ZELLE.match(cell) for cell in re.split(r'[;,\t]', text or ''))
+
+
 def get_sammel_zeile(klasse_id, sammel_id, student_id):
     """This student's own line as {'text', 'wartet', 'abgelehnt'}, or None."""
     with db_session() as conn:
@@ -9280,6 +9294,7 @@ def get_sammel_zeilen_for_klasse(klasse_id):
     for r in rows:
         zeile = dict(r)
         zeile['verlauf'] = verlauf.get((r['sammel_id'], r['student_id']), [])
+        zeile['formel'] = sammel_formel_verdacht(r['text'])
         grouped.setdefault(r['sammel_id'], []).append(zeile)
     result = {}
     for sammel_id, zeilen in grouped.items():

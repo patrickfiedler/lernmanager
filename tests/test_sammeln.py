@@ -259,3 +259,19 @@ def test_approval_is_scoped_to_the_class(db):
     models.set_sammel_zeile(k7b, 'schulweg', _student('ben', k7b, task_id), 'y')
     models.approve_sammel_zeilen(k7a, 'schulweg')
     assert models.get_sammel_texte(k7b, 'schulweg') == []
+
+
+@pytest.mark.parametrize('text,verdacht', [
+    ('=1+1', True), ('A1;=HYPERLINK("x";"y")', True), ('12; @SUM(1;1)', True),
+    ('5;+cmd', True), ("=cmd|' /C calc'!A0", True),
+    ('-5;3,5;Bus', False), ('+5', False), ('A1;12;1 km;Fuß', False), ('', False),
+])
+def test_formula_hint(text, verdacht):
+    assert models.sammel_formel_verdacht(text) is verdacht
+
+
+def test_formula_hint_shown_on_class_page(app, as_admin):
+    k = models.create_klasse('7a')
+    task_id = import_task.import_task(_data())
+    models.set_sammel_zeile(k, 'schulweg', _student('anna', k, task_id), 'A1;=1+1')
+    assert '⚠️ Formel?' in as_admin.get(f'/admin/klasse/{k}').get_data(as_text=True)
