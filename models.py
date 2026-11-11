@@ -736,6 +736,7 @@ def init_db():
                 student_id INTEGER NOT NULL,
                 text TEXT NOT NULL,
                 geaendert TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+                text_frei TEXT,  -- migrate_079: text approved by the teacher, NULL = never approved
                 UNIQUE (klasse_id, sammel_id, student_id),
                 FOREIGN KEY (klasse_id) REFERENCES klasse(id) ON DELETE CASCADE,
                 FOREIGN KEY (student_id) REFERENCES student(id) ON DELETE CASCADE
@@ -9177,12 +9178,14 @@ def clean_sammel_text(raw):
 
 
 def get_sammel_zeile(klasse_id, sammel_id, student_id):
-    """This student's own line, or None."""
+    """This student's own line as {'text', 'wartet'}, or None. `wartet`: not approved in this form yet."""
     with db_session() as conn:
         row = conn.execute(
-            "SELECT text FROM sammel_zeile WHERE klasse_id = ? AND sammel_id = ? AND student_id = ?",
+            "SELECT text, text_frei FROM sammel_zeile WHERE klasse_id = ? AND sammel_id = ? AND student_id = ?",
             (klasse_id, sammel_id, student_id)).fetchone()
-        return row['text'] if row else None
+    if not row:
+        return None
+    return {'text': row['text'], 'wartet': row['text'] != row['text_frei']}
 
 
 def set_sammel_zeile(klasse_id, sammel_id, student_id, raw):
@@ -9203,7 +9206,7 @@ def set_sammel_zeile(klasse_id, sammel_id, student_id, raw):
 
 
 def get_sammel_texte(klasse_id, sammel_id, shuffle_for=None):
-    """All lines of one class, no names.
+    """All approved lines of one class, no names. A changed line counts in its approved form.
 
     `shuffle_for=<student_id>`: in that student's own random order (MBI request,
     decided 2026-11-11), so nobody can read entry order off the file. Seeded by
@@ -9211,27 +9214,55 @@ def get_sammel_texte(klasse_id, sammel_id, shuffle_for=None):
     """
     with db_session() as conn:
         rows = conn.execute(
-            "SELECT text FROM sammel_zeile WHERE klasse_id = ? AND sammel_id = ? ORDER BY text, id",
+            "SELECT text_frei FROM sammel_zeile WHERE klasse_id = ? AND sammel_id = ? "
+            "AND text_frei IS NOT NULL ORDER BY text_frei, id",
             (klasse_id, sammel_id)).fetchall()
-    texts = [r['text'] for r in rows]
+    texts = [r['text_frei'] for r in rows]
     if shuffle_for is not None:
         random.Random(f"{shuffle_for}:{sammel_id}").shuffle(texts)
     return texts
 
 
 def get_sammel_zeilen_for_klasse(klasse_id):
-    """Teacher view: every line of this class with the student's name, grouped by collection id."""
+    """Teacher view, per collection id: {'zeilen': [...], 'wartend': n, 'fehlen': [names]}.
+
+    Lines waiting for approval come first. `fehlen` = students of the class
+    without a line -- a hint for "complete enough?", never a lock.
+    """
     with db_session() as conn:
         rows = conn.execute("""
-            SELECT z.id, z.sammel_id, z.text, z.geaendert, s.vorname, s.nachname
+            SELECT z.id, z.sammel_id, z.student_id, z.text, z.text_frei, z.geaendert,
+                   s.vorname, s.nachname, (z.text_frei IS NULL OR z.text_frei != z.text) AS wartet
             FROM sammel_zeile z JOIN student s ON s.id = z.student_id
             WHERE z.klasse_id = ?
-            ORDER BY z.sammel_id, s.nachname, s.vorname
+            ORDER BY z.sammel_id, wartet DESC, s.nachname, s.vorname
+        """, (klasse_id,)).fetchall()
+        roster = conn.execute("""
+            SELECT s.id, s.vorname, s.nachname FROM student s
+            JOIN student_klasse sk ON sk.student_id = s.id
+            WHERE sk.klasse_id = ? ORDER BY s.nachname, s.vorname
         """, (klasse_id,)).fetchall()
     grouped = {}
     for r in rows:
         grouped.setdefault(r['sammel_id'], []).append(dict(r))
-    return grouped
+    result = {}
+    for sammel_id, zeilen in grouped.items():
+        have = {z['student_id'] for z in zeilen}
+        result[sammel_id] = {
+            'zeilen': zeilen,
+            'wartend': sum(1 for z in zeilen if z['wartet']),
+            'fehlen': [f"{s['vorname']} {s['nachname']}" for s in roster if s['id'] not in have],
+        }
+    return result
+
+
+def approve_sammel_zeilen(klasse_id, sammel_id):
+    """Teacher approves every waiting line of one collection. Returns how many."""
+    with db_session() as conn:
+        return conn.execute(
+            "UPDATE sammel_zeile SET text_frei = text WHERE klasse_id = ? AND sammel_id = ? "
+            "AND (text_frei IS NULL OR text_frei != text)",
+            (klasse_id, sammel_id)).rowcount
 
 
 def delete_sammel_zeile(zeile_id, klasse_id):

@@ -357,20 +357,32 @@
     </form>
 </div>
 
-<!-- Zeilen sammeln (migrate_078): every line with its author, delete nonsense -->
+<!-- Zeilen sammeln (migrate_078/079): lines with their authors; the teacher approves before the class sees them -->
 {% if sammel_zeilen %}
-<details class="card mt-2" id="gesammelte-zeilen">
-    <summary class="card-header" style="cursor: pointer;">📝 Gesammelte Zeilen ({{ sammel_zeilen.values()|map('length')|sum }})</summary>
+{% set wartend_gesamt = sammel_zeilen.values()|map(attribute='wartend')|sum %}
+<details class="card mt-2" id="gesammelte-zeilen" {% if wartend_gesamt %}open{% endif %}>
+    <summary class="card-header" style="cursor: pointer;">📝 Gesammelte Zeilen{% if wartend_gesamt %} – {{ wartend_gesamt }} warten auf Freigabe{% endif %}</summary>
     <div style="padding: 1rem;">
-        {% for sammel_id, zeilen in sammel_zeilen.items() %}
-        <h4>{{ sammel_id }} <span class="text-muted">({{ zeilen|length }})</span></h4>
+        <p class="text-muted">Die Klasse sieht nur freigegebene Zeilen. Prüfen: einigermaßen vollständig, kein Unsinn. Tippfehler bleiben drin, die räumen die Schüler in Excel auf.</p>
+        {% for sammel_id, s in sammel_zeilen.items() %}
+        <h4>{{ sammel_id }} <span class="text-muted">({{ s.zeilen|length }} Zeilen, {{ s.wartend }} wartend)</span></h4>
+        {% if s.fehlen %}<p><strong>Fehlt noch ({{ s.fehlen|length }}):</strong> {{ s.fehlen|join(', ') }}</p>{% endif %}
+        {% if s.wartend %}
+        <form method="post" action="{{ url_for('admin_sammlung_freigeben', klasse_id=klasse.id) }}" style="margin-bottom: 0.5rem;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="sammel_id" value="{{ sammel_id }}">
+            <button type="submit" class="btn btn-primary">✅ Alle {{ s.wartend }} wartenden freigeben</button>
+        </form>
+        {% endif %}
         <table class="table">
-            <thead><tr><th>Name</th><th>Zeile</th><th>Geändert</th><th></th></tr></thead>
+            <thead><tr><th>Name</th><th>Zeile</th><th>Status</th><th>Geändert</th><th></th></tr></thead>
             <tbody>
-            {% for z in zeilen %}
-            <tr>
+            {% for z in s.zeilen %}
+            <tr{% if z.wartet %} style="background: #fef9c3;"{% endif %}>
                 <td>{{ z.nachname }}, {{ z.vorname }}</td>
-                <td><code style="white-space: pre-wrap;">{{ z.text }}</code></td>
+                <td><code style="white-space: pre-wrap;">{{ z.text }}</code>
+                    {% if z.wartet and z.text_frei is not none %}<br><span class="text-muted">bisher: <code>{{ z.text_frei }}</code></span>{% endif %}</td>
+                <td>{% if not z.wartet %}freigegeben{% elif z.text_frei is none %}neu{% else %}geändert{% endif %}</td>
                 <td class="text-muted">{{ z.geaendert }}</td>
                 <td>
                     <form method="post" action="{{ url_for('admin_sammel_zeile_loeschen', klasse_id=klasse.id, zeile_id=z.id) }}"

@@ -237,16 +237,21 @@
                     <p class="text-muted" style="margin: 0.25rem 0;">Nur du siehst und änderst deine Zeile.</p>
                     <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
                         <input type="text" id="sammel-zeile" name="zeile" maxlength="{{ sammeln.max_len }}"
-                               value="{{ sammeln.eigene_zeile or '' }}"
+                               value="{{ sammeln.eigene_zeile.text if sammeln.eigene_zeile else '' }}"
                                placeholder="{{ sammeln.eintragen.hinweis or '' }}"
                                autocomplete="off" style="flex: 1; min-width: 12rem;">
                         <button type="submit" class="btn btn-primary">Speichern</button>
                     </div>
-                    {% if sammeln.eigene_zeile %}<p style="margin: 0.5rem 0 0;">✅ Gespeichert</p>{% endif %}
+                    {% if sammeln.eigene_zeile %}
+                    <p style="margin: 0.5rem 0 0;">✅ Gespeichert{% if sammeln.eigene_zeile.wartet %} – die Lehrkraft gibt deine Zeile bald frei.{% else %} und freigegeben.{% endif %}</p>
+                    {% endif %}
                 </form>
                 {% endif %}
                 {% if sammeln.download %}
                 <div style="margin-top: {{ '1rem' if sammeln.eintragen else '0' }};">
+                    {% if not sammeln.anzahl %}
+                    <p style="margin: 0;">⏳ Die Lehrkraft gibt die Daten deiner Klasse bald frei.</p>
+                    {% else %}
                     <p class="text-muted" style="margin: 0 0 0.5rem;">{{ sammeln.anzahl }} Zeile{{ '' if sammeln.anzahl == 1 else 'n' }} aus deiner Klasse</p>
                     {% if sammeln.anzeige in ('textfeld', 'beides') %}
                     <label for="sammel-daten"><strong>📋 Daten zum Kopieren</strong></label>
@@ -256,6 +261,7 @@
                     {% endif %}
                     {% if sammeln.anzeige in ('datei', 'beides') %}
                     <a class="btn btn-primary" href="{{ url_for('student_sammel_download', slug=task|topic_slug, position=sammeln.position) }}">⬇️ {{ sammeln.download.dateiname or (sammeln.download.id ~ '.txt') }} herunterladen</a>
+                    {% endif %}
                     {% endif %}
                 </div>
                 {% endif %}

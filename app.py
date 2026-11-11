@@ -2036,6 +2036,15 @@ def admin_klasse_ueben_freischalten(klasse_id):
     return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id))
 
 
+@app.route('/admin/klasse/<int:klasse_id>/sammlung/freigeben', methods=['POST'])
+@staff_required
+def admin_sammlung_freigeben(klasse_id):
+    permissions.require_klasse(klasse_id)
+    n = models.approve_sammel_zeilen(klasse_id, request.form.get('sammel_id', ''))
+    flash(f'{n} Zeile{"" if n == 1 else "n"} freigegeben.', 'success')
+    return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id) + '#gesammelte-zeilen')
+
+
 @app.route('/admin/klasse/<int:klasse_id>/sammel-zeile/<int:zeile_id>/loeschen', methods=['POST'])
 @staff_required
 def admin_sammel_zeile_loeschen(klasse_id, zeile_id):
@@ -6684,7 +6693,8 @@ def student_sammel_zeile(slug, position):
         abort(404)
     stored = models.set_sammel_zeile(student_task['klasse_id'], cfg['id'], student_id,
                                      request.form.get('zeile', ''))
-    flash('Deine Zeile ist gespeichert.' if stored else 'Deine Zeile ist gelöscht.', 'success')
+    flash('Deine Zeile ist gespeichert. Die Lehrkraft gibt sie bald frei.' if stored
+          else 'Deine Zeile ist gelöscht.', 'success')
     return redirect(url_for('student_klasse', slug=slug, aufgabe=position))
 
 

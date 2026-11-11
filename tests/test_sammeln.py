@@ -93,6 +93,8 @@ def test_enter_change_download_own_class_only(app, client):
 
     html = client.get('/schueler/thema/tabellen?aufgabe=1').get_data(as_text=True)
     assert 'Z9;12;2;Bus' in html and 'A1;5,5' not in html  # own line only
+    models.approve_sammel_zeilen(k7a, 'schulweg')
+    models.approve_sammel_zeilen(k7b, 'schulweg')
 
     resp = client.get('/schueler/thema/tabellen/aufgabe/2/sammlung.txt')
     assert resp.status_code == 200
@@ -114,6 +116,7 @@ def test_text_box_shows_same_lines_as_file(app, client):
     task_id = import_task.import_task(_data())
     sid = _student('anna', k, task_id)
     models.set_sammel_zeile(k, 'schulweg', sid, 'A1;<b>5</b>')
+    models.approve_sammel_zeilen(k, 'schulweg')
     _login(client, sid)
     html = client.get('/schueler/thema/tabellen?aufgabe=2').get_data(as_text=True)
     assert f'{KOPF}\nA1;&lt;b&gt;5&lt;/b&gt;</textarea>' in html  # escaped, header first
@@ -125,7 +128,10 @@ def test_anzeige_switch(app, client):
     data['task']['subtasks'][1]['sammeln_download']['anzeige'] = 'textfeld'
     k = models.create_klasse('7a')
     task_id = import_task.import_task(data)
-    _login(client, _student('anna', k, task_id))
+    anna = _student('anna', k, task_id)
+    models.set_sammel_zeile(k, 'schulweg', anna, 'Z9;1')
+    models.approve_sammel_zeilen(k, 'schulweg')
+    _login(client, anna)
     html = client.get('/schueler/thema/tabellen?aufgabe=2').get_data(as_text=True)
     assert 'sammel-daten' in html and 'sammlung.txt' not in html
     assert client.get('/schueler/thema/tabellen/aufgabe/2/sammlung.txt').status_code == 404
@@ -149,6 +155,7 @@ def test_shuffle_differs_between_students_and_keeps_all_lines(db):
     for i in range(20):
         sid = models.create_student('N', f's{i}', f's{i}', 'pw')
         models.set_sammel_zeile(k, 'schulweg', sid, f'Zeile {i:02d}')
+    models.approve_sammel_zeilen(k, 'schulweg')
     plain = models.get_sammel_texte(k, 'schulweg')
     a = models.get_sammel_texte(k, 'schulweg', shuffle_for=1)
     b = models.get_sammel_texte(k, 'schulweg', shuffle_for=2)
@@ -161,6 +168,7 @@ def test_rows_survive_reimport(db):
     task_id = import_task.import_task(_data())
     sid = _student('anna', k, task_id)
     models.set_sammel_zeile(k, 'schulweg', sid, 'Z9;1')
+    models.approve_sammel_zeilen(k, 'schulweg')
     import_task.import_task(_data())
     assert models.get_sammel_texte(k, 'schulweg') == ['Z9;1']
 
@@ -170,7 +178,8 @@ def test_teacher_sees_names_and_deletes_only_in_own_class(app, as_admin):
     task_id = import_task.import_task(_data())
     anna = _student('anna', k7a, task_id)
     models.set_sammel_zeile(k7a, 'schulweg', anna, 'Unsinn')
-    zeile_id = models.get_sammel_zeilen_for_klasse(k7a)['schulweg'][0]['id']
+    models.approve_sammel_zeilen(k7a, 'schulweg')
+    zeile_id = models.get_sammel_zeilen_for_klasse(k7a)['schulweg']['zeilen'][0]['id']
 
     html = as_admin.get(f'/admin/klasse/{k7a}').get_data(as_text=True)
     assert 'Unsinn' in html and 'anna' in html
@@ -188,3 +197,47 @@ def test_deleting_student_deletes_their_line(db):
     models.set_sammel_zeile(k, 'schulweg', sid, 'Z9;1')
     models.delete_student(sid)
     assert models.get_sammel_texte(k, 'schulweg') == []
+
+
+def test_lines_wait_for_approval_late_entry_and_change(app, client, as_admin):
+    """Nothing reaches the class before the teacher approves; a late entry or a
+    change waits too, and until then the class keeps the approved version."""
+    k = models.create_klasse('7a')
+    task_id = import_task.import_task(_data())
+    anna, ben, carl = (_student(n, k, task_id) for n in ('anna', 'ben', 'carl'))
+    models.set_sammel_zeile(k, 'schulweg', anna, 'Z9;10')
+    models.set_sammel_zeile(k, 'schulweg', ben, 'A1;5')
+
+    _login(client, anna)
+    html = client.get('/schueler/thema/tabellen?aufgabe=2').get_data(as_text=True)
+    assert 'gibt die Daten deiner Klasse bald frei' in html and 'sammel-daten' not in html
+    html = client.get('/schueler/thema/tabellen?aufgabe=1').get_data(as_text=True)
+    assert 'gibt deine Zeile bald frei' in html
+
+    info = models.get_sammel_zeilen_for_klasse(k)['schulweg']
+    assert info['wartend'] == 2 and info['fehlen'] == ['carl N']
+    admin_id = models.verify_admin('testadmin', 'testpass')['id']
+    with client.session_transaction() as sess:  # client and as_admin are one client
+        sess.clear()
+        sess['admin_id'] = admin_id
+    as_admin.post(f'/admin/klasse/{k}/sammlung/freigeben', data={'sammel_id': 'schulweg'})
+    assert sorted(models.get_sammel_texte(k, 'schulweg')) == ['A1;5', 'Z9;10']
+
+    models.set_sammel_zeile(k, 'schulweg', anna, 'Z9;12')   # change
+    models.set_sammel_zeile(k, 'schulweg', carl, 'B7;20')   # absent last lesson
+    assert sorted(models.get_sammel_texte(k, 'schulweg')) == ['A1;5', 'Z9;10']
+    html = as_admin.get(f'/admin/klasse/{k}').get_data(as_text=True)
+    assert '2 warten auf Freigabe' in html and 'bisher: <code>Z9;10</code>' in html
+
+    assert models.approve_sammel_zeilen(k, 'schulweg') == 2
+    assert sorted(models.get_sammel_texte(k, 'schulweg')) == ['A1;5', 'B7;20', 'Z9;12']
+    assert models.get_sammel_zeilen_for_klasse(k)['schulweg']['fehlen'] == []
+
+
+def test_approval_is_scoped_to_the_class(db):
+    k7a, k7b = models.create_klasse('7a'), models.create_klasse('7b')
+    task_id = import_task.import_task(_data())
+    models.set_sammel_zeile(k7a, 'schulweg', _student('anna', k7a, task_id), 'x')
+    models.set_sammel_zeile(k7b, 'schulweg', _student('ben', k7b, task_id), 'y')
+    models.approve_sammel_zeilen(k7a, 'schulweg')
+    assert models.get_sammel_texte(k7b, 'schulweg') == []
