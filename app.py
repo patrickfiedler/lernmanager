@@ -6662,8 +6662,16 @@ def _sammeln_context(student_id, klasse_id, subtask):
         ctx['eigene_zeile'] = models.get_sammel_zeile(klasse_id, cfg['id'], student_id)
     if dl:
         ctx['download'] = dl
-        ctx['anzahl'] = len(models.get_sammel_texte(klasse_id, dl['id']))
+        ctx['anzeige'] = dl.get('anzeige', 'beides')
+        texte = models.get_sammel_texte(klasse_id, dl['id'], shuffle_for=student_id)
+        ctx['anzahl'] = len(texte)
+        ctx['textfeld'] = '\n'.join(_sammel_ausgabe(dl, texte))
     return ctx
+
+
+def _sammel_ausgabe(cfg, texte):
+    """Lines as handed out (file and text box alike): optional header, then the class's lines."""
+    return ([cfg['kopfzeile']] if cfg.get('kopfzeile') else []) + texte
 
 
 @app.route('/schueler/thema/<slug>/aufgabe/<int:position>/zeile', methods=['POST'])
@@ -6686,11 +6694,10 @@ def student_sammel_download(slug, position):
     student_id = session['student_id']
     student_task, subtask = _resolve_student_subtask(student_id, slug, position)
     cfg = _sammeln_config(subtask, 'sammeln_download')
-    if not cfg:
+    if not cfg or cfg.get('anzeige') == 'textfeld':
         abort(404)
-    lines = models.get_sammel_texte(student_task['klasse_id'], cfg['id'], shuffle_for=student_id)
-    if cfg.get('kopfzeile'):
-        lines = [cfg['kopfzeile']] + lines
+    lines = _sammel_ausgabe(cfg, models.get_sammel_texte(
+        student_task['klasse_id'], cfg['id'], shuffle_for=student_id))
     # BOM + CRLF: Excel "Aus Text/CSV" and Notepad on the school PCs read Umlaute right.
     body = ('\r\n'.join(lines) + '\r\n').encode('utf-8-sig')
     return send_file(io.BytesIO(body), mimetype='text/plain; charset=utf-8', as_attachment=True,

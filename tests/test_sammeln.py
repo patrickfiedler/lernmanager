@@ -109,6 +109,31 @@ def test_enter_change_download_own_class_only(app, client):
     assert client.post('/schueler/thema/tabellen/aufgabe/2/zeile', data={'zeile': 'x'}).status_code == 404
 
 
+def test_text_box_shows_same_lines_as_file(app, client):
+    k = models.create_klasse('7a')
+    task_id = import_task.import_task(_data())
+    sid = _student('anna', k, task_id)
+    models.set_sammel_zeile(k, 'schulweg', sid, 'A1;<b>5</b>')
+    _login(client, sid)
+    html = client.get('/schueler/thema/tabellen?aufgabe=2').get_data(as_text=True)
+    assert f'{KOPF}\nA1;&lt;b&gt;5&lt;/b&gt;</textarea>' in html  # escaped, header first
+    assert 'herunterladen' in html
+
+
+def test_anzeige_switch(app, client):
+    data = _data()
+    data['task']['subtasks'][1]['sammeln_download']['anzeige'] = 'textfeld'
+    k = models.create_klasse('7a')
+    task_id = import_task.import_task(data)
+    _login(client, _student('anna', k, task_id))
+    html = client.get('/schueler/thema/tabellen?aufgabe=2').get_data(as_text=True)
+    assert 'sammel-daten' in html and 'sammlung.txt' not in html
+    assert client.get('/schueler/thema/tabellen/aufgabe/2/sammlung.txt').status_code == 404
+
+    data['task']['subtasks'][1]['sammeln_download']['anzeige'] = 'kopieren'
+    assert 'anzeige muss eins von' in _errors(data)
+
+
 def test_empty_line_deletes_own_entry(app, client):
     k = models.create_klasse('7a')
     task_id = import_task.import_task(_data())

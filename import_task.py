@@ -571,8 +571,9 @@ def _resolve_klassen(names):
 
 _SAMMELN_FIELDS = {
     'sammeln': {'id', 'hinweis'},
-    'sammeln_download': {'id', 'dateiname', 'kopfzeile'},
+    'sammeln_download': {'id', 'dateiname', 'kopfzeile', 'anzeige'},
 }
+_SAMMELN_ANZEIGE = ('datei', 'textfeld', 'beides')
 
 
 def _validate_sammeln(task, errors):
@@ -600,6 +601,8 @@ def _validate_sammeln(task, errors):
             for field in allowed - {'id'}:
                 if field in cfg and not isinstance(cfg[field], str):
                     errors.append(f"{where}.{field} muss Text sein")
+            if 'anzeige' in cfg and cfg['anzeige'] not in _SAMMELN_ANZEIGE:
+                errors.append(f"{where}.anzeige muss eins von {list(_SAMMELN_ANZEIGE)} sein")
             name = cfg.get('dateiname')
             if isinstance(name, str) and (not name.endswith('.txt') or '/' in name or '\\' in name):
                 errors.append(f"{where}.dateiname muss auf .txt enden und darf keinen Pfad enthalten")

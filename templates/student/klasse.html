@@ -326,10 +326,18 @@
                 </form>
                 {% endif %}
                 {% if sammeln.download %}
-                <p style="margin: {{ '1rem' if sammeln.eintragen else '0' }} 0 0;">
+                <div style="margin-top: {{ '1rem' if sammeln.eintragen else '0' }};">
+                    <p class="text-muted" style="margin: 0 0 0.5rem;">{{ sammeln.anzahl }} Zeile{{ '' if sammeln.anzahl == 1 else 'n' }} aus deiner Klasse</p>
+                    {% if sammeln.anzeige in ('textfeld', 'beides') %}
+                    <label for="sammel-daten"><strong>📋 Daten zum Kopieren</strong></label>
+                    <textarea id="sammel-daten" readonly wrap="off" spellcheck="false"
+                              rows="{{ [[sammeln.anzahl + 2, 6]|max, 20]|min }}"
+                              style="display: block; width: 100%; font-family: monospace; margin: 0.25rem 0 0.5rem;">{{ sammeln.textfeld }}</textarea>
+                    {% endif %}
+                    {% if sammeln.anzeige in ('datei', 'beides') %}
                     <a class="btn btn-primary" href="{{ url_for('student_sammel_download', slug=task|topic_slug, position=sammeln.position) }}">⬇️ {{ sammeln.download.dateiname or (sammeln.download.id ~ '.txt') }} herunterladen</a>
-                    <span class="text-muted">{{ sammeln.anzahl }} Zeile{{ '' if sammeln.anzahl == 1 else 'n' }} aus deiner Klasse</span>
-                </p>
+                    {% endif %}
+                </div>
                 {% endif %}
             </div>
             {% endif %}
