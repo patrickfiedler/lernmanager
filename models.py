@@ -3,6 +3,7 @@ import os
 import re
 import shutil
 import sys
+import random
 from hashlib import sha256
 import unicodedata
 import uuid
@@ -292,6 +293,7 @@ def init_db():
                 fork_branch_note TEXT,  -- optional steering note shown on the selection screen
                 fork_required INTEGER NOT NULL DEFAULT 1,  -- 0=enrichment fork (unpicked branches stay as Zusatz)
                 is_intro INTEGER NOT NULL DEFAULT 0,  -- 1=Einführung subtask, excluded from progress-count denominator
+                sammeln_json TEXT,  -- migrate_078: {"sammeln": {...}} and/or {"sammeln_download": {...}}
                 FOREIGN KEY (task_id) REFERENCES task(id) ON DELETE CASCADE
             );
 
@@ -725,6 +727,19 @@ def init_db():
 
             CREATE INDEX IF NOT EXISTS idx_artifact_feedback_student_subtask
             ON artifact_feedback(student_id, subtask_id);
+
+            -- migrate_078: one line per student per collection (Zeilen sammeln)
+            CREATE TABLE IF NOT EXISTS sammel_zeile (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                klasse_id INTEGER NOT NULL,
+                sammel_id TEXT NOT NULL,
+                student_id INTEGER NOT NULL,
+                text TEXT NOT NULL,
+                geaendert TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+                UNIQUE (klasse_id, sammel_id, student_id),
+                FOREIGN KEY (klasse_id) REFERENCES klasse(id) ON DELETE CASCADE,
+                FOREIGN KEY (student_id) REFERENCES student(id) ON DELETE CASCADE
+            );
 
             CREATE TABLE IF NOT EXISTS artifact_gate_attempt (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1774,6 +1789,7 @@ def _delete_student_rows(conn, student_id):
     conn.execute("DELETE FROM artifact_feedback WHERE student_id = ?", (student_id,))
     conn.execute("DELETE FROM student_artifact_file WHERE student_id = ?", (student_id,))
     conn.execute("DELETE FROM artifact_gate_attempt WHERE student_id = ?", (student_id,))
+    conn.execute("DELETE FROM sammel_zeile WHERE student_id = ?", (student_id,))
     conn.execute("DELETE FROM grading_result WHERE student_id = ?", (student_id,))
     conn.execute("DELETE FROM grading_audit WHERE student_id = ?", (student_id,))
     conn.execute("DELETE FROM student WHERE id = ?", (student_id,))
@@ -2480,6 +2496,8 @@ def export_task_to_dict(task_id):
                 st_data['graded_artifact'] = json.loads(subtask['graded_artifact_json'])
             if subtask.get('artifact_gate_json'):
                 st_data['artifact_gate'] = json.loads(subtask['artifact_gate_json'])
+            if subtask.get('sammeln_json'):
+                st_data.update(json.loads(subtask['sammeln_json']))
             subtasks_data.append(st_data)
 
         materials_data = []
@@ -2854,12 +2872,13 @@ def create_subtask(task_id, beschreibung, reihenfolge=0, estimated_minutes=None,
                    path=None, path_model='skip', graded_artifact_json=None, fertig_wenn=None, tipps=None,
                    artifact_gate_json=None, checkpoint_type=None, kern_standard_tag=None,
                    checkpoint_hints_json=None, fork_group=None, fork_branch=None,
-                   fork_branch_label=None, fork_branch_note=None, fork_required=1, is_intro=0):
+                   fork_branch_label=None, fork_branch_note=None, fork_required=1, is_intro=0,
+                   sammeln_json=None):
     """Create a subtask."""
     with db_session() as conn:
         cursor = conn.execute(
-            "INSERT INTO subtask (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json, artifact_gate_json, fertig_wenn, tipps, checkpoint_type, kern_standard_tag, checkpoint_hints_json, fork_group, fork_branch, fork_branch_label, fork_branch_note, fork_required, is_intro) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json, artifact_gate_json, fertig_wenn, tipps, checkpoint_type, kern_standard_tag, checkpoint_hints_json, fork_group, fork_branch, fork_branch_label, fork_branch_note, fork_required, is_intro)
+            "INSERT INTO subtask (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json, artifact_gate_json, fertig_wenn, tipps, checkpoint_type, kern_standard_tag, checkpoint_hints_json, fork_group, fork_branch, fork_branch_label, fork_branch_note, fork_required, is_intro, sammeln_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json, artifact_gate_json, fertig_wenn, tipps, checkpoint_type, kern_standard_tag, checkpoint_hints_json, fork_group, fork_branch, fork_branch_label, fork_branch_note, fork_required, is_intro, sammeln_json)
         )
         return cursor.lastrowid
 
@@ -3060,6 +3079,7 @@ def update_subtasks_from_import(task_id, subtasks_data):
             fork_branch_note = sub.get('fork_branch_note') or None
             fork_required = 1 if sub.get('fork_required', True) else 0
             is_intro = 1 if sub.get('is_intro') else 0
+            sammeln_json = sammeln_json_from_subtask(sub)
 
             if pos in old_by_pos:
                 # UPDATE existing subtask — keeps the ID, preserves student_subtask
@@ -3070,21 +3090,21 @@ def update_subtasks_from_import(task_id, subtasks_data):
                     fertig_wenn=?, tipps=?, checkpoint_type=?, kern_standard_tag=?,
                     checkpoint_hints_json=?,
                     fork_group=?, fork_branch=?, fork_branch_label=?, fork_branch_note=?, fork_required=?,
-                    is_intro=?
+                    is_intro=?, sammeln_json=?
                     WHERE id=?
                 """, (sub['beschreibung'], estimated_minutes, quiz_json,
                       path, path_model, ga_json, gate_json, fertig_wenn, tipps,
                       checkpoint_type, kern_standard_tag, checkpoint_hints,
                       fork_group, fork_branch, fork_branch_label, fork_branch_note, fork_required,
-                      is_intro, sub_id))
+                      is_intro, sammeln_json, sub_id))
                 subtask_id_by_position[pos] = sub_id
             else:
                 # INSERT new subtask at this position
                 cursor = conn.execute(
-                    "INSERT INTO subtask (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json, artifact_gate_json, fertig_wenn, tipps, checkpoint_type, kern_standard_tag, checkpoint_hints_json, fork_group, fork_branch, fork_branch_label, fork_branch_note, fork_required, is_intro) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO subtask (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json, artifact_gate_json, fertig_wenn, tipps, checkpoint_type, kern_standard_tag, checkpoint_hints_json, fork_group, fork_branch, fork_branch_label, fork_branch_note, fork_required, is_intro, sammeln_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (task_id, sub['beschreibung'], pos, estimated_minutes, quiz_json, path, path_model, ga_json, gate_json, fertig_wenn, tipps,
                      checkpoint_type, kern_standard_tag, checkpoint_hints,
-                     fork_group, fork_branch, fork_branch_label, fork_branch_note, fork_required, is_intro)
+                     fork_group, fork_branch, fork_branch_label, fork_branch_note, fork_required, is_intro, sammeln_json)
                 )
                 subtask_id_by_position[pos] = cursor.lastrowid
 
@@ -9116,3 +9136,105 @@ def has_done_warmup_today(student_id):
             (student_id,)
         ).fetchone()
         return row is not None
+
+
+# ============ Zeilen sammeln (migrate_078) ============
+#
+# MBI request 2026-11-11 (Kl.7 Unit 3): one Aufgabe collects one line of text per
+# student (`sammeln`), another lets the class download all lines as .txt
+# (`sammeln_download`). Lines stay exactly as typed -- cleaning them up in Excel
+# is the lesson -- except for what keeps the file one line per student.
+
+SAMMELN_KEYS = ('sammeln', 'sammeln_download')
+SAMMEL_ZEILE_MAX = 200
+# Everything str.splitlines() breaks on: \n \r \v \f, FS/GS/RS, NEL, LS, PS.
+_LINE_BREAKS = frozenset('\n\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029')
+
+
+def sammeln_json_from_subtask(sub):
+    """Pick the `sammeln*` keys of an import subtask dict into one JSON column value."""
+    picked = {k: sub[k] for k in SAMMELN_KEYS if sub.get(k)}
+    return json.dumps(picked, ensure_ascii=False) if picked else None
+
+
+def clean_sammel_text(raw):
+    """Make one storable line out of what the student typed.
+
+    Only what keeps the download one line per student and bounded in size;
+    no trimming or other "fixing" -- untidy data is the point of the lesson.
+    Line breaks of every kind and tabs become a space (closer to what was typed
+    than deleting them, Patrick 2026-11-11); other control characters go. A
+    line of nothing but spaces counts as empty.
+    """
+    out = []
+    for ch in raw or '':
+        if ch == '\t' or ch in _LINE_BREAKS:
+            out.append(' ')
+        elif unicodedata.category(ch) != 'Cc':
+            out.append(ch)
+    text = ''.join(out)[:SAMMEL_ZEILE_MAX]
+    return text if text.strip() else ''
+
+
+def get_sammel_zeile(klasse_id, sammel_id, student_id):
+    """This student's own line, or None."""
+    with db_session() as conn:
+        row = conn.execute(
+            "SELECT text FROM sammel_zeile WHERE klasse_id = ? AND sammel_id = ? AND student_id = ?",
+            (klasse_id, sammel_id, student_id)).fetchone()
+        return row['text'] if row else None
+
+
+def set_sammel_zeile(klasse_id, sammel_id, student_id, raw):
+    """Store the student's line (insert or replace). Empty after cleaning = delete. Returns the stored text or None."""
+    text = clean_sammel_text(raw)
+    with db_session() as conn:
+        if not text:
+            conn.execute(
+                "DELETE FROM sammel_zeile WHERE klasse_id = ? AND sammel_id = ? AND student_id = ?",
+                (klasse_id, sammel_id, student_id))
+            return None
+        conn.execute("""
+            INSERT INTO sammel_zeile (klasse_id, sammel_id, student_id, text) VALUES (?, ?, ?, ?)
+            ON CONFLICT (klasse_id, sammel_id, student_id)
+            DO UPDATE SET text = excluded.text, geaendert = datetime('now','localtime')
+        """, (klasse_id, sammel_id, student_id, text))
+        return text
+
+
+def get_sammel_texte(klasse_id, sammel_id, shuffle_for=None):
+    """All lines of one class, no names.
+
+    `shuffle_for=<student_id>`: in that student's own random order (MBI request,
+    decided 2026-11-11), so nobody can read entry order off the file. Seeded by
+    student + collection: the same data downloads the same way twice.
+    """
+    with db_session() as conn:
+        rows = conn.execute(
+            "SELECT text FROM sammel_zeile WHERE klasse_id = ? AND sammel_id = ? ORDER BY text, id",
+            (klasse_id, sammel_id)).fetchall()
+    texts = [r['text'] for r in rows]
+    if shuffle_for is not None:
+        random.Random(f"{shuffle_for}:{sammel_id}").shuffle(texts)
+    return texts
+
+
+def get_sammel_zeilen_for_klasse(klasse_id):
+    """Teacher view: every line of this class with the student's name, grouped by collection id."""
+    with db_session() as conn:
+        rows = conn.execute("""
+            SELECT z.id, z.sammel_id, z.text, z.geaendert, s.vorname, s.nachname
+            FROM sammel_zeile z JOIN student s ON s.id = z.student_id
+            WHERE z.klasse_id = ?
+            ORDER BY z.sammel_id, s.nachname, s.vorname
+        """, (klasse_id,)).fetchall()
+    grouped = {}
+    for r in rows:
+        grouped.setdefault(r['sammel_id'], []).append(dict(r))
+    return grouped
+
+
+def delete_sammel_zeile(zeile_id, klasse_id):
+    """Teacher removes one line. Scoped to the class so a foreign id does nothing."""
+    with db_session() as conn:
+        conn.execute("DELETE FROM sammel_zeile WHERE id = ? AND klasse_id = ?", (zeile_id, klasse_id))

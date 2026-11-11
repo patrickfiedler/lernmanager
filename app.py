@@ -17,7 +17,7 @@ import urllib.error
 from functools import wraps
 from datetime import date, datetime
 import click
-from flask import Flask, has_request_context, render_template, request, redirect, url_for, session, flash, jsonify, send_from_directory, abort, Response, make_response, g
+from flask import Flask, has_request_context, render_template, request, redirect, url_for, session, flash, jsonify, send_from_directory, send_file, abort, Response, make_response, g
 from flask_wtf.csrf import CSRFProtect
 from flask_compress import Compress
 from werkzeug.utils import secure_filename
@@ -936,6 +936,7 @@ def admin_klasse_detail(klasse_id):
                            unterricht=unterricht, schedule=schedule,
                            has_queue=bool(queue), sidequests=sidequests,
                            practice_unlocked_ids=practice_unlocked_ids,
+                           sammel_zeilen=models.get_sammel_zeilen_for_klasse(klasse_id),
                            checkpoint_task_ids=models.get_task_ids_with_checkpoint_questions(),
                            andere_klassen=andere_klassen)
 
@@ -2033,6 +2034,15 @@ def admin_klasse_ueben_freischalten(klasse_id):
         msg = 'Fragen freigeschaltet. ✅' if unlocked else 'Freischaltung aufgehoben.'
         flash(msg, 'success')
     return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id))
+
+
+@app.route('/admin/klasse/<int:klasse_id>/sammel-zeile/<int:zeile_id>/loeschen', methods=['POST'])
+@staff_required
+def admin_sammel_zeile_loeschen(klasse_id, zeile_id):
+    permissions.require_klasse(klasse_id)
+    models.delete_sammel_zeile(zeile_id, klasse_id)
+    flash('Zeile gelöscht.', 'success')
+    return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id) + '#gesammelte-zeilen')
 
 
 @app.route('/admin/klasse/<int:klasse_id>/lernpfad-setzen', methods=['POST'])
@@ -5806,7 +5816,13 @@ def student_klasse(slug):
 
     step_ticks = models.get_step_ticks(student_id, [s['id'] for s in subtasks])
 
+    active = current_subtask or next((s for s in subtasks if not s.get('erledigt')), None)
+    sammeln = _sammeln_context(student_id, klasse_id, active) if active in subtasks else None
+    if sammeln:
+        sammeln['position'] = subtasks.index(active) + 1
+
     return render_template('student/klasse.html',
+                           sammeln=sammeln,
                            step_ticks=step_ticks,
                            retry_checkpoint_ids=retry_checkpoint_ids,
                            connections=connections,
@@ -6624,6 +6640,61 @@ def student_quiz(slug):
         return redirect(url_for('student_dashboard'))
 
     return _handle_quiz(student_id, student, task, slug, task['quiz_json'])
+
+
+# ============ Zeilen sammeln (MBI request 2026-11-11) ============
+
+def _sammeln_config(subtask, key):
+    """The `sammeln` or `sammeln_download` config of a subtask, or None."""
+    raw = subtask.get('sammeln_json') if subtask else None
+    return json.loads(raw).get(key) if raw else None
+
+
+def _sammeln_context(student_id, klasse_id, subtask):
+    """What the topic page needs for the active Aufgabe's collect/download box."""
+    cfg = _sammeln_config(subtask, 'sammeln')
+    dl = _sammeln_config(subtask, 'sammeln_download')
+    if not cfg and not dl:
+        return None
+    ctx = {'max_len': models.SAMMEL_ZEILE_MAX}
+    if cfg:
+        ctx['eintragen'] = cfg
+        ctx['eigene_zeile'] = models.get_sammel_zeile(klasse_id, cfg['id'], student_id)
+    if dl:
+        ctx['download'] = dl
+        ctx['anzahl'] = len(models.get_sammel_texte(klasse_id, dl['id']))
+    return ctx
+
+
+@app.route('/schueler/thema/<slug>/aufgabe/<int:position>/zeile', methods=['POST'])
+@student_required
+def student_sammel_zeile(slug, position):
+    student_id = session['student_id']
+    student_task, subtask = _resolve_student_subtask(student_id, slug, position)
+    cfg = _sammeln_config(subtask, 'sammeln')
+    if not cfg:
+        abort(404)
+    stored = models.set_sammel_zeile(student_task['klasse_id'], cfg['id'], student_id,
+                                     request.form.get('zeile', ''))
+    flash('Deine Zeile ist gespeichert.' if stored else 'Deine Zeile ist gelöscht.', 'success')
+    return redirect(url_for('student_klasse', slug=slug, aufgabe=position))
+
+
+@app.route('/schueler/thema/<slug>/aufgabe/<int:position>/sammlung.txt')
+@student_required
+def student_sammel_download(slug, position):
+    student_id = session['student_id']
+    student_task, subtask = _resolve_student_subtask(student_id, slug, position)
+    cfg = _sammeln_config(subtask, 'sammeln_download')
+    if not cfg:
+        abort(404)
+    lines = models.get_sammel_texte(student_task['klasse_id'], cfg['id'], shuffle_for=student_id)
+    if cfg.get('kopfzeile'):
+        lines = [cfg['kopfzeile']] + lines
+    # BOM + CRLF: Excel "Aus Text/CSV" and Notepad on the school PCs read Umlaute right.
+    body = ('\r\n'.join(lines) + '\r\n').encode('utf-8-sig')
+    return send_file(io.BytesIO(body), mimetype='text/plain; charset=utf-8', as_attachment=True,
+                     download_name=cfg.get('dateiname') or f"{cfg['id']}.txt")
 
 
 @app.route('/schueler/thema/<slug>/aufgabe-<int:position>/quiz', methods=['GET', 'POST'])

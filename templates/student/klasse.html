@@ -308,6 +308,31 @@
                 </div>
             </details>
             {% endif %}
+            {% if sammeln %}
+            <div class="card sammeln-box" style="margin: 1rem 0; padding: 1rem;">
+                {% if sammeln.eintragen %}
+                <form method="post" action="{{ url_for('student_sammel_zeile', slug=task|topic_slug, position=sammeln.position) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <label for="sammel-zeile"><strong>✏️ Deine Zeile</strong></label>
+                    <p class="text-muted" style="margin: 0.25rem 0;">Nur du siehst und änderst deine Zeile.</p>
+                    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                        <input type="text" id="sammel-zeile" name="zeile" maxlength="{{ sammeln.max_len }}"
+                               value="{{ sammeln.eigene_zeile or '' }}"
+                               placeholder="{{ sammeln.eintragen.hinweis or '' }}"
+                               autocomplete="off" style="flex: 1; min-width: 12rem;">
+                        <button type="submit" class="btn btn-primary">Speichern</button>
+                    </div>
+                    {% if sammeln.eigene_zeile %}<p style="margin: 0.5rem 0 0;">✅ Gespeichert</p>{% endif %}
+                </form>
+                {% endif %}
+                {% if sammeln.download %}
+                <p style="margin: {{ '1rem' if sammeln.eintragen else '0' }} 0 0;">
+                    <a class="btn btn-primary" href="{{ url_for('student_sammel_download', slug=task|topic_slug, position=sammeln.position) }}">⬇️ {{ sammeln.download.dateiname or (sammeln.download.id ~ '.txt') }} herunterladen</a>
+                    <span class="text-muted">{{ sammeln.anzahl }} Zeile{{ '' if sammeln.anzahl == 1 else 'n' }} aus deiner Klasse</span>
+                </p>
+                {% endif %}
+            </div>
+            {% endif %}
             {% if active_subtask and active_subtask.tipps %}
             <details class="tipps-toggle" open>
                 <summary>💡 Hilfe</summary>

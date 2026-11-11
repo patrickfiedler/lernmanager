@@ -540,6 +540,7 @@ def validate_task_structure(data, warnings=None):
     errors.extend(_inline_image_errors(task))
     _validate_material_variants(task, errors)
     _validate_material_klassen(task, errors)
+    _validate_sammeln(task, errors)
 
     # Validate topic-level quiz
     if 'quiz' in task and task['quiz']:
@@ -566,6 +567,49 @@ def _resolve_klassen(names):
         else:
             errors.append(f"Klasse '{name}' {'nicht gefunden' if not hits else 'mehrdeutig'}")
     return ids, errors
+
+
+_SAMMELN_FIELDS = {
+    'sammeln': {'id', 'hinweis'},
+    'sammeln_download': {'id', 'dateiname', 'kopfzeile'},
+}
+
+
+def _validate_sammeln(task, errors):
+    """`sammeln` / `sammeln_download` on an Aufgabe (MBI request 2026-11-11).
+
+    Hard errors: a broken config would leave a class without its data in the
+    lesson. A download id must be collected in the same topic, so a typo in
+    the id cannot ship an always-empty file."""
+    collected = set()
+    downloads = []
+    for i, sub in enumerate(task.get('subtasks') or [], 1):
+        if not isinstance(sub, dict):
+            continue
+        for key, allowed in _SAMMELN_FIELDS.items():
+            if key not in sub:
+                continue
+            cfg = sub[key]
+            where = f"Subtask {i} {key}"
+            if not isinstance(cfg, dict) or not isinstance(cfg.get('id'), str) or not cfg['id'].strip():
+                errors.append(f"{where}: braucht ein Objekt mit 'id' (Text)")
+                continue
+            unknown = set(cfg) - allowed
+            if unknown:
+                errors.append(f"{where}: unbekannte Felder {sorted(unknown)}, erlaubt: {sorted(allowed)}")
+            for field in allowed - {'id'}:
+                if field in cfg and not isinstance(cfg[field], str):
+                    errors.append(f"{where}.{field} muss Text sein")
+            name = cfg.get('dateiname')
+            if isinstance(name, str) and (not name.endswith('.txt') or '/' in name or '\\' in name):
+                errors.append(f"{where}.dateiname muss auf .txt enden und darf keinen Pfad enthalten")
+            if key == 'sammeln':
+                collected.add(cfg['id'])
+            else:
+                downloads.append((i, cfg['id']))
+    for i, sammel_id in downloads:
+        if sammel_id not in collected:
+            errors.append(f"Subtask {i} sammeln_download: id '{sammel_id}' wird in diesem Thema nirgends gesammelt")
 
 
 def _validate_material_klassen(task, errors):
@@ -789,7 +833,8 @@ def import_task(task_data, dry_run=False, warnings=None):
                                        checkpoint_hints_json=checkpoint_hints_json,
                                        fork_group=fork_group, fork_branch=fork_branch,
                                        fork_branch_label=fork_branch_label, fork_branch_note=fork_branch_note,
-                                       fork_required=fork_required, is_intro=is_intro)
+                                       fork_required=fork_required, is_intro=is_intro,
+                                       sammeln_json=models.sammeln_json_from_subtask(sub))
         subtask_id_by_position[reihenfolge] = sub_id
 
     # Create materials and restore subtask assignments

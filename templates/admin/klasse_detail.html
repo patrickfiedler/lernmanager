@@ -357,6 +357,37 @@
     </form>
 </div>
 
+<!-- Zeilen sammeln (migrate_078): every line with its author, delete nonsense -->
+{% if sammel_zeilen %}
+<details class="card mt-2" id="gesammelte-zeilen">
+    <summary class="card-header" style="cursor: pointer;">📝 Gesammelte Zeilen ({{ sammel_zeilen.values()|map('length')|sum }})</summary>
+    <div style="padding: 1rem;">
+        {% for sammel_id, zeilen in sammel_zeilen.items() %}
+        <h4>{{ sammel_id }} <span class="text-muted">({{ zeilen|length }})</span></h4>
+        <table class="table">
+            <thead><tr><th>Name</th><th>Zeile</th><th>Geändert</th><th></th></tr></thead>
+            <tbody>
+            {% for z in zeilen %}
+            <tr>
+                <td>{{ z.nachname }}, {{ z.vorname }}</td>
+                <td><code style="white-space: pre-wrap;">{{ z.text }}</code></td>
+                <td class="text-muted">{{ z.geaendert }}</td>
+                <td>
+                    <form method="post" action="{{ url_for('admin_sammel_zeile_loeschen', klasse_id=klasse.id, zeile_id=z.id) }}"
+                          onsubmit='return confirm({{ ("Zeile von " ~ z.vorname ~ " löschen?")|tojson }});'>
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="btn btn-small btn-danger">Löschen</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% endfor %}
+    </div>
+</details>
+{% endif %}
+
 <!-- DSGVO: Year-end bulk delete -->
 {% if is_admin %}
 <details class="card mt-2" style="border: 1px solid #fca5a5;">

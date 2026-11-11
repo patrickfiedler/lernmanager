@@ -69,13 +69,17 @@ def teacher(app):
     flag = models.create_checkpoint_flag(sub, 0, 'student', student_id=student, session_uid="f1",
                                          checkpoint_attempt_id=attempt)
     run, (result,) = _grading_run("fremd", task, (student, "fremd.fritz"))
+    with models.db_session() as conn:  # raw insert: independent of clean_sammel_text
+        zeile = conn.execute("INSERT INTO sammel_zeile (klasse_id, sammel_id, student_id, text) "
+                             "VALUES (?, 'schulweg', ?, 'x')", (other, student)).lastrowid
     client = app.test_client()
     with client.session_transaction() as sess:
         sess["admin_id"] = teacher['id']
     return client, {'klasse_id': other, 'student_id': student, 'unterricht_id': unterricht,
                     'attempt_id': attempt, 'answer_id': answer, 'flag_id': flag,
                     'checkpoint_id': sub, 'run_id': run, 'result_id': result,
-                    'relpath': f'{run}/fremd.fritz/001.jpg', 'filename': 'grades.csv'}
+                    'relpath': f'{run}/fremd.fritz/001.jpg', 'filename': 'grades.csv',
+                    'zeile_id': zeile}
 
 
 @pytest.fixture
