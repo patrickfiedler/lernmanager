@@ -2070,7 +2070,8 @@ def admin_klasse_ueben_freischalten(klasse_id):
 @staff_required
 def admin_sammlung_freigeben(klasse_id):
     permissions.require_klasse(klasse_id)
-    n = models.approve_sammel_zeilen(klasse_id, request.form.get('sammel_id', ''), session.get('admin_id'))
+    n = models.approve_sammel_zeilen(klasse_id, request.form.get('thema', ''),
+                                     request.form.get('sammel_id', ''), session.get('admin_id'))
     flash(f'{n} Zeile{"" if n == 1 else "n"} freigegeben.', 'success')
     return redirect(url_for('admin_klasse_detail', klasse_id=klasse_id) + '#gesammelte-zeilen')
 
@@ -6700,13 +6701,14 @@ def _sammeln_context(student_id, klasse_id, subtask):
     if not cfg and not dl:
         return None
     ctx = {'max_len': models.SAMMEL_ZEILE_MAX}
+    thema = models.sammel_thema(subtask['task_id'])
     if cfg:
         ctx['eintragen'] = cfg
-        ctx['eigene_zeile'] = models.get_sammel_zeile(klasse_id, cfg['id'], student_id)
+        ctx['eigene_zeile'] = models.get_sammel_zeile(klasse_id, thema, cfg['id'], student_id)
     if dl:
         ctx['download'] = dl
         ctx['anzeige'] = dl.get('anzeige', 'beides')
-        texte = models.get_sammel_texte(klasse_id, dl['id'], shuffle_for=student_id)
+        texte = models.get_sammel_texte(klasse_id, thema, dl['id'], shuffle_for=student_id)
         ctx['anzahl'] = len(texte)
         ctx['textfeld'] = '\n'.join(_sammel_ausgabe(dl, texte))
     return ctx
@@ -6725,7 +6727,8 @@ def student_sammel_zeile(slug, position):
     cfg = _sammeln_config(subtask, 'sammeln')
     if not cfg:
         abort(404)
-    stored = models.set_sammel_zeile(student_task['klasse_id'], cfg['id'], student_id,
+    stored = models.set_sammel_zeile(student_task['klasse_id'], models.sammel_thema(subtask['task_id']),
+                                     cfg['id'], student_id,
                                      request.form.get('zeile', ''))
     flash('Deine Zeile ist gespeichert. Die Lehrkraft gibt sie bald frei.' if stored
           else 'Deine Zeile ist gelöscht.', 'success')
@@ -6741,7 +6744,8 @@ def student_sammel_download(slug, position):
     if not cfg or cfg.get('anzeige') == 'textfeld':
         abort(404)
     lines = _sammel_ausgabe(cfg, models.get_sammel_texte(
-        student_task['klasse_id'], cfg['id'], shuffle_for=student_id))
+        student_task['klasse_id'], models.sammel_thema(subtask['task_id']), cfg['id'],
+        shuffle_for=student_id))
     # BOM + CRLF: Excel "Aus Text/CSV" and Notepad on the school PCs read Umlaute right.
     body = ('\r\n'.join(lines) + '\r\n').encode('utf-8-sig')
     return send_file(io.BytesIO(body), mimetype='text/plain; charset=utf-8', as_attachment=True,

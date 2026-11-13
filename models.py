@@ -732,13 +732,14 @@ def init_db():
             CREATE TABLE IF NOT EXISTS sammel_zeile (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 klasse_id INTEGER NOT NULL,
+                thema TEXT NOT NULL DEFAULT '',  -- migrate_080: sammel_thema() of the collecting Thema
                 sammel_id TEXT NOT NULL,
                 student_id INTEGER NOT NULL,
                 text TEXT NOT NULL,
                 geaendert TEXT NOT NULL DEFAULT (datetime('now','localtime')),
                 text_frei TEXT,  -- migrate_079: text approved by the teacher, NULL = never approved
                 abgelehnt INTEGER NOT NULL DEFAULT 0,  -- migrate_079: teacher rejected the current text
-                UNIQUE (klasse_id, sammel_id, student_id),
+                UNIQUE (klasse_id, thema, sammel_id, student_id),
                 FOREIGN KEY (klasse_id) REFERENCES klasse(id) ON DELETE CASCADE,
                 FOREIGN KEY (student_id) REFERENCES student(id) ON DELETE CASCADE
             );
@@ -752,7 +753,8 @@ def init_db():
                 aktion TEXT NOT NULL,  -- gespeichert / geloescht / freigegeben / abgelehnt / zurueckgenommen
                 text TEXT,
                 admin_id INTEGER,
-                zeit TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+                zeit TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+                thema TEXT NOT NULL DEFAULT ''  -- migrate_080
             );
             CREATE INDEX IF NOT EXISTS idx_sammel_zeile_log_klasse
                 ON sammel_zeile_log(klasse_id, sammel_id, student_id);
@@ -9196,10 +9198,34 @@ def clean_sammel_text(raw):
 _SAMMEL_WARTET_SQL = "(z.abgelehnt = 0 AND (z.text_frei IS NULL OR z.text_frei != z.text))"
 
 
-def _log_sammel(conn, klasse_id, sammel_id, student_id, aktion, text=None, admin_id=None):
+def sammel_thema(task_id):
+    """The Thema key a collection belongs to (migrate_080).
+
+    A collection is (class, Thema, id): two Themen using the same `id` keep their
+    lines apart. The key is the unit_slug, not the task id, so lines survive a
+    re-import; a Seilbahn twin uses its regular topic's slug (`seilbahn_of`) and
+    fills the same collection. Without a slug: 'task-<id>'.
+    """
+    with db_session() as conn:
+        row = conn.execute("SELECT unit_slug, seilbahn_of FROM task WHERE id = ?", (task_id,)).fetchone()
+    if not row:
+        return f'task-{task_id}'
+    return row['seilbahn_of'] or row['unit_slug'] or f'task-{task_id}'
+
+
+def _sammel_thema_name(conn, thema):
+    """Topic name for a Thema key, for the class page; the key itself if no topic matches."""
+    if thema.startswith('task-') and thema[5:].isdigit():
+        row = conn.execute("SELECT name FROM task WHERE id = ?", (int(thema[5:]),)).fetchone()
+    else:
+        row = conn.execute("SELECT name FROM task WHERE unit_slug = ?", (thema,)).fetchone()
+    return row['name'] if row else (thema or '(ohne Thema)')
+
+
+def _log_sammel(conn, klasse_id, thema, sammel_id, student_id, aktion, text=None, admin_id=None):
     conn.execute(
-        "INSERT INTO sammel_zeile_log (klasse_id, sammel_id, student_id, aktion, text, admin_id) "
-        "VALUES (?, ?, ?, ?, ?, ?)", (klasse_id, sammel_id, student_id, aktion, text, admin_id))
+        "INSERT INTO sammel_zeile_log (klasse_id, thema, sammel_id, student_id, aktion, text, admin_id) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)", (klasse_id, thema, sammel_id, student_id, aktion, text, admin_id))
 
 
 # A cell Excel may read as a formula once the line is split into columns:
@@ -9216,38 +9242,38 @@ def sammel_formel_verdacht(text):
     return any(_FORMEL_ZELLE.match(cell) for cell in re.split(r'[;,\t]', text or ''))
 
 
-def get_sammel_zeile(klasse_id, sammel_id, student_id):
+def get_sammel_zeile(klasse_id, thema, sammel_id, student_id):
     """This student's own line as {'text', 'wartet', 'abgelehnt'}, or None."""
     with db_session() as conn:
         row = conn.execute(
             f"SELECT z.text, z.abgelehnt, {_SAMMEL_WARTET_SQL} AS wartet FROM sammel_zeile z "
-            "WHERE z.klasse_id = ? AND z.sammel_id = ? AND z.student_id = ?",
-            (klasse_id, sammel_id, student_id)).fetchone()
+            "WHERE z.klasse_id = ? AND z.thema = ? AND z.sammel_id = ? AND z.student_id = ?",
+            (klasse_id, thema, sammel_id, student_id)).fetchone()
     return {'text': row['text'], 'wartet': bool(row['wartet']), 'abgelehnt': bool(row['abgelehnt'])} if row else None
 
 
-def set_sammel_zeile(klasse_id, sammel_id, student_id, raw):
+def set_sammel_zeile(klasse_id, thema, sammel_id, student_id, raw):
     """Store the student's line (insert or replace). Empty after cleaning = delete. Returns the stored text or None."""
     text = clean_sammel_text(raw)
     with db_session() as conn:
         if not text:
             deleted = conn.execute(
-                "DELETE FROM sammel_zeile WHERE klasse_id = ? AND sammel_id = ? AND student_id = ?",
-                (klasse_id, sammel_id, student_id)).rowcount
+                "DELETE FROM sammel_zeile WHERE klasse_id = ? AND thema = ? AND sammel_id = ? AND student_id = ?",
+                (klasse_id, thema, sammel_id, student_id)).rowcount
             if deleted:
-                _log_sammel(conn, klasse_id, sammel_id, student_id, 'geloescht')
+                _log_sammel(conn, klasse_id, thema, sammel_id, student_id, 'geloescht')
             return None
         # A new text is a new question to the teacher: a rejection does not carry over.
         conn.execute("""
-            INSERT INTO sammel_zeile (klasse_id, sammel_id, student_id, text) VALUES (?, ?, ?, ?)
-            ON CONFLICT (klasse_id, sammel_id, student_id)
+            INSERT INTO sammel_zeile (klasse_id, thema, sammel_id, student_id, text) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT (klasse_id, thema, sammel_id, student_id)
             DO UPDATE SET text = excluded.text, abgelehnt = 0, geaendert = datetime('now','localtime')
-        """, (klasse_id, sammel_id, student_id, text))
-        _log_sammel(conn, klasse_id, sammel_id, student_id, 'gespeichert', text)
+        """, (klasse_id, thema, sammel_id, student_id, text))
+        _log_sammel(conn, klasse_id, thema, sammel_id, student_id, 'gespeichert', text)
         return text
 
 
-def get_sammel_texte(klasse_id, sammel_id, shuffle_for=None):
+def get_sammel_texte(klasse_id, thema, sammel_id, shuffle_for=None):
     """All approved lines of one class, no names. A changed line counts in its approved form.
 
     `shuffle_for=<student_id>`: in that student's own random order (MBI request,
@@ -9256,9 +9282,9 @@ def get_sammel_texte(klasse_id, sammel_id, shuffle_for=None):
     """
     with db_session() as conn:
         rows = conn.execute(
-            "SELECT text_frei FROM sammel_zeile WHERE klasse_id = ? AND sammel_id = ? "
+            "SELECT text_frei FROM sammel_zeile WHERE klasse_id = ? AND thema = ? AND sammel_id = ? "
             "AND text_frei IS NOT NULL ORDER BY text_frei, id",
-            (klasse_id, sammel_id)).fetchall()
+            (klasse_id, thema, sammel_id)).fetchall()
     texts = [r['text_frei'] for r in rows]
     if shuffle_for is not None:
         random.Random(f"{shuffle_for}:{sammel_id}").shuffle(texts)
@@ -9266,57 +9292,62 @@ def get_sammel_texte(klasse_id, sammel_id, shuffle_for=None):
 
 
 def get_sammel_zeilen_for_klasse(klasse_id):
-    """Teacher view, per collection id: {'zeilen': [...], 'wartend': n, 'fehlen': [names]}.
+    """Teacher view, one dict per collection (Thema + id), in Thema order:
+    {'thema', 'sammel_id', 'name', 'zeilen': [...], 'wartend': n, 'fehlen': [names]}.
 
     Lines waiting for approval come first. `fehlen` = students of the class
     without a line -- a hint for "complete enough?", never a lock.
     """
     with db_session() as conn:
         rows = conn.execute(f"""
-            SELECT z.id, z.sammel_id, z.student_id, z.text, z.text_frei, z.abgelehnt, z.geaendert,
+            SELECT z.id, z.thema, z.sammel_id, z.student_id, z.text, z.text_frei, z.abgelehnt, z.geaendert,
                    s.vorname, s.nachname, {_SAMMEL_WARTET_SQL} AS wartet
             FROM sammel_zeile z JOIN student s ON s.id = z.student_id
             WHERE z.klasse_id = ?
-            ORDER BY z.sammel_id, wartet DESC, z.abgelehnt DESC, s.nachname, s.vorname
+            ORDER BY z.thema, z.sammel_id, wartet DESC, z.abgelehnt DESC, s.nachname, s.vorname
         """, (klasse_id,)).fetchall()
         log = conn.execute(
-            "SELECT sammel_id, student_id, aktion, text, zeit FROM sammel_zeile_log "
+            "SELECT thema, sammel_id, student_id, aktion, text, zeit FROM sammel_zeile_log "
             "WHERE klasse_id = ? ORDER BY id DESC", (klasse_id,)).fetchall()
         roster = conn.execute("""
             SELECT s.id, s.vorname, s.nachname FROM student s
             JOIN student_klasse sk ON sk.student_id = s.id
             WHERE sk.klasse_id = ? ORDER BY s.nachname, s.vorname
         """, (klasse_id,)).fetchall()
+        names = {t: _sammel_thema_name(conn, t) for t in {r['thema'] for r in rows}}
     verlauf = {}
     for e in log:
-        verlauf.setdefault((e['sammel_id'], e['student_id']), []).append(dict(e))
+        verlauf.setdefault((e['thema'], e['sammel_id'], e['student_id']), []).append(dict(e))
     grouped = {}
     for r in rows:
         zeile = dict(r)
-        zeile['verlauf'] = verlauf.get((r['sammel_id'], r['student_id']), [])
+        zeile['verlauf'] = verlauf.get((r['thema'], r['sammel_id'], r['student_id']), [])
         zeile['formel'] = sammel_formel_verdacht(r['text'])
-        grouped.setdefault(r['sammel_id'], []).append(zeile)
-    result = {}
-    for sammel_id, zeilen in grouped.items():
+        grouped.setdefault((r['thema'], r['sammel_id']), []).append(zeile)
+    result = []
+    for (thema, sammel_id), zeilen in grouped.items():
         have = {z['student_id'] for z in zeilen}
-        result[sammel_id] = {
+        result.append({
+            'thema': thema,
+            'sammel_id': sammel_id,
+            'name': names[thema],
             'zeilen': zeilen,
             'wartend': sum(1 for z in zeilen if z['wartet']),
             'fehlen': [f"{s['vorname']} {s['nachname']}" for s in roster if s['id'] not in have],
-        }
+        })
     return result
 
 
-def approve_sammel_zeilen(klasse_id, sammel_id, admin_id=None):
+def approve_sammel_zeilen(klasse_id, thema, sammel_id, admin_id=None):
     """Teacher approves every waiting line of one collection (rejected ones stay out). Returns how many."""
     with db_session() as conn:
         rows = conn.execute(
             f"SELECT z.id, z.student_id, z.text FROM sammel_zeile z "
-            f"WHERE z.klasse_id = ? AND z.sammel_id = ? AND {_SAMMEL_WARTET_SQL}",
-            (klasse_id, sammel_id)).fetchall()
+            f"WHERE z.klasse_id = ? AND z.thema = ? AND z.sammel_id = ? AND {_SAMMEL_WARTET_SQL}",
+            (klasse_id, thema, sammel_id)).fetchall()
         for r in rows:
             conn.execute("UPDATE sammel_zeile SET text_frei = text WHERE id = ?", (r['id'],))
-            _log_sammel(conn, klasse_id, sammel_id, r['student_id'], 'freigegeben', r['text'], admin_id)
+            _log_sammel(conn, klasse_id, thema, sammel_id, r['student_id'], 'freigegeben', r['text'], admin_id)
         return len(rows)
 
 
@@ -9328,7 +9359,7 @@ def set_sammel_zeile_abgelehnt(zeile_id, klasse_id, abgelehnt, admin_id=None):
     version of the line stays in.
     """
     with db_session() as conn:
-        row = conn.execute("SELECT sammel_id, student_id, text FROM sammel_zeile WHERE id = ? AND klasse_id = ?",
+        row = conn.execute("SELECT thema, sammel_id, student_id, text FROM sammel_zeile WHERE id = ? AND klasse_id = ?",
                            (zeile_id, klasse_id)).fetchone()
         if not row:
             return False
@@ -9338,7 +9369,7 @@ def set_sammel_zeile_abgelehnt(zeile_id, klasse_id, abgelehnt, admin_id=None):
                          (zeile_id,))
         else:
             conn.execute("UPDATE sammel_zeile SET abgelehnt = 0 WHERE id = ?", (zeile_id,))
-        _log_sammel(conn, klasse_id, row['sammel_id'], row['student_id'],
+        _log_sammel(conn, klasse_id, row['thema'], row['sammel_id'], row['student_id'],
                     'abgelehnt' if abgelehnt else 'zurueckgenommen', row['text'], admin_id)
         return True
 

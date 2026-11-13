@@ -360,18 +360,19 @@
 
 <!-- Zeilen sammeln (migrate_078/079): lines with their authors; the teacher approves before the class sees them -->
 {% if sammel_zeilen %}
-{% set wartend_gesamt = sammel_zeilen.values()|map(attribute='wartend')|sum %}
+{% set wartend_gesamt = sammel_zeilen|map(attribute='wartend')|sum %}
 <details class="card mt-2" id="gesammelte-zeilen" {% if wartend_gesamt %}open{% endif %}>
     <summary class="card-header" style="cursor: pointer;">📝 Gesammelte Zeilen{% if wartend_gesamt %} – {{ wartend_gesamt }} warten auf Freigabe{% endif %}</summary>
     <div style="padding: 1rem;">
         <p class="text-muted">Die Klasse sieht nur freigegebene Zeilen. Prüfen: einigermaßen vollständig, kein Unsinn. Tippfehler bleiben drin, die räumen die Schüler in Excel auf. Unsinn ablehnen: die Zeile bleibt mit Verlauf hier gespeichert, die Klasse sieht sie nie.</p>
-        {% for sammel_id, s in sammel_zeilen.items() %}
-        <h4>{{ sammel_id }} <span class="text-muted">({{ s.zeilen|length }} Zeilen, {{ s.wartend }} wartend)</span></h4>
+        {% for s in sammel_zeilen %}
+        <h4>{{ s.name }} <span class="text-muted">– {{ s.sammel_id }}</span> <span class="text-muted">({{ s.zeilen|length }} Zeilen, {{ s.wartend }} wartend)</span></h4>
         {% if s.fehlen %}<p><strong>Fehlt noch ({{ s.fehlen|length }}):</strong> {{ s.fehlen|join(', ') }}</p>{% endif %}
         {% if s.wartend %}
         <form method="post" action="{{ url_for('admin_sammlung_freigeben', klasse_id=klasse.id) }}" style="margin-bottom: 0.5rem;">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <input type="hidden" name="sammel_id" value="{{ sammel_id }}">
+            <input type="hidden" name="thema" value="{{ s.thema }}">
+            <input type="hidden" name="sammel_id" value="{{ s.sammel_id }}">
             <button type="submit" class="btn btn-primary">✅ Alle {{ s.wartend }} wartenden freigeben</button>
         </form>
         {% endif %}
