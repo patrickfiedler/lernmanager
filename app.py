@@ -395,6 +395,36 @@ def _refresh_task_completion(student_id, task):
     )
 
 
+def _student_task_fertig(task):
+    """Is this Thema really finished, not just no longer the active one?
+
+    `abgeschlossen` carries both meanings: assigning a new Thema sets it on the
+    old one (assign_task_to_student), finished or not. So a closed Thema counts
+    as finished only when the teacher closed it by hand or every requirement
+    is met. An open Thema is never finished -- _refresh_task_completion has
+    already closed it if it were.
+    """
+    if not task or not task.get('abgeschlossen'):
+        return False
+    return bool(task.get('manuell_abgeschlossen')) or models.check_task_completion(task['id'])
+
+
+def _add_topic_progress(student_id, klasse_id, task):
+    """Set task['completed_subtasks'] / ['total_subtasks'] ("x von y Aufgaben").
+
+    Counts the path-required, visible Aufgaben, no Einführung. Returns the
+    visible subtasks with their progress, in order.
+    """
+    visible = {s['id']: s for s in models.get_visible_subtasks_for_student(
+        student_id, klasse_id, task['task_id'])}
+    subtasks = [s for s in models.get_student_subtask_progress(task['id']) if s['id'] in visible]
+    required = [s for s in subtasks
+                if visible[s['id']].get('required', True) and not s.get('is_intro')]
+    task['total_subtasks'] = len(required)
+    task['completed_subtasks'] = sum(1 for s in required if s['erledigt'])
+    return subtasks
+
+
 def _resolve_resume_subtask(subtasks, subtask_quiz_status):
     """Where a student should land on param-less re-entry to a topic.
 
@@ -5446,23 +5476,8 @@ def student_dashboard():
         task = models.get_student_task(student_id, klasse['id'])
         _refresh_task_completion(student_id, task)
         if task:
-            # Get only VISIBLE subtasks for this student
-            visible_subtasks = models.get_visible_subtasks_for_student(
-                student_id, klasse['id'], task['task_id']
-            )
-            visible_subtask_ids = {s['id'] for s in visible_subtasks}
-
-            # Get progress for all subtasks
-            all_subtasks = models.get_student_subtask_progress(task['id'])
-
-            # Filter to show only visible subtasks with their progress
-            visible_with_progress = [s for s in all_subtasks if s['id'] in visible_subtask_ids]
-
+            visible_with_progress = _add_topic_progress(student_id, klasse['id'], task)
             task['subtasks'] = visible_with_progress
-            # Count only path-required subtasks for progress (excludes Einführung/is_intro subtasks)
-            required_subtasks = [s for s in visible_with_progress if s.get('required', True) and not s.get('is_intro')]
-            task['total_subtasks'] = len(required_subtasks)
-            task['completed_subtasks'] = sum(1 for s in required_subtasks if s['erledigt'])
 
             # Find first incomplete subtask name for preview
             next_subtask = next((s for s in visible_with_progress if not s['erledigt']), None)
@@ -5506,8 +5521,12 @@ def student_dashboard():
                           for r in models.get_reopened_checkpoint_topics(student_id)}
     completed_by_klasse = {}
     for klasse in klassen:
+        earlier = models.get_completed_student_tasks(student_id, klasse['id'])
+        for st in earlier:
+            _add_topic_progress(student_id, klasse['id'], st)
+            st['fertig'] = _student_task_fertig(st)
         completed_by_klasse[klasse['id']] = _build_completed_topic_list(
-            models.get_completed_student_tasks(student_id, klasse['id']),
+            earlier,
             reopened_by_module,
             bool(klasse.get('show_completed_topics')),
             klasse.get('klassenstufe'),
@@ -5572,9 +5591,13 @@ def _build_completed_topic_list(completed, reopened_by_module, show_archive, kla
     """
     entries = [c for c in completed
                if _stufe_matches_klassenstufe(c.get('stufe'), klassenstufe)]
+    # A Thema closed by the next assignment but not finished is work waiting,
+    # like a reopened checkpoint: always shown (Patrick 2026-11-13). A missing
+    # `fertig` counts as finished, the flag's old meaning.
     if not show_archive:
         entries = [c for i, c in enumerate(entries)
-                   if i == 0 or c['task_id'] in reopened_by_module]
+                   if i == 0 or c['task_id'] in reopened_by_module
+                   or not c.get('fertig', True)]
 
     result = []
     for c in entries:
@@ -5585,6 +5608,9 @@ def _build_completed_topic_list(completed, reopened_by_module, show_archive, kla
             'is_seilbahn': c.get('is_seilbahn'),
             'reopened': bool(reopened),
             'feedback': reopened.get('student_feedback') if reopened else None,
+            'fertig': c.get('fertig', True),
+            'completed_subtasks': c.get('completed_subtasks'),
+            'total_subtasks': c.get('total_subtasks'),
         })
     return result
 
@@ -5638,6 +5664,9 @@ def student_klasse(slug):
         return redirect(url_for('student_dashboard'))
 
     _refresh_task_completion(student_id, task)
+    # The page asks "finished?", not "closed?": a Thema closed by the next
+    # assignment stays workable until it is done.
+    task['fertig'] = _student_task_fertig(task)
 
     klasse_id = klasse['id']
     subtasks = []
@@ -5744,7 +5773,9 @@ def student_klasse(slug):
     # Nothing left in the queue is a state, not an absence -- say so rather than
     # ending the finished topic on a blank space (see student_dashboard).
     queue_finished = False
-    if task and task.get('abgeschlossen'):
+    # Not while another Thema is active: starting the next one would close it.
+    # Students now open older Themen, so this page is no longer only the latest.
+    if task['fertig'] and not models.get_student_task(student_id, klasse_id):
         next_topic = models.get_next_open_queued_topic(student_id, klasse_id, task['task_id'])
         queue_finished = not next_topic and bool(models.get_topic_queue(klasse_id))
 

@@ -393,7 +393,7 @@
             </div>
             {% endif %}
             <!-- Inline gate card (non-capstone subtask gate) -->
-            {% if inline_gate and not task.abgeschlossen %}
+            {% if inline_gate and not task.fertig %}
             {% set inline_gate_formats = inline_gate.get('format', []) %}
             <div id="inline-gate-card" class="gate-card gate-inline mt-2 {% if inline_gate_passed %}gate-passed{% else %}gate-ready{% endif %}">
                 {% if inline_gate_passed %}
@@ -425,13 +425,13 @@
             {% endif %}
 
             {% if active_subtask and active_subtask.fertig_wenn %}
-            <div class="fertig-wenn-callout {% if task.abgeschlossen %}fertig-wenn-callout--standalone{% endif %}">
+            <div class="fertig-wenn-callout {% if task.fertig %}fertig-wenn-callout--standalone{% endif %}">
                 {{ active_subtask.fertig_wenn | markdown(topic_materials) }}
             </div>
             {% endif %}
 
             <!-- Completion zone: checkbox (left) + optional KI-Check (right) -->
-            {% if active_subtask and not task.abgeschlossen %}
+            {% if active_subtask and not task.fertig %}
             {# Einführung is read, not done -- the checkbox means something different there. #}
             {% set complete_label = 'Ich habe das gelesen und verstanden! ✓ In der nächsten Aufgabe beginnst du mit der Arbeit.' if active_subtask.get('is_intro') else 'Ich habe das geschafft! ✓' %}
             {% if graded_artifact %}
@@ -554,7 +554,7 @@
     <!-- Quiz Section (if all subtasks complete) -->
     {% if task.quiz_json %}
     {% set all_complete = (all_subtasks|selectattr('erledigt')|list|length == all_subtasks|length) %}
-    {% if all_complete and not task.abgeschlossen %}
+    {% if all_complete and not task.fertig %}
     <div class="quiz-card mt-2">
         <div class="quiz-header">❓ Quiz</div>
         {% if quiz_attempts %}
@@ -575,7 +575,7 @@
         <p class="text-muted" style="font-size: 0.875rem; margin-top: 0.25rem;">Du kannst so oft wiederholen, wie du willst.</p>
         <a href="{{ url_for('student_quiz', slug=task|topic_slug) }}" class="btn btn-primary mt-1">Quiz starten</a>
     </div>
-    {% elif task.abgeschlossen %}
+    {% elif task.fertig %}
     <div class="alert alert-success mt-2">
         ✅ Quiz bestanden! Thema abgeschlossen.
     </div>
@@ -583,7 +583,7 @@
     {% endif %}
 
     <!-- Next topic from queue -->
-    {% if task.abgeschlossen and next_topic %}
+    {% if task.fertig and next_topic %}
     <div class="card mt-2" style="border-left: 4px solid #22c55e;">
         <div class="card-header">🎯 Nächstes Thema: {{ next_topic.name }}</div>
         <form method="POST" action="{{ url_for('student_start_next_topic') }}">
@@ -593,7 +593,7 @@
             <button type="submit" class="btn btn-success">Nächstes Thema starten →</button>
         </form>
     </div>
-    {% elif task.abgeschlossen and queue_finished %}
+    {% elif task.fertig and queue_finished %}
     <div class="card mt-2" style="border-left: 4px solid #22c55e;">
         <div class="card-header">🎉 Geschafft</div>
         <p class="text-muted" style="padding: 0 1rem 0.75rem;">

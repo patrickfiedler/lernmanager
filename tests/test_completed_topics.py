@@ -6,6 +6,9 @@ the section for the many classes that carry no klassenstufe.
 """
 import pytest
 
+import import_task
+import models
+
 from app import _build_completed_topic_list, _stufe_matches_klassenstufe
 
 
@@ -87,3 +90,52 @@ class TestBuildList:
 
     def test_nothing_completed(self):
         assert _build_completed_topic_list([], {}, True, 7) == []
+
+
+class TestUnfinished:
+    """A Thema closed by the next assignment but not finished (Patrick 2026-11-13)."""
+
+    def test_unfinished_survives_the_default_cutoff(self):
+        completed = [topic(3, 'Drittes'), dict(topic(2, 'Zweites'), fertig=False),
+                     topic(1, 'Erstes')]
+        out = _build_completed_topic_list(completed, {}, False, 7)
+        assert [e['name'] for e in out] == ['Drittes', 'Zweites']
+        assert out[1]['fertig'] is False
+
+
+def _thema(name, n):
+    return import_task.import_task({'task': {
+        'name': name, 'beschreibung': '', 'lernziel': '', 'fach': 'MBI', 'stufe': '7',
+        'kategorie': 'pflicht',
+        'subtasks': [{'beschreibung': f'### A{i}', 'reihenfolge': i, 'path': 'wanderweg'}
+                     for i in range(1, n + 1)],
+    }})
+
+
+def test_closed_unfinished_topic_stays_workable(app, client):
+    app.config['WTF_CSRF_ENABLED'] = False
+    k = models.create_klasse('7a')
+    unit2, unit3 = _thema('Unit Zwei', 3), _thema('Unit Drei', 2)
+    sid = models.create_student('N', 'anna', 'anna', 'pw')
+    models.add_student_to_klasse(sid, k)
+    models.assign_task_to_student(sid, k, unit2)
+    st2 = models.get_student_task(sid, k)
+    sub = models.get_student_subtask_progress(st2['id'])[0]
+    models.toggle_student_subtask(st2['id'], sub['id'], True)
+    models.assign_task_to_klasse(k, unit3)   # closes Unit Zwei at 1 of 3
+    with client.session_transaction() as sess:
+        sess['student_id'] = sid
+
+    html = client.get('/schueler').get_data(as_text=True)
+    assert 'Unit Zwei' in html and '1 von 3 Aufgaben' in html and 'Weiterarbeiten' in html
+
+    page = client.get('/schueler/thema/unit-zwei?aufgabe=2').get_data(as_text=True)
+    assert 'subtask-checkbox-' in page            # still workable
+    assert 'Thema abgeschlossen' not in page
+    assert 'Nächstes Thema' not in page           # Unit Drei is active
+
+    for pos in (2, 3):
+        client.post(f'/schueler/thema/unit-zwei/aufgabe/{pos}', json={'erledigt': True})
+    html = client.get('/schueler').get_data(as_text=True)
+    assert '3 von 3 Aufgaben' in html and 'Noch nicht fertig' not in html
+    assert models.get_student_task(sid, k)['task_id'] == unit3   # Unit Drei stays active

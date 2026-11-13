@@ -217,7 +217,8 @@
         <p style="margin-bottom: 0.75rem; font-size: 0.9rem; color: #4b5563;">
             Legt fest, ob Schüler auf ihrer Startseite eine Liste ihrer bereits abgeschlossenen Themen sehen.
             Sinnvoll für Klassen mit einer längeren Themen-Reihenfolge; bei einem einzelnen Thema nur unnötig.
-            Hinweise zu <em>neu geöffneten</em> Checkpoints erscheinen unabhängig davon immer.
+            Hinweise zu <em>neu geöffneten</em> Checkpoints und Themen, die beim Zuweisen eines neuen Themas
+            noch nicht fertig waren, erscheinen unabhängig davon immer -- mit „x von y Aufgaben“, zum Weiterarbeiten.
         </p>
         <form method="POST" action="{{ url_for('admin_klasse_show_completed_topics', klasse_id=klasse.id) }}" class="flex gap-1 flex-center">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
