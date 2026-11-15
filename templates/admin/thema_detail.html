@@ -116,6 +116,47 @@
     </form>
 </div>
 
+<!-- Bearbeitungsstand: how far the classes are, before editing Aufgaben -->
+{% if progress.klassen %}
+<div class="card mt-2">
+    <div class="card-header">📊 Bearbeitungsstand</div>
+    <p class="text-muted">
+        Haken bleiben beim Bearbeiten an der <strong>Position</strong>, nicht am Inhalt.
+        Wer eine Aufgabe schon hinter sich hat, bekommt nach Einfügen oder Umschreiben dort einen Haken auf fremdem Inhalt.
+        {% if progress.frei_ab %}
+        <br><strong>Ab Aufgabe {{ progress.frei_ab }} hat noch niemand etwas abgehakt</strong> -- dort ändern oder einfügen verschiebt keine Haken.
+        {% else %}
+        <br><strong>Auch die letzte Aufgabe ist schon abgehakt</strong> -- nur Anhängen am Ende verschiebt keine Haken.
+        {% endif %}
+    </p>
+    <div style="overflow-x: auto;">
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Aufgabe</th>
+                {% for k in progress.klassen %}
+                <th>{{ k.name }}<br><small class="text-muted">{{ k.lehrer|join(', ') or '–' }} · {{ k.aktiv }} offen{% if k.fertig %}, {{ k.fertig }} fertig{% endif %}</small></th>
+                {% endfor %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for st in subtasks %}
+            <tr>
+                <td>{{ loop.index }}. {{ st.beschreibung|aufgabe_titel(40) }}
+                    {% if st.content_changed_at %}<br><small class="text-muted">geändert {{ st.content_changed_at[:10] }}</small>{% endif %}</td>
+                {% for k in progress.klassen %}
+                {% set c = k.cells[st.id] %}
+                <td>{{ c.done }} erledigt · {{ c.passed }} weiter{% if c.stale %}<br><small>⚠️ {{ c.stale }} vor Änderung</small>{% endif %}</td>
+                {% endfor %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <small class="text-muted">„erledigt“: hat diese Aufgabe abgehakt. „weiter“: hat diese oder eine spätere abgehakt (übersprungene Zusatzaufgaben zählen mit). „vor Änderung“: abgehakt an einem Tag vor der letzten Inhaltsänderung. Nur offene Themen, ohne Vorschau-Schüler.</small>
+</div>
+{% endif %}
+
 <!-- Subtasks -->
 <div class="card mt-2">
     <div class="card-header">✅ Aufgaben <small class="text-muted">(Markdown)</small></div>

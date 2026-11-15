@@ -2870,7 +2870,8 @@ def admin_thema_detail(task_id):
     material_assignments = models.get_material_subtask_assignments(task_id)
     building_on_text, arriving_at_text = _connections_to_admin_fields(task.get('connections_json'))
     delete_impact = models.get_task_deletion_impact(task_id)
-    return render_template('admin/thema_detail.html', task=task, subtasks=subtasks, materials=materials, subjects=config.SUBJECTS, levels=config.LEVELS, material_assignments=material_assignments, building_on_text=building_on_text, arriving_at_text=arriving_at_text, delete_impact=delete_impact)
+    progress = models.get_topic_progress_by_klasse(task_id)
+    return render_template('admin/thema_detail.html', task=task, subtasks=subtasks, materials=materials, subjects=config.SUBJECTS, levels=config.LEVELS, material_assignments=material_assignments, building_on_text=building_on_text, arriving_at_text=arriving_at_text, delete_impact=delete_impact, progress=progress)
 
 
 @app.route('/admin/thema/<int:task_id>/bearbeiten', methods=['POST'])

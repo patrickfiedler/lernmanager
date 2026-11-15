@@ -2218,6 +2218,84 @@ def get_task_deletion_impact(task_id):
         }
 
 
+def get_topic_progress_by_klasse(task_id):
+    """How far the classes working on this topic are, per Aufgabe (admin_thema_detail).
+
+    Answers "can I still change this topic?": updates keep ticks by position, so
+    inserting or rewriting an Aufgabe that a student has passed moves their tick
+    onto other content. Only open student_task rows count; sandbox students
+    (preview_of_admin) are left out.
+
+    Returns {'klassen': [...], 'frei_ab': int | None}:
+    klassen   one dict per class with open students: name, lehrer, aktiv, fertig and
+              cells[subtask_id] = {'done', 'passed', 'stale'}:
+              done    ticked this Aufgabe
+              passed  ticked this one or any later one (skipped Zusatz counts as passed)
+              stale   ticked on a day before the Aufgabe's content last changed
+                      (completed_at is a date: a tick on the day of the change is not counted)
+    frei_ab   1-based position from which no open student has a tick: inserting
+              or rewriting there moves no tick. None = the last Aufgabe has ticks.
+    """
+    with db_session() as conn:
+        subtasks = [dict(r) for r in conn.execute(
+            "SELECT id, reihenfolge, content_changed_at FROM subtask WHERE task_id = ? ORDER BY reihenfolge",
+            (task_id,)).fetchall()]
+        rows = conn.execute("""
+            SELECT st.id AS student_task_id, st.abgeschlossen, k.id AS klasse_id, k.name AS klasse_name
+            FROM student_task st
+            JOIN klasse k ON k.id = st.klasse_id
+            JOIN student s ON s.id = st.student_id
+            WHERE st.task_id = ? AND s.preview_of_admin IS NULL
+        """, (task_id,)).fetchall()
+        ticks = conn.execute("""
+            SELECT ss.student_task_id, ss.subtask_id, ss.completed_at
+            FROM student_subtask ss JOIN student_task st ON st.id = ss.student_task_id
+            WHERE st.task_id = ? AND ss.erledigt = 1
+        """, (task_id,)).fetchall()
+        lehrer = {}
+        for r in conn.execute("""
+            SELECT kl.klasse_id, COALESCE(a.nachname, a.username) AS name
+            FROM klasse_lehrer kl JOIN admin a ON a.id = kl.admin_id
+            WHERE a.active = 1 ORDER BY name
+        """).fetchall():
+            lehrer.setdefault(r['klasse_id'], []).append(r['name'])
+
+    pos_of = {s['id']: i for i, s in enumerate(subtasks)}
+    changed_day = {s['id']: (s['content_changed_at'] or '')[:10] for s in subtasks}
+    ticks_by_st = {}
+    for t in ticks:
+        if t['subtask_id'] in pos_of:
+            ticks_by_st.setdefault(t['student_task_id'], []).append(t)
+
+    klassen = {}
+    for r in rows:
+        k = klassen.setdefault(r['klasse_id'], {
+            'id': r['klasse_id'], 'name': r['klasse_name'], 'lehrer': lehrer.get(r['klasse_id'], []),
+            'aktiv': 0, 'fertig': 0,
+            'cells': {s['id']: {'done': 0, 'passed': 0, 'stale': 0} for s in subtasks}})
+        if r['abgeschlossen']:
+            k['fertig'] += 1
+            continue
+        k['aktiv'] += 1
+        mine = ticks_by_st.get(r['student_task_id'], [])
+        furthest = max((pos_of[t['subtask_id']] for t in mine), default=-1)
+        for s in subtasks[:furthest + 1]:
+            k['cells'][s['id']]['passed'] += 1
+        for t in mine:
+            cell = k['cells'][t['subtask_id']]
+            cell['done'] += 1
+            if t['completed_at'] and t['completed_at'][:10] < changed_day[t['subtask_id']]:
+                cell['stale'] += 1
+
+    # a class whose students all finished the topic has nothing left to break
+    klassen = sorted((k for k in klassen.values() if k['aktiv']), key=lambda k: k['name'])
+    frei_ab = 1
+    for i, s in enumerate(subtasks):
+        if any(k['cells'][s['id']]['passed'] for k in klassen):
+            frei_ab = i + 2
+    return {'klassen': klassen, 'frei_ab': frei_ab if frei_ab <= len(subtasks) else None}
+
+
 def delete_task(task_id):
     """Delete a task and its dependent rows.
 
