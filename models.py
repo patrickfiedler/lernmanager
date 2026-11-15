@@ -294,6 +294,7 @@ def init_db():
                 fork_required INTEGER NOT NULL DEFAULT 1,  -- 0=enrichment fork (unpicked branches stay as Zusatz)
                 is_intro INTEGER NOT NULL DEFAULT 0,  -- 1=Einführung subtask, excluded from progress-count denominator
                 sammeln_json TEXT,  -- migrate_078: {"sammeln": {...}} and/or {"sammeln_download": {...}}
+                content_changed_at DATETIME,  -- migrate_081: last edit of SUBTASK_CONTENT_FIELDS; NULL = unchanged since creation (or before 081)
                 FOREIGN KEY (task_id) REFERENCES task(id) ON DELETE CASCADE
             );
 
@@ -2908,6 +2909,41 @@ def delete_subtask(subtask_id):
         conn.execute("DELETE FROM subtask WHERE id = ?", (subtask_id,))
 
 
+# What a student reads or answers on an Aufgabe. Updates match subtasks by
+# position, so a student's tick stays on the row even when its content is
+# replaced; content_changed_at records when that happened, so a tick from
+# before it can be told apart (admin_thema_detail, Bearbeitungsstand).
+SUBTASK_CONTENT_FIELDS = ('beschreibung', 'quiz_json', 'fertig_wenn', 'tipps',
+                          'checkpoint_hints_json', 'artifact_gate_json', 'sammeln_json')
+
+
+def _normalized_content(field, value):
+    """Compare by meaning: JSON parsed, text stripped, '' and None alike."""
+    if value is None:
+        return None
+    if field.endswith('_json'):
+        try:
+            return json.loads(value)
+        except (TypeError, ValueError):
+            pass
+    return str(value).strip() or None
+
+
+def subtask_content_changed(old_row, new_values):
+    """True if any content field in new_values differs from old_row.
+
+    Fields the caller does not write (absent from new_values) cannot change.
+    """
+    return any(_normalized_content(f, old_row.get(f)) != _normalized_content(f, new_values[f])
+               for f in SUBTASK_CONTENT_FIELDS if f in new_values)
+
+
+def _mark_content_changed(conn, old_row, new_values):
+    if subtask_content_changed(old_row, new_values):
+        conn.execute("UPDATE subtask SET content_changed_at = ? WHERE id = ?",
+                     (now_local(), old_row['id']))
+
+
 def update_subtasks(task_id, subtasks_list, estimated_minutes_list=None, quiz_json_list=None,
                     path_list=None, path_model_list=None, graded_artifact_json_list=None,
                     fertig_wenn_list=None, tipps_list=None, checkpoint_type_list=None,
@@ -3030,6 +3066,10 @@ def update_subtasks(task_id, subtasks_list, estimated_minutes_list=None, quiz_js
                       checkpoint_type, kern_standard_tag, checkpoint_hints, school_only,
                       fork_group, fork_branch, fork_branch_label, fork_branch_note, fork_required,
                       old_by_pos[i]['id']))
+                _mark_content_changed(conn, old_by_pos[i], {
+                    'beschreibung': beschreibung, 'quiz_json': subtask_quiz,
+                    'fertig_wenn': fertig_wenn, 'tipps': tipps,
+                    'checkpoint_hints_json': checkpoint_hints})
             else:
                 # INSERT new subtask at this position
                 conn.execute(
@@ -3116,6 +3156,11 @@ def update_subtasks_from_import(task_id, subtasks_data):
                       checkpoint_type, kern_standard_tag, checkpoint_hints,
                       fork_group, fork_branch, fork_branch_label, fork_branch_note, fork_required,
                       is_intro, sammeln_json, sub_id))
+                _mark_content_changed(conn, old_by_pos[pos], {
+                    'beschreibung': sub['beschreibung'], 'quiz_json': quiz_json,
+                    'fertig_wenn': fertig_wenn, 'tipps': tipps,
+                    'checkpoint_hints_json': checkpoint_hints,
+                    'artifact_gate_json': gate_json, 'sammeln_json': sammeln_json})
                 subtask_id_by_position[pos] = sub_id
             else:
                 # INSERT new subtask at this position
