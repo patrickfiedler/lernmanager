@@ -3073,7 +3073,10 @@ def update_subtasks(task_id, subtasks_list, estimated_minutes_list=None, quiz_js
                 path_model = pm if pm in ('skip', 'depth') else 'skip'
 
             graded_artifact = None
-            if graded_artifact_json_list and i < len(graded_artifact_json_list):
+            if graded_artifact_json_list is None:
+                # The admin form does not edit it (import only): keep what is stored.
+                graded_artifact = old_by_pos.get(i, {}).get('graded_artifact_json')
+            elif i < len(graded_artifact_json_list):
                 ga = graded_artifact_json_list[i].strip() if graded_artifact_json_list[i] else ''
                 graded_artifact = ga if ga else None
 
