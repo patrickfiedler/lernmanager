@@ -252,6 +252,27 @@ def _judgment_confidence(response):
     return None
 
 
+def _token_usage(response):
+    """{'input_tokens', 'output_tokens'} from an OpenAI-style response, None where the
+    provider sent nothing."""
+    usage = getattr(response, 'usage', None)
+    return {'input_tokens': getattr(usage, 'prompt_tokens', None),
+            'output_tokens': getattr(usage, 'completion_tokens', None)}
+
+
+def _record_call(student_id, usage_tag, started, *, prompt_version=None, usage=None,
+                 error=None):
+    """One llm_usage row with call metadata (migrate_082). error = None means success;
+    a failed call is recorded with ok=0 and does not count against the rate limit.
+    Nothing is recorded without a student (llm_usage.student_id is NOT NULL)."""
+    if student_id is None:
+        return
+    models.record_llm_usage(
+        student_id, usage_tag, model=config.LLM_MODEL, prompt_version=prompt_version,
+        latency_ms=round((time.monotonic() - started) * 1000),
+        ok=error is None, error=error, **(usage or {}))
+
+
 def _call_llm(question_text, expected_or_rubric, student_answer, system_prompt=SYSTEM_PROMPT,
               timeout=None, want_confidence=False, model=None, backend=None):
     """Send grading request to LLM and parse JSON response.
@@ -354,7 +375,7 @@ def _call_llm(question_text, expected_or_rubric, student_answer, system_prompt=S
             print(f"LLM grading: confidence extraction failed "
                   f"({type(e).__name__}: {e})", file=sys.stderr)
     return {"correct": bool(result["correct"]), "feedback": str(result["feedback"]),
-            "confidence": confidence}
+            "confidence": confidence, "usage": _token_usage(response)}
 
 
 NOISE_SYSTEM_PROMPT = (
@@ -428,7 +449,7 @@ ARTIFACT_CHECKLIST_SYSTEM_PROMPT = (
 )
 
 
-def grade_artifact_checklist(extracted_text: str, criteria: list) -> list:
+def grade_artifact_checklist(extracted_text: str, criteria: list, student_id=None) -> list:
     """Check an extracted artifact against a list of criteria strings.
 
     Args:
@@ -442,6 +463,7 @@ def grade_artifact_checklist(extracted_text: str, criteria: list) -> list:
     Returns:
         List of dicts: [{"criterion": str, "passed": bool, "note": str, "source": "llm"}, ...]
         Returns an empty list on failure (caller should handle gracefully).
+        student_id: recorded in llm_usage ('artifact_feedback'), never sent to the LLM.
     """
     if not config.LLM_ENABLED or not criteria or not extracted_text:
         return []
@@ -453,6 +475,7 @@ def grade_artifact_checklist(extracted_text: str, criteria: list) -> list:
     )
 
     client = _get_client()
+    started = time.monotonic()
     try:
         response = client.chat.completions.create(
             model=config.LLM_MODEL,
@@ -470,6 +493,7 @@ def grade_artifact_checklist(extracted_text: str, criteria: list) -> list:
 
         if not text:
             print("LLM artifact checklist: empty response", file=sys.stderr)
+            _record_call(student_id, 'artifact_feedback', started, error='empty')
             return []
 
         parsed = json.loads(text)
@@ -479,6 +503,9 @@ def grade_artifact_checklist(extracted_text: str, criteria: list) -> list:
         if len(results) != len(criteria):
             print(f"LLM artifact checklist: expected {len(criteria)} results, got {len(results)}", file=sys.stderr)
 
+        _record_call(student_id, 'artifact_feedback', started,
+                     prompt_version=prompt_version_for(ARTIFACT_CHECKLIST_SYSTEM_PROMPT),
+                     usage=_token_usage(response))
         # Match positionally — the original criterion text (not the model's echo of it) is
         # always used, so criteria containing quotes/special chars can't break JSON escaping.
         return [
@@ -492,6 +519,7 @@ def grade_artifact_checklist(extracted_text: str, criteria: list) -> list:
         ]
     except Exception as e:
         print(f"LLM artifact checklist error: {type(e).__name__}: {e}", file=sys.stderr)
+        _record_call(student_id, 'artifact_feedback', started, error=type(e).__name__)
         return []
 
 
@@ -540,20 +568,27 @@ def grade_answer(question_text, expected_or_rubric, student_answer, student_id=N
         system_prompt, timeout = SYSTEM_PROMPT, config.LLM_TIMEOUT
         want_confidence = False
 
+    prompt_version = prompt_version_for(system_prompt)
+    started = time.monotonic()
     try:
         llm_response = _call_llm(question_text, expected_or_rubric, student_answer,
                                  system_prompt, timeout, want_confidence=want_confidence)
         if llm_response is None:
             print(f"LLM grading ({usage_tag}): response was not valid JSON", file=sys.stderr)
+            _record_call(student_id, usage_tag, started, prompt_version=prompt_version,
+                         error='invalid_response')
             return fallback
-        models.record_llm_usage(student_id, usage_tag, 0)
+        _record_call(student_id, usage_tag, started, prompt_version=prompt_version,
+                     usage=llm_response.pop("usage", None))
         llm_response["source"] = "llm"
         llm_response["llm_provider"] = config.LLM_PROVIDER
         llm_response["llm_model"] = config.LLM_MODEL
-        llm_response["prompt_version"] = prompt_version_for(system_prompt)
+        llm_response["prompt_version"] = prompt_version
         return llm_response
     except Exception as e:
         print(f"LLM grading error ({usage_tag}): {type(e).__name__}: {e}", file=sys.stderr)
+        _record_call(student_id, usage_tag, started, prompt_version=prompt_version,
+                     error=type(e).__name__)
         return fallback
 
 
@@ -621,6 +656,8 @@ def generate_checkpoint_hint(question_text, rubric, student_answer, hints, stude
     HINT_REPORT_TEXT. The model's luecke goes back as `gap` for the teacher only -- it
     names the missing content and must never reach the student.
     """
+    prompt_version = prompt_version_for(CHECKPOINT_HINT_PROMPT)
+    started = time.monotonic()
     try:
         response = _get_client().with_options(max_retries=0).chat.completions.create(
             model=config.LLM_MODEL, max_tokens=400, temperature=0,
@@ -634,8 +671,11 @@ def generate_checkpoint_hint(question_text, rubric, student_answer, hints, stude
         data = json.loads(_message_text(response) or '')
     except Exception as e:
         print(f"LLM checkpoint hint error: {type(e).__name__}: {e}", file=sys.stderr)
+        _record_call(student_id, 'checkpoint_hint', started, prompt_version=prompt_version,
+                     error=type(e).__name__)
         return None
-    models.record_llm_usage(student_id, 'checkpoint_hint', 0)
+    _record_call(student_id, 'checkpoint_hint', started, prompt_version=prompt_version,
+                 usage=_token_usage(response))
     if not isinstance(data, dict):
         return None
 

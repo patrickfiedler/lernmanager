@@ -6390,10 +6390,9 @@ def _build_level2_feedback(student_id, klasse, graded, student_path, filename, v
             if models.get_artifact_checks_remaining(student_id) <= 0:
                 rate_limited = True
             elif anonymized_text:
-                llm_feedback = llm_grading.grade_artifact_checklist(anonymized_text, criteria)
+                llm_feedback = llm_grading.grade_artifact_checklist(
+                    anonymized_text, criteria, student_id=student_id)
                 feedback.extend(llm_feedback)
-                if llm_feedback:
-                    models.record_llm_usage(student_id, 'artifact_feedback', 0)
 
     return {
         'feedback': feedback,
@@ -8369,10 +8368,11 @@ def student_warmup():
         return redirect(url_for('student_dashboard'))
 
     pool = models.get_warmup_question_pool(student_id)
-    if not pool:
-        return redirect(url_for('student_dashboard'))
-
-    questions = models.select_warmup_questions(student_id, pool, difficulty='mixed', count=3)
+    questions = models.select_warmup_questions(student_id, pool, difficulty='mixed', count=3) if pool else []
+    # Once per visit, also when nothing is due: pool size over time, and "offered"
+    # vs. warmup_session (finished/skipped) shows who left without either.
+    models.log_analytics_event('warmup_offered', student_id, 'student',
+                               {'pool': len(pool), 'shown': len(questions)})
     if not questions:
         return redirect(url_for('student_dashboard'))
 
@@ -8413,7 +8413,10 @@ def student_warmup_answer():
     question = matched['question']
 
     correct, feedback, source, _prompt_version, _confidence = _grade_warmup_answer(question, answer)
-    models.record_warmup_answer(student_id, task_id, subtask_id, matched['question_hash'], correct)
+    models.record_warmup_answer(
+        student_id, task_id, subtask_id, matched['question_hash'], correct,
+        phase='practice' if data.get('phase') == 'practice' else 'warmup',
+        question_type=question.get('type', 'multiple_choice'), grader=source)
 
     # Build correct_answer for feedback display
     # MC: always send correct indices (needed for ✅/❌ highlighting on all options)

@@ -473,6 +473,12 @@ def test_practice_answer_grades_checkpoint_short_answer(app, client, monkeypatch
     resp = client.post("/schueler/aufwaermen/antwort", json={**body, "phase": "practice"})
     assert resp.status_code == 200
     assert resp.get_json()["correct"] is True
+    # logged once, as practice (migrate_082)
+    with models.db_session() as conn:
+        rows = [dict(r) for r in conn.execute("SELECT * FROM warmup_answer")]
+    assert len(rows) == 1
+    assert rows[0]["phase"] == "practice" and rows[0]["grader"] == "llm"
+    assert rows[0]["question_type"] == "short_answer" and rows[0]["correct"] == 1
 
 
 # ---- Demo accounts: student.demo_practice skips every gate ----

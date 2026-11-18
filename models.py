@@ -706,6 +706,15 @@ def init_db():
                 timestamp DATETIME DEFAULT (datetime('now','localtime')),
                 question_type TEXT NOT NULL,
                 tokens_used INTEGER DEFAULT 0,
+                -- migrate_082: call metadata. ok = 0 marks a failed call; rate limits
+                -- count only ok = 1, so an outage does not eat a student's budget.
+                model TEXT,
+                prompt_version TEXT,
+                latency_ms INTEGER,
+                input_tokens INTEGER,
+                output_tokens INTEGER,
+                ok INTEGER NOT NULL DEFAULT 1,
+                error TEXT,
                 FOREIGN KEY (student_id) REFERENCES student(id) ON DELETE CASCADE
             );
 
@@ -927,6 +936,28 @@ def init_db():
                 session_type TEXT NOT NULL DEFAULT 'warmup',  -- warmup/practice
                 FOREIGN KEY (student_id) REFERENCES student(id) ON DELETE CASCADE
             );
+
+            -- migrate_082: one row per answered warm-up/practice question.
+            -- days_since_last/streak_before = warmup_history state BEFORE this answer
+            -- (that row is overwritten). NULL days_since_last = first time seen.
+            CREATE TABLE IF NOT EXISTS warmup_answer (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_id INTEGER NOT NULL,
+                timestamp DATETIME DEFAULT (datetime('now','localtime')),
+                phase TEXT NOT NULL,  -- warmup/practice
+                task_id INTEGER,
+                subtask_id INTEGER,
+                question_hash TEXT NOT NULL,
+                question_type TEXT,
+                correct INTEGER NOT NULL,
+                grader TEXT,  -- _grade_warmup_answer source: mc/match/llm/fallback/...
+                days_since_last INTEGER,
+                streak_before INTEGER,
+                FOREIGN KEY (student_id) REFERENCES student(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_warmup_answer_student_time
+            ON warmup_answer(student_id, timestamp);
         ''')
 
 
@@ -1854,6 +1885,9 @@ def get_student_data_summary(student_id):
             'warmup_sessions': conn.execute(
                 "SELECT COUNT(*) FROM warmup_session WHERE student_id = ?", (student_id,)
             ).fetchone()[0],
+            'warmup_answers': conn.execute(
+                "SELECT COUNT(*) FROM warmup_answer WHERE student_id = ?", (student_id,)
+            ).fetchone()[0],
             'analytics_events': conn.execute(
                 "SELECT COUNT(*) FROM analytics_events WHERE user_id = ? AND user_type = 'student'",
                 (student_id,)
@@ -1899,8 +1933,13 @@ def get_student_data_export(student_id):
             (student_id,)
         ).fetchall()]
 
+        warmup_answers = [dict(r) for r in conn.execute(
+            "SELECT timestamp, phase, task_id, subtask_id, question_type, correct, grader "
+            "FROM warmup_answer WHERE student_id = ? ORDER BY timestamp DESC", (student_id,)
+        ).fetchall()]
+
         llm_usage = [dict(r) for r in conn.execute(
-            "SELECT timestamp, question_type, tokens_used FROM llm_usage "
+            "SELECT timestamp, question_type, tokens_used, model, latency_ms, ok FROM llm_usage "
             "WHERE student_id = ? ORDER BY timestamp DESC", (student_id,)
         ).fetchall()]
 
@@ -1913,6 +1952,7 @@ def get_student_data_export(student_id):
         'student': student,
         'quiz_attempts': quiz_attempts,
         'warmup_sessions': warmup_sessions,
+        'warmup_answers': warmup_answers,
         'analytics_events': analytics_events,
         'llm_usage': llm_usage,
         'artifact_feedback': artifact_feedback,
@@ -6962,7 +7002,7 @@ def check_llm_rate_limit(student_id, usage_tag='llm_grading'):
     with db_session() as conn:
         row = conn.execute(
             "SELECT COUNT(*) as cnt FROM llm_usage "
-            "WHERE student_id = ? AND question_type = ? "
+            "WHERE student_id = ? AND question_type = ? AND ok = 1 "
             "AND timestamp > ?",
             (student_id, usage_tag, local_cutoff(hours=1))
         ).fetchone()
@@ -6980,7 +7020,7 @@ def llm_rate_limit_free_at(student_id, usage_tag='llm_grading'):
     with db_session() as conn:
         rows = conn.execute(
             "SELECT timestamp FROM llm_usage WHERE student_id = ? AND question_type = ? "
-            "AND timestamp > ? ORDER BY timestamp",
+            "AND ok = 1 AND timestamp > ? ORDER BY timestamp",
             (student_id, usage_tag, local_cutoff(hours=1))
         ).fetchall()
     if len(rows) < limit:
@@ -6994,7 +7034,7 @@ def get_artifact_checks_remaining(student_id):
     with db_session() as conn:
         row = conn.execute(
             "SELECT COUNT(*) as cnt FROM llm_usage "
-            "WHERE student_id = ? AND question_type = 'artifact_feedback' "
+            "WHERE student_id = ? AND question_type = 'artifact_feedback' AND ok = 1 "
             "AND timestamp > ?",
             (student_id, local_cutoff(hours=1))
         ).fetchone()
@@ -7221,12 +7261,23 @@ def get_reopened_checkpoint_topics(student_id):
         return [dict(r) for r in rows]
 
 
-def record_llm_usage(student_id, question_type, tokens_used=0):
-    """Record an LLM API call for rate limiting and monitoring."""
+def record_llm_usage(student_id, question_type, tokens_used=0, *, model=None,
+                     prompt_version=None, latency_ms=None, input_tokens=None,
+                     output_tokens=None, ok=True, error=None):
+    """Record an LLM API call for rate limiting and monitoring (metadata: migrate_082).
+
+    ok=False records a failed call: kept for monitoring, ignored by the rate limits.
+    tokens_used is filled from input + output when both are known.
+    """
+    if input_tokens is not None and output_tokens is not None:
+        tokens_used = input_tokens + output_tokens
     with db_session() as conn:
         conn.execute(
-            "INSERT INTO llm_usage (student_id, question_type, tokens_used, timestamp) VALUES (?, ?, ?, ?)",
-            (student_id, question_type, tokens_used, now_local())
+            "INSERT INTO llm_usage (student_id, question_type, tokens_used, timestamp, model, "
+            "prompt_version, latency_ms, input_tokens, output_tokens, ok, error) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (student_id, question_type, tokens_used, now_local(), model, prompt_version,
+             latency_ms, input_tokens, output_tokens, 1 if ok else 0, error)
         )
 
 
@@ -9142,7 +9193,7 @@ def select_warmup_questions(student_id, pool, difficulty='easy', count=2, respec
         key = (h['task_id'], h['subtask_id'], h['question_hash'])
         history[key] = dict(h)
 
-    today = datetime.now().date()
+    today = datetime.strptime(now_local('%Y-%m-%d'), '%Y-%m-%d').date()  # same base as last_shown
 
     bucket = []
     for q in pool:
@@ -9222,16 +9273,35 @@ def _prioritize_questions(bucket, history, today, count):
     return selected
 
 
-def record_warmup_answer(student_id, task_id, subtask_id, question_hash, correct):
-    """Upsert warmup_history: update streak, times_shown/correct, last_shown."""
+def record_warmup_answer(student_id, task_id, subtask_id, question_hash, correct,
+                         phase='warmup', question_type=None, grader=None):
+    """Upsert warmup_history (streak, times_shown/correct, last_shown) and log the
+    answer in warmup_answer (migrate_082) with the history state from before it.
+
+    phase: 'warmup' | 'practice'. Both still drive the same warmup_history; the log
+    keeps them apart.
+    """
     with db_session() as conn:
         existing = conn.execute(
-            'SELECT id, streak FROM warmup_history '
+            'SELECT id, streak, last_shown FROM warmup_history '
             'WHERE student_id = ? AND task_id IS ? AND subtask_id IS ? AND question_hash = ?',
             (student_id, task_id, subtask_id, question_hash)
         ).fetchone()
 
-        today = datetime.now().strftime('%Y-%m-%d')
+        today = now_local('%Y-%m-%d')
+        days_since_last = streak_before = None
+        if existing:
+            streak_before = existing['streak']
+            if existing['last_shown']:
+                days_since_last = (datetime.strptime(today, '%Y-%m-%d')
+                                   - datetime.strptime(existing['last_shown'], '%Y-%m-%d')).days
+        conn.execute(
+            'INSERT INTO warmup_answer (student_id, timestamp, phase, task_id, subtask_id, '
+            'question_hash, question_type, correct, grader, days_since_last, streak_before) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            (student_id, now_local(), phase, task_id, subtask_id, question_hash,
+             question_type, 1 if correct else 0, grader, days_since_last, streak_before)
+        )
 
         if existing:
             new_streak = (existing['streak'] + 1) if correct else 0
@@ -9267,18 +9337,23 @@ def count_practice_sessions_today(student_id):
     with db_session() as conn:
         row = conn.execute(
             "SELECT COUNT(*) FROM warmup_session "
-            "WHERE student_id = ? AND session_type = 'practice' AND DATE(timestamp) = DATE('now')",
-            (student_id,)
+            "WHERE student_id = ? AND session_type = 'practice' AND DATE(timestamp) = ?",
+            (student_id, now_local('%Y-%m-%d'))
         ).fetchone()
         return row[0] if row else 0
 
 
 def has_done_warmup_today(student_id):
-    """Check if student already completed a warmup session today."""
+    """Check if student already finished or skipped the warm-up today.
+
+    Practice sessions do not count: practising first must not cancel the warm-up.
+    Local date: timestamps are local (now_local), SQLite's DATE('now') is UTC.
+    """
     with db_session() as conn:
         row = conn.execute(
-            "SELECT 1 FROM warmup_session WHERE student_id = ? AND DATE(timestamp) = DATE('now') LIMIT 1",
-            (student_id,)
+            "SELECT 1 FROM warmup_session WHERE student_id = ? AND session_type = 'warmup' "
+            "AND DATE(timestamp) = ? LIMIT 1",
+            (student_id, now_local('%Y-%m-%d'))
         ).fetchone()
         return row is not None
 
