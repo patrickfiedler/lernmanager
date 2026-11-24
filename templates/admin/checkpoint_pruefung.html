@@ -436,12 +436,13 @@
 
                 {% if flag.status == 'offen' %}
                 <form method="POST" action="{{ url_for('admin_checkpoint_flag_resolve', flag_id=flag.id) }}"
-                      class="checkpoint-flag-form" data-flag-id="{{ flag.id }}">
+                      class="checkpoint-flag-form"
+                      data-note-url="{{ url_for('admin_checkpoint_flag_note', flag_id=flag.id) }}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <input type="text" name="resolution_note" class="form-control checkpoint-flag-note"
+                    <input type="text" name="resolution_note" class="form-control autosave-note"
                            placeholder="Notiz zur Frage (freiwillig, speichert sich selbst)"
                            value="{{ flag.resolution_note or '' }}">
-                    <small class="checkpoint-flag-note-status text-muted" aria-live="polite">
+                    <small class="autosave-status text-muted" aria-live="polite">
                         {% if flag.resolution_note %}✓ Notiz gespeichert{% endif %}</small>
                     <div class="flex gap-1 mt-1" style="flex-wrap: wrap;">
                         {% for code, label in flag_resolutions.items() %}
@@ -767,15 +768,15 @@ document.querySelectorAll('.checkpoint-verdict').forEach(function(row) {
     });
 });
 
-// Note on a student report ("Notiz zur Frage"): saved after a short typing pause
-// and on blur, so moving on to the next question never loses it. The status line
-// stays visible (no fade) -- the teacher should be able to glance back and see it.
-// A verdict button still submits the field with the form, so the last keystroke
-// before a click is never lost either.
-document.querySelectorAll('.checkpoint-flag-form').forEach(function(form) {
-    var note = form.querySelector('.checkpoint-flag-note');
-    var status = form.querySelector('.checkpoint-flag-note-status');
-    var url = '/admin/checkpoint-pruefung/meldung/' + form.dataset.flagId + '/notiz';
+// Notes that save themselves: "Notiz zur Frage" on a student report (session view)
+// and the teacher's own note on a question (Fragen view). Any form with
+// data-note-url, an .autosave-note field and an .autosave-status line. Saved after
+// a short typing pause and on blur, so moving on never loses it; the status stays
+// visible (no fade) so the teacher can glance back. A verdict button still submits
+// the field with the form, so the last keystroke before a click is never lost.
+document.querySelectorAll('form[data-note-url]').forEach(function(form) {
+    var note = form.querySelector('.autosave-note');
+    var status = form.querySelector('.autosave-status');
     var savedNote = note.value;
     var timer = null;
 
@@ -784,10 +785,10 @@ document.querySelectorAll('.checkpoint-flag-form').forEach(function(form) {
         if (note.value.trim() === savedNote.trim()) { return; }
         var sending = note.value;
         var formData = new FormData();
-        formData.append('resolution_note', sending);
+        formData.append(note.name, sending);
         formData.append('csrf_token', document.querySelector('meta[name="csrf-token"]').content);
         status.textContent = 'speichert …';
-        LLMButton.postForm(url, formData).then(function(data) {
+        LLMButton.postForm(form.dataset.noteUrl, formData).then(function(data) {
             if (!data.ok) { status.textContent = '⚠️ Nicht gespeichert: ' + data.message; return; }
             savedNote = sending;
             var now = new Date();
@@ -803,8 +804,8 @@ document.querySelectorAll('.checkpoint-flag-form').forEach(function(form) {
         timer = setTimeout(save, 1000);
     });
     note.addEventListener('change', save);
-    // Enter in a one-field form would submit it with no status -- the server
-    // would answer "Unbekanntes Urteil". Save instead.
+    // Enter would submit the form with no verdict -- the server would answer
+    // "Unbekanntes Urteil". Save instead.
     note.addEventListener('keydown', function(e) {
         if (e.key === 'Enter') { e.preventDefault(); save(); }
     });

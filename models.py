@@ -511,6 +511,19 @@ def init_db():
                 PRIMARY KEY (checkpoint_id, question_index)
             );
 
+            -- A teacher's own draft note on a checkpoint question (Fragen view,
+            -- migrate_084). Per teacher, so nobody overwrites anyone. Autosaved
+            -- before any verdict; a verdict click copies it into the mark and
+            -- deletes it here.
+            CREATE TABLE IF NOT EXISTS checkpoint_question_note (
+                checkpoint_id INTEGER NOT NULL,  -- = subtask.id, no FK, like checkpoint_flag
+                question_index INTEGER NOT NULL,
+                admin_id INTEGER NOT NULL,  -- no FK, like checkpoint_flag.resolved_by
+                note TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (checkpoint_id, question_index, admin_id)
+            );
+
             -- Ticked steps inside an Aufgabe (templates/student/klasse.html).
             -- Scratchpad, not progress: the durable record is student_subtask.
             CREATE TABLE IF NOT EXISTS step_tick (
@@ -5721,6 +5734,34 @@ def set_checkpoint_flag_note(flag_id, note):
             WHERE id = ? AND status = 'offen'
         ''', (note or None, flag_id))
         return cur.rowcount > 0
+
+
+def set_checkpoint_question_note(checkpoint_id, question_index, admin_id, note):
+    """Autosave of one teacher's note on a question. Empty text deletes it."""
+    with db_session() as conn:
+        if note:
+            conn.execute("""
+                INSERT INTO checkpoint_question_note
+                    (checkpoint_id, question_index, admin_id, note, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT (checkpoint_id, question_index, admin_id)
+                DO UPDATE SET note = excluded.note, updated_at = excluded.updated_at
+            """, (checkpoint_id, question_index, admin_id, note, now_local()))
+        else:
+            conn.execute("""
+                DELETE FROM checkpoint_question_note
+                WHERE checkpoint_id = ? AND question_index = ? AND admin_id = ?
+            """, (checkpoint_id, question_index, admin_id))
+
+
+def get_checkpoint_question_notes(admin_id):
+    """{(checkpoint_id, question_index): note} -- this teacher's notes only."""
+    with db_session() as conn:
+        rows = conn.execute("""
+            SELECT checkpoint_id, question_index, note FROM checkpoint_question_note
+            WHERE admin_id = ?
+        """, (admin_id,)).fetchall()
+        return {(r['checkpoint_id'], r['question_index']): r['note'] for r in rows}
 
 
 def mark_checkpoint_flags_retried(flag_ids):

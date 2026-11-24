@@ -164,7 +164,10 @@
            already folded row, so on an unreported question it was easy to miss. #}
         <div class="cq-sub cq-flag-form">
             <p class="cq-flag-head">🛠️ Diese Frage bemängeln</p>
-            <form method="POST"
+            <form method="POST" class="cq-flag-note-form"
+                  data-note-url="{{ url_for('admin_checkpoint_question_note',
+                                            checkpoint_id=q.checkpoint_id,
+                                            question_index=q.question_index) }}"
                   action="{{ url_for('admin_checkpoint_flag_question',
                                      checkpoint_id=q.checkpoint_id,
                                      question_index=q.question_index) }}">
@@ -175,8 +178,12 @@
                     pro Sitzung repariert, damit keine längst fertige Bewertung
                     stillschweigend umgeschrieben wird.
                 </p>
-                <input type="text" name="reason_text" class="form-control"
-                       placeholder="Was stimmt nicht? (optional, für die spätere Überarbeitung)">
+                {% set my_note = my_question_notes.get((q.checkpoint_id, q.question_index)) %}
+                <input type="text" name="reason_text" class="form-control autosave-note"
+                       placeholder="Was stimmt nicht? (speichert sich selbst, nur du siehst es)"
+                       value="{{ my_note or '' }}">
+                <small class="autosave-status text-muted" aria-live="polite">
+                    {% if my_note %}✓ Notiz gespeichert{% endif %}</small>
                 <div class="flex gap-1 mt-1" style="flex-wrap: wrap;">
                     {% for code, label in teacher_verdicts.items() %}
                     <button type="submit" name="status" value="{{ code }}"

@@ -500,3 +500,28 @@ def test_admin_creates_teacher_who_then_sees_her_class(app, monkeypatch):
     login = app.test_client().post('/login', data={'username': 'kollegin', 'password': password},
                                    follow_redirects=True)
     assert 'deaktiviert' in login.get_data(as_text=True)
+
+
+def test_question_note_autosaves_per_teacher(own):
+    """Fragen view: a teacher's note on a question is saved without a verdict, is
+    hers alone, and moves into the mark when she clicks one."""
+    client, mine = own
+    cp = models.get_checkpoint_reviews(student_id=mine['student_id'])[0]['checkpoint_id']
+    resp = client.post(f'/admin/checkpoint-pruefung/frage/{cp}/0/notiz',
+                       data={'reason_text': ' Bild unscharf '})
+    assert resp.get_json() == {'ok': True}
+    html = client.get('/admin/checkpoint-pruefung?ansicht=fragen').get_data(as_text=True)
+    assert 'value="Bild unscharf"' in html
+
+    admin = flask_app.test_client()
+    with admin.session_transaction() as sess:
+        sess["admin_id"] = 1
+    html = admin.get('/admin/checkpoint-pruefung?ansicht=fragen').get_data(as_text=True)
+    assert 'Bild unscharf' not in html          # another account's note stays hers
+
+    status = next(iter(models.CHECKPOINT_FLAG_TEACHER_VERDICTS))
+    client.post(f'/admin/checkpoint-pruefung/frage/{cp}/0/markieren',
+                data={'status': status, 'reason_text': 'Bild unscharf'})
+    teacher_id = models.verify_admin("lehrerin", "testpass")['id']
+    assert models.get_checkpoint_question_notes(teacher_id) == {}
+    assert any(f['reason_text'] == 'Bild unscharf' for f in models.get_checkpoint_flags())

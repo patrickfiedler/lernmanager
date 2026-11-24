@@ -4028,6 +4028,8 @@ def admin_checkpoint_pruefung():
                            flag_reasons=models.CHECKPOINT_FLAG_REASONS,
                            flag_resolutions=models.CHECKPOINT_FLAG_RESOLUTIONS,
                            teacher_verdicts=models.CHECKPOINT_FLAG_TEACHER_VERDICTS,
+                           my_question_notes=models.get_checkpoint_question_notes(
+                               session['admin_id']),
                            flagged_session_count=sum(1 for s in sessions
                                                      if s['open_flag_count']),
                            resettable_count=sum(1 for s in sessions
@@ -4439,6 +4441,19 @@ def admin_checkpoint_flag_note(flag_id):
     return jsonify({'ok': True})
 
 
+@app.route('/admin/checkpoint-pruefung/frage/<int:checkpoint_id>/<int:question_index>/notiz',
+           methods=['POST'])
+@staff_required
+def admin_checkpoint_question_note(checkpoint_id, question_index):
+    """Autosave the teacher's own note on a question (Fragen view), before or
+    without any verdict. Per teacher: models.set_checkpoint_question_note."""
+    permissions.require_checkpoint_question(checkpoint_id)
+    note = (request.form.get('reason_text') or '').strip()
+    models.set_checkpoint_question_note(checkpoint_id, question_index,
+                                        session['admin_id'], note)
+    return jsonify({'ok': True})
+
+
 # Keyed on every value of CHECKPOINT_FLAG_RESOLUTIONS -- a verdict added to the dict
 # without a line here used to KeyError the route rather than the import.
 _FLAG_VERDICT_FLASH = {
@@ -4494,6 +4509,10 @@ def admin_checkpoint_flag_question(checkpoint_id, question_index):
         flash('Unbekanntes Urteil.', 'danger')
         return redirect(request.referrer or url_for('admin_checkpoint_pruefung'))
 
+    # The draft note now lives in the mark; leaving it would prefill the field
+    # again and the next verdict would repeat it.
+    models.set_checkpoint_question_note(checkpoint_id, question_index,
+                                        session['admin_id'], '')
     models.create_checkpoint_flag(
         checkpoint_id=checkpoint_id, question_index=question_index,
         source='teacher', status=status,
