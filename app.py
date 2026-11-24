@@ -3847,7 +3847,7 @@ def _build_unfinished_sittings(sittings):
 
 def _build_checkpoint_sessions(attempts):
     """Assemble the review UI's display model: each checkpoint session with its
-    per-question answer log, duplicate flags and a suggested score."""
+    per-question answer log and duplicate flags."""
     answers_by_attempt = models.get_checkpoint_answers_for_attempts(
         [a['id'] for a in attempts]
     )
@@ -3952,15 +3952,6 @@ def _build_checkpoint_sessions(attempts):
             _mark_question_routine(entry)
 
         has_duplicates = any(entry['duplicate_ids'] for entry in review)
-        # The score the session would have had if no duplicate had been counted.
-        # min() across questions, exactly as the live scoring does -- reported
-        # questions left out, exactly as _score_checkpoint_session leaves them out.
-        clean_scores = [entry['scored_without_duplicates'] for entry in review
-                        if entry['scored_without_duplicates'] is not None]
-        if clean_scores:
-            suggested = min(clean_scores)
-        else:
-            suggested = 0 if review else attempt['score']
 
         sessions.append({
             'attempt': attempt,
@@ -3969,14 +3960,6 @@ def _build_checkpoint_sessions(attempts):
             'open_flag_count': len(open_flags),
             'flag_count': sum(len(rows) for rows in flags.values()),
             'score_provisional': attempt['id'] in provisional_ids,
-            # Only offer a correction when it would actually change something and
-            # the teacher has not already decided -- a suggestion that repeats the
-            # current score is noise.
-            'suggested_score': (suggested
-                                if has_duplicates
-                                and suggested != attempt['score']
-                                and attempt.get('teacher_score') is None
-                                else None),
             'answer_count': len(answers),
         })
     return sessions
@@ -4059,44 +4042,33 @@ def admin_checkpoint_pruefung():
 @app.route('/admin/checkpoint-pruefung/<int:attempt_id>/bewerten', methods=['POST'])
 @staff_required
 def admin_checkpoint_review_save(attempt_id):
-    """Save one checkpoint review: the grade, the private reason, the student note.
+    """Save one checkpoint review: the student note and the review mark.
 
-    Three separate things land here, and only the first two are the teacher's own
-    record -- `student_feedback` is published to the student (migrate_049), so it is
-    kept apart from `teacher_note` all the way down rather than merged into one
-    "notes" concept in the route.
+    The page no longer sets a session score (2026-11-24): the points per question
+    are the grade. An override and its private reason from before that are carried
+    over unchanged on Speichern; "Prüfung zurücknehmen" clears them with the rest.
+
+    `student_feedback` is published to the student (migrate_049), so it is kept
+    apart from `teacher_note` all the way down.
 
     `reviewed` comes from which submit button was pressed: "Speichern" marks the
     session checked (that is the point -- a student is shown that it happened),
     "Prüfung zurücknehmen" clears it back to unreviewed.
     """
     permissions.require_checkpoint('attempt', attempt_id)
-    raw_score = request.form.get('teacher_score', '')
-    note = (request.form.get('teacher_note') or '').strip()
+    attempt = models.get_checkpoint_attempt(attempt_id)
     student_feedback = (request.form.get('student_feedback') or '').strip()
     reviewed = request.form.get('reviewed', '1') != '0'
 
-    if raw_score == '':
-        teacher_score = None          # clears the override, back to the computed score
+    if reviewed:
+        teacher_score, note = attempt.get('teacher_score'), attempt.get('teacher_note')
     else:
-        try:
-            teacher_score = int(raw_score)
-        except ValueError:
-            flash('Ungültige Punktzahl.', 'danger')
-            return redirect(request.referrer or url_for('admin_checkpoint_pruefung'))
-        if teacher_score not in (0, 2, 3):
-            # The scale is a strict three-value category (chemie-data-contract.md
-            # §3a), not a range -- a 1 here would silently break the Kern-Sperre.
-            flash('Punktzahl muss 0, 2 oder 3 sein.', 'danger')
-            return redirect(request.referrer or url_for('admin_checkpoint_pruefung'))
-
-    if not reviewed:
         teacher_score, note, student_feedback = None, '', ''
 
     models.set_checkpoint_teacher_review(attempt_id, teacher_score, note,
                                          student_feedback, session['admin_id'],
                                          reviewed=reviewed)
-    flash('Prüfung zurückgenommen.' if not reviewed else 'Bewertung gespeichert.', 'success')
+    flash('Prüfung zurückgenommen.' if not reviewed else 'Prüfung gespeichert.', 'success')
     return redirect(request.referrer or url_for('admin_checkpoint_pruefung'))
 
 

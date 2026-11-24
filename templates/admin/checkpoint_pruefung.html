@@ -496,37 +496,16 @@
               class="checkpoint-col-grade">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
-            <p class="checkpoint-zone-head checkpoint-zone-head-grade">
-                ⭐ Checkpoint-Bewertung
-                <span>mindestens 2 Punkte werden benötigt</span>
-            </p>
-
-            {% set current = attempt.teacher_score if attempt.teacher_score is not none else entry.suggested_score %}
-            <div class="checkpoint-score-options">
-                {% for value in [0, 2, 3] %}
-                <label class="checkpoint-score-option">
-                    <input type="radio" name="teacher_score" value="{{ value }}"
-                           {{ 'checked' if current == value }}>
-                    <span>{{ value }} Punkte</span>
-                </label>
-                {% endfor %}
-                <label class="checkpoint-score-option">
-                    <input type="radio" name="teacher_score" value="" {{ 'checked' if current is none }}>
-                    <span title="Keine Korrektur — es gilt die berechnete Punktzahl">automatisch ({{ attempt.score }})</span>
-                </label>
-            </div>
-
-            <label class="checkpoint-field">
-                <span>Begründung <em>(nur für dich)</em></span>
-                <input type="text" name="teacher_note" class="form-control"
-                       placeholder="Warum diese Korrektur?"
-                       value="{{ attempt.teacher_note or '' }}">
-            </label>
-
-            {% if entry.suggested_score is not none %}
-            <p class="checkpoint-suggestion">
-                Vorschlag: {{ entry.suggested_score }} statt {{ attempt.score }} — ein Versuch sieht nach
-                Doppelklick aus. Nicht gespeichert, bis du auf Speichern klickst.
+            {# No session score input any more: the points per question are the grade.
+               An override set before that stays in force and is shown here, so it
+               does not act invisibly; "Prüfung zurücknehmen" clears it. #}
+            {% if attempt.teacher_score is not none or attempt.teacher_note %}
+            <p class="checkpoint-legacy-override">
+                {% if attempt.teacher_score is not none %}
+                Früher von Hand gesetzt: <strong>{{ attempt.teacher_score }}/3</strong> statt
+                {{ attempt.score }}/3 -- gilt weiter vor den Fragenpunkten.
+                {% endif %}
+                {% if attempt.teacher_note %}Notiz: {{ attempt.teacher_note }}{% endif %}
             </p>
             {% endif %}
 
@@ -691,23 +670,19 @@
                         font-weight: 700; font-size: 0.9rem; padding: 0.4rem 0.6rem; border-radius: 4px; }
 .checkpoint-zone-head span { font-weight: 400; font-size: 0.78rem; }
 .checkpoint-zone-head-calib { background: #f3f4f6; color: #4b5563; border-left: 4px solid #9ca3af; }
-.checkpoint-zone-head-grade { background: #eff6ff; color: #1e40af; border-left: 4px solid #2563eb; }
-.checkpoint-zone-head-student { background: #f0fdf4; color: #166534; border-left: 4px solid #16a34a;
-                                margin-top: 1rem; }
+.checkpoint-zone-head-student { background: #f0fdf4; color: #166534; border-left: 4px solid #16a34a; }
 
-/* The grade panel follows the answers: on a long session the teacher is reading
-   the last question while the score radios would otherwise be scrolled away. */
+/* The review panel follows the answers: on a long session the teacher is reading
+   the last question while Rückmeldung + Speichern would otherwise be scrolled away. */
 .checkpoint-col-grade { position: sticky; top: 1rem; border: 2px solid #2563eb; border-radius: 6px;
                         padding: 0.75rem; background: #fff; }
-.checkpoint-score-options { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 0.75rem; }
-.checkpoint-score-option { display: flex; gap: 0.4rem; align-items: center; }
 .checkpoint-field { display: block; margin-bottom: 0.5rem; font-size: 0.82rem; }
 .checkpoint-field > span { display: block; margin-bottom: 0.2rem; color: #4b5563; }
 .checkpoint-field em { color: #6b7280; font-style: normal; }
 .checkpoint-field .form-control { width: 100%; max-width: none; }
 .checkpoint-save-row { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.6rem; }
 .checkpoint-review-hint { font-size: 0.78rem; color: #6b7280; margin: 0.4rem 0 0; }
-.checkpoint-suggestion { font-size: 0.8rem; color: #92400e; margin: 0 0 0.5rem; }
+.checkpoint-legacy-override { font-size: 0.8rem; color: #92400e; margin: 0 0 0.75rem; }
 
 @media (max-width: 900px) {
     .checkpoint-split { grid-template-columns: minmax(0, 1fr); }
@@ -721,8 +696,8 @@
 {% block scripts %}
 // Per-answer verdicts and notes save individually via AJAX: a teacher scanning a
 // class clicks a lot of these, and a full page reload per click would lose their
-// place in a long list. The session score below stays a normal form POST -- it is
-// the grade, so it gets an explicit Speichern.
+// place in a long list. Rückmeldung + Prüfvermerk below stay a normal form POST --
+// the student sees them, so they get an explicit Speichern.
 //
 // The note field autosaves on `change` (i.e. on blur, and only when the text
 // actually changed). Before this it was only ever read during a verdict click, so

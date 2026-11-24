@@ -210,14 +210,37 @@ def test_student_feedback_is_stored_separately_from_the_private_note(checkpoint_
     assert row["student_feedback"] == "Gut gelöst, ich habe den Punkt ergänzt."
 
 
-def test_route_rejects_a_score_outside_the_scale(as_admin, checkpoint_data):
-    """0/2/3 is a strict three-value category, not a range -- a 1 would silently
-    break the Kern-Sperre's `score >= 2` gate."""
+def test_saving_a_review_sets_no_session_score(as_admin, checkpoint_data):
+    """The points per question are the grade (2026-11-24): the form has no score
+    field any more, and a posted one is ignored."""
     attempt_id = _log_session(checkpoint_data, [{"question_index": 0}], score=2)
 
     as_admin.post(f"/admin/checkpoint-pruefung/{attempt_id}/bewerten",
-                  data={"teacher_score": "1", "teacher_note": ""})
+                  data={"teacher_score": "3", "student_feedback": "Gut."})
 
+    row = models.get_checkpoint_reviews()[0]
+    assert row["teacher_score"] is None
+    assert row["student_feedback"] == "Gut."
+    assert row["reviewed_at"] is not None
+
+
+def test_saving_a_review_keeps_an_older_override(as_admin, checkpoint_data):
+    """An override from before stays in force: Speichern must not wipe it just
+    because the form no longer carries it. Only "Prüfung zurücknehmen" clears it."""
+    attempt_id = _log_session(checkpoint_data, [{"question_index": 0}], score=2)
+    models.set_checkpoint_teacher_review(attempt_id, 3, "Doppelklick", "", 1)
+
+    body = as_admin.get("/admin/checkpoint-pruefung").get_data(as_text=True)
+    assert "Früher von Hand gesetzt" in body
+    assert 'name="teacher_score"' not in body
+
+    as_admin.post(f"/admin/checkpoint-pruefung/{attempt_id}/bewerten",
+                  data={"student_feedback": "Neu."})
+    row = models.get_checkpoint_reviews()[0]
+    assert (row["teacher_score"], row["teacher_note"]) == (3, "Doppelklick")
+
+    as_admin.post(f"/admin/checkpoint-pruefung/{attempt_id}/bewerten",
+                  data={"reviewed": "0"})
     assert models.get_checkpoint_reviews()[0]["teacher_score"] is None
 
 
@@ -337,23 +360,6 @@ def test_a_genuine_retry_is_not_flagged(checkpoint_data):
 
     assert review[0]["duplicate_ids"] == set()
     assert review[0]["scored_without_duplicates"] == 2
-
-
-def test_suggested_score_is_offered_but_not_applied(checkpoint_data):
-    """Detection never edits a grade on its own -- it only pre-fills a suggestion
-    the teacher has to confirm."""
-    attempt_id = _log_session(checkpoint_data, [
-        {"question_index": 0, "attempt_no": 1, "correct": True, "answer_text": "Gleiche Antwort"},
-        {"question_index": 0, "attempt_no": 2, "correct": True, "answer_text": "Gleiche Antwort"},
-    ], score=2)
-
-    sessions = app_module._build_checkpoint_sessions(models.get_checkpoint_reviews())
-
-    assert sessions[0]["has_duplicates"] is True
-    assert sessions[0]["suggested_score"] == 3
-    # Nothing written until the teacher posts the form.
-    assert models.get_checkpoint_reviews()[0]["teacher_score"] is None
-    assert models.get_checkpoint_reviews()[0]["effective_score"] == 2
 
 
 def test_identical_answers_outside_the_window_are_not_flagged(checkpoint_data):
