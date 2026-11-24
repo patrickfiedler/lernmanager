@@ -4,7 +4,7 @@
 #
 # This script updates an existing Lernmanager installation by pulling
 # the latest code from GitHub and restarting the service. It automatically
-# rolls back if the service fails to start.
+# rolls back if a migration fails or the service fails to start.
 #
 # Usage:
 #   sudo ./update.sh                          # Run locally on server
@@ -282,8 +282,11 @@ main() {
         echo ""
         MIGRATIONS_RUN=true
 
-        # Run only pending migrations
-        MIGRATION_ERRORS=0
+        # Run only pending migrations, in order. The first failure stops the deploy:
+        # restarting would put the new code on a database it does not match (it
+        # used to log the error and restart anyway; the service came up fine, so
+        # the rollback below never fired, and the pages that need the new schema
+        # failed). Later migrations are skipped too -- they may build on this one.
         for migration in "${PENDING_MIGRATIONS[@]}"; do
             MIGRATION_NAME=$(basename "$migration")
             log_info "Executing: $MIGRATION_NAME"
@@ -295,19 +298,14 @@ main() {
                 log_info "✓ $MIGRATION_NAME completed"
                 echo "$MIGRATION_NAME" >> "$MIGRATIONS_DONE_FILE"
             else
-                log_error "✗ $MIGRATION_NAME failed"
-                MIGRATION_ERRORS=$((MIGRATION_ERRORS + 1))
+                log_error "✗ $MIGRATION_NAME failed -- output above"
+                log_error "Remaining migrations skipped; going back to the previous code."
+                log_error "Migrations that completed before it stay applied and recorded."
+                rollback
             fi
             echo ""
         done
-
-        if [ $MIGRATION_ERRORS -gt 0 ]; then
-            log_error "$MIGRATION_ERRORS migration(s) failed"
-            log_error "Check the output above for details"
-            log_error "You may need to run migrations manually"
-        else
-            log_info "All migrations completed successfully"
-        fi
+        log_info "All migrations completed successfully"
     else
         log_info "No pending migrations"
     fi
