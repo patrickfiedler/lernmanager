@@ -26,9 +26,9 @@ def _post(client, url, **data):
 
 QUIZ = {
     "questions": [
-        {"text": "Frage eins", "options": ["richtig", "falsch"], "correct": [0]},
-        {"text": "Frage zwei", "options": ["richtig", "falsch"], "correct": [0]},
-        {"text": "Frage drei", "options": ["richtig", "falsch"], "correct": [0]},
+        {"id": "f1", "text": "Frage eins", "options": ["richtig", "falsch"], "correct": [0]},
+        {"id": "f2", "text": "Frage zwei", "options": ["richtig", "falsch"], "correct": [0]},
+        {"id": "f3", "text": "Frage drei", "options": ["richtig", "falsch"], "correct": [0]},
     ]
 }
 
@@ -84,7 +84,7 @@ def test_teacher_flag_is_about_the_question_not_a_student(as_admin):
                                reason_text="Die Aufgabe erklärt das nicht")
     assert resp.status_code == 302
 
-    flag = _flags(checkpoint_id=subtask_id, question_index=1)[0]
+    flag = _flags(checkpoint_id=subtask_id, question_id="f2")[0]
     assert flag["source"] == "teacher"
     assert flag["student_id"] is None          # a claim about the question, about nobody
     assert flag["status"] == "design_fehlerhaft"   # the verdict is immediate, not 'offen'
@@ -155,7 +155,7 @@ def test_redo_closes_a_teacher_flag_too(as_admin):
 
     models.mark_checkpoint_flags_retried([flag_id])
     assert models.get_flags_for_retry(student_id, subtask_id) == []
-    assert _flags(checkpoint_id=subtask_id, question_index=2)[0]["status"] == "nachgeholt"
+    assert _flags(checkpoint_id=subtask_id, question_id="f3")[0]["status"] == "nachgeholt"
 
 
 # --- repair 2: set one question's score by hand -----------------------------

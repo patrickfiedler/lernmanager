@@ -3859,11 +3859,10 @@ def _build_checkpoint_sessions(attempts):
     answers_by_attempt = models.get_checkpoint_answers_for_attempts(
         [a['id'] for a in attempts]
     )
-    flags_by_attempt = {}
+    flags_of_attempt = {}
     for flag in models.get_checkpoint_flags(attempt_ids=[a['id'] for a in attempts],
                                             limit=2000):
-        flags_by_attempt.setdefault(flag['checkpoint_attempt_id'], {}) \
-                        .setdefault(flag['question_index'], []).append(flag)
+        flags_of_attempt.setdefault(flag['checkpoint_attempt_id'], []).append(flag)
     # How many students reported each question, across the whole class -- the number
     # that says whether the question or the student is the problem.
     checkpoint_ids = {a['checkpoint_id'] for a in attempts}
@@ -3885,13 +3884,16 @@ def _build_checkpoint_sessions(attempts):
         for flag in models.get_checkpoint_flags(checkpoint_id=checkpoint_id):
             if flag['checkpoint_attempt_id'] is None and flag['student_id'] is None:
                 question_flags.setdefault(
-                    (checkpoint_id, flag['question_index']), []).append(flag)
+                    (checkpoint_id, flag['question_id']), []).append(flag)
 
     sessions = []
     for attempt in attempts:
         answers = answers_by_attempt.get(attempt['id'], [])
         questions = _checkpoint_snapshot_questions(attempt)
-        flags = flags_by_attempt.get(attempt['id'], {})
+        # Positions in this sitting's snapshot -- the frame its answers and scores use.
+        flags = {}
+        for flag in models.reframe_rows(flags_of_attempt.get(attempt['id'], []), questions):
+            flags.setdefault(flag['question_index'], []).append(flag)
         # Only reports still awaiting a decision take the question out of the score.
         # Once ruled on, the verdict decides: 'abgelehnt' puts it back on the
         # student (they redo it), the other two leave it out for good.
@@ -3917,18 +3919,18 @@ def _build_checkpoint_sessions(attempts):
                 entry['scored_teacher'] = manual_scores[str(entry['question_index'])]
                 entry['scored'] = entry['scored_teacher']
                 entry['scored_without_duplicates'] = entry['scored']
+            question_id = models.question_id_at(questions, entry['question_index'])
+            entry['question_id'] = question_id
             entry['flags'] = (flags.get(entry['question_index'], [])
-                              + question_flags.get((attempt['checkpoint_id'],
-                                                    entry['question_index']), []))
-            exclusion = excluded_questions.get(attempt['checkpoint_id'], {}).get(
-                entry['question_index'])
+                              + question_flags.get((attempt['checkpoint_id'], question_id), []))
+            exclusion = excluded_questions.get(attempt['checkpoint_id'], {}).get(question_id)
             entry['excluded'] = exclusion is not None
             entry['excluded_reason'] = (
                 None if exclusion is None else
                 'ausgeschaltet' if 'created_at' in exclusion   # a checkpoint_question_exclusion row
                 else models.QUESTION_REMOVED)
             entry['flag_class_count'] = open_by_question.get(
-                (attempt['checkpoint_id'], entry['question_index']), 0)
+                (attempt['checkpoint_id'], question_id), 0)
             question = (questions[entry['question_index']]
                         if entry['question_index'] < len(questions) else None)
             entry['question_text'] = question.get('text') if question else None
@@ -3999,7 +4001,8 @@ def admin_checkpoint_pruefung():
     # queries: the question view can then never disagree with the session view about
     # a score, a flag or a duplicate. Built unconditionally because the tab has to
     # show its count either way, and it is pure aggregation over data already loaded.
-    questions = checkpoint_questions.build_question_view(sessions)
+    questions = checkpoint_questions.build_question_view(
+        sessions, _current_question_ids({s['attempt']['checkpoint_id'] for s in sessions}))
 
     unfinished = _build_unfinished_sittings(models.get_unfinished_checkpoint_sittings(
         **{key: filters[key] for key in ('klasse_id', 'student_id', 'checkpoint_id',
@@ -4303,6 +4306,16 @@ def admin_checkpoint_correct_double_clicks():
 BULK_SCORE_VALUES = {'': None}
 
 
+def _current_question_ids(checkpoint_ids):
+    """{checkpoint_id: [question id, ...]} of today's quizzes."""
+    out = {}
+    for checkpoint_id in checkpoint_ids:
+        subtask = models.get_subtask(checkpoint_id)
+        if subtask:
+            out[checkpoint_id] = [q.get('id') for q in models.quiz_questions(subtask['quiz_json'])]
+    return out
+
+
 def _bulk_question_score_plan(filters, checkpoint_id, question_index, score,
                               include_reviewed):
     """Re-derive the batch selection from the posted filters. Server-side, always:
@@ -4310,8 +4323,11 @@ def _bulk_question_score_plan(filters, checkpoint_id, question_index, score,
     stale form nor a tampered one can name a session outside it."""
     filters['include_superseded'] = False
     sessions = _build_checkpoint_sessions(models.get_checkpoint_reviews(**filters))
+    # question_index: position in today's quiz (the Fragen tab's rows).
+    today = _current_question_ids([checkpoint_id]).get(checkpoint_id, [])
+    question_id = today[question_index] if 0 <= question_index < len(today) else None
     return checkpoint_questions.plan_bulk_score(
-        sessions, checkpoint_id, question_index, score,
+        sessions, checkpoint_id, question_id, score,
         consolidate=_consolidate_question_scores,
         include_reviewed=include_reviewed)
 
@@ -4390,7 +4406,7 @@ def admin_checkpoint_bulk_question_score(checkpoint_id, question_index):
         # the question as hand-set (the ✋ badge), and the analytics event carries
         # `via` so a batch run can be told from a single click afterwards.
         _score, counted = _set_checkpoint_question_score(
-            attempt, question_index, BULK_SCORE_VALUES[raw], via='sammelkorrektur')
+            attempt, row['question_index'], BULK_SCORE_VALUES[raw], via='sammelkorrektur')
         if not counted:
             emptied += 1
 
@@ -4477,8 +4493,11 @@ _FLAG_VERDICT_FLASH = {
 }
 
 
-def _checkpoint_question_wording(checkpoint_id, question_index):
+def _checkpoint_question_wording(checkpoint_id, question_index, question_id=None):
     """The question as it reads RIGHT NOW, for pinning onto a flag.
+
+    question_index is a position in today's quiz; pass question_id instead when the
+    caller's position belongs to a sitting's snapshot.
 
     Deliberately the live subtask.quiz_json and not the session's snapshot: a
     teacher flagging a question is about to rewrite that question, and the record
@@ -4491,7 +4510,9 @@ def _checkpoint_question_wording(checkpoint_id, question_index):
         questions = json.loads(subtask['quiz_json']).get('questions', [])
     except (ValueError, AttributeError):
         return None
-    if 0 <= question_index < len(questions):
+    if question_id is not None:
+        question_index = models.question_position(questions, question_id)
+    if question_index is not None and 0 <= question_index < len(questions):
         return questions[question_index].get('text')
     return None
 
@@ -4564,11 +4585,11 @@ def admin_checkpoint_uebersicht():
         checkpoints = [{
             'id': s['id'], 'titel': aufgabe_titel(s['beschreibung']),
             'kern': s.get('kern_standard_tag') == 'kern',
-            'questions': [q.get('text', '') for q in
-                          json.loads(s['quiz_json']).get('questions', [])],
+            'questions': [q.get('text', '') for q in models.quiz_questions(s['quiz_json'])],
+            'question_ids': [q.get('id') for q in models.quiz_questions(s['quiz_json'])],
         } for s in subtasks]
-        scores = {a['id']: json.loads(a['question_scores_json'])
-                  for a in attempts.values() if a.get('question_scores_json')}
+        scores = {a['id']: models.attempt_scores_by_id(a) for a in attempts.values()
+                  if a.get('question_scores_json')}
         overview = checkpoint_overview.build_overview(
             students, checkpoints, attempts, scores, excluded, pending)
 
@@ -4606,7 +4627,8 @@ def admin_checkpoint_question_exclusion(checkpoint_id, question_index):
                    'Die gespeicherten Punkte bleiben erhalten.')
         total = len(json.loads(models.get_subtask(checkpoint_id)['quiz_json'])
                     .get('questions', []))
-        if len(models.get_excluded_questions([checkpoint_id]).get(checkpoint_id, {})) >= total:
+        out = models.get_excluded_questions([checkpoint_id])[checkpoint_id]
+        if all(out.at(i) for i in range(total)):
             # Same floor as everywhere else: nothing left to take a min() over is 0.
             message += (' Achtung: In diesem Checkpoint zählt jetzt keine Frage mehr — '
                         'die Sitzungs-Punktzahl steht damit bei allen auf 0.')
@@ -4638,8 +4660,14 @@ def admin_checkpoint_question_retry(attempt_id, question_index):
               'ganzen Checkpoint neu.', 'warning')
         return redirect(request.referrer or url_for('admin_checkpoint_pruefung'))
 
+    # question_index is a position in this sitting's snapshot (the review page).
+    question_id = models.question_id_at(
+        models.quiz_questions(attempt.get('quiz_snapshot_json')), question_index)
+    if question_id is None:
+        flash('Diese Frage gibt es in der Sitzung nicht.', 'danger')
+        return redirect(request.referrer or url_for('admin_checkpoint_pruefung'))
     existing = models.get_checkpoint_flags(
-        checkpoint_id=attempt['checkpoint_id'], question_index=question_index,
+        checkpoint_id=attempt['checkpoint_id'], question_id=question_id,
         student_id=attempt['student_id'], statuses=('nachbesserung',))
     if existing:
         flash(f'Frage {question_index + 1} ist bei diesem Schüler schon zur '
@@ -4653,10 +4681,10 @@ def admin_checkpoint_question_retry(attempt_id, question_index):
         # the review page (which groups by attempt) and to
         # checkpoint_score_is_provisional, so the score would read as final while a
         # question is still outstanding.
-        checkpoint_attempt_id=attempt['id'],
+        checkpoint_attempt_id=attempt['id'], question_id=question_id,
         reason_text=(request.form.get('reason_text') or '').strip(),
-        question_text_at_flag=_checkpoint_question_wording(attempt['checkpoint_id'],
-                                                           question_index),
+        question_text_at_flag=_checkpoint_question_wording(
+            attempt['checkpoint_id'], None, question_id=question_id),
         resolved_by=session['admin_id'])
     flash(f'Frage {question_index + 1} geht zurück an den Schüler — sie wird beim '
           'nächsten Öffnen des Checkpoints gestellt, ohne Punktabzug fürs Nachholen.',
@@ -4814,6 +4842,7 @@ def _checkpoint_export_rows(sessions):
                     'checkpoint_type': attempt['checkpoint_type'],
                     'kern_standard': attempt['kern_standard_tag'],
                     'frage_nr': question['question_index'] + 1,
+                    'frage_id': question.get('question_id'),
                     'frage_typ': question['question_type'],
                     'frage': question['question_text'],
                     'bewertungskriterien': question['rubric'],
@@ -4844,6 +4873,7 @@ def _checkpoint_export_rows(sessions):
                     'checkpoint_type': attempt['checkpoint_type'],
                     'kern_standard': attempt['kern_standard_tag'],
                     'frage_nr': question['question_index'] + 1,
+                    'frage_id': question.get('question_id'),
                     'frage_typ': question['question_type'],
                     'frage': question['question_text'],
                     'bewertungskriterien': question['rubric'],
@@ -5002,7 +5032,10 @@ def admin_checkpoint_export_json():
             # downstream reads a provisional number as a grade.
             'score_vorlaeufig': entry['score_provisional'],
             'fragen': [{
+                # nr = position in THIS sitting (its version of the quiz); id = the
+                # question across versions -- the one to group or sum by.
                 'nr': question['question_index'] + 1,
+                'id': question.get('question_id'),
                 'typ': question['question_type'],
                 'frage': question['question_text'],
                 'bewertungskriterien': question['rubric'],
@@ -7166,7 +7199,8 @@ def _checkpoint_review(subtask, attempt):
                     key=lambda a: (a['timestamp'], a['id'])):
         by_question.setdefault(a['question_index'], []).append(a)
     flags = {}
-    for f in models.get_checkpoint_flags(attempt_ids=[attempt['id']]):
+    for f in models.reframe_rows(models.get_checkpoint_flags(attempt_ids=[attempt['id']]),
+                                 questions):
         flags.setdefault(f['question_index'], f)   # newest first -> keep the newest
     capped = {f['question_index'] for f in flags.values() if f['status'] == 'nachgeholt'
               and f.get('source') != 'teacher'}
@@ -7186,7 +7220,7 @@ def _checkpoint_review(subtask, attempt):
             'points': score,
             'why': (None if scores is None else
                     _checkpoint_question_points_text(None, False, answers, None, False)
-                    if index in excluded else
+                    if question.get('id') in excluded else
                     _checkpoint_question_points_text(score, key in manual, answers,
                                                      flags.get(index), index in capped)),
             'final_answer': next((_checkpoint_answer_display(question, a['answer_text'])
@@ -7240,7 +7274,9 @@ def _handle_checkpoint_quiz(student, task, slug, subtask, position, klasse):
     # teacher reset there is nothing to rescore, so the checkpoint is simply taken
     # again from the top and the reports are closed on the way out.
     standing_attempt = models.get_latest_checkpoint_attempt(student['id'], subtask['id'])
-    retry_flags = (models.get_flags_for_retry(student['id'], subtask['id'])
+    # Positions in today's quiz: that is what the student answers now.
+    retry_flags = (models.reframe_rows(models.get_flags_for_retry(student['id'], subtask['id']),
+                                       models.quiz_questions(subtask['quiz_json']))
                    if standing_attempt else [])
 
     # Finished and nothing owed: look, don't retake (Patrick, 2026-09-16). "Ansehen"
@@ -7319,7 +7355,8 @@ def _handle_checkpoint_quiz(student, task, slug, subtask, position, klasse):
         was: old answer above the field, the hint under it, the field to revise."""
         if not _adaptive_hint_allowed(question):
             return None
-        row = models.get_last_checkpoint_answer(progress['session_uid'], index)
+        row = models.get_last_checkpoint_answer(progress['session_uid'], index,
+                                                question.get('id'))
         if not row or row['correct'] != 0:
             return None
         return {'answer_id': row['id'], 'answer_text': row['answer_text'],
@@ -7539,7 +7576,8 @@ def student_checkpoint_answer():
     # answer to compare against. Checked here rather than filtered out in the query:
     # skipping such a row would compare against an older one instead, and could then
     # suppress exactly the retry the error invited.
-    previous = models.get_last_checkpoint_answer(progress['session_uid'], question_index)
+    previous = models.get_last_checkpoint_answer(progress['session_uid'], question_index,
+                                                 question.get('id'))
     if previous and previous['correct'] is not None and \
             _normalized_answer_text(previous) == _normalized_answer_text(
                 {'answer_text': answer_text}):
@@ -7682,7 +7720,8 @@ def student_checkpoint_ai_hint():
     if progress['flagged'].get(qidx) or progress['solved'].get(qidx):
         return jsonify(no_hint)
 
-    answer = models.get_last_checkpoint_answer(progress['session_uid'], question_index)
+    answer = models.get_last_checkpoint_answer(progress['session_uid'], question_index,
+                                               question.get('id'))
     if not answer or answer['correct'] != 0 or answer['id'] != data.get('answer_id'):
         return jsonify(no_hint)
     if answer['hint_status'] is not None:
@@ -7812,7 +7851,8 @@ def student_checkpoint_flag():
         return jsonify({'error': ('Diesen Grund kannst du erst wählen, wenn du die Frage '
                                   'mindestens einmal beantwortet hast.')}), 400
 
-    if models.get_open_student_flag(student_id, subtask_id, question_index):
+    if models.get_open_student_flag(student_id, subtask_id, question_index,
+                                    question.get('id')):
         return jsonify({'error': 'Du hast diese Frage schon gemeldet.'}), 400
 
     progress['flagged'][qidx] = True
@@ -7895,8 +7935,17 @@ def _finish_checkpoint_retry(student_id, subtask_id, slug, progress, question_re
         # floor -- the redo may lower the score, never invent a higher one.
         scores = {'vorher': attempt['score']}
 
+    # The redo ran on today's quiz; the attempt's scores are keyed by positions in
+    # its own snapshot. Same question = same id, wherever it sits in each.
+    today = models.quiz_questions(models.get_subtask(subtask_id)['quiz_json'])
+    snapshot = models.quiz_questions(attempt.get('quiz_snapshot_json'))
+
+    def sitting_key(index):
+        position = models.question_position(snapshot, models.question_id_at(today, index))
+        return str(index if position is None else position)
+
     scores.update(zip(
-        (str(r['index']) for r in question_results),
+        (sitting_key(r['index']) for r in question_results),
         _checkpoint_question_scores(question_results)
     ))
     score = _consolidate_question_scores(scores)
@@ -7916,7 +7965,8 @@ def _finish_checkpoint_retry(student_id, subtask_id, slug, progress, question_re
     return jsonify({
         'score': score,
         'question_points': _question_points(_counted_scores(
-            {'checkpoint_id': subtask_id, 'question_scores_json': json.dumps(scores)})),
+            {'checkpoint_id': subtask_id, 'question_scores_json': json.dumps(scores),
+             'quiz_snapshot_json': attempt.get('quiz_snapshot_json')})),
         # The cap applies only to a rejected report -- a question the teacher sent
         # back is redone without it, and saying otherwise would be wrong.
         'score_reason': (f'{solved} von {total} nachgeholten Fragen gelöst.'
@@ -8044,7 +8094,8 @@ def student_checkpoint_finish():
         'score': score, 'score_reason': score_reason, 'needs_review': needs_review,
         'flagged_count': flagged_count,
         'question_points': _question_points(_counted_scores(
-            {'checkpoint_id': subtask_id, 'question_scores_json': question_scores})),
+            {'checkpoint_id': subtask_id, 'question_scores_json': question_scores,
+             'quiz_snapshot_json': subtask['quiz_json']})),
         'redirect_url': url_for('student_klasse', slug=slug)
     })
 

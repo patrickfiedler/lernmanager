@@ -353,7 +353,8 @@ def test_only_settled_checkpoint_questions_can_be_practised(db):
     scores["1"] = None            # reported, no score yet
     del scores[str(all_indices[-1])]   # held back, not part of the sitting
     models.create_checkpoint_attempt(student_id, subtask_id, task_id, "quiz", "kern", 3,
-                                     timestamp=LONG_AGO, question_scores_json=json.dumps(scores))
+                                     timestamp=LONG_AGO, question_scores_json=json.dumps(scores),
+                                     quiz_snapshot_json=models.get_subtask(subtask_id)["quiz_json"])
     assert _pool_indices(student_id) == [i for i in all_indices if i not in (1, all_indices[-1])]
 
 
@@ -365,7 +366,8 @@ def test_question_the_teacher_sent_back_leaves_the_practice_pool(db):
     all_indices = list(range(len(MIXED_QUIZ["questions"])))
     attempt_id = models.create_checkpoint_attempt(
         student_id, subtask_id, task_id, "quiz", "kern", 2, timestamp=LONG_AGO,
-        question_scores_json=json.dumps({str(i): 2 for i in all_indices}))
+        question_scores_json=json.dumps({str(i): 2 for i in all_indices}),
+        quiz_snapshot_json=models.get_subtask(subtask_id)["quiz_json"])
     assert _pool_indices(student_id) == all_indices
 
     flag_id = models.create_checkpoint_flag(

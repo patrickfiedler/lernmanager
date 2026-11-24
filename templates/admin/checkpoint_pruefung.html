@@ -380,7 +380,7 @@
                     <a href="{{ url_for('admin_checkpoint_pruefung',
                                         **dict(request.args, ansicht='fragen',
                                                checkpoint_id=attempt.checkpoint_id,
-                                               _anchor='frage-%d-%d' % (attempt.checkpoint_id, question.question_index))) }}">
+                                               _anchor='frage-%s-%s' % (attempt.checkpoint_id, question.question_id or question.question_index))) }}">
                         → in der Fragen-Ansicht bemängeln</a>
                 </p>
 

@@ -21,12 +21,12 @@
 {# Collapsed by default. Open only where there is something to decide: the summary
    line carries every number needed to triage, and a teacher scanning 24 questions
    should not have to scroll past 24 opened rubrics to find the two that matter. #}
-<details id="frage-{{ q.checkpoint_id }}-{{ q.question_index }}"
+<details id="frage-{{ q.checkpoint_id }}-{{ q.question_id or q.question_index }}"
          class="card mb-1 cq-row{{ ' cq-row-quiet' if q.concern_count == 0 }}"
          {{ 'open' if q.open_flag_count or q.concern_rate >= 0.5 }}>
     <summary class="cq-head">
         <span class="cq-title">
-            <strong>Frage {{ q.question_index + 1 }}</strong>
+            <strong>{% if q.question_index is not none %}Frage {{ q.question_index + 1 }}{% else %}Frage (inzwischen gelöscht){% endif %}</strong>
             <span class="text-muted">{{ q.task_name or 'Thema gelöscht' }}
                 · {{ (q.subtask_name|aufgabe_titel|striptags|truncate(40)) if q.subtask_name else 'Aufgabe gelöscht' }}</span>
             {% if q.question_type %}<span class="badge badge-secondary">{{ q.question_type }}</span>{% endif %}
@@ -159,6 +159,8 @@
         </p>
         {% endfor %}
 
+        {# A question deleted since counts for nobody: nothing left to mark or batch. #}
+        {% if q.question_index is not none %}
         {# Teachers too (2026-11-24): the route checks the checkpoint is theirs.
            Open, not folded away (Patrick 2026-11-24): it was a second fold inside an
            already folded row, so on an unreported question it was easy to miss. #}
@@ -178,7 +180,7 @@
                     pro Sitzung repariert, damit keine längst fertige Bewertung
                     stillschweigend umgeschrieben wird.
                 </p>
-                {% set my_note = my_question_notes.get((q.checkpoint_id, q.question_index)) %}
+                        {% set my_note = my_question_notes.get((q.checkpoint_id, q.question_id)) %}
                 <input type="text" name="reason_text" class="form-control autosave-note"
                        placeholder="Was stimmt nicht? (speichert sich selbst, nur du siehst es)"
                        value="{{ my_note or '' }}">
@@ -220,6 +222,8 @@
             🧮 Für eine Sammelkorrektur dieser Frage zuerst nach Klasse, Schüler
             oder Checkpoint filtern.
         </p>
+        {% endif %}
+
         {% endif %}
 
         <p class="cq-jump">

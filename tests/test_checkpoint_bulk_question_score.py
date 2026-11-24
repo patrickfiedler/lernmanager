@@ -24,7 +24,8 @@ WORDING_B = "Beschreibe den Aufbau eines Atoms in eigenen Worten."
 
 
 def _quiz(text):
-    return {"questions": [{"type": "short_answer", "text": text,
+    # Both wordings are one question, reworded: same id (task_plan § Feste Frage-IDs).
+    return {"questions": [{"id": "f1", "type": "short_answer", "text": text,
                            "rubric": "Kern und Hülle."}]}
 
 
@@ -70,7 +71,7 @@ def _plan(data, include_reviewed=False, **filters):
     sessions = app_module._build_checkpoint_sessions(
         models.get_checkpoint_reviews(**filters))
     return checkpoint_questions.plan_bulk_score(
-        sessions, data["subtask_id"], 0, None,
+        sessions, data["subtask_id"], "f1", None,
         consolidate=app_module._consolidate_question_scores,
         include_reviewed=include_reviewed)
 

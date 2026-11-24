@@ -23,9 +23,9 @@ import models
 
 QUIZ = {
     "questions": [
-        {"type": "short_answer", "text": "Erkläre den Aufbau des Atoms.",
+        {"id": "f1", "type": "short_answer", "text": "Erkläre den Aufbau des Atoms.",
          "rubric": "Kern und Hülle."},
-        {"type": "short_answer", "text": "Was ist ein Isotop?",
+        {"id": "f2", "type": "short_answer", "text": "Was ist ein Isotop?",
          "rubric": "Gleiche Protonen, andere Neutronen."},
     ]
 }

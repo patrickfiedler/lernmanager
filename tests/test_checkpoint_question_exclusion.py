@@ -12,9 +12,9 @@ import checkpoint_overview
 import models
 
 QUIZ = {"questions": [
-    {"type": "short_answer", "text": "Frage A", "rubric": "a"},
-    {"type": "short_answer", "text": "Frage B", "rubric": "b"},
-    {"type": "short_answer", "text": "Frage C", "rubric": "c"},
+    {"id": "f1", "type": "short_answer", "text": "Frage A", "rubric": "a"},
+    {"id": "f2", "type": "short_answer", "text": "Frage B", "rubric": "b"},
+    {"id": "f3", "type": "short_answer", "text": "Frage C", "rubric": "c"},
 ]}
 
 
@@ -49,9 +49,10 @@ def _overview(data):
         data["klasse_id"], data["task_id"])
     excluded = models.get_excluded_questions([s["id"] for s in subtasks])
     checkpoints = [{"id": s["id"], "titel": "x", "kern": True,
-                    "questions": [q["text"] for q in json.loads(s["quiz_json"])["questions"]]}
+                    "questions": [q["text"] for q in json.loads(s["quiz_json"])["questions"]],
+                    "question_ids": [q["id"] for q in json.loads(s["quiz_json"])["questions"]]}
                    for s in subtasks]
-    scores = {a["id"]: json.loads(a["question_scores_json"]) for a in attempts.values()}
+    scores = {a["id"]: models.attempt_scores_by_id(a) for a in attempts.values()}
     return checkpoint_overview.build_overview(
         students, checkpoints, attempts, scores, excluded, pending)
 
@@ -132,7 +133,7 @@ def test_admin_page_and_switch(data, as_admin):
 
     as_admin.post(f"/admin/checkpoint-uebersicht/frage/{data['cp']}/1/wertung",
                   data={"ausschliessen": "1", "grund": "Bild fehlte"})
-    assert 1 in models.get_excluded_questions()[data["cp"]]
+    assert "f2" in models.get_excluded_questions()[data["cp"]]
     body = as_admin.get(url).get_data(as_text=True)
     assert "Wieder werten" in body and "Bild fehlte" in body
 
@@ -178,7 +179,7 @@ def test_a_question_deleted_from_the_quiz_counts_for_nobody(data, as_admin):
     on them. The snapshot still has them; the grade must not."""
     a = data["students"][0]
     old_quiz = {"questions": QUIZ["questions"] + [
-        {"type": "short_answer", "text": "Frage D", "rubric": "d"}]}
+        {"id": "f4", "type": "short_answer", "text": "Frage D", "rubric": "d"}]}
     attempt_id = models.create_checkpoint_attempt(
         a, data["cp"], data["task_id"], "quiz", "kern", score=0, attempt_count=1,
         hint_count=0, quiz_snapshot_json=json.dumps(old_quiz), session_uid=f"s-{a}",

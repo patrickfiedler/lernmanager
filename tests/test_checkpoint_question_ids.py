@@ -38,10 +38,12 @@ def cp(db):
 def sit(cp, scores=None):
     """A finished sitting on today's quiz, as the student route writes it."""
     snapshot = models.get_subtask(cp["cp"])["quiz_json"]
+    scores = scores or {"0": 3, "1": 2, "2": 3}
+    counted = [v for v in scores.values() if v is not None]
     return models.create_checkpoint_attempt(
-        cp["student"], cp["cp"], cp["task"], "quiz", "kern", score=2,
+        cp["student"], cp["cp"], cp["task"], "quiz", "kern", score=min(counted or [0]),
         quiz_snapshot_json=snapshot,
-        question_scores_json=json.dumps(scores or {"0": 3, "1": 2, "2": 3}))
+        question_scores_json=json.dumps(scores))
 
 
 def by_id(attempt_id, column="question_scores_by_id_json"):
@@ -186,3 +188,107 @@ def test_flag_takes_its_id_from_the_sitting_or_todays_quiz(cp):
     with models.db_session() as conn:
         got = {r["id"]: r["question_id"] for r in conn.execute("SELECT id, question_id FROM checkpoint_flag")}
     assert got == {on_sitting: "f1", on_question: "f2", explicit: "f3"}
+
+
+# ---- read side (C.3/C.5): a quiz edited after the sitting ----
+
+def set_quiz(cp, *questions, removed=()):
+    with models.db_session() as conn:
+        conn.execute("UPDATE subtask SET quiz_json = ? WHERE id = ?", (json.dumps(
+            {"entfernte_ids": list(removed), "questions": list(questions)}), cp["cp"]))
+
+
+A, B, C = q("A", id="f1"), q("B", id="f2"), q("C", id="f3")
+
+
+def overview_cells(cp, attempt):
+    subtask = models.get_subtask(cp["cp"])
+    questions = models.quiz_questions(subtask["quiz_json"])
+    checkpoints = [{"id": cp["cp"], "titel": "x", "kern": True,
+                    "questions": [x["text"] for x in questions],
+                    "question_ids": [x["id"] for x in questions]}]
+    row = models.get_checkpoint_attempt(attempt)
+    import checkpoint_overview
+    out = checkpoint_overview.build_overview(
+        [{"id": cp["student"], "vorname": "K", "nachname": "A"}], checkpoints,
+        {(cp["student"], cp["cp"]): row}, {attempt: models.attempt_scores_by_id(row)},
+        models.get_excluded_questions([cp["cp"]]), set())
+    return [c["points"] for c in out["rows"][0]["cells"]]
+
+
+@pytest.mark.parametrize("today, removed, effective, cells", [
+    ([B, C], ["f1"], 2, [2, 3]),          # deleted at the start: B keeps its 2, not A's 0
+    ([A, C], ["f2"], 0, [0, 3]),          # deleted in the middle
+    ([A, B], ["f3"], 0, [0, 2]),          # deleted at the end
+    ([C, A, B], [], 0, [3, 0, 2]),        # reordered
+])
+def test_points_stay_with_their_question(cp, today, removed, effective, cells):
+    attempt = sit(cp, {"0": 0, "1": 2, "2": 3})
+    set_quiz(cp, *today, removed=removed)
+    row = models.get_checkpoint_attempt(attempt)
+    assert models.effective_checkpoint_score(row) == effective
+    assert overview_cells(cp, attempt) == cells
+
+
+def test_a_reworded_question_keeps_counting(cp):
+    attempt = sit(cp, {"0": 3, "1": 0, "2": 3})
+    set_quiz(cp, A, q("B, genauer gefasst", id="f2"), C)
+    assert models.effective_checkpoint_score(models.get_checkpoint_attempt(attempt)) == 0
+    assert overview_cells(cp, attempt) == [3, 0, 3]
+
+
+def test_exclusion_follows_the_question_not_the_position(cp):
+    attempt = sit(cp, {"0": 3, "1": 0, "2": 3})
+    models.set_question_excluded(cp["cp"], 1, True)          # B
+    set_quiz(cp, B, C, removed=["f1"])                         # A gone, B now first
+    assert models.get_excluded_questions([cp["cp"]])[cp["cp"]].at(0)["question_id"] == "f2"
+    # Neither A (removed) nor B (excluded) counts: only C's 3 is left.
+    assert models.effective_checkpoint_score(models.get_checkpoint_attempt(attempt)) == 3
+
+
+def test_a_flag_follows_its_question(cp):
+    attempt = sit(cp, {"0": 3, "1": None, "2": 3})
+    models.create_checkpoint_flag(cp["cp"], 1, "student", student_id=cp["student"],
+                                  checkpoint_attempt_id=attempt, status="abgelehnt")
+    set_quiz(cp, B, C, removed=["f1"])
+    owed = models.get_checkpoints_awaiting_retry(cp["student"])
+    assert [x["nr"] for x in owed[cp["cp"]]] == [1]          # B, today first
+    set_quiz(cp, A, C, removed=["f2"])
+    assert not models.get_checkpoints_awaiting_retry(cp["student"])   # B gone: owes nothing
+    assert not models.checkpoint_score_is_provisional({"id": attempt})
+
+
+def test_resume_finds_an_answer_after_the_quiz_moved(cp):
+    question_b = models.quiz_questions(models.get_subtask(cp["cp"])["quiz_json"])[1]
+    models.create_checkpoint_answer(cp["student"], cp["cp"], "u1", 1, None, "x", True, "",
+                                    "llm", question=question_b)
+    set_quiz(cp, B, C, removed=["f1"])
+    resumed = models.resume_unfinished_checkpoint_session(cp["student"], cp["cp"])
+    assert list(resumed["questions"]) == [0]
+    assert resumed["questions"][0]["solved"]
+
+
+def test_review_answers_sit_at_the_sittings_position(cp):
+    """Answered while B was second; the snapshot taken at the end already had A
+    removed. The answer belongs to B wherever B sits in that snapshot."""
+    question_b = models.quiz_questions(models.get_subtask(cp["cp"])["quiz_json"])[1]
+    models.create_checkpoint_answer(cp["student"], cp["cp"], "u2", 1, None, "x", True, "",
+                                    "llm", question=question_b)
+    set_quiz(cp, B, C, removed=["f1"])
+    attempt = models.create_checkpoint_attempt(
+        cp["student"], cp["cp"], cp["task"], "quiz", "kern", score=3,
+        quiz_snapshot_json=models.get_subtask(cp["cp"])["quiz_json"], session_uid="u2",
+        question_scores_json=json.dumps({"0": 3, "1": 3}))
+    answers = models.get_checkpoint_answers_for_attempt(attempt)
+    assert [(a["question_index"], a["question_id"]) for a in answers] == [(0, "f2")]
+
+
+def test_export_names_the_question_id(cp, as_admin):
+    questions = models.quiz_questions(models.get_subtask(cp["cp"])["quiz_json"])
+    for i, question in enumerate(questions):
+        models.create_checkpoint_answer(cp["student"], cp["cp"], "u3", i, None, "x", True, "",
+                                        "llm", question=question)
+    attempt = sit(cp)
+    models.attach_checkpoint_session_to_attempt("u3", attempt)
+    export = json.loads(as_admin.get("/admin/checkpoint-pruefung/export.json").get_data(as_text=True))
+    assert [x["id"] for x in export["sessions"][0]["fragen"]] == ["f1", "f2", "f3"]

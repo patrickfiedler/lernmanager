@@ -96,7 +96,8 @@ def own(app, teacher):
                                 quiz_json=json.dumps({"questions": [{"text": "F?", "options": ["a"], "correct": [0]}]}),
                                 checkpoint_type="quiz")
     models.create_checkpoint_answer(student, sub, "e1", 0, 1, "a", True, "", "llm")
-    models.create_checkpoint_attempt(student, sub, task, "quiz", "kern", score=2, session_uid="e1")
+    models.create_checkpoint_attempt(student, sub, task, "quiz", "kern", score=2, session_uid="e1",
+                                     quiz_snapshot_json=models.get_subtask(sub)["quiz_json"])
     unterricht = models.create_or_get_unterricht(klasse, '2026-10-26')
     run, (result,) = _grading_run("eigen", task, (student, "eigen.emma"))
     return client, {'klasse_id': klasse, 'student_id': student, 'task_id': task,

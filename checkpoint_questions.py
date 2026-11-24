@@ -183,7 +183,7 @@ def _wording_variants(entries):
     return variants
 
 
-def build_question_view(sessions):
+def build_question_view(sessions, current_ids=None):
     """Aggregate the session display model into one row per checkpoint question.
 
     `sessions` is exactly what app._build_checkpoint_sessions returns, so this view
@@ -192,23 +192,38 @@ def build_question_view(sessions):
 
     Rows are ordered by suspicion (failure rate, then how many students saw it) so
     the questions worth opening come first.
+
+    One row per question ID: sittings of different quiz versions hold the same
+    question at different positions. `current_ids` ({checkpoint_id: [id, ...]},
+    today's quizzes) gives each row its position today -- the one every question
+    route takes -- or None when the question has been deleted since.
     """
+    current_ids = current_ids or {}
     grouped = collections.defaultdict(list)
     for entry in sessions:
         if entry['attempt'].get('superseded_at'):
             continue                    # a reset session is history, not evidence
         for question in entry['questions']:
-            key = (entry['attempt']['checkpoint_id'], question['question_index'])
+            qid = question.get('question_id')
+            key = (entry['attempt']['checkpoint_id'],
+                   qid if qid is not None else ('#', question['question_index']))
             grouped[key].append((entry, question))
 
-    rows = [_build_row(checkpoint_id, question_index, entries)
-            for (checkpoint_id, question_index), entries in grouped.items()]
-    rows.sort(key=lambda r: (-r['concern_rate'], -r['concern_count'],
-                             r['checkpoint_id'], r['question_index']))
+    rows = []
+    for (checkpoint_id, key), entries in grouped.items():
+        if isinstance(key, tuple):      # no id known: the old position is all there is
+            question_id, question_index = None, key[1]
+        else:
+            question_id = key
+            today = current_ids.get(checkpoint_id, [])
+            question_index = today.index(key) if key in today else None
+        rows.append(_build_row(checkpoint_id, question_index, entries, question_id))
+    rows.sort(key=lambda r: (-r['concern_rate'], -r['concern_count'], r['checkpoint_id'],
+                             r['question_index'] if r['question_index'] is not None else 10**6))
     return rows
 
 
-def _build_row(checkpoint_id, question_index, entries):
+def _build_row(checkpoint_id, question_index, entries, question_id=None):
     """One question's aggregate. `entries` is [(session, question), ...]."""
     first_question = entries[0][1]
     variants = _wording_variants(entries)
@@ -283,7 +298,8 @@ def _build_row(checkpoint_id, question_index, entries):
     concerned = failed | reported | gave_up
     return {
         'checkpoint_id': checkpoint_id,
-        'question_index': question_index,
+        'question_index': question_index,     # today's position, None = deleted since
+        'question_id': question_id,
         'question_type': first_question.get('question_type'),
         'rubric': first_question.get('rubric'),
         'correct_display': first_question.get('correct_display'),
@@ -395,7 +411,7 @@ def _plan_skip_reason(entry, question, include_reviewed):
     return None
 
 
-def plan_bulk_score(sessions, checkpoint_id, question_index, score,
+def plan_bulk_score(sessions, checkpoint_id, question_id, score,
                     consolidate, include_reviewed=False):
     """What a batch rescore of ONE question would do, session by session.
 
@@ -418,11 +434,13 @@ def plan_bulk_score(sessions, checkpoint_id, question_index, score,
     nothing to match against and the caller must refuse: without it, every session
     would classify as UNKNOWN and "matches the reference" would be vacuously true.
     """
+    # By id: each sitting holds the question at its own position (question_index
+    # here is the position in that sitting's snapshot, the key of its scores).
     entries = [(entry, question)
                for entry in sessions
                for question in entry['questions']
                if entry['attempt']['checkpoint_id'] == checkpoint_id
-               and question['question_index'] == question_index]
+               and question_id is not None and question.get('question_id') == question_id]
     if not entries:
         return {'reference': None, 'variants': [], 'apply': [],
                 'skipped': {}, 'skipped_count': 0}
@@ -448,6 +466,13 @@ def plan_bulk_score(sessions, checkpoint_id, question_index, score,
             'wording': question.get('question_text'),
         })
 
+    # A sitting whose snapshot names no question ids cannot say whether it held
+    # this question at all. Listed as unknown, once, rather than silently dropped.
+    for entry in sessions:
+        if (entry['attempt']['checkpoint_id'] == checkpoint_id and entry['questions']
+                and all(q.get('question_id') is None for q in entry['questions'])):
+            skip('unbekannt', entry, {})
+
     for entry, question in entries:
         reason = _plan_skip_reason(entry, question, include_reviewed)
         if reason:
@@ -465,13 +490,15 @@ def plan_bulk_score(sessions, checkpoint_id, question_index, score,
 
         attempt = entry['attempt']
         scores = json.loads(attempt['question_scores_json'])
+        position = question['question_index']
         after = dict(scores)
-        after[str(question_index)] = score
+        after[str(position)] = score
         apply_rows.append({
             'attempt_id': attempt['id'],
+            'question_index': position,
             'student_name': attempt['student_name'],
             'timestamp': attempt['timestamp'],
-            'old': scores.get(str(question_index)),
+            'old': scores.get(str(position)),
             'new': score,
             # The stored session score, not consolidate(scores): those can disagree
             # on a legacy row, and the preview has to state what the teacher will

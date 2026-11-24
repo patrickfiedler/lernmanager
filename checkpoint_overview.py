@@ -21,20 +21,21 @@ What a cell can be:
 MAX_POINTS = 3
 
 
-def _cell(index, attempt, scores, excluded, pending):
-    """One student x one question. `scores`: the attempt's stored breakdown or None."""
-    if index in excluded:
-        raw = scores.get(str(index)) if scores else None
+def _cell(question_id, attempt, scores, excluded, pending):
+    """One student x one question. `scores`: the attempt's breakdown by question id,
+    or None."""
+    if question_id in excluded:
+        raw = scores.get(question_id) if scores else None
         return {'state': 'ausgeschlossen', 'points': raw}
     if attempt is None:
         return {'state': 'fehlt', 'points': None}
     if scores is None:
         return {'state': 'unbekannt', 'points': attempt.get('score')}
-    if str(index) not in scores:
+    if question_id not in scores:
         return {'state': 'fehlt', 'points': None}
-    points = scores[str(index)]
+    points = scores[question_id]
     if points is None:
-        return {'state': 'gemeldet' if index in pending else 'ohne_wertung', 'points': None}
+        return {'state': 'gemeldet' if question_id in pending else 'ohne_wertung', 'points': None}
     return {'state': 'punkte', 'points': points}
 
 
@@ -43,12 +44,16 @@ def build_overview(students, checkpoints, attempts, scores_by_attempt, excluded,
     """Arrange everything into rows ready to render.
 
     students:          [{'id', 'vorname', 'nachname'}]
-    checkpoints:       [{'id', 'titel', 'kern', 'questions': [text, ...]}] in page order
+    checkpoints:       [{'id', 'titel', 'kern', 'questions': [text, ...],
+                         'question_ids': [id, ...]}] in page order, today's quiz
     attempts:          {(student_id, checkpoint_id): attempt row} -- standing ones only
-    scores_by_attempt: {attempt_id: {"<index>": 0|2|3|None}} where a breakdown exists
-    excluded:          {checkpoint_id: {question_index: row}}
-    pending_flags:     {(student_id, checkpoint_id, question_index)} still waiting on
+    scores_by_attempt: {attempt_id: {question_id: 0|2|3|None}} where a breakdown exists
+    excluded:          {checkpoint_id: {question_id: row}} (models.QuestionExclusions)
+    pending_flags:     {(student_id, checkpoint_id, question_id)} still waiting on
                        a human (models.PROVISIONAL_FLAG_STATUSES)
+
+    Columns are today's questions; a sitting's score is found by question id, so a
+    question deleted or moved since the sitting cannot lend its points to another.
 
     Returns {'rows': [...], 'counted_questions': n, 'excluded_questions': n}. Each
     row: {'student', 'cells' (flat, in column order), 'points', 'max', 'fehlend',
@@ -61,10 +66,10 @@ def build_overview(students, checkpoints, attempts, scores_by_attempt, excluded,
             attempt = attempts.get((student['id'], cp['id']))
             scores = scores_by_attempt.get(attempt['id']) if attempt else None
             out = excluded.get(cp['id'], {})
-            pending = {idx for (sid, cid, idx) in pending_flags
+            pending = {qid for (sid, cid, qid) in pending_flags
                        if sid == student['id'] and cid == cp['id']}
-            for index in range(len(cp['questions'])):
-                cell = _cell(index, attempt, scores, out, pending)
+            for question_id in cp['question_ids']:
+                cell = _cell(question_id, attempt, scores, out, pending)
                 cells.append(cell)
                 if cell['state'] == 'punkte':
                     points += cell['points']
@@ -77,9 +82,8 @@ def build_overview(students, checkpoints, attempts, scores_by_attempt, excluded,
         rows.append({'student': student, 'cells': cells, 'points': points,
                      'max': counted * MAX_POINTS, 'fehlend': fehlend, 'offen': offen})
 
-    total = sum(len(cp['questions']) for cp in checkpoints)
-    excluded_count = sum(1 for cp in checkpoints
-                         for index in range(len(cp['questions']))
-                         if index in excluded.get(cp['id'], {}))
+    total = sum(len(cp['question_ids']) for cp in checkpoints)
+    excluded_count = sum(1 for cp in checkpoints for question_id in cp['question_ids']
+                         if question_id in excluded.get(cp['id'], {}))
     return {'rows': rows, 'counted_questions': total - excluded_count,
             'excluded_questions': excluded_count}

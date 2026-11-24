@@ -88,7 +88,7 @@
             <tr>
                 {% for cp in checkpoints %}
                     {% for text in cp.questions %}
-                    <th class="{{ 'cu-first' if loop.first }} {{ 'cu-aus-head' if loop.index0 in excluded.get(cp.id, {}) }}"
+                    <th class="{{ 'cu-first' if loop.first }} {{ 'cu-aus-head' if excluded.get(cp.id) is not none and excluded[cp.id].at(loop.index0) }}"
                         title="{{ text|striptags|truncate(200) }}">F{{ loop.index }}</th>
                     {% endfor %}
                 {% endfor %}
@@ -138,7 +138,7 @@
     {% for cp in checkpoints %}
     <h3 style="font-size: 1rem; margin: 1rem 0 0.25rem 0;">{{ cp.titel }}</h3>
         {% for text in cp.questions %}
-        {% set out = excluded.get(cp.id, {}).get(loop.index0) %}
+        {% set out = excluded[cp.id].at(loop.index0) if excluded.get(cp.id) is not none else none %}
         <div class="cu-question">
             <strong>F{{ loop.index }}</strong>
             <span class="cu-question-text">

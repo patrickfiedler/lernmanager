@@ -4608,6 +4608,26 @@ def _attempt_question_id(conn, attempt_id, index):
     return question_id_at(quiz_questions(row['quiz_snapshot_json']), index) if row else None
 
 
+def reframe_rows(rows, questions):
+    """Rows (answers, flags) with question_index set to their question's position in
+    `questions` -- a sitting's snapshot or today's quiz, whichever the caller shows.
+
+    The logged question_index is the position when the row was written; the quiz may
+    have changed since. A row whose question is not in `questions` is left out: its
+    logged index would point at whatever question sits there now. A row without
+    question_id (old, wording unknown) keeps its logged index.
+    """
+    out = []
+    for row in rows:
+        if row.get('question_id') is not None:
+            position = question_position(questions, row['question_id'])
+            if position is None:
+                continue
+            row = dict(row, question_index=position)
+        out.append(row)
+    return out
+
+
 # ============ Checkpoint-Punktekonto (Chemie 11/12) ============
 
 def create_checkpoint_attempt(student_id, checkpoint_id, module_id, checkpoint_type,
@@ -4715,13 +4735,15 @@ def create_checkpoint_answer(student_id, checkpoint_id, session_uid, question_in
     the row whose verdict the caller should hand back, and `id` is that row's. The id
     is what the page sends back when it asks for a hint to exactly this answer.
     """
+    question_id = (question or {}).get('id')
+    same_question, key = _same_question(question_id, question_index)
     with db_session() as conn:
         if dedupe:
-            previous = conn.execute('''
+            previous = conn.execute(f'''
                 SELECT * FROM checkpoint_answer
-                WHERE session_uid = ? AND question_index = ? AND gave_up = 0
+                WHERE session_uid = ? AND {same_question} AND gave_up = 0
                 ORDER BY id DESC LIMIT 1
-            ''', (session_uid, question_index)).fetchone()
+            ''', (session_uid, key)).fetchone()
             if (previous and previous['correct'] is not None
                     and normalized_answer_text(previous['answer_text'])
                     == normalized_answer_text(answer_text)):
@@ -4731,8 +4753,8 @@ def create_checkpoint_answer(student_id, checkpoint_id, session_uid, question_in
         if attempt_no is None:
             attempt_no = conn.execute(
                 'SELECT COALESCE(MAX(attempt_no), 0) + 1 FROM checkpoint_answer '
-                'WHERE session_uid = ? AND question_index = ?',
-                (session_uid, question_index)).fetchone()[0]
+                f'WHERE session_uid = ? AND {same_question}',
+                (session_uid, key)).fetchone()[0]
 
         cursor = conn.execute('''
             INSERT INTO checkpoint_answer
@@ -4742,7 +4764,7 @@ def create_checkpoint_answer(student_id, checkpoint_id, session_uid, question_in
              question_snapshot_json)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (student_id, checkpoint_id, session_uid, question_index,
-              (question or {}).get('id'), attempt_no,
+              question_id, attempt_no,
               answer_text, correct, feedback, grader, llm_model, hints_used_before,
               1 if gave_up else 0, now_local(), prompt_version, judgment_confidence,
               json.dumps(question, ensure_ascii=False) if question else None))
@@ -4892,15 +4914,20 @@ def get_checkpoint_answers_for_attempt(checkpoint_attempt_id):
     """All logged answer attempts for one completed checkpoint session, in the order
     they were submitted -- the per-question detail behind a checkpoint_attempt's
     aggregate score. For a future teacher-review UI."""
-    with db_session() as conn:
-        rows = conn.execute('''
-            SELECT * FROM checkpoint_answer WHERE checkpoint_attempt_id = ?
-            ORDER BY question_index, attempt_no
-        ''', (checkpoint_attempt_id,)).fetchall()
-        return [dict(r) for r in rows]
+    return get_checkpoint_answers_for_attempts([checkpoint_attempt_id]).get(
+        checkpoint_attempt_id, [])
 
 
-def get_last_checkpoint_answer(session_uid, question_index):
+def _same_question(question_id, question_index):
+    """SQL condition + value for "rows about this question" within one session: by id
+    when the question has one (its position may have changed mid-sitting), else by
+    position."""
+    if question_id is not None:
+        return 'question_id = ?', question_id
+    return 'question_index = ?', question_index
+
+
+def get_last_checkpoint_answer(session_uid, question_index, question_id=None):
     """The most recently logged attempt at one question in one live session, or None.
 
     Read before grading (app.student_checkpoint_answer) to recognise a resubmission
@@ -4916,12 +4943,13 @@ def get_last_checkpoint_answer(session_uid, question_index):
     same attempt_no (confirmed in production 2026-09-02), and the newest row is the
     one to compare against either way.
     """
+    same_question, key = _same_question(question_id, question_index)
     with db_session() as conn:
-        row = conn.execute('''
+        row = conn.execute(f'''
             SELECT * FROM checkpoint_answer
-            WHERE session_uid = ? AND question_index = ? AND gave_up = 0
+            WHERE session_uid = ? AND {same_question} AND gave_up = 0
             ORDER BY id DESC LIMIT 1
-        ''', (session_uid, question_index)).fetchone()
+        ''', (session_uid, key)).fetchone()
         return dict(row) if row else None
 
 
@@ -4986,33 +5014,40 @@ QUESTION_REMOVED = 'frage_entfernt'
 
 
 class QuestionExclusions(dict):
-    """{question_index: row} for one checkpoint -- plus every index at or past the end
-    of the CURRENT quiz, which counts as excluded too.
+    """{question_id: row} for one checkpoint -- plus every id today's quiz no longer
+    has, which counts as excluded too.
 
-    Why: scores are keyed by position, and a sitting's snapshot keeps a question the
-    author later deleted (chemie, 2026-11-24: 1.4 F4 and 1.7 F4). Its points must not
-    count, and no teacher can switch it off -- the question is gone from the page.
-    Detects a question cut from the END only; one cut from the middle shifts every
-    later index, which only stable question ids could catch.
+    Why the second kind: a sitting's snapshot keeps a question the author later
+    deleted (chemie, 2026-11-24: 1.4 F4 and 1.7 F4). Its points must not count, and
+    no teacher can switch it off -- the question is gone from the page. With fixed
+    ids this holds wherever the question was cut, start, middle or end.
 
-    `in` and `.get()` answer for both kinds; len() and iteration see table rows only.
+    `in` and `.get()` take a question id and answer for both kinds; len() and
+    iteration see table rows only. `at(index)` asks by position in today's quiz.
     """
-    def __init__(self, rows=None, question_count=None):
+    def __init__(self, rows=None, current_ids=None):
         super().__init__(rows or {})
-        self.question_count = question_count
+        self.current_ids = current_ids   # ids of today's quiz; None = no quiz to compare
 
-    def removed(self, index):
-        return self.question_count is not None and index >= self.question_count
+    def removed(self, question_id):
+        return (self.current_ids is not None and question_id is not None
+                and question_id not in self.current_ids)
 
-    def __contains__(self, index):
-        return dict.__contains__(self, index) or self.removed(index)
+    def __contains__(self, question_id):
+        return dict.__contains__(self, question_id) or self.removed(question_id)
 
-    def get(self, index, default=None):
-        if dict.__contains__(self, index):
-            return dict.__getitem__(self, index)
-        if self.removed(index):
-            return {'question_index': index, 'reason': QUESTION_REMOVED}
+    def get(self, question_id, default=None):
+        if dict.__contains__(self, question_id):
+            return dict.__getitem__(self, question_id)
+        if self.removed(question_id):
+            return {'question_id': question_id, 'reason': QUESTION_REMOVED}
         return default
+
+    def at(self, index):
+        """The exclusion row of today's question at `index`, None if it counts."""
+        if self.current_ids is None or not 0 <= index < len(self.current_ids):
+            return None
+        return self.get(self.current_ids[index])
 
 
 def get_excluded_questions(checkpoint_ids=None):
@@ -5033,20 +5068,19 @@ def get_excluded_questions(checkpoint_ids=None):
     with db_session() as conn:
         rows = conn.execute(sql, params).fetchall()
         wanted = set(ids) if ids is not None else {r['checkpoint_id'] for r in rows}
-        counts = {}
+        current = {}
         if wanted:
             for r in conn.execute(
                     f"SELECT id, quiz_json FROM subtask WHERE id IN ({','.join('?' * len(wanted))})",
                     list(wanted)).fetchall():
-                try:
-                    counts[r['id']] = len(json.loads(r['quiz_json'])['questions'])
-                except (TypeError, ValueError, KeyError):
-                    pass   # no quiz: nothing to have been removed from
-    excluded = {cid: QuestionExclusions(question_count=n) for cid, n in counts.items()}
+                questions = quiz_questions(r['quiz_json'])
+                if questions:   # no quiz: nothing to have been removed from
+                    current[r['id']] = [q.get('id') for q in questions]
+    excluded = {cid: QuestionExclusions(current_ids=qids) for cid, qids in current.items()}
     for r in rows:
         excluded.setdefault(r['checkpoint_id'],
-                            QuestionExclusions(question_count=counts.get(r['checkpoint_id'])))
-        dict.__setitem__(excluded[r['checkpoint_id']], r['question_index'], dict(r))
+                            QuestionExclusions(current_ids=current.get(r['checkpoint_id'])))
+        dict.__setitem__(excluded[r['checkpoint_id']], r['question_id'], dict(r))
     return excluded
 
 
@@ -5070,6 +5104,28 @@ def set_question_excluded(checkpoint_id, question_index, excluded, reason=None,
                   now_local(), admin_id))
 
 
+def attempt_scores_by_id(attempt):
+    """{question_id: score} of one sitting, None when it has no breakdown. Read from
+    question_scores_by_id_json; a row written before that column existed is
+    translated through its own snapshot."""
+    if attempt.get('question_scores_by_id_json'):
+        return json.loads(attempt['question_scores_by_id_json'])
+    if not attempt.get('question_scores_json'):
+        return None
+    return scores_by_id(json.loads(attempt['question_scores_json']),
+                        quiz_questions(_attempt_snapshot(attempt)))
+
+
+def _attempt_snapshot(attempt):
+    """The sitting's quiz snapshot, read from the row if the caller's dict lacks it."""
+    if 'quiz_snapshot_json' in attempt or attempt.get('id') is None:
+        return attempt.get('quiz_snapshot_json')
+    with db_session() as conn:
+        row = conn.execute('SELECT quiz_snapshot_json FROM checkpoint_attempt WHERE id = ?',
+                           (attempt['id'],)).fetchone()
+    return row['quiz_snapshot_json'] if row else None
+
+
 def counted_question_scores(attempt, excluded=None):
     """The attempt's stored per-question scores with every excluded question set to
     None ("does not count") -- the ONE place the exclusion is applied.
@@ -5087,7 +5143,10 @@ def counted_question_scores(attempt, excluded=None):
     if out is None:
         return None
     scores = json.loads(raw)
-    hit = {k for k in scores if k.isdigit() and int(k) in out}
+    # Keys are positions in THIS sitting's snapshot; the snapshot says which question
+    # each one was. Today's positions mean nothing here.
+    snapshot = quiz_questions(_attempt_snapshot(attempt))
+    hit = {k for k in scores if k.isdigit() and question_id_at(snapshot, int(k)) in out}
     if not hit:
         return None
     return {k: (None if k in hit else v) for k, v in scores.items()}
@@ -5271,7 +5330,7 @@ def get_checkpoint_overview_data(klasse_id, task_id):
                    'quiz': 'abnahme' and 'artefakt' have no questions and no write
                    path yet (task_plan.md Phase 3)
     attempts       {(student_id, checkpoint_id): standing attempt row}
-    pending_flags  {(student_id, checkpoint_id, question_index)} still waiting on a
+    pending_flags  {(student_id, checkpoint_id, question_id)} still waiting on a
                    human, flags on excluded questions left out
     """
     with db_session() as conn:
@@ -5301,9 +5360,9 @@ def get_checkpoint_overview_data(klasse_id, task_id):
             ORDER BY id
         """, ids).fetchall():
             attempts[(r['student_id'], r['checkpoint_id'])] = dict(r)   # newest wins
-        pending = {(r['student_id'], r['checkpoint_id'], r['question_index'])
+        pending = {(r['student_id'], r['checkpoint_id'], r['question_id'])
                    for r in conn.execute(f"""
-            SELECT student_id, checkpoint_id, question_index FROM checkpoint_flag
+            SELECT student_id, checkpoint_id, question_id FROM checkpoint_flag
             WHERE student_id IN ({s_marks}) AND checkpoint_id IN ({c_marks})
               AND status IN ({','.join('?' * len(PROVISIONAL_FLAG_STATUSES))})
               AND {FLAG_QUESTION_COUNTS}
@@ -5353,12 +5412,19 @@ def get_checkpoint_answers_for_attempts(attempt_ids):
         rows = conn.execute(f'''
             SELECT * FROM checkpoint_answer
             WHERE checkpoint_attempt_id IN ({placeholders})
-            ORDER BY question_index, attempt_no, id
+            ORDER BY attempt_no, id
         ''', list(attempt_ids)).fetchall()
+        snapshots = {r['id']: quiz_questions(r['quiz_snapshot_json']) for r in conn.execute(
+            f'SELECT id, quiz_snapshot_json FROM checkpoint_attempt WHERE id IN ({placeholders})',
+            list(attempt_ids))}
     grouped = {}
     for row in rows:
         grouped.setdefault(row['checkpoint_attempt_id'], []).append(dict(row))
-    return grouped
+    # question_index in the sitting's own frame (its snapshot), the frame its scores
+    # are keyed in.
+    return {aid: sorted(reframe_rows(answers, snapshots.get(aid, [])),
+                        key=lambda r: (r['question_index'], r['attempt_no'], r['id']))
+            for aid, answers in grouped.items()}
 
 
 def set_checkpoint_teacher_review(attempt_id, teacher_score, teacher_note,
@@ -5587,7 +5653,7 @@ def create_checkpoint_flag(checkpoint_id, question_index, source, student_id=Non
         return cursor.lastrowid
 
 
-def get_checkpoint_flags(checkpoint_id=None, question_index=None, student_id=None,
+def get_checkpoint_flags(checkpoint_id=None, question_id=None, student_id=None,
                          attempt_ids=None, statuses=None, limit=500):
     """Flags, newest first, enriched with the student and Aufgabe names the review
     UI and the export need. Every filter is optional and ANDed.
@@ -5598,9 +5664,9 @@ def get_checkpoint_flags(checkpoint_id=None, question_index=None, student_id=Non
     if checkpoint_id is not None:
         clauses.append('f.checkpoint_id = ?')
         params.append(checkpoint_id)
-    if question_index is not None:
-        clauses.append('f.question_index = ?')
-        params.append(question_index)
+    if question_id is not None:
+        clauses.append('f.question_id = ?')
+        params.append(question_id)
     if student_id is not None:
         clauses.append('f.student_id = ?')
         params.append(student_id)
@@ -5638,7 +5704,7 @@ def get_checkpoint_flags(checkpoint_id=None, question_index=None, student_id=Non
 def count_open_flags_by_question(checkpoint_ids):
     """How many students currently have an open report on each question.
 
-    Keyed (checkpoint_id, question_index) because that is what the claim is about:
+    Keyed (checkpoint_id, question_id) because that is what the claim is about:
     a broken question is broken for the whole class, and "three students reported
     this one" is the number that tells a teacher whether to look at the question or
     at the student.
@@ -5648,27 +5714,28 @@ def count_open_flags_by_question(checkpoint_ids):
         return {}
     with db_session() as conn:
         rows = conn.execute(f"""
-            SELECT checkpoint_id, question_index, COUNT(DISTINCT student_id) AS cnt
+            SELECT checkpoint_id, question_id, COUNT(DISTINCT student_id) AS cnt
             FROM checkpoint_flag
             WHERE status = 'offen' AND source = 'student'
               AND checkpoint_id IN ({','.join('?' * len(checkpoint_ids))})
-            GROUP BY checkpoint_id, question_index
+            GROUP BY checkpoint_id, question_id
         """, checkpoint_ids).fetchall()
-        return {(r['checkpoint_id'], r['question_index']): r['cnt'] for r in rows}
+        return {(r['checkpoint_id'], r['question_id']): r['cnt'] for r in rows}
 
 
-def get_open_student_flag(student_id, checkpoint_id, question_index):
+def get_open_student_flag(student_id, checkpoint_id, question_index, question_id=None):
     """A flag this student already raised on this question that has not been ruled on
     or redone yet. Guards against reporting the same question twice -- the second
     report would add nothing and would double-count in the export.
     """
     with db_session() as conn:
-        row = conn.execute('''
+        same_question, key = _same_question(question_id, question_index)
+        row = conn.execute(f'''
             SELECT * FROM checkpoint_flag
-            WHERE student_id = ? AND checkpoint_id = ? AND question_index = ?
+            WHERE student_id = ? AND checkpoint_id = ? AND {same_question}
               AND source = 'student' AND status IN ('offen', 'abgelehnt')
             ORDER BY created_at DESC LIMIT 1
-        ''', (student_id, checkpoint_id, question_index)).fetchone()
+        ''', (student_id, checkpoint_id, key)).fetchone()
         return dict(row) if row else None
 
 
@@ -5759,8 +5826,13 @@ def resume_unfinished_checkpoint_session(student_id, checkpoint_id):
             WHERE student_id = ? AND checkpoint_id = ?
         """, (student_id, checkpoint_id)).fetchone()['cut'] or ''
 
+        quiz_row = conn.execute('SELECT quiz_json FROM subtask WHERE id = ?',
+                                (checkpoint_id,)).fetchone()
+        current = quiz_questions(quiz_row['quiz_json']) if quiz_row else []
+        # Grouped by question, not by position: a question that moved between two
+        # visits is still one question. Positions are then read in today's quiz.
         answers = conn.execute("""
-            SELECT question_index,
+            SELECT MAX(question_id) AS question_id, MAX(question_index) AS question_index,
                    MAX(CASE WHEN correct = 1 THEN 1 ELSE 0 END) AS solved,
                    -- An attempt is a graded submission. A give-up carries correct = 0
                    -- but is not an attempt, and an ungraded row (LLM outage, or the
@@ -5775,14 +5847,14 @@ def resume_unfinished_checkpoint_session(student_id, checkpoint_id):
             FROM checkpoint_answer
             WHERE student_id = ? AND checkpoint_id = ?
               AND checkpoint_attempt_id IS NULL AND timestamp > ?
-            GROUP BY question_index
+            GROUP BY COALESCE(question_id, '#' || question_index)
         """, (student_id, checkpoint_id, cutoff)).fetchall()
 
         # A report needs no answer text, so a flagged question can have no
         # checkpoint_answer row at all. 'abgelehnt' is left out on purpose: the
         # teacher sent that question back, so it is open again, not reported.
         flags = conn.execute("""
-            SELECT DISTINCT question_index, session_uid, created_at
+            SELECT DISTINCT question_index, question_id, session_uid, created_at
             FROM checkpoint_flag
             WHERE student_id = ? AND checkpoint_id = ?
               AND checkpoint_attempt_id IS NULL AND status != 'abgelehnt'
@@ -5793,7 +5865,7 @@ def resume_unfinished_checkpoint_session(student_id, checkpoint_id):
             return None
 
         questions = {}
-        for row in answers:
+        for row in reframe_rows([dict(r) for r in answers], current):
             questions[row['question_index']] = {
                 'solved': bool(row['solved']),
                 'attempts': row['attempts'] or 0,
@@ -5802,7 +5874,7 @@ def resume_unfinished_checkpoint_session(student_id, checkpoint_id):
                 'llm_errors': row['llm_errors'] or 0,
                 'flagged': False,
             }
-        for row in flags:
+        for row in reframe_rows([dict(r) for r in flags], current):
             entry = questions.setdefault(row['question_index'], {
                 'solved': False, 'attempts': 0, 'hints_used': 0,
                 'gave_up': False, 'llm_errors': 0, 'flagged': False,
@@ -5902,7 +5974,7 @@ def get_unfinished_checkpoint_sittings(klasse_id=None, student_id=None, checkpoi
             ORDER BY r.timestamp, r.id
         """, params).fetchall()
         flags = conn.execute(f"""
-            SELECT r.student_id, r.checkpoint_id, r.question_index, r.created_at
+            SELECT r.student_id, r.checkpoint_id, r.question_index, r.question_id, r.created_at
             FROM checkpoint_flag r {joins}
             WHERE r.status != 'abgelehnt' AND r.student_id IS NOT NULL
               AND {_unfinished_checkpoint_rows('created_at')} {scope}
@@ -5912,14 +5984,14 @@ def get_unfinished_checkpoint_sittings(klasse_id=None, student_id=None, checkpoi
         def sitting(row):
             return sittings.setdefault((row['student_id'], row['checkpoint_id']), {
                 'student_id': row['student_id'], 'checkpoint_id': row['checkpoint_id'],
-                'answers': [], 'flagged': set(), 'last_seen': ''})
+                'answers': [], 'flagged': [], 'last_seen': ''})
         for row in answers:
             entry = sitting(row)
             entry['answers'].append(dict(row))
             entry['last_seen'] = max(entry['last_seen'], row['timestamp'])
         for row in flags:
             entry = sitting(row)
-            entry['flagged'].add(row['question_index'])
+            entry['flagged'].append(dict(row))
             entry['last_seen'] = max(entry['last_seen'], row['created_at'])
 
         kept = [e for e in sittings.values()
@@ -5937,6 +6009,13 @@ def get_unfinished_checkpoint_sittings(klasse_id=None, student_id=None, checkpoi
             """, (entry['checkpoint_id'], entry['student_id'])).fetchone()
             entry.update(dict(names))
             entry['student_name'] = f"{names['vorname']} {names['nachname']}"
+            # Positions in today's quiz, which the page lists. Without a quiz (the
+            # Aufgabe is gone) the logged positions are all there is.
+            current = quiz_questions(entry.get('quiz_json'))
+            if current:
+                entry['answers'] = reframe_rows(entry['answers'], current)
+                entry['flagged'] = reframe_rows(entry['flagged'], current)
+            entry['flagged'] = {r['question_index'] for r in entry['flagged']}
     return kept
 
 
@@ -5954,18 +6033,24 @@ def get_checkpoints_awaiting_retry(student_id):
     """
     with db_session() as conn:
         rows = conn.execute("""
-            SELECT checkpoint_id, question_index, status, reason_text, resolution_note
-            FROM checkpoint_flag
+            SELECT checkpoint_id, question_index, question_id, status, reason_text,
+                   resolution_note, sub.quiz_json
+            FROM checkpoint_flag LEFT JOIN subtask sub ON sub.id = checkpoint_flag.checkpoint_id
             WHERE student_id = ? AND status IN ('abgelehnt', 'nachbesserung')
               AND """ + FLAG_QUESTION_COUNTS + """
-            ORDER BY checkpoint_id, question_index
         """, (student_id,)).fetchall()
-    owed = {}
+    by_checkpoint = {}
     for r in rows:
-        owed.setdefault(r['checkpoint_id'], []).append({
+        by_checkpoint.setdefault(r['checkpoint_id'], []).append(dict(r))
+    owed = {}
+    for checkpoint_id, flags in by_checkpoint.items():
+        # 'nr' names the question as the student sees it today.
+        flags = reframe_rows(flags, quiz_questions(flags[0]['quiz_json']))
+        owed[checkpoint_id] = [{
             'nr': r['question_index'] + 1, 'status': r['status'],
-            'reason_text': r['reason_text'], 'resolution_note': r['resolution_note']})
-    return owed
+            'reason_text': r['reason_text'], 'resolution_note': r['resolution_note']}
+            for r in sorted(flags, key=lambda r: r['question_index'])]
+    return {cid: v for cid, v in owed.items() if v}
 
 
 def resolve_checkpoint_flag(flag_id, status, resolution_note, admin_id):
@@ -6026,13 +6111,13 @@ def set_checkpoint_question_note(checkpoint_id, question_index, admin_id, note):
 
 
 def get_checkpoint_question_notes(admin_id):
-    """{(checkpoint_id, question_index): note} -- this teacher's notes only."""
+    """{(checkpoint_id, question_id): note} -- this teacher's notes only."""
     with db_session() as conn:
         rows = conn.execute("""
-            SELECT checkpoint_id, question_index, note FROM checkpoint_question_note
+            SELECT checkpoint_id, question_id, note FROM checkpoint_question_note
             WHERE admin_id = ?
         """, (admin_id,)).fetchall()
-        return {(r['checkpoint_id'], r['question_index']): r['note'] for r in rows}
+        return {(r['checkpoint_id'], r['question_id']): r['note'] for r in rows}
 
 
 def mark_checkpoint_flags_retried(flag_ids):
@@ -6051,15 +6136,18 @@ def mark_checkpoint_flags_retried(flag_ids):
 # SQL condition on a checkpoint_flag row: its question still counts. A flag on a
 # question taken out of the grading (migrate_066) waits on nobody -- it neither makes
 # a score provisional nor owes the student a redo.
-# Same for a question deleted from the end of the quiz (QuestionExclusions).
-FLAG_QUESTION_COUNTS = '''(NOT EXISTS (
+# Same for a question deleted from the quiz (its id is gone, QuestionExclusions).
+# question_id NULL: an old row whose question is unknown -- it keeps counting.
+FLAG_QUESTION_COUNTS = '''(checkpoint_flag.question_id IS NULL OR (NOT EXISTS (
     SELECT 1 FROM checkpoint_question_exclusion x
     WHERE x.checkpoint_id = checkpoint_flag.checkpoint_id
-      AND x.question_index = checkpoint_flag.question_index)
-  AND checkpoint_flag.question_index < COALESCE((
-    SELECT json_array_length(sub_q.quiz_json, '$.questions') FROM subtask sub_q
-    WHERE sub_q.id = checkpoint_flag.checkpoint_id AND json_valid(sub_q.quiz_json)),
-    checkpoint_flag.question_index + 1))'''
+      AND x.question_id = checkpoint_flag.question_id)
+  AND NOT EXISTS (
+    SELECT 1 FROM subtask sub_q
+    WHERE sub_q.id = checkpoint_flag.checkpoint_id AND json_valid(sub_q.quiz_json)
+      AND NOT EXISTS (
+        SELECT 1 FROM json_each(sub_q.quiz_json, '$.questions') je
+        WHERE json_extract(je.value, '$.id') = checkpoint_flag.question_id))))'''
 
 
 # A score stays provisional while a flag in one of these states hangs on it.
@@ -9378,7 +9466,8 @@ def get_warmup_question_pool(student_id, include_short_answer=False):
         finished_checkpoints = conn.execute('''
             SELECT sub.id as subtask_id, sub.task_id, sub.quiz_json,
                    sub.beschreibung, sub.reihenfolge,
-                   t.name as topic_name, t.fach, ca.question_scores_json
+                   t.name as topic_name, t.fach, ca.question_scores_json,
+                   ca.question_scores_by_id_json, ca.quiz_snapshot_json
             FROM checkpoint_attempt ca
             JOIN subtask sub ON sub.id = ca.checkpoint_id
             JOIN task t ON t.id = sub.task_id
@@ -9393,26 +9482,31 @@ def get_warmup_question_pool(student_id, include_short_answer=False):
         excluded_questions = get_excluded_questions(list(standing))
         open_flags = {}
         for f in conn.execute(f'''
-            SELECT checkpoint_id, question_index FROM checkpoint_flag
+            SELECT checkpoint_id, question_id FROM checkpoint_flag
             WHERE student_id = ? AND status IN ({','.join('?' * len(PROVISIONAL_FLAG_STATUSES))})
         ''', (student_id, *PROVISIONAL_FLAG_STATUSES)).fetchall():
-            open_flags.setdefault(f['checkpoint_id'], set()).add(f['question_index'])
+            open_flags.setdefault(f['checkpoint_id'], set()).add(f['question_id'])
 
         for sub in standing.values():
+            # Settled = by question id (the sitting's), then found in today's quiz:
+            # the pool hands out today's wording at today's position.
+            today_ids = [q.get('id') for q in quiz_questions(sub['quiz_json'])]
             try:
-                scores = json.loads(sub['question_scores_json'] or 'null')
+                scores = attempt_scores_by_id(dict(sub))
             except (json.JSONDecodeError, TypeError):
                 scores = None
             if isinstance(scores, dict):
-                settled = {int(k) for k, v in scores.items() if v is not None and str(k).isdigit()}
+                settled = {qid for qid, v in scores.items() if v is not None}
             else:
                 # Sittings from before migrate_055 carry no per-question scores:
                 # every question counts as settled, minus the flagged ones below.
-                settled = set(range(len(json.loads(sub['quiz_json']).get('questions', []))))
+                settled = set(today_ids)
             settled -= open_flags.get(sub['subtask_id'], set())
             # A question taken out of the grading is broken or misplaced -- nothing
             # to practise on.
-            settled -= set(excluded_questions.get(sub['subtask_id'], {}))
+            out = excluded_questions.get(sub['subtask_id'], {})
+            settled = {i for i, qid in enumerate(today_ids)
+                       if qid in settled and qid not in out}
             pool.extend(_quiz_json_to_pool_entries(
                 sub['task_id'], sub['subtask_id'], sub['quiz_json'], sub['topic_name'],
                 student_path=student_path, fach=sub['fach'],
@@ -9472,13 +9566,13 @@ def get_warmup_question_pool(student_id, include_short_answer=False):
                 continue
             is_checkpoint = sub['checkpoint_type'] is not None
             # A question taken out of the grading is broken or misplaced (as in 2b).
-            excluded = unlocked_excluded.get(sub['subtask_id'], {})
+            excluded = unlocked_excluded.get(sub['subtask_id'])
             pool.extend(e for e in _quiz_json_to_pool_entries(
                 sub['task_id'], sub['subtask_id'], sub['quiz_json'], sub['topic_name'],
                 student_path=student_path, fach=sub['fach'],
                 allow_short_answer=include_short_answer and is_checkpoint,
                 checkpoint=sub if is_checkpoint else None)
-                if e['question_index'] not in excluded)
+                if excluded is None or excluded.at(e['question_index']) is None)
 
         # 4. Demo accounts (student.demo_practice, set by the teacher): every question
         #    of every assigned Thema, checkpoints included -- no attempt, no review,
