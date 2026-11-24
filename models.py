@@ -397,6 +397,8 @@ def init_db():
                 quiz_snapshot_json TEXT,  -- quiz_json as it was at completion time (content can be edited later)
                 superseded_at TEXT,  -- set instead of deleting on a "Fortschritte zurücksetzen" re-import -- see reset_student_progress_for_task
                 question_scores_json TEXT,
+                question_scores_by_id_json TEXT,  -- migrate_085: the same scores keyed by question id. The one to read; the position-keyed column is still written so older code could read new rows
+                question_scores_manual_by_id_json TEXT,  -- migrate_085: question_scores_manual_json keyed by question id
                 question_scores_manual_json TEXT,  -- migrate_056: which of those values a teacher set by hand, same {"<index>": 0|2|3|null} shape. Provenance only -- question_scores_json stays the effective breakdown. Without it a corrected score is indistinguishable from a computed one in the review page and the export  -- migrate_055: per-question 0/2/3 breakdown behind `score`, JSON list. `null` at a position = the question was flagged and carries no score yet. Without this, a finished attempt could be overridden by hand but never recomputed -- per-question hint counts are not exactly recoverable from checkpoint_answer
                 teacher_score INTEGER,  -- migrate_048: teacher's override, NULL = not reviewed. Read via effective_checkpoint_score(), never `score` directly
                 teacher_note TEXT,  -- short reason for the override, shown to nobody but the teacher
@@ -425,6 +427,7 @@ def init_db():
                 checkpoint_id INTEGER NOT NULL,
                 session_uid TEXT NOT NULL,
                 question_index INTEGER NOT NULL,
+                question_id TEXT,  -- migrate_085: the question's fixed id; question_index is its position at the time. NULL only on old unfinished rows whose wording is lost
                 attempt_no INTEGER NOT NULL,
                 answer_text TEXT,
                 correct INTEGER,  -- 0/1/NULL -- NULL = LLM grading failed, not "wrong"
@@ -473,6 +476,7 @@ def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 checkpoint_id INTEGER NOT NULL,  -- = subtask.id, no FK -- see above
                 question_index INTEGER NOT NULL,
+                question_id TEXT,  -- migrate_085: the question's fixed id; question_index is its position when flagged
                 student_id INTEGER,  -- NULL = raised by a teacher, about no one student
                 checkpoint_attempt_id INTEGER,  -- backfilled via session_uid, like checkpoint_answer
                 session_uid TEXT,
@@ -491,6 +495,9 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_checkpoint_flag_question
             ON checkpoint_flag(checkpoint_id, question_index);
 
+            CREATE INDEX IF NOT EXISTS idx_checkpoint_flag_question_id
+            ON checkpoint_flag(checkpoint_id, question_id);
+
             CREATE INDEX IF NOT EXISTS idx_checkpoint_flag_attempt
             ON checkpoint_flag(checkpoint_attempt_id);
 
@@ -503,12 +510,13 @@ def init_db():
             -- as history, this is a switch that can be turned back off.
             CREATE TABLE IF NOT EXISTS checkpoint_question_exclusion (
                 checkpoint_id INTEGER NOT NULL,  -- = subtask.id, no FK, like checkpoint_flag
-                question_index INTEGER NOT NULL,
+                question_index INTEGER NOT NULL,  -- position when excluded; the key is question_id (migrate_085)
+                question_id TEXT NOT NULL,
                 reason TEXT,
                 question_text TEXT,  -- wording when excluded; an index says nothing once the quiz is edited
                 created_at TEXT NOT NULL,
                 created_by INTEGER,
-                PRIMARY KEY (checkpoint_id, question_index)
+                PRIMARY KEY (checkpoint_id, question_id)
             );
 
             -- A teacher's own draft note on a checkpoint question (Fragen view,
@@ -517,11 +525,12 @@ def init_db():
             -- deletes it here.
             CREATE TABLE IF NOT EXISTS checkpoint_question_note (
                 checkpoint_id INTEGER NOT NULL,  -- = subtask.id, no FK, like checkpoint_flag
-                question_index INTEGER NOT NULL,
+                question_index INTEGER NOT NULL,  -- position when last saved; the key is question_id (migrate_085)
+                question_id TEXT NOT NULL,
                 admin_id INTEGER NOT NULL,  -- no FK, like checkpoint_flag.resolved_by
                 note TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
-                PRIMARY KEY (checkpoint_id, question_index, admin_id)
+                PRIMARY KEY (checkpoint_id, question_id, admin_id)
             );
 
             -- Ticked steps inside an Aufgabe (templates/student/klasse.html).
@@ -3038,6 +3047,8 @@ def create_subtask(task_id, beschreibung, reihenfolge=0, estimated_minutes=None,
                    sammeln_json=None):
     """Create a subtask."""
     with db_session() as conn:
+        if checkpoint_type:
+            quiz_json = checkpoint_quiz_with_ids(conn, None, quiz_json)
         cursor = conn.execute(
             "INSERT INTO subtask (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json, artifact_gate_json, fertig_wenn, tipps, checkpoint_type, kern_standard_tag, checkpoint_hints_json, fork_group, fork_branch, fork_branch_label, fork_branch_note, fork_required, is_intro, sammeln_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json, artifact_gate_json, fertig_wenn, tipps, checkpoint_type, kern_standard_tag, checkpoint_hints_json, fork_group, fork_branch, fork_branch_label, fork_branch_note, fork_required, is_intro, sammeln_json)
@@ -3197,6 +3208,10 @@ def update_subtasks(task_id, subtasks_list, estimated_minutes_list=None, quiz_js
             if fork_required_list and i < len(fork_required_list):
                 fork_required = 1 if fork_required_list[i] == '1' else 0
 
+            if checkpoint_type:
+                subtask_quiz = checkpoint_quiz_with_ids(
+                    conn, old_by_pos[i]['id'] if i in old_by_pos else None, subtask_quiz)
+
             if i in old_by_pos:
                 # UPDATE in-place — preserves subtask ID and student_subtask records
                 conn.execute("""
@@ -3284,6 +3299,9 @@ def update_subtasks_from_import(task_id, subtasks_data):
             fork_required = 1 if sub.get('fork_required', True) else 0
             is_intro = 1 if sub.get('is_intro') else 0
             sammeln_json = sammeln_json_from_subtask(sub)
+            if checkpoint_type:
+                quiz_json = checkpoint_quiz_with_ids(
+                    conn, old_by_pos[pos]['id'] if pos in old_by_pos else None, quiz_json)
 
             if pos in old_by_pos:
                 # UPDATE existing subtask — keeps the ID, preserves student_subtask
@@ -4411,6 +4429,152 @@ def has_passed_subtask_quiz(student_task_id, subtask_id):
         return row is not None
 
 
+# ============ Checkpoint question ids (migrate_085) ============
+#
+# Stored checkpoint data (points, answers, flags, exclusions, notes) is tied to a
+# question's `id`, not to its position: a question deleted from the start or middle
+# would otherwise shift every later score onto the wrong question (1.3, 2026-11).
+# Positions still exist -- the page asks for "question 3" -- but they only ever mean
+# "position in THIS list" (today's quiz, or one sitting's snapshot). These helpers
+# are the one place a position becomes an id and back. task_plan.md § Feste Frage-IDs.
+
+QUESTION_ID_RE = re.compile(r'^[a-z0-9-]+$')
+
+
+class QuizIdError(ValueError):
+    """A checkpoint quiz whose question ids would cut stored data loose."""
+
+
+def quiz_questions(quiz_json):
+    """The question list of a quiz_json string (or parsed dict); [] when there is none."""
+    if not quiz_json:
+        return []
+    try:
+        quiz = json.loads(quiz_json) if isinstance(quiz_json, str) else quiz_json
+        return quiz.get('questions') or []
+    except (TypeError, ValueError, AttributeError):
+        return []
+
+
+def question_id_at(questions, index):
+    """Id of the question at 0-based `index` in this list; None if out of range or
+    the question has none."""
+    if index is None or not 0 <= index < len(questions):
+        return None
+    return questions[index].get('id')
+
+
+def question_position(questions, question_id):
+    """0-based position of `question_id` in this list; None if it is not there --
+    which, for today's quiz, means the question was removed."""
+    if question_id is None:
+        return None
+    for i, q in enumerate(questions):
+        if q.get('id') == question_id:
+            return i
+    return None
+
+
+def scores_by_id(scores, questions):
+    """{"<position>": score} -> {id: score}, positions read in `questions` (the
+    sitting's own snapshot). Keys that are no position ('vorher', legacy) are kept
+    as they are; a position without an id is dropped -- there is nothing stable to
+    file it under."""
+    out = {}
+    for key, value in (scores or {}).items():
+        if not str(key).isdigit():
+            out[key] = value
+            continue
+        qid = question_id_at(questions, int(key))
+        if qid is not None:
+            out[qid] = value
+    return out
+
+
+def _checkpoint_has_sittings(conn, checkpoint_id):
+    """Anything stored against this checkpoint's questions: a finished sitting or a
+    logged answer of an unfinished one."""
+    if checkpoint_id is None:
+        return False
+    return conn.execute('''
+        SELECT 1 FROM checkpoint_attempt WHERE checkpoint_id = ?
+        UNION ALL SELECT 1 FROM checkpoint_answer WHERE checkpoint_id = ? LIMIT 1
+    ''', (checkpoint_id, checkpoint_id)).fetchone() is not None
+
+
+def checkpoint_quiz_with_ids(conn, checkpoint_id, quiz_json):
+    """The quiz_json to store for a checkpoint: every question with an id.
+
+    Ids given by the author are kept and checked (format, unique). Missing ones are
+    filled in (f<position>) only while nothing is stored against the checkpoint yet
+    -- once there are sittings, a question without id could be a rewording of an
+    old one or a new one, and guessing which is exactly what ids are there to end
+    (Patrick 2026-11-24: reject, do not warn). Raises QuizIdError.
+
+    checkpoint_id: the subtask being overwritten, None for a new one.
+    """
+    if not quiz_json:
+        return quiz_json
+    quiz = json.loads(quiz_json)
+    questions = quiz.get('questions') or []
+    given = [q.get('id') for q in questions if q.get('id') is not None]
+    for qid in given:
+        if not isinstance(qid, str) or not QUESTION_ID_RE.match(qid):
+            raise QuizIdError(f'Frage-id {qid!r}: nur Kleinbuchstaben, Ziffern und „-“ erlaubt.')
+    duplicates = sorted({qid for qid in given if given.count(qid) > 1})
+    if duplicates:
+        raise QuizIdError(f'Frage-id doppelt: {", ".join(duplicates)}.')
+    missing = [i for i, q in enumerate(questions, start=1) if q.get('id') is None]
+    if not missing:
+        return quiz_json
+    if _checkpoint_has_sittings(conn, checkpoint_id):
+        raise QuizIdError(
+            f'Frage {", ".join(map(str, missing))} ohne id. Dieser Checkpoint hat schon '
+            'Sitzungen: jede Frage braucht ihre feste id (eine umformulierte Frage '
+            'behält ihre alte, eine neue bekommt eine neue).')
+    taken = set(given)
+    for position, q in enumerate(questions, start=1):
+        if q.get('id') is None:
+            candidate, n = f'f{position}', 0
+            while candidate in taken:
+                n += 1
+                candidate = f'f{position}-{n}'
+            q['id'] = candidate
+            taken.add(candidate)
+    return json.dumps(quiz, ensure_ascii=False)
+
+
+def check_checkpoint_quiz_ids(checkpoint_id, quiz_json):
+    """Validation before saving: the QuizIdError message, or None when it would pass.
+    Same rule as the write path (checkpoint_quiz_with_ids), asked without writing."""
+    try:
+        with db_session() as conn:
+            checkpoint_quiz_with_ids(conn, checkpoint_id, quiz_json)
+    except QuizIdError as e:
+        return str(e)
+    return None
+
+
+def _current_question_id(conn, checkpoint_id, index):
+    row = conn.execute('SELECT quiz_json FROM subtask WHERE id = ?', (checkpoint_id,)).fetchone()
+    return question_id_at(quiz_questions(row['quiz_json']), index) if row else None
+
+
+def _require_current_question_id(conn, checkpoint_id, index):
+    """Id of today's question at `index`, for rows that are about the question itself
+    (exclusion, note). Their key is the id, so a missing one is an error, not a NULL."""
+    question_id = _current_question_id(conn, checkpoint_id, index)
+    if question_id is None:
+        raise QuizIdError(f'Checkpoint {checkpoint_id}, Frage {index + 1}: keine Frage-id.')
+    return question_id
+
+
+def _attempt_question_id(conn, attempt_id, index):
+    row = conn.execute('SELECT quiz_snapshot_json FROM checkpoint_attempt WHERE id = ?',
+                       (attempt_id,)).fetchone()
+    return question_id_at(quiz_questions(row['quiz_snapshot_json']), index) if row else None
+
+
 # ============ Checkpoint-Punktekonto (Chemie 11/12) ============
 
 def create_checkpoint_attempt(student_id, checkpoint_id, module_id, checkpoint_type,
@@ -4438,15 +4602,18 @@ def create_checkpoint_attempt(student_id, checkpoint_id, module_id, checkpoint_t
     attempt rescorable later without rebuilding the session from the answer log.
     """
     with db_session() as conn:
+        by_id = (json.dumps(scores_by_id(json.loads(question_scores_json),
+                                         quiz_questions(quiz_snapshot_json)))
+                 if question_scores_json else None)
         cursor = conn.execute('''
             INSERT INTO checkpoint_attempt
             (student_id, checkpoint_id, module_id, checkpoint_type, kern_standard_tag,
              score, attempt_count, hint_count, timestamp, needs_review, review_notes,
-             quiz_snapshot_json, question_scores_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, ?), ?, ?, ?, ?)
+             quiz_snapshot_json, question_scores_json, question_scores_by_id_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, ?), ?, ?, ?, ?, ?)
         ''', (student_id, checkpoint_id, module_id, checkpoint_type, kern_standard_tag,
               score, attempt_count, hint_count, timestamp, now_local(), 1 if needs_review else 0, review_notes,
-              quiz_snapshot_json, question_scores_json))
+              quiz_snapshot_json, question_scores_json, by_id))
         attempt_id = cursor.lastrowid
         if session_uid:
             conn.execute('''
@@ -4536,12 +4703,13 @@ def create_checkpoint_answer(student_id, checkpoint_id, session_uid, question_in
 
         cursor = conn.execute('''
             INSERT INTO checkpoint_answer
-            (student_id, checkpoint_id, session_uid, question_index, attempt_no,
-             answer_text, correct, feedback, grader, llm_model, hints_used_before,
-             gave_up, timestamp, prompt_version, judgment_confidence,
+            (student_id, checkpoint_id, session_uid, question_index, question_id,
+             attempt_no, answer_text, correct, feedback, grader, llm_model,
+             hints_used_before, gave_up, timestamp, prompt_version, judgment_confidence,
              question_snapshot_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (student_id, checkpoint_id, session_uid, question_index, attempt_no,
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (student_id, checkpoint_id, session_uid, question_index,
+              (question or {}).get('id'), attempt_no,
               answer_text, correct, feedback, grader, llm_model, hints_used_before,
               1 if gave_up else 0, now_local(), prompt_version, judgment_confidence,
               json.dumps(question, ensure_ascii=False) if question else None))
@@ -4851,17 +5019,21 @@ def get_excluded_questions(checkpoint_ids=None):
 
 def set_question_excluded(checkpoint_id, question_index, excluded, reason=None,
                           question_text=None, admin_id=None):
-    """Take one question out of the grading for everyone, or put it back."""
+    """Take one question out of the grading for everyone, or put it back.
+    question_index: position in today's quiz; the row is filed under that
+    question's id."""
     with db_session() as conn:
+        question_id = _require_current_question_id(conn, checkpoint_id, question_index)
         conn.execute('DELETE FROM checkpoint_question_exclusion '
-                     'WHERE checkpoint_id = ? AND question_index = ?',
-                     (checkpoint_id, question_index))
+                     'WHERE checkpoint_id = ? AND question_id = ?',
+                     (checkpoint_id, question_id))
         if excluded:
             conn.execute('''
                 INSERT INTO checkpoint_question_exclusion
-                (checkpoint_id, question_index, reason, question_text, created_at, created_by)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (checkpoint_id, question_index, reason or None, question_text,
+                (checkpoint_id, question_index, question_id, reason, question_text,
+                 created_at, created_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (checkpoint_id, question_index, question_id, reason or None, question_text,
                   now_local(), admin_id))
 
 
@@ -5338,7 +5510,7 @@ CHECKPOINT_FLAG_TEACHER_VERDICTS = {
 def create_checkpoint_flag(checkpoint_id, question_index, source, student_id=None,
                            session_uid=None, reason_code=None, reason_text=None,
                            question_text_at_flag=None, status='offen',
-                           resolved_by=None, checkpoint_attempt_id=None):
+                           resolved_by=None, checkpoint_attempt_id=None, question_id=None):
     """Report one checkpoint question as broken or misplaced (migrate_055).
 
     source='student': the report comes from a session in progress, `status` stays
@@ -5358,15 +5530,23 @@ def create_checkpoint_flag(checkpoint_id, question_index, source, student_id=Non
     that is already finished -- a teacher sending one question back has an attempt in
     hand and no session_uid, so the usual backfill never fires. Leave it None for a
     flag about the question itself: that one belongs to no single sitting.
+
+    question_id: pass it when the caller holds the question (a sitting in progress).
+    Otherwise it is read at question_index -- in the sitting's snapshot when
+    checkpoint_attempt_id is given, else in today's quiz.
     """
     with db_session() as conn:
+        if question_id is None:
+            question_id = (_attempt_question_id(conn, checkpoint_attempt_id, question_index)
+                           if checkpoint_attempt_id is not None
+                           else _current_question_id(conn, checkpoint_id, question_index))
         cursor = conn.execute('''
             INSERT INTO checkpoint_flag
-            (checkpoint_id, question_index, student_id, session_uid, source,
+            (checkpoint_id, question_index, question_id, student_id, session_uid, source,
              checkpoint_attempt_id, reason_code, reason_text, question_text_at_flag,
              status, resolved_at, resolved_by, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (checkpoint_id, question_index, student_id, session_uid, source,
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (checkpoint_id, question_index, question_id, student_id, session_uid, source,
               checkpoint_attempt_id,
               reason_code, reason_text or None, question_text_at_flag, status,
               now_local() if status != 'offen' else None,
@@ -5791,21 +5971,25 @@ def set_checkpoint_flag_note(flag_id, note):
 
 
 def set_checkpoint_question_note(checkpoint_id, question_index, admin_id, note):
-    """Autosave of one teacher's note on a question. Empty text deletes it."""
+    """Autosave of one teacher's note on a question. Empty text deletes it.
+    question_index: position in today's quiz; the note is filed under that
+    question's id."""
     with db_session() as conn:
+        question_id = _require_current_question_id(conn, checkpoint_id, question_index)
         if note:
             conn.execute("""
                 INSERT INTO checkpoint_question_note
-                    (checkpoint_id, question_index, admin_id, note, updated_at)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT (checkpoint_id, question_index, admin_id)
-                DO UPDATE SET note = excluded.note, updated_at = excluded.updated_at
-            """, (checkpoint_id, question_index, admin_id, note, now_local()))
+                    (checkpoint_id, question_index, question_id, admin_id, note, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT (checkpoint_id, question_id, admin_id)
+                DO UPDATE SET note = excluded.note, updated_at = excluded.updated_at,
+                              question_index = excluded.question_index
+            """, (checkpoint_id, question_index, question_id, admin_id, note, now_local()))
         else:
             conn.execute("""
                 DELETE FROM checkpoint_question_note
-                WHERE checkpoint_id = ? AND question_index = ? AND admin_id = ?
-            """, (checkpoint_id, question_index, admin_id))
+                WHERE checkpoint_id = ? AND question_id = ? AND admin_id = ?
+            """, (checkpoint_id, question_id, admin_id))
 
 
 def get_checkpoint_question_notes(admin_id):
@@ -5901,17 +6085,24 @@ def update_checkpoint_attempt_scores(attempt_id, question_scores, score,
     question scored, not the record of which values a teacher had chosen.
     """
     with db_session() as conn:
+        row = conn.execute('SELECT quiz_snapshot_json FROM checkpoint_attempt WHERE id = ?',
+                           (attempt_id,)).fetchone()
+        questions = quiz_questions(row['quiz_snapshot_json']) if row else []
+        by_id = lambda scores: json.dumps(scores_by_id(scores, questions))
         if manual_scores is None:
             conn.execute('''
-                UPDATE checkpoint_attempt SET score = ?, question_scores_json = ?
+                UPDATE checkpoint_attempt SET score = ?, question_scores_json = ?,
+                    question_scores_by_id_json = ?
                 WHERE id = ?
-            ''', (score, json.dumps(question_scores), attempt_id))
+            ''', (score, json.dumps(question_scores), by_id(question_scores), attempt_id))
         else:
             conn.execute('''
                 UPDATE checkpoint_attempt
-                SET score = ?, question_scores_json = ?, question_scores_manual_json = ?
+                SET score = ?, question_scores_json = ?, question_scores_manual_json = ?,
+                    question_scores_by_id_json = ?, question_scores_manual_by_id_json = ?
                 WHERE id = ?
-            ''', (score, json.dumps(question_scores), json.dumps(manual_scores), attempt_id))
+            ''', (score, json.dumps(question_scores), json.dumps(manual_scores),
+                  by_id(question_scores), by_id(manual_scores), attempt_id))
 
 
 def get_text_quiz_answers(klasse_id=None, only_fallback=False, klasse_ids=None):

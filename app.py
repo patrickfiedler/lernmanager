@@ -2974,11 +2974,19 @@ def admin_thema_aufgaben(task_id):
                 return redirect(url_for('admin_thema_detail', task_id=task_id))
 
         # Validate all subtask quiz JSONs before saving
+        old_subtask_ids = {s['reihenfolge']: s['id'] for s in models.get_subtasks(task_id)}
         for i, qj in enumerate(quiz_json_list):
             try:
                 validated = validate_quiz_json(qj)
             except ValueError as e:
                 flash(f'Aufgabe {i+1} Quiz-JSON: {e}', 'danger')
+                return redirect(url_for('admin_thema_detail', task_id=task_id))
+            is_checkpoint = i < len(checkpoint_type_list) and checkpoint_type_list[i] in (
+                'quiz', 'abnahme', 'artefakt')
+            problem = validated and is_checkpoint and models.check_checkpoint_quiz_ids(
+                old_subtask_ids.get(i), validated)
+            if problem:
+                flash(f'Aufgabe {i+1}: {problem}', 'danger')
                 return redirect(url_for('admin_thema_detail', task_id=task_id))
             # Quiz-checkpoints render as radio-button retry sessions (single-select
             # only) - a multi-correct MC question there could never be answered right.
@@ -7826,6 +7834,7 @@ def student_checkpoint_flag():
 
     models.create_checkpoint_flag(
         subtask_id, question_index, source='student', student_id=student_id,
+        question_id=question.get('id'),
         session_uid=progress['session_uid'], reason_code=reason_code,
         reason_text=(data.get('reason_text') or '').strip()[:1000] or None,
         # The question as it read today: content gets edited, and without this a

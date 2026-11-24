@@ -7,8 +7,8 @@ once in 1.3. Design and decisions: task_plan.md § Feste Frage-IDs; every old wo
 without an exact match was decided by hand:
 docs/shared/lernmanager/2026-11-24-frage-ids-zuordnung.md
 
-ADDITIVE ONLY. Nothing that exists is changed or removed, so the old code keeps
-working and a rollback stays possible:
+ADDITIVE, with one exception. Nothing that exists is changed or removed, so old
+code can still read every row:
   - each checkpoint question in subtask.quiz_json gets "id" (f1, f2, ... by today's
     position; an id already present is kept)
   - snapshots (checkpoint_attempt.quiz_snapshot_json, checkpoint_answer.
@@ -16,6 +16,11 @@ working and a rollback stays possible:
   - new columns: checkpoint_attempt.question_scores_by_id_json /
     question_scores_manual_by_id_json, and question_id on checkpoint_answer,
     checkpoint_flag, checkpoint_question_exclusion, checkpoint_question_note
+The exception: checkpoint_question_exclusion and checkpoint_question_note are
+rebuilt with their primary key on question_id instead of question_index. Keyed on
+the position, excluding question 2 after question 1 was deleted would collide with
+the row of the question that used to be number 2. Old code still reads both tables;
+saving a note with it would fail (its ON CONFLICT names the old key).
 
 How an old row finds its question: by its wording at the time (sitting snapshot,
 answer snapshot, flag text, exclusion text). Exact match on today's wording, else
@@ -24,14 +29,10 @@ Anything else STOPS the migration: guessing is never allowed. A removed question
 gets an id of its own ("x-<hash>") that today's quiz does not contain, so it counts
 for nobody while its points stay stored.
 
-PARKED as _migrate_085_*: update.sh runs every migrate_*.py on deploy, and this one
-must ship together with the code that reads ids (task_plan.md Phase C). Rename it to
-migrate_085_frage_ids.py in that commit, and add the new columns to models.init_db.
-
 Usage:
-    python migrate/_migrate_085_frage_ids.py              # migrate config.DATABASE
-    python migrate/_migrate_085_frage_ids.py --probelauf  # count only, write nothing
-    python migrate/_migrate_085_frage_ids.py --probelauf path/to/copy.db
+    python migrate/migrate_085_frage_ids.py              # migrate config.DATABASE
+    python migrate/migrate_085_frage_ids.py --probelauf  # count only, write nothing
+    python migrate/migrate_085_frage_ids.py --probelauf path/to/copy.db
 """
 import hashlib
 import json
@@ -297,6 +298,10 @@ def build_plan(conn):
         if qid is None:
             problems.append(f'Ausschluss {x["checkpoint_id"]}/{x["question_index"]} bekommt keine id')
         plan['exclusion'][(x['checkpoint_id'], x['question_index'])] = qid
+    exclusion_ids = [(cid, qid) for (cid, _), qid in plan['exclusion'].items() if qid]
+    for key, n in Counter(exclusion_ids).items():
+        if n > 1:
+            problems.append(f'Ausschluss: zwei Zeilen in Checkpoint {key[0]} zeigen auf id {key[1]}')
     for n in conn.execute('SELECT * FROM checkpoint_question_note'):
         cp = checkpoints.get(n['checkpoint_id'])
         qid = cp.id_at(n['question_index']) if cp else None
@@ -328,6 +333,48 @@ def add_columns(conn):
     for (table, column), sql in statements.items():
         if column not in existing(table):
             conn.execute(sql)
+
+
+REKEYED_TABLES = {
+    'checkpoint_question_exclusion': '''
+        CREATE TABLE checkpoint_question_exclusion_new (
+            checkpoint_id INTEGER NOT NULL,
+            question_index INTEGER NOT NULL,
+            question_id TEXT NOT NULL,
+            reason TEXT,
+            question_text TEXT,
+            created_at TEXT NOT NULL,
+            created_by INTEGER,
+            PRIMARY KEY (checkpoint_id, question_id)
+        )''',
+    'checkpoint_question_note': '''
+        CREATE TABLE checkpoint_question_note_new (
+            checkpoint_id INTEGER NOT NULL,
+            question_index INTEGER NOT NULL,
+            question_id TEXT NOT NULL,
+            admin_id INTEGER NOT NULL,
+            note TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (checkpoint_id, question_id, admin_id)
+        )''',
+}
+
+
+def rekey_tables(conn):
+    """Move the primary key of the two question tables from position to id.
+    Runs after apply_plan: every row has its question_id by then."""
+    for table, create in REKEYED_TABLES.items():
+        info = conn.execute(f'PRAGMA table_info({table})').fetchall()
+        if any(r[1] == 'question_id' and r[5] for r in info):
+            continue   # already keyed on question_id
+        conn.execute(f'DROP TABLE IF EXISTS {table}_new')
+        conn.execute(create)
+        names = ', '.join(r[1] for r in conn.execute(f'PRAGMA table_info({table}_new)'))
+        conn.execute(f'INSERT INTO {table}_new ({names}) SELECT {names} FROM {table}')
+        conn.execute(f'DROP TABLE {table}')
+        conn.execute(f'ALTER TABLE {table}_new RENAME TO {table}')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_checkpoint_flag_question_id '
+                 'ON checkpoint_flag(checkpoint_id, question_id)')
 
 
 def apply_plan(conn, plan):
@@ -387,6 +434,7 @@ def run(db_path=None, probelauf=False):
         with conn:
             add_columns(conn)
             apply_plan(conn, plan)
+            rekey_tables(conn)
         print('Frage-IDs gesetzt.')
         return True
     finally:

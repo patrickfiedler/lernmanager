@@ -16,7 +16,7 @@ import config
 import models
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'migrate'))
-mig = importlib.import_module('_migrate_085_frage_ids')
+mig = importlib.import_module('migrate_085_frage_ids')
 
 
 def q(text):
@@ -36,14 +36,46 @@ def cp(db, monkeypatch):
                                   quiz_json=json.dumps({"questions": [A, B, C]}),
                                   checkpoint_type="quiz", kern_standard_tag="kern")
     student = models.create_student("Adler", "Kim", "u0", "pw")
+    _old_schema()
+    set_quiz({"cp": cp_id}, [A, B, C])       # as before: no ids yet
     return {"task": task_id, "cp": cp_id, "student": student}
 
 
-def sit(cp, questions, scores, uid="s1"):
-    return models.create_checkpoint_attempt(
-        cp["student"], cp["cp"], cp["task"], "quiz", "kern", score=0, attempt_count=1,
-        hint_count=0, quiz_snapshot_json=json.dumps({"questions": questions}),
-        session_uid=uid, question_scores_json=json.dumps(scores))
+def _old_schema():
+    """Turn init_db's schema back into the one this migration meets in production."""
+    with models.db_session() as conn:
+        conn.execute("DROP INDEX idx_checkpoint_flag_question_id")
+        for table, column in (("checkpoint_attempt", "question_scores_by_id_json"),
+                              ("checkpoint_attempt", "question_scores_manual_by_id_json"),
+                              ("checkpoint_answer", "question_id"),
+                              ("checkpoint_flag", "question_id")):
+            conn.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
+        conn.execute("DROP TABLE checkpoint_question_exclusion")
+        conn.execute("""CREATE TABLE checkpoint_question_exclusion (
+            checkpoint_id INTEGER NOT NULL, question_index INTEGER NOT NULL,
+            reason TEXT, question_text TEXT, created_at TEXT NOT NULL, created_by INTEGER,
+            PRIMARY KEY (checkpoint_id, question_index))""")
+        conn.execute("DROP TABLE checkpoint_question_note")
+        conn.execute("""CREATE TABLE checkpoint_question_note (
+            checkpoint_id INTEGER NOT NULL, question_index INTEGER NOT NULL,
+            admin_id INTEGER NOT NULL, note TEXT NOT NULL, updated_at TEXT NOT NULL,
+            PRIMARY KEY (checkpoint_id, question_index, admin_id))""")
+
+
+def insert(table, **values):
+    """A row as the old code wrote it (models' writers know the new columns)."""
+    with models.db_session() as conn:
+        return conn.execute(
+            f"INSERT INTO {table} ({', '.join(values)}) VALUES ({', '.join('?' * len(values))})",
+            list(values.values())).lastrowid
+
+
+def sit(cp, questions, scores):
+    return insert("checkpoint_attempt", student_id=cp["student"], checkpoint_id=cp["cp"],
+                  module_id=cp["task"], checkpoint_type="quiz", kern_standard_tag="kern",
+                  score=0, timestamp="2026-11-01 10:00",
+                  quiz_snapshot_json=json.dumps({"questions": questions}),
+                  question_scores_json=json.dumps(scores))
 
 
 def set_quiz(cp, questions):
@@ -122,12 +154,12 @@ def test_legacy_key_manual_scores_answers_and_flags(cp, monkeypatch):
     with models.db_session() as conn:
         conn.execute("UPDATE checkpoint_attempt SET question_scores_manual_json = ? WHERE id = ?",
                      (json.dumps({"2": 2}), attempt))
-    answer = models.create_checkpoint_answer(cp["student"], cp["cp"], "s1", 2, 1, "x",
-                                             correct=1, feedback="", grader="llm")["id"]
-    models.attach_checkpoint_session_to_attempt("s1", attempt)
-    flag = models.create_checkpoint_flag(cp["cp"], 1, "student", student_id=cp["student"],
-                                         checkpoint_attempt_id=attempt,
-                                         question_text_at_flag="Frage B")
+    answer = insert("checkpoint_answer", checkpoint_attempt_id=attempt, student_id=cp["student"],
+                    checkpoint_id=cp["cp"], session_uid="s1", question_index=2, attempt_no=1,
+                    answer_text="x", correct=1, grader="llm", timestamp="2026-11-01 10:00")
+    flag = insert("checkpoint_flag", checkpoint_id=cp["cp"], question_index=1,
+                  student_id=cp["student"], checkpoint_attempt_id=attempt, source="student",
+                  question_text_at_flag="Frage B", created_at="2026-11-01 10:00")
     set_quiz(cp, [C, B])                     # A deleted, B and C swapped
     monkeypatch.setattr(mig, 'DECISIONS', {(cp["cp"], mig.text_key("Frage A")): mig.REMOVED})
     assert mig.run() is True
@@ -152,6 +184,27 @@ def test_existing_ids_are_kept_and_a_second_run_changes_nothing(cp):
     assert [x["id"] for x in json.loads(first[0]["quiz_json"])["questions"]] == ["anregung", "f2", "f3"]
     assert mig.run() is True
     assert (row("SELECT quiz_json FROM subtask WHERE id = ?", cp["cp"]), by_id(attempt)) == first
+
+
+def test_exclusion_and_note_are_rekeyed_on_the_id(cp):
+    insert("checkpoint_question_exclusion", checkpoint_id=cp["cp"], question_index=2,
+           question_text="Frage C", created_at="2026-11-01")
+    insert("checkpoint_question_note", checkpoint_id=cp["cp"], question_index=0, admin_id=1,
+           note="unklar", updated_at="2026-11-01")
+    assert mig.run() is True
+    assert row("SELECT question_id FROM checkpoint_question_exclusion")["question_id"] == "f3"
+    assert row("SELECT question_id FROM checkpoint_question_note")["question_id"] == "f1"
+
+    # The case the new key is for: A deleted, B now at position 0. Excluding it must
+    # not collide with -- or overwrite -- the note filed under A at position 0.
+    set_quiz(cp, [dict(B, id="f2"), dict(C, id="f3")])
+    models.set_checkpoint_question_note(cp["cp"], 0, 1, "B auch")
+    models.set_question_excluded(cp["cp"], 1, False)       # C counts again
+    with models.db_session() as conn:
+        notes = {r["question_id"]: r["note"] for r in conn.execute(
+            "SELECT * FROM checkpoint_question_note")}
+        assert conn.execute("SELECT COUNT(*) FROM checkpoint_question_exclusion").fetchone()[0] == 0
+    assert notes == {"f1": "unklar", "f2": "B auch"}
 
 
 def test_heading_guard(cp, monkeypatch):

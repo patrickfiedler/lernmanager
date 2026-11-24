@@ -905,6 +905,16 @@ def overwrite_task_from_import(existing_task_id, task_data, reset_progress=False
     """
     task = task_data['task']
 
+    # Checked before anything is written: the steps below are separate transactions,
+    # and a checkpoint that loses its question ids would cut stored points loose.
+    old_ids = {s['reihenfolge']: s['id'] for s in models.get_subtasks(existing_task_id)}
+    for i, sub in enumerate(task.get('subtasks', [])):
+        if sub.get('checkpoint_type') and sub.get('quiz'):
+            problem = models.check_checkpoint_quiz_ids(
+                old_ids.get(sub.get('reihenfolge', i)), json.dumps(sub['quiz']))
+            if problem:
+                raise ValidationError(f"Aufgabe {i + 1}: {problem}")
+
     if reset_progress:
         models.reset_student_progress_for_task(existing_task_id)
 
