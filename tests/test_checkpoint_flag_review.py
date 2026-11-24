@@ -119,3 +119,37 @@ def test_a_question_reported_by_several_students_is_counted(app, client, as_admi
         [models.get_checkpoint_flags()[0]["checkpoint_id"]]
     )
     assert list(counts.values()) == [1]
+
+
+def test_the_note_autosaves_without_deciding_the_report(app, client, as_admin):
+    """Typing a note and moving on used to lose it: it only travelled with a
+    verdict button. The autosave keeps it and still decides nothing."""
+    _finished_session_with_report(app, client)
+    flag = models.get_checkpoint_flags()[0]
+
+    resp = as_admin.post(f"/admin/checkpoint-pruefung/meldung/{flag['id']}/notiz",
+                         data={"resolution_note": "  Bild fehlt  "})
+    assert resp.get_json() == {"ok": True}
+
+    updated = models.get_checkpoint_flags()[0]
+    assert updated["resolution_note"] == "Bild fehlt"
+    assert updated["status"] == "offen"
+    assert updated["resolved_at"] is None
+    # Still waiting for a verdict, and the page shows the saved note again.
+    assert models.get_checkpoint_reviews(flagged_only=True)
+    body = as_admin.get("/admin/checkpoint-pruefung").get_data(as_text=True)
+    assert 'value="Bild fehlt"' in body
+    assert "✓ Notiz gespeichert" in body
+
+
+def test_the_autosave_leaves_a_decided_report_alone(app, client, as_admin):
+    """A stale tab must not rewrite a note that is already part of a verdict."""
+    _finished_session_with_report(app, client)
+    flag = models.get_checkpoint_flags()[0]
+    as_admin.post(f"/admin/checkpoint-pruefung/meldung/{flag['id']}/urteil",
+                  data={"status": "frage_kaputt", "resolution_note": "Bild fehlte"})
+
+    resp = as_admin.post(f"/admin/checkpoint-pruefung/meldung/{flag['id']}/notiz",
+                         data={"resolution_note": "anders"})
+    assert resp.get_json()["ok"] is False
+    assert models.get_checkpoint_flags()[0]["resolution_note"] == "Bild fehlte"

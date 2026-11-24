@@ -5694,6 +5694,24 @@ def resolve_checkpoint_flag(flag_id, status, resolution_note, admin_id):
         ''', (status, resolution_note or None, now_local(), admin_id, flag_id))
 
 
+def set_checkpoint_flag_note(flag_id, note):
+    """Autosave of the "Notiz zur Frage" field while the teacher is still deciding.
+
+    Writes only resolution_note -- status, resolved_at and resolved_by stay as
+    they are, so a saved note never counts as a verdict. Returns True when a row
+    was written.
+
+    Only on an open report: once decided, the note is part of the verdict (exports,
+    the student's notice), and a stale second tab must not rewrite it.
+    """
+    with db_session() as conn:
+        cur = conn.execute('''
+            UPDATE checkpoint_flag SET resolution_note = ?
+            WHERE id = ? AND status = 'offen'
+        ''', (note or None, flag_id))
+        return cur.rowcount > 0
+
+
 def mark_checkpoint_flags_retried(flag_ids):
     """Close owed questions once the student has redone them -- both a rejected
     report and a question the teacher sent back land in 'nachgeholt'."""

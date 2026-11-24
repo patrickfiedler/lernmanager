@@ -435,10 +435,13 @@
 
                 {% if flag.status == 'offen' %}
                 <form method="POST" action="{{ url_for('admin_checkpoint_flag_resolve', flag_id=flag.id) }}"
-                      class="checkpoint-flag-form">
+                      class="checkpoint-flag-form" data-flag-id="{{ flag.id }}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <input type="text" name="resolution_note" class="form-control"
-                           placeholder="Notiz zur Frage (freiwillig)">
+                    <input type="text" name="resolution_note" class="form-control checkpoint-flag-note"
+                           placeholder="Notiz zur Frage (freiwillig, speichert sich selbst)"
+                           value="{{ flag.resolution_note or '' }}">
+                    <small class="checkpoint-flag-note-status text-muted" aria-live="polite">
+                        {% if flag.resolution_note %}✓ Notiz gespeichert{% endif %}</small>
                     <div class="flex gap-1 mt-1" style="flex-wrap: wrap;">
                         {% for code, label in flag_resolutions.items() %}
                         <button type="submit" name="status" value="{{ code }}"
@@ -775,6 +778,49 @@ document.querySelectorAll('.checkpoint-verdict').forEach(function(row) {
     note.addEventListener('change', function() {
         if (note.value === savedNote) { return; }
         save(activeVerdict(), '✓ Notiz gespeichert');
+    });
+});
+
+// Note on a student report ("Notiz zur Frage"): saved after a short typing pause
+// and on blur, so moving on to the next question never loses it. The status line
+// stays visible (no fade) -- the teacher should be able to glance back and see it.
+// A verdict button still submits the field with the form, so the last keystroke
+// before a click is never lost either.
+document.querySelectorAll('.checkpoint-flag-form').forEach(function(form) {
+    var note = form.querySelector('.checkpoint-flag-note');
+    var status = form.querySelector('.checkpoint-flag-note-status');
+    var url = '/admin/checkpoint-pruefung/meldung/' + form.dataset.flagId + '/notiz';
+    var savedNote = note.value;
+    var timer = null;
+
+    function save() {
+        clearTimeout(timer);
+        if (note.value.trim() === savedNote.trim()) { return; }
+        var sending = note.value;
+        var formData = new FormData();
+        formData.append('resolution_note', sending);
+        formData.append('csrf_token', document.querySelector('meta[name="csrf-token"]').content);
+        status.textContent = 'speichert …';
+        LLMButton.postForm(url, formData).then(function(data) {
+            if (!data.ok) { status.textContent = '⚠️ Nicht gespeichert: ' + data.message; return; }
+            savedNote = sending;
+            var now = new Date();
+            status.textContent = note.value === sending
+                ? '✓ Notiz gespeichert ' + now.toLocaleTimeString('de-DE', {hour: '2-digit', minute: '2-digit'})
+                : '… ungespeichert';
+        });
+    }
+
+    note.addEventListener('input', function() {
+        status.textContent = '… ungespeichert';
+        clearTimeout(timer);
+        timer = setTimeout(save, 1000);
+    });
+    note.addEventListener('change', save);
+    // Enter in a one-field form would submit it with no status -- the server
+    // would answer "Unbekanntes Urteil". Save instead.
+    note.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') { e.preventDefault(); save(); }
     });
 });
 {% endblock %}

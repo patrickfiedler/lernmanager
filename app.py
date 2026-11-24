@@ -4452,6 +4452,21 @@ def admin_checkpoint_flag_resolve(flag_id):
     return redirect(request.referrer or url_for('admin_checkpoint_pruefung'))
 
 
+@app.route('/admin/checkpoint-pruefung/meldung/<int:flag_id>/notiz', methods=['POST'])
+@staff_required
+def admin_checkpoint_flag_note(flag_id):
+    """Autosave the note on a report before any verdict button is pressed.
+
+    Before this the note only travelled with a verdict button, so typing it and
+    moving on to the next question lost it without a word."""
+    permissions.require_checkpoint('flag', flag_id)
+    note = (request.form.get('resolution_note') or '').strip()
+    if not models.set_checkpoint_flag_note(flag_id, note):
+        return jsonify({'ok': False,
+                        'message': 'Meldung ist schon entschieden — Seite neu laden.'})
+    return jsonify({'ok': True})
+
+
 # Keyed on every value of CHECKPOINT_FLAG_RESOLUTIONS -- a verdict added to the dict
 # without a line here used to KeyError the route rather than the import.
 _FLAG_VERDICT_FLASH = {
