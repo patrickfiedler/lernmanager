@@ -533,6 +533,35 @@ def init_db():
                 PRIMARY KEY (checkpoint_id, question_id, admin_id)
             );
 
+            -- Bewertungsfenster (migrate_086): period + expected modules a grade is
+            -- computed over. Denominator derived from the module list; every change logged.
+            CREATE TABLE IF NOT EXISTS bewertungsfenster (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                klasse_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                start_datum TEXT NOT NULL,  -- YYYY-MM-DD
+                stichtag TEXT NOT NULL,     -- YYYY-MM-DD
+                eingefroren_am TEXT,  -- set by the manual freeze; NULL = only the date decides
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (klasse_id) REFERENCES klasse(id) ON DELETE CASCADE
+            );
+            CREATE TABLE IF NOT EXISTS bewertungsfenster_modul (
+                fenster_id INTEGER NOT NULL,
+                task_id INTEGER NOT NULL,
+                PRIMARY KEY (fenster_id, task_id),
+                FOREIGN KEY (fenster_id) REFERENCES bewertungsfenster(id) ON DELETE CASCADE,
+                FOREIGN KEY (task_id) REFERENCES task(id) ON DELETE CASCADE
+            );
+            CREATE TABLE IF NOT EXISTS bewertungsfenster_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                fenster_id INTEGER NOT NULL,
+                zeitpunkt TEXT NOT NULL,
+                admin_id INTEGER,  -- no FK, like checkpoint_flag.resolved_by
+                aktion TEXT NOT NULL,
+                detail TEXT NOT NULL DEFAULT '',
+                FOREIGN KEY (fenster_id) REFERENCES bewertungsfenster(id) ON DELETE CASCADE
+            );
+
             -- Ticked steps inside an Aufgabe (templates/student/klasse.html).
             -- Scratchpad, not progress: the durable record is student_subtask.
             CREATE TABLE IF NOT EXISTS step_tick (
@@ -2532,6 +2561,158 @@ def set_topic_queue(klasse_id, task_ids_ordered):
                 "INSERT INTO topic_queue (klasse_id, task_id, position) VALUES (?, ?, ?)",
                 (klasse_id, task_id, pos)
             )
+
+
+# ============ Bewertungsfenster ============
+# Period + expected modules a grade is computed over (chemie, task_plan.md § Notenrechnung).
+# The module list is the only input for the denominator, so every change is logged.
+
+def fenster_ist_eingefroren(fenster, heute=None):
+    """True once the window may no longer change (name, dates, modules).
+
+    fenster: dict with 'stichtag' (YYYY-MM-DD). heute: YYYY-MM-DD, default today.
+    Frozen by hand (eingefroren_am, freeze_fenster) or from the day after the
+    Stichtag: students still work on the Stichtag itself.
+    """
+    if fenster.get('eingefroren_am'):
+        return True
+    heute = heute or now_local('%Y-%m-%d')
+    return heute > fenster['stichtag']
+
+
+def _check_fenster_daten(name, start_datum, stichtag):
+    name = (name or '').strip()
+    if not name:
+        raise ValueError('Name fehlt.')
+    try:
+        start = datetime.strptime(start_datum, '%Y-%m-%d').date()
+        ende = datetime.strptime(stichtag, '%Y-%m-%d').date()
+    except (TypeError, ValueError):
+        raise ValueError('Datum fehlt oder ist ungültig.')
+    if ende < start:
+        raise ValueError('Der Stichtag liegt vor dem Start.')
+    return name
+
+
+def _log_fenster(conn, fenster_id, admin_id, aktion, detail=''):
+    conn.execute(
+        "INSERT INTO bewertungsfenster_log (fenster_id, zeitpunkt, admin_id, aktion, detail) "
+        "VALUES (?, ?, ?, ?, ?)", (fenster_id, now_local(), admin_id, aktion, detail))
+
+
+def _task_names(conn, task_ids):
+    if not task_ids:
+        return []
+    marks = ','.join('?' * len(task_ids))
+    rows = conn.execute(f"SELECT name FROM task WHERE id IN ({marks}) ORDER BY name",
+                        list(task_ids)).fetchall()
+    return [r['name'] for r in rows]
+
+
+def create_fenster(klasse_id, name, start_datum, stichtag, task_ids, admin_id):
+    """New window for a class; returns its id. Raises ValueError on bad input."""
+    name = _check_fenster_daten(name, start_datum, stichtag)
+    task_ids = sorted(set(task_ids))
+    with db_session() as conn:
+        fenster_id = conn.execute(
+            "INSERT INTO bewertungsfenster (klasse_id, name, start_datum, stichtag, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (klasse_id, name, start_datum, stichtag, now_local())).lastrowid
+        conn.executemany("INSERT INTO bewertungsfenster_modul (fenster_id, task_id) VALUES (?, ?)",
+                         [(fenster_id, t) for t in task_ids])
+        _log_fenster(conn, fenster_id, admin_id, 'angelegt',
+                     f'{start_datum} bis {stichtag}; Module: '
+                     + (', '.join(_task_names(conn, task_ids)) or 'keine'))
+    return fenster_id
+
+
+def get_fenster(fenster_id):
+    """Window as dict with 'task_ids' and 'module' (id, name), or None."""
+    with db_session() as conn:
+        row = conn.execute("SELECT * FROM bewertungsfenster WHERE id = ?", (fenster_id,)).fetchone()
+        if not row:
+            return None
+        fenster = dict(row)
+        module = conn.execute(
+            "SELECT t.id, t.name FROM bewertungsfenster_modul m JOIN task t ON t.id = m.task_id "
+            "WHERE m.fenster_id = ? ORDER BY t.name", (fenster_id,)).fetchall()
+    fenster['module'] = [dict(m) for m in module]
+    fenster['task_ids'] = [m['id'] for m in module]
+    fenster['eingefroren'] = fenster_ist_eingefroren(fenster)
+    return fenster
+
+
+def list_fenster(klasse_id):
+    """All windows of a class, newest start first, each with module count + frozen flag."""
+    with db_session() as conn:
+        rows = conn.execute(
+            "SELECT f.*, (SELECT COUNT(*) FROM bewertungsfenster_modul m WHERE m.fenster_id = f.id) "
+            "AS modul_anzahl FROM bewertungsfenster f WHERE f.klasse_id = ? "
+            "ORDER BY f.start_datum DESC, f.id DESC", (klasse_id,)).fetchall()
+    result = [dict(r) for r in rows]
+    for f in result:
+        f['eingefroren'] = fenster_ist_eingefroren(f)
+    return result
+
+
+def update_fenster(fenster_id, name, start_datum, stichtag, task_ids, admin_id):
+    """Save name, dates and module list; one log row per change. Returns the number of
+    changes. Raises ValueError on bad input or when the window is frozen."""
+    fenster = get_fenster(fenster_id)
+    if fenster['eingefroren']:
+        raise ValueError('Das Fenster ist eingefroren und lässt sich nicht mehr ändern.')
+    name = _check_fenster_daten(name, start_datum, stichtag)
+    alt, neu = set(fenster['task_ids']), set(task_ids)
+    changes = 0
+    with db_session() as conn:
+        for feld, label, wert in (('name', 'Name', name), ('start_datum', 'Start', start_datum),
+                                  ('stichtag', 'Stichtag', stichtag)):
+            if fenster[feld] != wert:
+                conn.execute(f"UPDATE bewertungsfenster SET {feld} = ? WHERE id = ?",
+                             (wert, fenster_id))
+                _log_fenster(conn, fenster_id, admin_id, 'daten',
+                             f'{label}: {fenster[feld]} -> {wert}')
+                changes += 1
+        for task_id in sorted(neu - alt):
+            conn.execute("INSERT INTO bewertungsfenster_modul (fenster_id, task_id) VALUES (?, ?)",
+                         (fenster_id, task_id))
+        for task_id in sorted(alt - neu):
+            conn.execute("DELETE FROM bewertungsfenster_modul WHERE fenster_id = ? AND task_id = ?",
+                         (fenster_id, task_id))
+        for aktion, ids in (('modul_hinzu', neu - alt), ('modul_entfernt', alt - neu)):
+            for modul in _task_names(conn, ids):
+                _log_fenster(conn, fenster_id, admin_id, aktion, modul)
+                changes += 1
+    return changes
+
+
+def delete_fenster(fenster_id):
+    """Delete a window with its log. Refused once frozen: it is the evidence for a grade."""
+    fenster = get_fenster(fenster_id)
+    if fenster['eingefroren']:
+        raise ValueError('Ein eingefrorenes Fenster bleibt erhalten.')
+    with db_session() as conn:
+        conn.execute("DELETE FROM bewertungsfenster WHERE id = ?", (fenster_id,))
+
+
+def freeze_fenster(fenster_id, admin_id):
+    """Freeze a window by hand before its Stichtag. Cannot be undone."""
+    if get_fenster(fenster_id)['eingefroren']:
+        raise ValueError('Das Fenster ist schon eingefroren.')
+    with db_session() as conn:
+        conn.execute("UPDATE bewertungsfenster SET eingefroren_am = ? WHERE id = ?",
+                     (now_local(), fenster_id))
+        _log_fenster(conn, fenster_id, admin_id, 'eingefroren', 'von Hand')
+
+
+def get_fenster_log(fenster_id):
+    """Change log, newest first, with the admin's username."""
+    with db_session() as conn:
+        rows = conn.execute(
+            "SELECT l.*, a.username FROM bewertungsfenster_log l "
+            "LEFT JOIN admin a ON a.id = l.admin_id WHERE l.fenster_id = ? "
+            "ORDER BY l.id DESC", (fenster_id,)).fetchall()
+    return [dict(r) for r in rows]
 
 
 def get_next_open_queued_topic(student_id, klasse_id, current_task_id=None):

@@ -2128,6 +2128,68 @@ def admin_topic_queue(klasse_id):
                            themen_exact=themen_exact, themen_other=themen_other)
 
 
+# ============ Admin: Bewertungsfenster ============
+
+def _fenster_form():
+    return (request.form.get('name', ''), request.form.get('start_datum', ''),
+            request.form.get('stichtag', ''), request.form.getlist('task_ids', type=int))
+
+
+@app.route('/admin/klasse/<int:klasse_id>/bewertungsfenster', methods=['GET', 'POST'])
+@admin_required
+def admin_bewertungsfenster(klasse_id):
+    """List a class's grading windows and create a new one."""
+    klasse = models.get_klasse(klasse_id)
+    if not klasse:
+        abort(404)
+    if request.method == 'POST':
+        try:
+            fenster_id = models.create_fenster(klasse_id, *_fenster_form(), session.get('admin_id'))
+        except ValueError as e:
+            flash(str(e), 'danger')
+            return redirect(url_for('admin_bewertungsfenster', klasse_id=klasse_id))
+        flash('Bewertungsfenster angelegt. ✅', 'success')
+        return redirect(url_for('admin_bewertungsfenster_detail', fenster_id=fenster_id))
+    themen_exact, themen_other = split_tasks_by_stufe(models.get_all_tasks(),
+                                                      [klasse.get('klassenstufe')])
+    return render_template('admin/bewertungsfenster.html', klasse=klasse,
+                           fenster_liste=models.list_fenster(klasse_id), fenster=None,
+                           themen_exact=themen_exact, themen_other=themen_other)
+
+
+@app.route('/admin/bewertungsfenster/<int:fenster_id>', methods=['GET', 'POST'])
+@admin_required
+def admin_bewertungsfenster_detail(fenster_id):
+    """Edit one window (until frozen) and show its change log."""
+    fenster = models.get_fenster(fenster_id)
+    if not fenster:
+        abort(404)
+    if request.method == 'POST':
+        try:
+            if request.form.get('aktion') == 'loeschen':
+                models.delete_fenster(fenster_id)
+                flash('Bewertungsfenster gelöscht.', 'success')
+                return redirect(url_for('admin_bewertungsfenster', klasse_id=fenster['klasse_id']))
+            if request.form.get('aktion') == 'einfrieren':
+                if request.form.get('bestaetigt') != '1':
+                    raise ValueError('Bitte das Einfrieren bestätigen (Häkchen setzen).')
+                models.freeze_fenster(fenster_id, session.get('admin_id'))
+                flash('Fenster eingefroren. 🔒', 'success')
+                return redirect(url_for('admin_bewertungsfenster_detail', fenster_id=fenster_id))
+            n = models.update_fenster(fenster_id, *_fenster_form(), session.get('admin_id'))
+            flash(f'Gespeichert, {n} Änderung(en) protokolliert. ✅' if n else 'Keine Änderung.',
+                  'success')
+        except ValueError as e:
+            flash(str(e), 'danger')
+        return redirect(url_for('admin_bewertungsfenster_detail', fenster_id=fenster_id))
+    klasse = models.get_klasse(fenster['klasse_id'])
+    themen_exact, themen_other = split_tasks_by_stufe(models.get_all_tasks(),
+                                                      [klasse.get('klassenstufe')])
+    return render_template('admin/bewertungsfenster.html', klasse=klasse, fenster=fenster,
+                           log=models.get_fenster_log(fenster_id),
+                           themen_exact=themen_exact, themen_other=themen_other)
+
+
 # ============ Admin: Schüler ============
 
 @app.route('/admin/schueler/<int:student_id>')

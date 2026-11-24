@@ -1,0 +1,122 @@
+{% extends 'base.html' %}
+{% import 'admin/_thema_options.html' as thema_opts %}
+
+{% block title %}Bewertungsfenster - {{ klasse.name }}{% endblock %}
+
+{% macro modul_checkbox(task, checked, disabled) -%}
+<label style="display: block;"><input type="checkbox" name="task_ids" value="{{ task.id }}"
+    {% if checked %}checked{% endif %} {% if disabled %}disabled{% endif %}>
+    {{ task.fach }} ({{ task.stufe }}): {{ thema_opts.thema_label(task) }}</label>
+{%- endmacro %}
+
+{% macro fenster_form(f) -%}
+{% set gewaehlt = f.task_ids if f else [] %}
+{% set zu = f and f.eingefroren %}
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<div class="flex gap-1 mb-2">
+    <label>Name<br><input type="text" name="name" class="form-control" required
+        value="{{ f.name if f else '' }}" placeholder="z. B. Fenster II" {% if zu %}disabled{% endif %}></label>
+    <label>Start<br><input type="date" name="start_datum" class="form-control" required
+        value="{{ f.start_datum if f else '' }}" {% if zu %}disabled{% endif %}></label>
+    <label>Stichtag<br><input type="date" name="stichtag" class="form-control" required
+        value="{{ f.stichtag if f else '' }}" {% if zu %}disabled{% endif %}></label>
+</div>
+<p class="mb-1"><strong>Erwartete Module</strong> -- daraus ergibt sich der Nenner jeder Note.</p>
+{% for task in themen_exact %}{{ modul_checkbox(task, task.id in gewaehlt, zu) }}{% endfor %}
+{% set andere_gewaehlt = themen_other | selectattr('id', 'in', gewaehlt) | list %}
+{% if themen_other %}
+<details class="mt-1" {% if andere_gewaehlt or not themen_exact %}open{% endif %}>
+    <summary>{% if themen_exact %}Andere Klassenstufen{% else %}Alle Themen{% endif %}</summary>
+    {% for task in themen_other %}{{ modul_checkbox(task, task.id in gewaehlt, zu) }}{% endfor %}
+</details>
+{% endif %}
+{%- endmacro %}
+
+{% block content %}
+<div class="flex flex-between flex-center mb-2">
+    <h1>📐 Bewertungsfenster: {{ klasse.name }}</h1>
+    <a href="{{ url_for('admin_bewertungsfenster', klasse_id=klasse.id) if fenster else url_for('admin_klasse_detail', klasse_id=klasse.id) }}"
+       class="btn btn-secondary">← Zurück</a>
+</div>
+
+{% if fenster %}
+<div class="card mb-2">
+    <div class="card-header">{{ fenster.name }}
+        {% if fenster.eingefroren %}<span class="badge">🔒 eingefroren</span>{% endif %}</div>
+    <div class="card-body">
+        {% if fenster.eingefroren %}
+        <p class="text-muted">{% if fenster.eingefroren_am %}Von Hand eingefroren am {{ fenster.eingefroren_am }}.{% else %}Der Stichtag ist vorbei.{% endif %}
+            Name, Daten und Module bleiben so, wie sie sind.</p>
+        {% else %}
+        <p class="text-muted">Jede Änderung wird unten protokolliert: Sie verschiebt den Nenner aller Schüler.</p>
+        {% endif %}
+        <form method="POST">
+            {{ fenster_form(fenster) }}
+            {% if not fenster.eingefroren %}
+            <button type="submit" class="btn btn-primary mt-2">💾 Speichern</button>
+            {% endif %}
+        </form>
+        {% if not fenster.eingefroren %}
+        <form method="POST" class="mt-2">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="aktion" value="loeschen">
+            <button type="submit" class="btn btn-danger btn-sm">Fenster löschen</button>
+        </form>
+        <form method="POST" class="mt-2">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="aktion" value="einfrieren">
+            <p class="text-muted mb-1">Am Tag nach dem Stichtag friert das Fenster von selbst ein. Früher geht es von Hand -- endgültig.</p>
+            <label><input type="checkbox" name="bestaetigt" value="1" required>
+                Ich will das Fenster jetzt einfrieren. Danach lässt es sich nicht mehr ändern oder löschen.</label>
+            <button type="submit" class="btn btn-secondary btn-sm">🔒 Jetzt einfrieren</button>
+        </form>
+        {% endif %}
+    </div>
+</div>
+
+<div class="card mb-2">
+    <div class="card-header">Änderungsprotokoll</div>
+    <table class="table">
+        <thead><tr><th>Zeitpunkt</th><th>Wer</th><th>Was</th><th>Detail</th></tr></thead>
+        <tbody>
+        {% for e in log %}
+        <tr><td>{{ e.zeitpunkt }}</td><td>{{ e.username or '–' }}</td>
+            <td>{{ {'angelegt': 'angelegt', 'daten': 'Daten geändert', 'modul_hinzu': 'Modul hinzu',
+                    'modul_entfernt': 'Modul entfernt', 'eingefroren': 'eingefroren'}.get(e.aktion, e.aktion) }}</td>
+            <td>{{ e.detail }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% else %}
+<div class="card mb-2">
+    <div class="card-header">Fenster dieser Klasse</div>
+    {% if fenster_liste %}
+    <table class="table">
+        <thead><tr><th>Name</th><th>Zeitraum</th><th>Module</th><th></th></tr></thead>
+        <tbody>
+        {% for f in fenster_liste %}
+        <tr><td><a href="{{ url_for('admin_bewertungsfenster_detail', fenster_id=f.id) }}">{{ f.name }}</a></td>
+            <td>{{ f.start_datum }} bis {{ f.stichtag }}</td>
+            <td>{{ f.modul_anzahl }}</td>
+            <td>{% if f.eingefroren %}🔒 eingefroren{% endif %}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="text-muted card-body">Noch kein Fenster angelegt.</p>
+    {% endif %}
+</div>
+
+<div class="card mb-2">
+    <div class="card-header">Neues Fenster</div>
+    <div class="card-body">
+        <form method="POST">
+            {{ fenster_form(None) }}
+            <button type="submit" class="btn btn-primary mt-2">➕ Anlegen</button>
+        </form>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

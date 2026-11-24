@@ -24,6 +24,7 @@
         <a href="{{ url_for('admin_topic_queue', klasse_id=klasse.id) }}" class="btn btn-secondary">📋 Themen-Reihenfolge</a>
         {% if is_admin %}
         <a href="{{ url_for('admin_grading_upload') }}" class="btn btn-secondary">🎯 KI-Bewertung hochladen</a>
+        <a href="{{ url_for('admin_bewertungsfenster', klasse_id=klasse.id) }}" class="btn btn-secondary">📐 Bewertungsfenster</a>
         {% endif %}
         <a href="{{ url_for('admin_unterricht', klasse_id=klasse.id) }}" class="btn btn-primary">📅 Unterricht</a>
         <a href="{{ url_for('admin_klasse_bericht', klasse_id=klasse.id) }}" class="btn btn-success">📊 Klassenbericht</a>
