@@ -525,3 +525,19 @@ def test_question_note_autosaves_per_teacher(own):
     teacher_id = models.verify_admin("lehrerin", "testpass")['id']
     assert models.get_checkpoint_question_notes(teacher_id) == {}
     assert any(f['reason_text'] == 'Bild unscharf' for f in models.get_checkpoint_flags())
+
+
+def test_checkpoint_overview_for_own_classes_only(own, teacher):
+    """Teachers see the points overview for their classes; the switch that takes a
+    question out for every class stays admin."""
+    client, mine = own
+    _, foreign = teacher
+    html = client.get('/admin/checkpoint-uebersicht').get_data(as_text=True)
+    assert 'Fremde' not in html                  # foreign class not offered
+    resp = client.get(f"/admin/checkpoint-uebersicht?klasse_id={mine['klasse_id']}")
+    assert resp.status_code == 200
+    html = resp.get_data(as_text=True)
+    assert 'Emma' in html
+    assert 'Nicht werten</button>' not in html
+    assert client.get(f"/admin/checkpoint-uebersicht?klasse_id={foreign['klasse_id']}"
+                      ).status_code == 404

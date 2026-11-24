@@ -133,6 +133,7 @@
     <p class="text-muted" style="margin: 0 0 0.75rem 0; font-size: 0.9rem;">
         „Nicht werten" gilt für alle Schüler und alle Sitzungen, auch künftige. Die gespeicherten
         Punkte bleiben erhalten, „Wieder werten" macht es rückgängig.
+        {% if not is_admin %}Weil es alle Klassen betrifft, schaltet das nur der Admin um.{% endif %}
     </p>
     {% for cp in checkpoints %}
     <h3 style="font-size: 1rem; margin: 1rem 0 0.25rem 0;">{{ cp.titel }}</h3>
@@ -150,6 +151,7 @@
                 </span>
                 {% endif %}
             </span>
+            {% if is_admin %}{# counts for every class, not only the teacher's #}
             <form method="POST" class="flex gap-1 flex-center"
                   action="{{ url_for('admin_checkpoint_question_exclusion', checkpoint_id=cp.id, question_index=loop.index0) }}">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -162,6 +164,7 @@
                 <button type="submit" class="btn btn-sm">Nicht werten</button>
                 {% endif %}
             </form>
+            {% endif %}
         </div>
         {% endfor %}
     {% endfor %}

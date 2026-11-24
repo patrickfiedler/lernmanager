@@ -4527,12 +4527,17 @@ def admin_checkpoint_flag_question(checkpoint_id, question_index):
 
 
 @app.route('/admin/checkpoint-uebersicht')
-@admin_required
+@staff_required
 def admin_checkpoint_uebersicht():
     """Points per student and question for one class and Thema, with the sum, the
-    missing questions, and the switch that takes a question out of the grading."""
-    klassen = models.get_all_klassen()
+    missing questions, and the switch that takes a question out of the grading.
+
+    Teachers too (Patrick, 2026-11-24), for their own classes. The switch stays
+    admin: it takes the question out for every class, not only hers."""
+    klassen = permissions.visible_klassen()
     klasse_id = request.args.get('klasse_id', type=int)
+    if klasse_id:
+        permissions.require_klasse(klasse_id)
     tasks = models.get_checkpoint_topics_for_klasse(klasse_id) if klasse_id else []
     task_id = request.args.get('task_id', type=int)
     if task_id not in {t['id'] for t in tasks}:
