@@ -171,3 +171,37 @@ def test_exports_say_which_question_is_not_graded(data, as_admin):
     lines = as_admin.get("/admin/checkpoint-pruefung/export.csv").get_data(as_text=True).splitlines()
     column = lines[0].split(";").index("nicht_gewertet")
     assert [line.split(";")[column] for line in lines[1:] if line.strip()] == ["0", "1", "0"]
+
+
+def test_a_question_deleted_from_the_quiz_counts_for_nobody(data, as_admin):
+    """Chemie, 2026-11-24: 1.4 F4 and 1.7 F4 were deleted after sittings had points
+    on them. The snapshot still has them; the grade must not."""
+    a = data["students"][0]
+    old_quiz = {"questions": QUIZ["questions"] + [
+        {"type": "short_answer", "text": "Frage D", "rubric": "d"}]}
+    attempt_id = models.create_checkpoint_attempt(
+        a, data["cp"], data["task_id"], "quiz", "kern", score=0, attempt_count=1,
+        hint_count=0, quiz_snapshot_json=json.dumps(old_quiz), session_uid=f"s-{a}",
+        question_scores_json=json.dumps({"0": 3, "1": 3, "2": 2, "3": 0}))
+    for index in range(4):
+        models.create_checkpoint_answer(
+            a, data["cp"], f"s-{a}", index, 1, "Antwort", correct=1, feedback="ok",
+            hints_used_before=0, grader="llm")
+    models.attach_checkpoint_session_to_attempt(f"s-{a}", attempt_id)
+    flag_id = models.create_checkpoint_flag(data["cp"], 3, "student", student_id=a,
+                                            checkpoint_attempt_id=attempt_id)
+
+    assert models.effective_checkpoint_score(models.get_checkpoint_attempt(attempt_id)) == 2
+    assert not models.checkpoint_score_is_provisional({"id": attempt_id})
+    assert flag_id
+
+    session = json.loads(as_admin.get("/admin/checkpoint-pruefung/export.json")
+                         .get_data(as_text=True))["sessions"][0]
+    assert [(q["nicht_gewertet"], q["nicht_gewertet_grund"]) for q in session["fragen"]] == [
+        (False, None), (False, None), (False, None), (True, "frage_entfernt")]
+
+    models.set_question_excluded(data["cp"], 1, True)              # both kinds side by side
+    session = json.loads(as_admin.get("/admin/checkpoint-pruefung/export.json")
+                         .get_data(as_text=True))["sessions"][0]
+    assert [q["nicht_gewertet_grund"] for q in session["fragen"]] == [
+        None, "ausgeschaltet", None, "frage_entfernt"]

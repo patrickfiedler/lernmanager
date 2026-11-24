@@ -4781,9 +4781,48 @@ def consolidate_question_scores(scores):
     return min(counted) if counted else 0
 
 
+QUESTION_REMOVED = 'frage_entfernt'
+
+
+class QuestionExclusions(dict):
+    """{question_index: row} for one checkpoint -- plus every index at or past the end
+    of the CURRENT quiz, which counts as excluded too.
+
+    Why: scores are keyed by position, and a sitting's snapshot keeps a question the
+    author later deleted (chemie, 2026-11-24: 1.4 F4 and 1.7 F4). Its points must not
+    count, and no teacher can switch it off -- the question is gone from the page.
+    Detects a question cut from the END only; one cut from the middle shifts every
+    later index, which only stable question ids could catch.
+
+    `in` and `.get()` answer for both kinds; len() and iteration see table rows only.
+    """
+    def __init__(self, rows=None, question_count=None):
+        super().__init__(rows or {})
+        self.question_count = question_count
+
+    def removed(self, index):
+        return self.question_count is not None and index >= self.question_count
+
+    def __contains__(self, index):
+        return dict.__contains__(self, index) or self.removed(index)
+
+    def get(self, index, default=None):
+        if dict.__contains__(self, index):
+            return dict.__getitem__(self, index)
+        if self.removed(index):
+            return {'question_index': index, 'reason': QUESTION_REMOVED}
+        return default
+
+
 def get_excluded_questions(checkpoint_ids=None):
-    """{checkpoint_id: {question_index: row}} for the questions that count for nobody."""
+    """{checkpoint_id: QuestionExclusions} for the questions that count for nobody.
+
+    With ids: one entry per checkpoint that has a quiz, so the removed-question rule
+    applies even where no question was switched off. Without: only checkpoints that
+    have a switched-off question.
+    """
     sql, params = 'SELECT * FROM checkpoint_question_exclusion', []
+    ids = None
     if checkpoint_ids is not None:
         ids = list(checkpoint_ids)
         if not ids:
@@ -4792,9 +4831,21 @@ def get_excluded_questions(checkpoint_ids=None):
         params = ids
     with db_session() as conn:
         rows = conn.execute(sql, params).fetchall()
-    excluded = {}
+        wanted = set(ids) if ids is not None else {r['checkpoint_id'] for r in rows}
+        counts = {}
+        if wanted:
+            for r in conn.execute(
+                    f"SELECT id, quiz_json FROM subtask WHERE id IN ({','.join('?' * len(wanted))})",
+                    list(wanted)).fetchall():
+                try:
+                    counts[r['id']] = len(json.loads(r['quiz_json'])['questions'])
+                except (TypeError, ValueError, KeyError):
+                    pass   # no quiz: nothing to have been removed from
+    excluded = {cid: QuestionExclusions(question_count=n) for cid, n in counts.items()}
     for r in rows:
-        excluded.setdefault(r['checkpoint_id'], {})[r['question_index']] = dict(r)
+        excluded.setdefault(r['checkpoint_id'],
+                            QuestionExclusions(question_count=counts.get(r['checkpoint_id'])))
+        dict.__setitem__(excluded[r['checkpoint_id']], r['question_index'], dict(r))
     return excluded
 
 
@@ -4828,10 +4879,13 @@ def counted_question_scores(attempt, excluded=None):
     if excluded is None:
         excluded = get_excluded_questions([checkpoint_id])
     out = excluded.get(checkpoint_id)
-    if not out:
+    if out is None:
         return None
-    return {k: (None if k.isdigit() and int(k) in out else v)
-            for k, v in json.loads(raw).items()}
+    scores = json.loads(raw)
+    hit = {k for k in scores if k.isdigit() and int(k) in out}
+    if not hit:
+        return None
+    return {k: (None if k in hit else v) for k, v in scores.items()}
 
 
 def checkpoint_review_status(attempt):
@@ -5780,10 +5834,15 @@ def mark_checkpoint_flags_retried(flag_ids):
 # SQL condition on a checkpoint_flag row: its question still counts. A flag on a
 # question taken out of the grading (migrate_066) waits on nobody -- it neither makes
 # a score provisional nor owes the student a redo.
-FLAG_QUESTION_COUNTS = '''NOT EXISTS (
+# Same for a question deleted from the end of the quiz (QuestionExclusions).
+FLAG_QUESTION_COUNTS = '''(NOT EXISTS (
     SELECT 1 FROM checkpoint_question_exclusion x
     WHERE x.checkpoint_id = checkpoint_flag.checkpoint_id
-      AND x.question_index = checkpoint_flag.question_index)'''
+      AND x.question_index = checkpoint_flag.question_index)
+  AND checkpoint_flag.question_index < COALESCE((
+    SELECT json_array_length(sub_q.quiz_json, '$.questions') FROM subtask sub_q
+    WHERE sub_q.id = checkpoint_flag.checkpoint_id AND json_valid(sub_q.quiz_json)),
+    checkpoint_flag.question_index + 1))'''
 
 
 # A score stays provisional while a flag in one of these states hangs on it.

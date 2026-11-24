@@ -3912,8 +3912,13 @@ def _build_checkpoint_sessions(attempts):
             entry['flags'] = (flags.get(entry['question_index'], [])
                               + question_flags.get((attempt['checkpoint_id'],
                                                     entry['question_index']), []))
-            entry['excluded'] = entry['question_index'] in excluded_questions.get(
-                attempt['checkpoint_id'], {})
+            exclusion = excluded_questions.get(attempt['checkpoint_id'], {}).get(
+                entry['question_index'])
+            entry['excluded'] = exclusion is not None
+            entry['excluded_reason'] = (
+                None if exclusion is None else
+                'ausgeschaltet' if 'created_at' in exclusion   # a checkpoint_question_exclusion row
+                else models.QUESTION_REMOVED)
             entry['flag_class_count'] = open_by_question.get(
                 (attempt['checkpoint_id'], entry['question_index']), 0)
             question = (questions[entry['question_index']]
@@ -4780,6 +4785,7 @@ def _checkpoint_export_rows(sessions):
                 # The points columns keep what the question earned; whoever adds
                 # them up has to skip the row. score_gueltig already does.
                 'nicht_gewertet': 1 if question.get('excluded') else 0,
+                'nicht_gewertet_grund': question.get('excluded_reason'),
                 'gemeldet': 1 if flag else 0,
                 'meldung_grund_code': flag.get('reason_code'),
                 'meldung_grund': models.CHECKPOINT_FLAG_REASONS.get(flag.get('reason_code')),
@@ -5005,6 +5011,9 @@ def admin_checkpoint_export_json():
                 # what the question earned -- a reader summing points must skip it,
                 # in numerator and denominator alike. score_gueltig already does.
                 'nicht_gewertet': bool(question.get('excluded')),
+                # Why: 'ausgeschaltet' (switched off on the Übersicht) or
+                # 'frage_entfernt' (no longer in the checkpoint's current quiz).
+                'nicht_gewertet_grund': question.get('excluded_reason'),
                 'versuche_gezaehlt': question['attempts_counted'],
                 # Structured, not free text: "which questions did students report,
                 # for what reason, and what did the teacher decide" is the question

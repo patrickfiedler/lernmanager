@@ -14,7 +14,8 @@ import pytest
 
 import models
 
-QUIZ = {"questions": [{"type": "short_answer", "text": "Erkläre.", "rubric": "Kern."}]}
+QUIZ = {"questions": [{"type": "short_answer", "text": t, "rubric": "Kern."}
+                      for t in ("Erkläre.", "Begründe.", "Nenne.")]}
 
 URL = "/schueler/checkpoints"
 
