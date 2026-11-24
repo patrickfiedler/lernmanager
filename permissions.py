@@ -76,6 +76,14 @@ def require_checkpoint(kind, row_id):
         abort(404)
 
 
+def require_checkpoint_question(checkpoint_id):
+    """Marking a question (no student): a teacher may, once a student of one of her
+    classes has sat the checkpoint -- the same questions the Fragen tab shows her."""
+    ids = visible_klasse_ids()
+    if ids is not None and not ids & models.get_klasse_ids_for_checkpoint(checkpoint_id):
+        abort(404)
+
+
 def can_see_grading_result(result):
     """One rubric spans several classes, so a grading run has no class of its own:
     the student's result decides. Same rule as can_see_student_topic; an artifact

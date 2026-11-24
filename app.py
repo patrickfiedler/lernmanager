@@ -4470,7 +4470,7 @@ def _checkpoint_question_wording(checkpoint_id, question_index):
 
 @app.route('/admin/checkpoint-pruefung/frage/<int:checkpoint_id>/<int:question_index>/markieren',
            methods=['POST'])
-@admin_required
+@staff_required
 def admin_checkpoint_flag_question(checkpoint_id, question_index):
     """Flag a question as faulty without any student having reported it.
 
@@ -4485,7 +4485,10 @@ def admin_checkpoint_flag_question(checkpoint_id, question_index):
     long-finished ones. The repair is chosen per session afterwards: send the
     question back (admin_checkpoint_question_retry) or set its score by hand
     (admin_checkpoint_question_score).
+
+    Teachers too (Patrick, 2026-11-24), for checkpoints their classes sat.
     """
+    permissions.require_checkpoint_question(checkpoint_id)
     status = request.form.get('status')
     if status not in models.CHECKPOINT_FLAG_TEACHER_VERDICTS:
         flash('Unbekanntes Urteil.', 'danger')

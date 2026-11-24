@@ -1098,6 +1098,17 @@ def get_klasse_ids_for_student_topic(student_id, task_id):
         return {r['klasse_id'] for r in rows}
 
 
+def get_klasse_ids_for_checkpoint(checkpoint_id):
+    """Classes in which some student sat this checkpoint (its topic's student_task)."""
+    with db_session() as conn:
+        rows = conn.execute("""
+            SELECT DISTINCT st.klasse_id FROM checkpoint_attempt ca
+            JOIN student_task st ON st.student_id = ca.student_id AND st.task_id = ca.module_id
+            WHERE ca.checkpoint_id = ?
+        """, (checkpoint_id,)).fetchall()
+        return {r['klasse_id'] for r in rows}
+
+
 def get_klasse_ids_for_student(student_id):
     with db_session() as conn:
         rows = conn.execute(

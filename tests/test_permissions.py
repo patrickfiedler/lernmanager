@@ -265,13 +265,20 @@ def test_deactivated_teacher_is_logged_out(own):
 
 def test_checkpoint_review_lists_only_own_classes(own, teacher):
     """The review page and every bulk action read through _checkpoint_filters."""
-    client, _ = own
+    client, mine = own
     _, foreign = teacher
     html = client.get('/admin/checkpoint-pruefung').get_data(as_text=True)
     assert 'Emma' in html       # her own student's session is there
     assert 'Fritz' not in html  # the student; the topic name may show (library is shared)
     html = client.get('/admin/checkpoint-pruefung?ansicht=fragen').get_data(as_text=True)
-    assert 'Diese Frage bemängeln' not in html
+    # Marking a question: teachers too (2026-11-24), only checkpoints her classes sat.
+    assert 'Diese Frage bemängeln' in html
+    own_cp = models.get_checkpoint_reviews(student_id=mine['student_id'])[0]['checkpoint_id']
+    status = next(iter(models.CHECKPOINT_FLAG_TEACHER_VERDICTS))
+    assert client.post(f'/admin/checkpoint-pruefung/frage/{own_cp}/0/markieren',
+                       data={'status': status}).status_code == 302
+    assert client.post(f"/admin/checkpoint-pruefung/frage/{foreign['checkpoint_id']}/0/markieren",
+                       data={'status': status}).status_code == 404
     client.post('/admin/checkpoint-pruefung/zuruecksetzen',
                 data={'checkpoint_id': foreign['checkpoint_id']})
     assert all(a['superseded_at'] is None for a in models.get_checkpoint_reviews())

@@ -21,7 +21,8 @@
 {# Collapsed by default. Open only where there is something to decide: the summary
    line carries every number needed to triage, and a teacher scanning 24 questions
    should not have to scroll past 24 opened rubrics to find the two that matter. #}
-<details class="card mb-1 cq-row{{ ' cq-row-quiet' if q.concern_count == 0 }}"
+<details id="frage-{{ q.checkpoint_id }}-{{ q.question_index }}"
+         class="card mb-1 cq-row{{ ' cq-row-quiet' if q.concern_count == 0 }}"
          {{ 'open' if q.open_flag_count or q.concern_rate >= 0.5 }}>
     <summary class="cq-head">
         <span class="cq-title">
@@ -158,9 +159,11 @@
         </p>
         {% endfor %}
 
-        {% if is_admin %}{# a verdict about the question, for every class: admin only #}
-        <details class="cq-sub cq-flag-form">
-            <summary>🛠️ Diese Frage bemängeln</summary>
+        {# Teachers too (2026-11-24): the route checks the checkpoint is theirs.
+           Open, not folded away (Patrick 2026-11-24): it was a second fold inside an
+           already folded row, so on an unreported question it was easy to miss. #}
+        <div class="cq-sub cq-flag-form">
+            <p class="cq-flag-head">🛠️ Diese Frage bemängeln</p>
             <form method="POST"
                   action="{{ url_for('admin_checkpoint_flag_question',
                                      checkpoint_id=q.checkpoint_id,
@@ -181,8 +184,7 @@
                     {% endfor %}
                 </div>
             </form>
-        </details>
-        {% endif %}
+        </div>
 
         {# The batch. Two steps, never a confirm dialog: this button only asks the
            server what it WOULD do, and the preview page is where the teacher agrees.
@@ -249,7 +251,7 @@
 .cq-jump { font-size: 0.85rem; margin: 0.6rem 0 0; }
 .cq-flag { border-left: 3px solid #9ca3af; background: #f9fafb; border-radius: 4px;
            padding: 0.4rem 0.6rem; margin: 0.4rem 0; font-size: 0.85rem; }
-.cq-flag-form > summary { color: #92400e; }
+.cq-flag-head { color: #92400e; font-weight: 600; margin: 0 0 0.3rem; }
 .cq-flag-form .form-control { max-width: 32rem; }
 .cq-bulk { font-size: 0.85rem; margin: 0.6rem 0 0; display: flex; gap: 0.5rem;
            align-items: center; flex-wrap: wrap; }

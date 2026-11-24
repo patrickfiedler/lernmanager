@@ -379,7 +379,8 @@
                     Etwas mit der <em>Frage</em> stimmt nicht — also bei allen Schülern?
                     <a href="{{ url_for('admin_checkpoint_pruefung',
                                         **dict(request.args, ansicht='fragen',
-                                               checkpoint_id=attempt.checkpoint_id)) }}">
+                                               checkpoint_id=attempt.checkpoint_id,
+                                               _anchor='frage-%d-%d' % (attempt.checkpoint_id, question.question_index))) }}">
                         → in der Fragen-Ansicht bemängeln</a>
                 </p>
 
@@ -694,6 +695,16 @@
 {% endblock %}
 
 {% block scripts %}
+// A link to one question of the Fragen tab (#frage-<checkpoint>-<index>) lands on a
+// folded row; open it, or the teacher arrives at a closed box with nothing to edit.
+(function() {
+    var target = location.hash && document.getElementById(location.hash.slice(1));
+    if (target && target.tagName === 'DETAILS') {
+        target.open = true;
+        target.scrollIntoView();
+    }
+})();
+
 // Per-answer verdicts and notes save individually via AJAX: a teacher scanning a
 // class clicks a lot of these, and a full page reload per click would lose their
 // place in a long list. Rückmeldung + Prüfvermerk below stay a normal form POST --
