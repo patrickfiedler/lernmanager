@@ -4511,32 +4511,65 @@ def checkpoint_quiz_with_ids(conn, checkpoint_id, quiz_json):
     old one or a new one, and guessing which is exactly what ids are there to end
     (Patrick 2026-11-24: reject, do not warn). Raises QuizIdError.
 
+    `entfernte_ids` (chemie 2026-11-24, optional, sibling of `questions`): ids of
+    deleted questions. No question may carry one of them -- a reused id would hand
+    the old points to a new question. Once there are sittings, an id may only leave
+    the quiz by being listed there. The list is carried over from the stored quiz,
+    so dropping it from the JSON does not make its ids free again.
+
     checkpoint_id: the subtask being overwritten, None for a new one.
     """
     if not quiz_json:
         return quiz_json
     quiz = json.loads(quiz_json)
     questions = quiz.get('questions') or []
+    old_quiz = {}
+    if checkpoint_id is not None:
+        row = conn.execute('SELECT quiz_json FROM subtask WHERE id = ?', (checkpoint_id,)).fetchone()
+        try:
+            old_quiz = json.loads(row['quiz_json']) if row and row['quiz_json'] else {}
+        except ValueError:
+            old_quiz = {}
+
     given = [q.get('id') for q in questions if q.get('id') is not None]
-    for qid in given:
+    if not isinstance(quiz.get('entfernte_ids') or [], list):
+        raise QuizIdError('entfernte_ids muss eine Liste sein, z.B. [f4].')
+    removed = list(dict.fromkeys((old_quiz.get('entfernte_ids') or [])
+                                 + (quiz.get('entfernte_ids') or [])))
+    for qid in given + removed:
         if not isinstance(qid, str) or not QUESTION_ID_RE.match(qid):
             raise QuizIdError(f'Frage-id {qid!r}: nur Kleinbuchstaben, Ziffern und „-“ erlaubt.')
     duplicates = sorted({qid for qid in given if given.count(qid) > 1})
     if duplicates:
         raise QuizIdError(f'Frage-id doppelt: {", ".join(duplicates)}.')
+    reused = [qid for qid in given if qid in removed]
+    if reused:
+        raise QuizIdError(f'Frage-id {", ".join(reused)} steht in entfernte_ids und darf '
+                          'nicht wieder vergeben werden.')
+
     missing = [i for i, q in enumerate(questions, start=1) if q.get('id') is None]
-    if not missing:
-        return quiz_json
     if _checkpoint_has_sittings(conn, checkpoint_id):
-        raise QuizIdError(
-            f'Frage {", ".join(map(str, missing))} ohne id. Dieser Checkpoint hat schon '
-            'Sitzungen: jede Frage braucht ihre feste id (eine umformulierte Frage '
-            'behält ihre alte, eine neue bekommt eine neue).')
+        if missing:
+            raise QuizIdError(
+                f'Frage {", ".join(map(str, missing))} ohne id. Dieser Checkpoint hat schon '
+                'Sitzungen: jede Frage braucht ihre feste id (eine umformulierte Frage '
+                'behält ihre alte, eine neue bekommt eine neue).')
+        vanished = [q['id'] for q in old_quiz.get('questions') or []
+                    if q.get('id') and q['id'] not in given and q['id'] not in removed]
+        if vanished:
+            raise QuizIdError(
+                f'Frage-id {", ".join(vanished)} fehlt. Dieser Checkpoint hat schon '
+                'Sitzungen: eine gelöschte Frage gehört in entfernte_ids.')
+
+    if not missing and removed == (quiz.get('entfernte_ids') or []):
+        return quiz_json
+    if removed:
+        quiz['entfernte_ids'] = removed
     taken = set(given)
     for position, q in enumerate(questions, start=1):
         if q.get('id') is None:
             candidate, n = f'f{position}', 0
-            while candidate in taken:
+            while candidate in taken or candidate in removed:
                 n += 1
                 candidate = f'f{position}-{n}'
             q['id'] = candidate

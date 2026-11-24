@@ -93,6 +93,30 @@ def test_with_sittings_every_question_needs_its_id(cp):
     assert models.check_checkpoint_quiz_ids(other, quiz(q("A"))) is not None
 
 
+def test_removed_ids_may_not_come_back(cp):
+    problem = models.check_checkpoint_quiz_ids(
+        cp["cp"], json.dumps({"entfernte_ids": ["f2"], "questions": [q("A", id="f1"), q("neu", id="f2")]}))
+    assert "nicht wieder vergeben" in problem
+
+
+def test_with_sittings_a_question_leaves_only_through_entfernte_ids(cp):
+    sit(cp)
+    gone = [q("A", id="f1"), q("C", id="f3")]
+    assert "f2 fehlt" in models.check_checkpoint_quiz_ids(cp["cp"], quiz(*gone))
+    listed = json.dumps({"entfernte_ids": ["f2"], "questions": gone})
+    assert models.check_checkpoint_quiz_ids(cp["cp"], listed) is None
+
+
+def test_entfernte_ids_survive_an_edit_that_drops_them(cp):
+    with models.db_session() as conn:
+        conn.execute("UPDATE subtask SET quiz_json = ? WHERE id = ?", (json.dumps(
+            {"entfernte_ids": ["f2"], "questions": [q("A", id="f1"), q("C", id="f3")]}), cp["cp"]))
+        stored = models.checkpoint_quiz_with_ids(conn, cp["cp"], quiz(q("A", id="f1"), q("neu")))
+    stored = json.loads(stored)
+    assert stored["entfernte_ids"] == ["f2"]
+    assert [x["id"] for x in stored["questions"]] == ["f1", "f2-1"]   # f2 stays retired
+
+
 def test_editor_refuses_and_saves_nothing(cp, as_admin):
     sit(cp)
     before = models.get_subtask(cp["cp"])["quiz_json"]
