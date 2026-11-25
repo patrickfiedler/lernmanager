@@ -46,27 +46,31 @@
     </form>
 </div>
 
+{% macro zahl(x) %}{% if x is none %}–{% else %}{{ '%.1f'|format(x)|replace('.', ',') }}{% endif %}{% endmacro %}
 {% if not klasse_id %}
 <div class="card"><p class="text-muted">Wähle eine Klasse.</p></div>
-{% elif not overview %}
-<div class="card"><p class="text-muted">In dieser Klasse ist kein Thema mit Quiz-Checkpoints zugewiesen.</p></div>
-{% elif not checkpoints %}
-<div class="card"><p class="text-muted">Dieses Thema hat keine Quiz-Checkpoints.</p></div>
+{% elif not task_id %}
+<div class="card"><p class="text-muted">In dieser Klasse ist kein Thema mit Checkpoints zugewiesen.</p></div>
+{% elif not units %}
+<div class="card"><p class="text-muted">Dieses Thema hat keine Checkpoints.</p></div>
 {% else %}
+{% set typ_label = {'quiz': '', 'abnahme': 'Abnahme', 'artefakt': 'Artefakt', 'protokoll': 'Protokoll'} %}
 
 <div class="card mb-2">
     <p style="margin: 0 0 0.5rem 0;">
-        <strong>{{ overview.counted_questions }}</strong> gewertete Fragen{% if overview.excluded_questions %},
-        <strong>{{ overview.excluded_questions }}</strong> nicht gewertet{% endif %}.
-        Je Frage 0, 2 oder 3 Punkte.
+        Stand heute, gerechnet wie im Bewertungsfenster.
+        <strong>{{ units|rejectattr('typ', 'equalto', 'protokoll')|list|length }}</strong> gewertete Einheiten{% if excluded_count %},
+        <strong>{{ excluded_count }}</strong> Frage(n) für alle nicht gewertet{% endif %}. Je Einheit 0, 2 oder 3 Punkte.
+        Qualität und Abdeckung nur für dieses Thema -- die Note rechnet das ganze Fenster.
+        Ein Protokoll ist eine eigene Note (BE nach Punktetabelle, erst wenn alle Abschnitte eingetragen sind).
     </p>
     <p class="cu-legend text-muted" style="margin: 0; font-size: 0.85rem;">
         <span class="cu-p3">3</span><span class="cu-p2">2</span><span class="cu-p0">0</span>
         <span class="cu-fehlt">–</span>fehlt (zählt als 0)
-        <span class="cu-gemeldet" style="margin-left: 0.8rem;">⚑</span>gemeldet, noch offen
-        <span style="margin-left: 0.8rem;">○</span>für diesen Schüler ohne Wertung
-        <span class="cu-aus" style="margin-left: 0.8rem;">3</span>für alle nicht gewertet
+        <span class="cu-gemeldet" style="margin-left: 0.8rem;">⚑</span>gemeldet, noch offen -- Klick führt zur Sitzung
+        <span style="margin-left: 0.8rem;">○</span>Meldung entschieden, ohne Punkte (zählt als 0)
         <span style="margin-left: 0.8rem;">?</span>alte Sitzung ohne Einzelpunkte
+        <span style="margin-left: 0.8rem;"><u>3</u></span>Lehrkraft-Eintrag, Klick öffnet die Eingabe
     </p>
 </div>
 
@@ -75,53 +79,76 @@
         <thead>
             <tr>
                 <th class="cu-name" rowspan="2">Schüler</th>
-                {% for cp in checkpoints %}
-                <th colspan="{{ cp.questions|length }}" class="cu-first" title="{{ cp.titel }}">
-                    {{ cp.titel|truncate(28) }}{% if cp.kern %} <span class="badge badge-primary">Kern</span>{% endif %}
+                {% for g in groups if g.typ != 'protokoll' %}
+                <th colspan="{{ g.units }}" class="cu-first" title="{{ g.titel }}">
+                    {{ g.titel|truncate(28) }}{% if typ_label[g.typ] %} <span class="badge">{{ typ_label[g.typ] }}</span>{% endif %}{% if g.typ == 'quiz' and g.kern %} <span class="badge badge-primary">Kern</span>{% endif %}
                 </th>
                 {% endfor %}
                 <th rowspan="2" class="cu-first">Punkte</th>
                 <th rowspan="2">von</th>
                 <th rowspan="2">fehlend</th>
                 <th rowspan="2">offen</th>
+                <th rowspan="2" title="Qualität des Arbeitsprozesses, 0-15, nur dieses Thema">Qualität</th>
+                <th rowspan="2" title="Abdeckung, 0-15, nur dieses Thema">Abdeckung</th>
+                {% for g in groups if g.typ == 'protokoll' %}
+                <th colspan="{{ g.units + 1 }}" class="cu-first" title="{{ g.titel }}">
+                    {{ g.titel|truncate(28) }} <span class="badge">Protokoll</span></th>
+                {% endfor %}
             </tr>
             <tr>
-                {% for cp in checkpoints %}
-                    {% for text in cp.questions %}
-                    <th class="{{ 'cu-first' if loop.first }} {{ 'cu-aus-head' if excluded.get(cp.id) is not none and excluded[cp.id].at(loop.index0) }}"
-                        title="{{ text|striptags|truncate(200) }}">F{{ loop.index }}</th>
-                    {% endfor %}
+                {% for u in units if u.typ != 'protokoll' %}
+                <th class="{{ 'cu-first' if loop.first or loop.previtem.checkpoint_id != u.checkpoint_id }}"
+                    title="{{ u.text|striptags|truncate(200) }}">{% if u.question_id is none %}ganz{% elif u.typ == 'quiz' %}F{{ u.nr }}{% else %}{{ u.question_id|truncate(8, true, '…') }}{% endif %}</th>
+                {% endfor %}
+                {% for u in units if u.typ == 'protokoll' %}
+                <th class="{{ 'cu-first' if loop.first or loop.previtem.checkpoint_id != u.checkpoint_id }}" title="{{ u.text|striptags|truncate(200) }}">{{ u.question_id|truncate(8, true, '…') }}</th>
+                {% if loop.last or loop.nextitem.checkpoint_id != u.checkpoint_id %}<th>BE / Pkt</th>{% endif %}
                 {% endfor %}
             </tr>
         </thead>
         <tbody>
-            {% for row in overview.rows %}
-            <tr>
-                <td class="cu-name">{{ row.student|name }}</td>
-                {% set ns = namespace(i=0) %}
-                {% for cp in checkpoints %}
-                    {% for text in cp.questions %}
-                    {% set cell = row.cells[ns.i] %}{% set ns.i = ns.i + 1 %}
-                    {% set first = 'cu-first' if loop.first else '' %}
-                    {% if cell.state == 'punkte' %}
-                    <td class="{{ first }} cu-p{{ cell.points }}">{{ cell.points }}</td>
-                    {% elif cell.state == 'fehlt' %}
-                    <td class="{{ first }} cu-fehlt" title="fehlt">–</td>
-                    {% elif cell.state == 'gemeldet' %}
-                    <td class="{{ first }} cu-gemeldet" title="gemeldet, noch nicht entschieden">⚑</td>
-                    {% elif cell.state == 'ohne_wertung' %}
-                    <td class="{{ first }}" title="für diesen Schüler ohne Wertung">○</td>
-                    {% elif cell.state == 'ausgeschlossen' %}
-                    <td class="{{ first }} cu-aus" title="für alle nicht gewertet">{{ cell.points if cell.points is not none else '·' }}</td>
-                    {% else %}
-                    <td class="{{ first }}" title="alte Sitzung, nur Sitzungs-Punktzahl {{ cell.points }} bekannt">?</td>
-                    {% endif %}
-                    {% endfor %}
-                {% endfor %}
-                <td class="cu-first cu-sum">{{ row.points }}</td>
+            {% macro summen(row) %}
+                <td class="cu-first cu-sum">{{ row.punkte }}</td>
                 <td>{{ row.max }}</td>
                 <td>{{ row.fehlend or '' }}</td>
                 <td>{{ row.offen or '' }}</td>
+                <td>{{ zahl(row.qualitaet) }}</td>
+                <td>{{ zahl(row.abdeckung) }}</td>
+            {% endmacro %}
+            {% set nicht_gestellt = ('nicht_bearbeitet', 'llm_kontingent', 'frage_neu') %}
+            {% for row in rows %}
+            {% set rs = namespace(summen=false) %}
+            {% set review = url_for('admin_checkpoint_pruefung', klasse_id=klasse_id, student_id=row.student.id) %}
+            <tr>
+                <td class="cu-name">{{ row.student|name }}</td>
+                {% for u in units %}
+                {% set cell = row.cells[loop.index0] %}
+                {% if u.typ == 'protokoll' and not rs.summen %}{% set rs.summen = true %}{{ summen(row) }}{% endif %}
+                {% set first = 'cu-first' if loop.first or loop.previtem.checkpoint_id != u.checkpoint_id else '' %}
+                {% set lehrer = u.typ != 'quiz' %}
+                {% set eintragen = url_for('admin_checkpoint_eintragen', klasse_id=klasse_id, subtask_id=u.checkpoint_id) if lehrer and is_admin else none %}
+                {% set sitzung = review ~ '&checkpoint_id=' ~ u.checkpoint_id ~ '#sitzung-' ~ cell.attempt_id if cell.attempt_id else none %}
+                {% set grund = gruende.get(cell.grund, cell.grund) if cell.grund else '' %}
+                {% if cell.state == 'punkte' %}
+                <td class="{{ first }} cu-p{{ cell.punkte }}" title="{{ grund }}">{% if eintragen %}<a href="{{ eintragen }}">{{ cell.punkte }}</a>{% else %}{{ cell.punkte }}{% endif %}</td>
+                {% elif cell.grund == 'gemeldet' %}
+                <td class="{{ first }} cu-gemeldet" title="{{ grund }}"><a href="{{ sitzung or review ~ '&checkpoint_id=' ~ u.checkpoint_id ~ '&ansicht=angefangen' }}">⚑</a></td>
+                {% elif cell.grund == 'ohne_aufschluesselung' %}
+                <td class="{{ first }}" title="{{ grund }}">?</td>
+                {% elif lehrer %}{# no score from the teacher yet: a gap to fill, counts 0 #}
+                <td class="{{ first }} cu-fehlt" title="noch nicht eingetragen (zählt als 0)">{% if eintragen %}<a href="{{ eintragen }}">–</a>{% else %}–{% endif %}</td>
+                {% elif cell.grund in nicht_gestellt %}
+                <td class="{{ first }} cu-fehlt" title="{{ grund }}">–</td>
+                {% else %}{# report decided, no points: counts 0 (Patrick 2026-11-25) #}
+                <td class="{{ first }}" title="{{ grund }} (zählt als 0)">{% if sitzung %}<a href="{{ sitzung }}">○</a>{% else %}○{% endif %}</td>
+                {% endif %}
+                {% if u.typ == 'protokoll' and (loop.last or loop.nextitem.checkpoint_id != u.checkpoint_id) %}
+                {% for p in row.protokolle if p.checkpoint_id == u.checkpoint_id %}
+                <td class="cu-sum" title="{{ p.offen }} Abschnitt(e) noch nicht eingetragen">{{ p.be }}/{{ p.max }}{% if p.offen %} ({{ p.offen }} offen){% elif p.punkte is not none %} = {{ p.punkte }}{% endif %}</td>
+                {% endfor %}
+                {% endif %}
+                {% endfor %}
+                {% if not rs.summen %}{{ summen(row) }}{% endif %}
             </tr>
             {% endfor %}
         </tbody>

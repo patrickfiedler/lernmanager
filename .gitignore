@@ -36,7 +36,6 @@
 !/artifact_checker.py
 !/artifact_processor.py
 !/checkpoint_questions.py
-!/checkpoint_overview.py
 !/grading_window.py
 !/punktetabelle_oberstufe.json
 !/analytics_queue.py

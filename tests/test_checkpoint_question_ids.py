@@ -202,18 +202,20 @@ A, B, C = q("A", id="f1"), q("B", id="f2"), q("C", id="f3")
 
 
 def overview_cells(cp, attempt):
+    """The overview's cells, via grading_window (same rules as the window page)."""
+    import grading_window
     subtask = models.get_subtask(cp["cp"])
     questions = models.quiz_questions(subtask["quiz_json"])
-    checkpoints = [{"id": cp["cp"], "titel": "x", "kern": True,
-                    "questions": [x["text"] for x in questions],
-                    "question_ids": [x["id"] for x in questions]}]
+    units, _ = grading_window.expected_units(
+        [{"id": cp["cp"], "checkpoint_type": "quiz", "kern_standard_tag": "kern",
+          "question_ids": [x["id"] for x in questions]}],
+        models.get_excluded_questions([cp["cp"]]))
     row = models.get_checkpoint_attempt(attempt)
-    import checkpoint_overview
-    out = checkpoint_overview.build_overview(
-        [{"id": cp["student"], "vorname": "K", "nachname": "A"}], checkpoints,
-        {(cp["student"], cp["cp"]): row}, {attempt: models.attempt_scores_by_id(row)},
-        models.get_excluded_questions([cp["cp"]]), set())
-    return [c["points"] for c in out["rows"][0]["cells"]]
+    rows = grading_window.build_noten(
+        [{"id": cp["student"]}], units,
+        {cp["student"]: {"attempts": {cp["cp"]: row},
+                         "scores": {cp["cp"]: models.attempt_scores_by_id(row)}}})
+    return [c["punkte"] for c in rows[0]["cells"]]
 
 
 @pytest.mark.parametrize("today, removed, effective, cells", [

@@ -19,6 +19,11 @@ def pts(p):
     return {'state': 'punkte', 'punkte': p, 'grund': None}
 
 
+def bare(cell):
+    """A cell without its link target (attempt_id), for comparing."""
+    return {k: v for k, v in cell.items() if k != 'attempt_id'}
+
+
 FEHLT = {'state': 'fehlt', 'punkte': None, 'grund': 'nicht_bearbeitet'}
 OFFEN = {'state': 'vorlaeufig', 'punkte': None, 'grund': 'gemeldet'}
 
@@ -207,7 +212,7 @@ def test_only_what_stood_at_the_stichtag_counts(fenster):
         conn.execute("UPDATE checkpoint_attempt SET superseded_at = '2026-11-22 08:00:00'")
     sit(fx, fx['s'][0], fx['kern'], {'0': 0, '1': 0}, '2026-11-22 09:00:00')
     rows, _ = noten(fx)
-    assert rows['Adler']['cells'][0] == pts(3)
+    assert bare(rows['Adler']['cells'][0]) == pts(3)
 
 
 def test_running_sitting_counts_its_solved_questions(fenster):
@@ -220,5 +225,5 @@ def test_running_sitting_counts_its_solved_questions(fenster):
     with models.db_session() as conn:
         conn.execute("UPDATE checkpoint_answer SET timestamp = '2026-11-15 09:00:00'")
     rows, _ = noten(fx)
-    assert rows['Biber']['cells'][0] == {'state': 'punkte', 'punkte': 3, 'grund': 'laufend'}
+    assert bare(rows['Biber']['cells'][0]) == {'state': 'punkte', 'punkte': 3, 'grund': 'laufend'}
     assert rows['Biber']['cells'][1]['grund'] == 'nicht_bearbeitet'

@@ -258,7 +258,7 @@
    unavailable and a question was scored as a give-up, so a human has to re-grade.
    has_duplicates used to open sessions too, which inverted the page -- routine
    double-clicks expanded themselves while the real review cases stayed collapsed. #}
-<details class="card mb-1 checkpoint-session{{ ' checkpoint-session-reset' if is_reset }}" {{ 'open' if not is_reset and (attempt.needs_review or entry.open_flag_count) }}>
+<details id="sitzung-{{ attempt.id }}" class="card mb-1 checkpoint-session{{ ' checkpoint-session-reset' if is_reset }}" {{ 'open' if not is_reset and (attempt.needs_review or entry.open_flag_count) }}>
     <summary class="checkpoint-session-head">
         <span class="checkpoint-session-title">
             <strong>{{ attempt.student_name }}</strong>

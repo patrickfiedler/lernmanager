@@ -35,7 +35,6 @@ import permissions
 import inline_images
 import key_combos
 import checkpoint_questions
-import checkpoint_overview
 import grading_window
 from utils import generate_username, generate_password, allowed_file, file_extension, material_pfad, material_filename, content_matches_extension, generate_credentials_pdf, generate_credentials_pdf_grouped, generate_name_username_pdf, generate_student_self_report_pdf, generate_class_report_pdf, generate_student_report_pdf, slugify, format_bytes, is_ip_allowed, is_within_time_window, parse_netzwerk_csv, split_tasks_by_stufe, stufe_sort_key, normalize_markdown_lists
 from import_task import validate_task_structure, check_duplicate, import_task as do_import_task, overwrite_task_from_import, ValidationError, zip_entry_for
@@ -110,6 +109,9 @@ def _inline_image_resolver(materials):
         return url_for('download_material', material_id=mat['id'], eingebettet=1)
 
     return resolve
+
+
+app.jinja_env.globals['gruende'] = grading_window.REASONS
 
 
 @app.template_filter('name')
@@ -2173,6 +2175,13 @@ def admin_bewertungsfenster(klasse_id):
                            themen_exact=themen_exact, themen_other=themen_other)
 
 
+def _checkpoint_unit_texts(subtask):
+    """{unit id: wording} for column tooltips: question text or section text."""
+    if subtask['checkpoint_type'] == 'quiz':
+        return {q.get('id'): q.get('text', '') for q in models.quiz_questions(subtask['quiz_json'])}
+    return {a['id']: a['text'] for a in models.checkpoint_sections(subtask)}
+
+
 def _checkpoint_unit_ids(subtask):
     """Ids that count as one unit each: quiz questions, or the teacher-graded sections
     of an abnahme/artefakt ([] = the checkpoint counts as one whole)."""
@@ -2189,7 +2198,8 @@ def _fenster_noten(fenster):
     checkpoints = [{'id': s['id'], 'checkpoint_type': s['checkpoint_type'],
                     'kern_standard_tag': s.get('kern_standard_tag'),
                     'titel': aufgabe_titel(s['beschreibung']),
-                    'question_ids': _checkpoint_unit_ids(s)}
+                    'question_ids': _checkpoint_unit_ids(s),
+                    'texts': _checkpoint_unit_texts(s)}
                    for s in subtasks]
     units, excluded_count = grading_window.expected_units(checkpoints, excluded)
     for data in per_student.values():
@@ -2205,6 +2215,7 @@ def _fenster_noten(fenster):
     for u in units:
         cp = by_id[u['checkpoint_id']]
         u['titel'] = cp['titel']
+        u['text'] = cp['texts'].get(u['question_id'], '')
         u['nr'] = cp['question_ids'].index(u['question_id']) + 1 if u['question_id'] else None
     return grading_window.build_noten(students, units, per_student), units, excluded_count
 
@@ -4737,8 +4748,13 @@ def admin_checkpoint_flag_question(checkpoint_id, question_index):
 @app.route('/admin/checkpoint-uebersicht')
 @staff_required
 def admin_checkpoint_uebersicht():
-    """Points per student and question for one class and Thema, with the sum, the
-    missing questions, and the switch that takes a question out of the grading.
+    """Points per student and unit for one class and Thema, as of today.
+
+    Same numbers as the Bewertungsfenster (app._fenster_noten + grading_window), for
+    one topic and without a Stichtag: what counts there counts here (Patrick
+    2026-11-25: a confirmed report without points is 0 in both). Protokolle are their
+    own grade and sit in their own block on the right. Below: the switch that takes a
+    quiz question out of the grading.
 
     Teachers too (Patrick, 2026-11-24), for their own classes. The switch stays
     admin: it takes the question out for every class, not only hers."""
@@ -4751,26 +4767,33 @@ def admin_checkpoint_uebersicht():
     if task_id not in {t['id'] for t in tasks}:
         task_id = tasks[0]['id'] if tasks else None
 
-    overview, checkpoints, excluded = None, [], {}
+    rows, units, groups, quiz_checkpoints, excluded, excluded_count = [], [], [], [], {}, 0
     if task_id:
-        students, subtasks, attempts, pending = models.get_checkpoint_overview_data(
-            klasse_id, task_id)
-        excluded = models.get_excluded_questions([s['id'] for s in subtasks])
-        checkpoints = [{
+        heute = {'klasse_id': klasse_id, 'task_ids': [task_id], 'stichtag': '9999-12-31'}
+        rows, units, excluded_count = _fenster_noten(heute)
+        # Protokoll columns to the right edge; cells follow their units
+        order = sorted(range(len(units)), key=lambda i: units[i]['typ'] == 'protokoll')
+        units = [units[i] for i in order]
+        for r in rows:
+            r['cells'] = [r['cells'][i] for i in order]
+        for u in units:                     # consecutive units of one checkpoint = one group
+            if groups and groups[-1]['checkpoint_id'] == u['checkpoint_id']:
+                groups[-1]['units'] += 1
+            else:
+                groups.append({'checkpoint_id': u['checkpoint_id'], 'titel': u['titel'],
+                               'typ': u['typ'], 'kern': u['niveau'] == 'kern', 'units': 1})
+        quiz_checkpoints = [{
             'id': s['id'], 'titel': aufgabe_titel(s['beschreibung']),
-            'kern': s.get('kern_standard_tag') == 'kern',
             'questions': [q.get('text', '') for q in models.quiz_questions(s['quiz_json'])],
-            'question_ids': [q.get('id') for q in models.quiz_questions(s['quiz_json'])],
-        } for s in subtasks]
-        scores = {a['id']: models.attempt_scores_by_id(a) for a in attempts.values()
-                  if a.get('question_scores_json')}
-        overview = checkpoint_overview.build_overview(
-            students, checkpoints, attempts, scores, excluded, pending)
+        } for s in models.get_subtasks(task_id)
+            if s['checkpoint_type'] == 'quiz' and not s.get('hidden')]
+        excluded = models.get_excluded_questions([c['id'] for c in quiz_checkpoints])
 
     return render_template('admin/checkpoint_uebersicht.html',
                            klassen=klassen, klasse_id=klasse_id,
-                           tasks=tasks, task_id=task_id,
-                           overview=overview, checkpoints=checkpoints, excluded=excluded)
+                           tasks=tasks, task_id=task_id, rows=rows, units=units,
+                           groups=groups, checkpoints=quiz_checkpoints, excluded=excluded,
+                           excluded_count=excluded_count)
 
 
 @app.route('/admin/checkpoint-uebersicht/frage/<int:checkpoint_id>/<int:question_index>/wertung',

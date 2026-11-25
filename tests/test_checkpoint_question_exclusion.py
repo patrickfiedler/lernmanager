@@ -8,7 +8,6 @@ import json
 
 import pytest
 
-import checkpoint_overview
 import models
 
 QUIZ = {"questions": [
@@ -45,16 +44,11 @@ def _sit(data, student_id, scores):
 
 
 def _overview(data):
-    students, subtasks, attempts, pending = models.get_checkpoint_overview_data(
-        data["klasse_id"], data["task_id"])
-    excluded = models.get_excluded_questions([s["id"] for s in subtasks])
-    checkpoints = [{"id": s["id"], "titel": "x", "kern": True,
-                    "questions": [q["text"] for q in json.loads(s["quiz_json"])["questions"]],
-                    "question_ids": [q["id"] for q in json.loads(s["quiz_json"])["questions"]]}
-                   for s in subtasks]
-    scores = {a["id"]: models.attempt_scores_by_id(a) for a in attempts.values()}
-    return checkpoint_overview.build_overview(
-        students, checkpoints, attempts, scores, excluded, pending)
+    """What /admin/checkpoint-uebersicht shows: the window's numbers, one topic, today."""
+    import app
+    rows, units, excluded_count = app._fenster_noten(
+        {"klasse_id": data["klasse_id"], "task_ids": [data["task_id"]], "stichtag": "9999-12-31"})
+    return {"rows": rows, "units": units, "excluded": excluded_count}
 
 
 def test_excluding_lifts_the_session_score_without_rewriting_it(data):
@@ -84,8 +78,8 @@ def test_overview_sums_and_missing(data):
     _sit(data, a, {"0": 3, "1": 3, "2": 2})
     # b never sat the checkpoint
     rows = {r["student"]["id"]: r for r in _overview(data)["rows"]}
-    assert (rows[a]["points"], rows[a]["max"], rows[a]["fehlend"]) == (8, 9, 0)
-    assert (rows[b]["points"], rows[b]["max"], rows[b]["fehlend"]) == (0, 9, 3)
+    assert (rows[a]["punkte"], rows[a]["max"], rows[a]["fehlend"]) == (8, 9, 0)
+    assert (rows[b]["punkte"], rows[b]["max"], rows[b]["fehlend"]) == (0, 9, 3)
 
 
 def test_excluded_question_leaves_sum_maximum_and_missing_for_everyone(data):
@@ -95,10 +89,10 @@ def test_excluded_question_leaves_sum_maximum_and_missing_for_everyone(data):
     models.set_question_excluded(data["cp"], 1, True)
     overview = _overview(data)
     rows = {r["student"]["id"]: r for r in overview["rows"]}
-    assert (rows[a]["points"], rows[a]["max"]) == (5, 6)
+    assert (rows[a]["punkte"], rows[a]["max"]) == (5, 6)
     assert (rows[b]["max"], rows[b]["fehlend"]) == (6, 2)
-    assert rows[a]["cells"][1] == {"state": "ausgeschlossen", "points": 3}
-    assert (overview["counted_questions"], overview["excluded_questions"]) == (2, 1)
+    assert [u["question_id"] for u in overview["units"]] == ["f1", "f3"]
+    assert overview["excluded"] == 1
 
 
 def test_an_open_report_is_neither_points_nor_missing(data):
@@ -107,7 +101,7 @@ def test_an_open_report_is_neither_points_nor_missing(data):
     models.create_checkpoint_flag(data["cp"], 1, "student", student_id=a,
                                   checkpoint_attempt_id=attempt_id)
     row = _overview(data)["rows"][0]
-    assert (row["points"], row["max"], row["fehlend"], row["offen"]) == (6, 6, 0, 1)
+    assert (row["punkte"], row["max"], row["fehlend"], row["offen"]) == (6, 6, 0, 1)
     assert models.checkpoint_score_is_provisional({"id": attempt_id})
 
 

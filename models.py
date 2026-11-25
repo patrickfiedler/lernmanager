@@ -5743,8 +5743,8 @@ def get_checkpoint_checkpoints():
 
 
 def get_checkpoint_topics_for_klasse(klasse_id):
-    """Themen with at least one quiz checkpoint that somebody in this class has been
-    assigned -- what the points overview can show for the class."""
+    """Themen with at least one checkpoint (any type) that somebody in this class
+    has been assigned -- what the points overview can show for the class."""
     with db_session() as conn:
         rows = conn.execute("""
             SELECT DISTINCT t.id, t.name
@@ -5752,60 +5752,11 @@ def get_checkpoint_topics_for_klasse(klasse_id):
             JOIN task t ON t.id = st.task_id
             WHERE st.klasse_id = ?
               AND EXISTS (SELECT 1 FROM subtask sub
-                          WHERE sub.task_id = t.id AND sub.checkpoint_type = 'quiz'
+                          WHERE sub.task_id = t.id AND COALESCE(sub.checkpoint_type, '') != ''
                             AND COALESCE(sub.hidden, 0) = 0)
             ORDER BY t.name
         """, (klasse_id,)).fetchall()
         return [dict(r) for r in rows]
-
-
-def get_checkpoint_overview_data(klasse_id, task_id):
-    """Raw rows for the points overview of one class and Thema (checkpoint_overview).
-
-    Returns (students, checkpoints, attempts, pending_flags):
-    students       everyone in the class, by name
-    checkpoints    the Thema's quiz checkpoints (subtask rows) in page order. Only
-                   'quiz': 'abnahme' and 'artefakt' have no questions and no write
-                   path yet (task_plan.md Phase 3)
-    attempts       {(student_id, checkpoint_id): standing attempt row}
-    pending_flags  {(student_id, checkpoint_id, question_id)} still waiting on a
-                   human, flags on excluded questions left out
-    """
-    with db_session() as conn:
-        students = [dict(r) for r in conn.execute(f"""
-            SELECT s.id, s.vorname, s.nachname
-            FROM student s JOIN student_klasse sk ON sk.student_id = s.id
-            WHERE sk.klasse_id = ?
-            ORDER BY {student_order()}
-        """, (klasse_id,)).fetchall()]
-        checkpoints = [dict(r) for r in conn.execute("""
-            SELECT * FROM subtask
-            WHERE task_id = ? AND checkpoint_type = 'quiz' AND COALESCE(hidden, 0) = 0
-              AND quiz_json IS NOT NULL AND quiz_json != ''
-            ORDER BY reihenfolge
-        """, (task_id,)).fetchall()]
-        if not students or not checkpoints:
-            return students, checkpoints, {}, set()
-
-        s_marks = ','.join('?' * len(students))
-        c_marks = ','.join('?' * len(checkpoints))
-        ids = [s['id'] for s in students] + [c['id'] for c in checkpoints]
-        attempts = {}
-        for r in conn.execute(f"""
-            SELECT * FROM checkpoint_attempt
-            WHERE student_id IN ({s_marks}) AND checkpoint_id IN ({c_marks})
-              AND superseded_at IS NULL
-            ORDER BY id
-        """, ids).fetchall():
-            attempts[(r['student_id'], r['checkpoint_id'])] = dict(r)   # newest wins
-        pending = {(r['student_id'], r['checkpoint_id'], r['question_id'])
-                   for r in conn.execute(f"""
-            SELECT student_id, checkpoint_id, question_id FROM checkpoint_flag
-            WHERE student_id IN ({s_marks}) AND checkpoint_id IN ({c_marks})
-              AND status IN ({','.join('?' * len(PROVISIONAL_FLAG_STATUSES))})
-              AND {FLAG_QUESTION_COUNTS}
-        """, ids + list(PROVISIONAL_FLAG_STATUSES)).fetchall()}
-    return students, checkpoints, attempts, pending
 
 
 def supersede_checkpoint_attempts(attempt_ids):

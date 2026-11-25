@@ -1,7 +1,7 @@
 """The grades (0-15) of one Bewertungsfenster, per student: two axes + one Protokoll
 grade per required experiment.
 
-Pure functions, no Flask and no database, same as checkpoint_overview: the numbers a
+Pure functions, no Flask and no database: the numbers a
 grade is read off must be testable without a browser. app._fenster_noten loads the
 rows, this module only decides what each unit is worth and adds it up.
 
@@ -38,6 +38,17 @@ SOLVED = 2          # a question counts as solved from 2 points (§ 3)
 # Reports that still wait on a teacher. 'abgelehnt' and 'nachbesserung' do not: the
 # teacher has ruled and the student owes the question, so it counts 0 until redone.
 OPEN_FLAG = 'offen'
+
+# Why a unit has no score, as the admin pages say it (window page + overview)
+REASONS = {
+    'nicht_bearbeitet': 'nicht bearbeitet', 'llm_kontingent': 'nicht gestellt (KI-Kontingent)',
+    'frage_neu': 'Frage nach der Sitzung neu, nachholen',
+    'abgelehnt': 'Meldung abgelehnt, nachholen', 'nachbesserung': 'zur Nachbesserung zurück',
+    'frage_kaputt': 'Frage kaputt', 'kontext_falsch': 'falscher Platz',
+    'design_fehlerhaft': 'Aufgabe bereitet nicht vor', 'ohne_wertung': 'ohne Wertung',
+    'gemeldet': 'gemeldet, wartet auf Entscheidung',
+    'ohne_aufschluesselung': 'alte Sitzung ohne Punkte je Frage',
+}
 
 # Official Punktetabelle Oberstufe, one lookup per total BE (copy of
 # docs/shared/lernmanager/chemie-punktetabelle-oberstufe.json -- the symlink is not
@@ -147,8 +158,10 @@ def axes(units, cells):
                    lift the cap (§ 9b)
     abdeckung      10 x share of kern solved + 5 x share of standard solved, capped
                    at 10 while a kern question is unsolved (§ 3). Quiz only
-    Protokoll units are in neither axis, nor in `vorlaeufig`/`fehlend` (own grade,
-    see protokoll_noten).
+    punkte / max   raw sum and maximum (3 per unit that is not vorläufig), what the
+                   checkpoint overview reads at a glance
+    fehlend / offen units without a score (count 0) / reported and undecided
+    Protokoll units are in none of these (own grade, see protokoll_noten).
     """
     pairs = [(u, c) for u, c in zip(units, cells) if u['typ'] != 'protokoll']
     quiz = [(u, c) for u, c in pairs if u['typ'] == 'quiz']
@@ -175,6 +188,9 @@ def axes(units, cells):
             'abdeckung': abdeckung,
             'vorlaeufig': any(c['state'] == 'vorlaeufig' for _, c in pairs),
             'fehlend': sum(1 for _, c in pairs if c['state'] == 'fehlt'),
+            'punkte': sum(c['punkte'] or 0 for _, c in pairs if c['state'] == 'punkte'),
+            'max': MAX_POINTS * sum(1 for _, c in pairs if c['state'] != 'vorlaeufig'),
+            'offen': sum(1 for _, c in pairs if c['grund'] == 'gemeldet'),
             'offene_kern': [u for u, c in quiz if u['niveau'] != 'standard' and _open(c)]}
 
 
@@ -223,10 +239,11 @@ def build_noten(students, units, per_student):
         for unit in units:
             cid = unit['checkpoint_id']
             attempt = data.get('attempts', {}).get(cid)
-            cells.append(unit_cell(unit, attempt,
-                                   data.get('scores', {}).get(cid),
-                                   data.get('running', {}).get(cid, {}),
-                                   data.get('flags', {}).get(cid, {})))
+            cell = unit_cell(unit, attempt, data.get('scores', {}).get(cid),
+                             data.get('running', {}).get(cid, {}),
+                             data.get('flags', {}).get(cid, {}))
+            cell['attempt_id'] = attempt['id'] if attempt else None   # for links
+            cells.append(cell)
         rows.append({'student': student, 'cells': cells, **axes(units, cells),
                      'protokolle': protokoll_noten(units, cells)})
     return rows
