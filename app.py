@@ -2249,7 +2249,7 @@ def admin_checkpoint_eintragen(klasse_id, subtask_id):
         for s in students:
             scores = {}
             for k in keys:
-                raw = request.form.get(f"p_{s['id']}_{k or 'ganz'}", '')
+                raw = request.form.get(f"p_{s['id']}_{k or 'ganz'}", '').strip()
                 if raw != '':
                     scores[k] = int(raw) if raw.isdigit() else -1   # -1 is refused below
             entries[s['id']] = {'scores': scores, 'notiz': request.form.get(f"n_{s['id']}", '')}

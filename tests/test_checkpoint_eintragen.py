@@ -210,3 +210,22 @@ def test_protokoll_grade_on_the_window_page(db, as_admin):
     assert '14 von 18 BE = 11 Punkte' in page and '<th>Arbeitsprozess</th>' not in page
     form = as_admin.get(f"/admin/klasse/{klasse}/checkpoint/{protokoll['id']}/eintragen")
     assert form.status_code == 200 and 'eigene Note' in form.get_data(as_text=True)
+
+
+def test_form_takes_typed_digits(db, app, as_admin):
+    """Text fields (2026-11-25): a typed digit is saved and shown again; 1 is refused."""
+    task_id = import_task(topic(PROTOKOLL, 'protokoll'))
+    protokoll = dict(models.get_subtasks(task_id)[1])
+    klasse = models.create_klasse('11z')
+    adler = models.create_student('Adler', 'Kim', 'u0', 'pw')
+    models.add_student_to_klasse(adler, klasse)
+    url = f"/admin/klasse/{klasse}/checkpoint/{protokoll['id']}/eintragen"
+    app.config['WTF_CSRF_ENABLED'] = False
+    base = {'datum': '2026-12-10'}
+    as_admin.post(url, data=base | {f'p_{adler}_rechnung': '1'})
+    assert models.standing_teacher_attempts(protokoll['id'], [adler]) == {}
+    as_admin.post(url, data=base | {f'p_{adler}_rechnung': ' 3', f'p_{adler}_deutung': ''})
+    assert adler in models.standing_teacher_attempts(protokoll['id'], [adler])
+    page = as_admin.get(url).get_data(as_text=True)
+    assert f'name="p_{adler}_rechnung"' in page and 'value="3"' in page
+    assert '<select' not in page
