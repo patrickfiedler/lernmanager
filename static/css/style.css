@@ -2367,6 +2367,26 @@ body.split-pane-active .container {
     border-top: none;
 }
 
+/* Materialien hebt sich von den grauen Klappboxen (Hilfe, Worum geht's ...)
+   ab: Schueler fanden es zwischen ihnen nicht. Blau = Farbe der Material-Links
+   darin, also dieselbe Bedeutung. Nur leicht: Aufgabentext bleibt Hauptsache. */
+.materials-toggle summary {
+    background: #eff6ff;
+    border-color: #93c5fd;
+    border-left: 4px solid var(--primary);
+    color: #1e40af;
+    font-size: 1.0625rem;
+}
+.materials-toggle summary:hover {
+    background: #dbeafe;
+    border-color: #60a5fa;
+    border-left-color: var(--primary-dark);
+}
+.materials-toggle .materials-content {
+    border-color: #93c5fd;
+    border-left: 4px solid var(--primary);
+}
+
 .artifact-file-content ul {
     margin: 0.4rem 0 0.8rem 1.25rem;
     padding: 0;
