@@ -23,7 +23,7 @@ FEHLT = {'state': 'fehlt', 'punkte': None, 'grund': 'nicht_bearbeitet'}
 OFFEN = {'state': 'vorlaeufig', 'punkte': None, 'grund': 'gemeldet'}
 
 
-# ---- the three axes, pure ----
+# ---- the axes, pure ----
 
 def test_docs32_example_quality_capped_without_solved_standard():
     """§ 6: 24 kern on 3, 6 standard untouched -> 72/30*5 = 12, capped at 10."""
@@ -60,11 +60,47 @@ def test_open_report_is_in_neither_points_nor_maximum():
     assert a['offene_kern'] == []        # waits on the teacher, not on the student
 
 
-def test_abnahme_is_its_own_axis_without_cap():
+def test_abnahme_counts_for_quality_under_the_cap():
+    """2026-11-25: Arbeitsprozess merged into quality; an Abnahme is one more unit."""
     units = [unit()] * 2 + [unit(niveau='standard')] + [unit('abnahme', qid=None, cid=2)]
     a = gw.axes(units, [pts(3), pts(3), FEHLT, pts(3)])
-    assert a['arbeitsprozess'] == 15
-    assert a['qualitaet'] == 10
+    assert 'arbeitsprozess' not in a
+    assert a['qualitaet'] == 10          # 9/4*5 = 11.25, capped: no standard solved
+    a = gw.axes(units, [pts(3), pts(3), pts(2), pts(0)])
+    assert a['qualitaet'] == pytest.approx(5 * 8 / 4)
+
+
+# ---- Protokoll: own grade (docs/32 § 3a) ----
+
+def proto(sid, cid=5):
+    return dict(unit('protokoll', niveau=None, cid=cid, qid=sid), titel='3.7')
+
+
+def test_protokoll_is_in_no_axis():
+    units = [unit(), proto('a'), proto('b')]
+    a = gw.axes(units, [pts(3), pts(0), FEHLT])
+    assert a['qualitaet'] == 15 and a['abdeckung'] == 10   # no standard: tops at 10
+    assert a['fehlend'] == 0 and not a['vorlaeufig']
+
+
+def test_protokoll_grade_from_the_table():
+    """Chemie's example: 14 of 18 BE = 11 Punkte."""
+    units = [proto(s) for s in 'abcdef']
+    cells = [pts(3), pts(3), pts(2), pts(2), pts(2), pts(2)]
+    assert gw.protokoll_noten(units, cells) == [
+        {'checkpoint_id': 5, 'titel': '3.7', 'be': 14, 'max': 18, 'offen': 0, 'punkte': 11}]
+
+
+def test_protokoll_without_all_sections_has_no_grade_yet():
+    """The Abnahme section is entered weeks before the rest: empty is not 0."""
+    units = [proto(s) for s in 'abcdef']
+    g, = gw.protokoll_noten(units, [pts(3)] + [FEHLT] * 5)
+    assert (g['be'], g['max'], g['offen'], g['punkte']) == (3, 18, 5, None)
+
+
+def test_total_missing_from_table_gives_be_only():
+    assert gw.notenpunkte(0, 18) == 0 and gw.notenpunkte(18, 18) == 15
+    assert gw.notenpunkte(6, 6) is None      # table starts at 10 BE
 
 
 def test_artefakt_counts_for_quality_but_not_coverage_or_cap():
@@ -72,7 +108,6 @@ def test_artefakt_counts_for_quality_but_not_coverage_or_cap():
     a = gw.axes(units, [pts(3), FEHLT, pts(3)])
     assert a['qualitaet'] == 10          # artefakt section does not lift the cap (§ 9b)
     assert a['abdeckung'] == 10          # kern 1/1, standard 0/1
-    assert a['arbeitsprozess'] is None
 
 
 # ---- cells ----

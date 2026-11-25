@@ -1,16 +1,19 @@
-"""The three grade axes (0-15) of one Bewertungsfenster, per student.
+"""The grades (0-15) of one Bewertungsfenster, per student: two axes + one Protokoll
+grade per required experiment.
 
 Pure functions, no Flask and no database, same as checkpoint_overview: the numbers a
 grade is read off must be testable without a browser. app._fenster_noten loads the
 rows, this module only decides what each unit is worth and adds it up.
 
-Rules: Chemie `docs/32-bewertungsregeln.md` § 3, § 6 and § 9b; plan in
-`task_plan.md` § Chemies Notenrechnung, Phase 2.
+Rules: Chemie `docs/32-bewertungsregeln.md` § 3, § 3a, § 6 and § 9b; plan in
+`task_plan.md` § Chemies Notenrechnung, Phase 2 + 3b. Since 2026-11-25 the
+Arbeitsprozess axis is merged into quality and a Protokoll is its own grade
+(decision 2026-11-25-protokoll-eigene-note-arbeitsprozess-verschmolzen).
 
 Unit = what one 0/2/3 belongs to:
     quiz checkpoint             one unit per question of today's quiz
-    abnahme / artefakt          one unit per question if the checkpoint has a quiz
-                                (sections, Phase 3), else one unit for the whole thing
+    abnahme/artefakt/protokoll  one unit per teacher-graded section, else one unit
+                                for the whole thing
 
 State of one student x one unit:
     punkte      0, 2 or 3 -- counts
@@ -26,6 +29,8 @@ quiz are not units at all.
 """
 
 import json
+from functools import lru_cache
+from pathlib import Path
 
 MAX_POINTS = 3
 SOLVED = 2          # a question counts as solved from 2 points (§ 3)
@@ -33,6 +38,22 @@ SOLVED = 2          # a question counts as solved from 2 points (§ 3)
 # Reports that still wait on a teacher. 'abgelehnt' and 'nachbesserung' do not: the
 # teacher has ruled and the student owes the question, so it counts 0 until redone.
 OPEN_FLAG = 'offen'
+
+# Official Punktetabelle Oberstufe, one lookup per total BE (copy of
+# docs/shared/lernmanager/chemie-punktetabelle-oberstufe.json -- the symlink is not
+# on the server). A table, not a formula: the official one has gaps and repeated
+# thresholds no percentage rule reproduces.
+POINTS_TABLE = Path(__file__).with_name('punktetabelle_oberstufe.json')
+
+
+@lru_cache(maxsize=1)
+def _points_table():
+    return json.loads(POINTS_TABLE.read_text(encoding='utf-8'))['tabellen']
+
+
+def notenpunkte(be, max_be):
+    """Notenpunkte for `be` of `max_be` BE; None when the table has no such total."""
+    return _points_table().get(str(max_be), {}).get(str(be))
 
 
 def expected_units(checkpoints, excluded):
@@ -118,22 +139,23 @@ def _share_solved(cells):
 
 
 def axes(units, cells):
-    """The three axes for one student. units and cells: same length, same order.
+    """The two axes for one student. units and cells: same length, same order.
 
-    qualitaet      mean of quiz + artefakt units x 5; capped at 10 while the window
-                   offers a standard quiz question and none is solved (§ 6). An
-                   artefakt section never lifts the cap (§ 9b)
-    arbeitsprozess mean of abnahme units x 5, no cap; None without any abnahme
+    qualitaet      "Qualität des Arbeitsprozesses": mean of quiz + artefakt + abnahme
+                   units x 5; capped at 10 while the window offers a standard quiz
+                   question and none is solved (§ 6). Artefakt and abnahme never
+                   lift the cap (§ 9b)
     abdeckung      10 x share of kern solved + 5 x share of standard solved, capped
-                   at 10 while a kern question is unsolved (§ 3). Quiz only:
-                   artefakt carries no kern/standard (§ 3), abnahme is its own axis
+                   at 10 while a kern question is unsolved (§ 3). Quiz only
+    Protokoll units are in neither axis, nor in `vorlaeufig`/`fehlend` (own grade,
+    see protokoll_noten).
     """
-    pairs = list(zip(units, cells))
+    pairs = [(u, c) for u, c in zip(units, cells) if u['typ'] != 'protokoll']
     quiz = [(u, c) for u, c in pairs if u['typ'] == 'quiz']
     kern = [c for u, c in quiz if u['niveau'] != 'standard']
     standard = [c for u, c in quiz if u['niveau'] == 'standard']
 
-    qualitaet = _mean_x5([c for u, c in pairs if u['typ'] in ('quiz', 'artefakt')])
+    qualitaet = _mean_x5([c for u, c in pairs if u['typ'] in ('quiz', 'artefakt', 'abnahme')])
     standard_solved, _ = _share_solved(standard)
     if qualitaet is not None and standard and not standard_solved:
         qualitaet = min(qualitaet, 10)
@@ -150,11 +172,36 @@ def axes(units, cells):
             abdeckung = min(abdeckung, 10)
 
     return {'qualitaet': qualitaet,
-            'arbeitsprozess': _mean_x5([c for u, c in pairs if u['typ'] == 'abnahme']),
             'abdeckung': abdeckung,
-            'vorlaeufig': any(c['state'] == 'vorlaeufig' for c in cells),
-            'fehlend': sum(1 for c in cells if c['state'] == 'fehlt'),
+            'vorlaeufig': any(c['state'] == 'vorlaeufig' for _, c in pairs),
+            'fehlend': sum(1 for _, c in pairs if c['state'] == 'fehlt'),
             'offene_kern': [u for u, c in quiz if u['niveau'] != 'standard' and _open(c)]}
+
+
+def protokoll_noten(units, cells):
+    """One grade per Protokoll checkpoint (§ 3a), in page order.
+
+    BE = sum of the sections' 0/2/3, maximum 3 per section. An empty section is
+    "not entered yet", never 0 (the Abnahme section is usually entered weeks before
+    the rest), so Notenpunkte come only once every section has a score; until then
+    `offen` counts the empty ones. Without a table entry for the total: BE only.
+    """
+    grades = {}
+    for u, c in zip(units, cells):
+        if u['typ'] != 'protokoll':
+            continue
+        g = grades.setdefault(u['checkpoint_id'], {
+            'checkpoint_id': u['checkpoint_id'], 'titel': u.get('titel'),
+            'be': 0, 'max': 0, 'offen': 0, 'punkte': None})
+        g['max'] += MAX_POINTS
+        if c['state'] == 'punkte':
+            g['be'] += c['punkte']
+        else:
+            g['offen'] += 1
+    for g in grades.values():
+        if not g['offen']:
+            g['punkte'] = notenpunkte(g['be'], g['max'])
+    return list(grades.values())
 
 
 def _open(cell):
@@ -180,5 +227,6 @@ def build_noten(students, units, per_student):
                                    data.get('scores', {}).get(cid),
                                    data.get('running', {}).get(cid, {}),
                                    data.get('flags', {}).get(cid, {})))
-        rows.append({'student': student, 'cells': cells, **axes(units, cells)})
+        rows.append({'student': student, 'cells': cells, **axes(units, cells),
+                     'protokolle': protokoll_noten(units, cells)})
     return rows

@@ -89,11 +89,14 @@
             {{ units|selectattr('typ', 'equalto', 'quiz')|rejectattr('niveau', 'equalto', 'standard')|list|length }} Kern-Fragen,
             {{ units|selectattr('typ', 'equalto', 'quiz')|selectattr('niveau', 'equalto', 'standard')|list|length }} Standard-Fragen,
             {{ units|selectattr('typ', 'equalto', 'abnahme')|list|length }} Abnahme-Einheiten,
-            {{ units|selectattr('typ', 'equalto', 'artefakt')|list|length }} Artefakt-Einheiten
+            {{ units|selectattr('typ', 'equalto', 'artefakt')|list|length }} Artefakt-Einheiten,
+            {{ units|selectattr('typ', 'equalto', 'protokoll')|list|length }} Protokoll-Abschnitte
             {% if excluded_count %}({{ excluded_count }} Frage(n) für alle aus der Wertung){% endif %}.
             Gezählt wird, was bis {{ fenster.stichtag }} 23:59 vorlag; laufende Sitzungen zählen mit.
             Fehlendes zählt 0. <em>vorläufig</em> = mindestens eine Frage zählt noch weder Punkte noch Maximum: gemeldet und nicht entschieden, oder aus einer alten Sitzung ohne Punkte je Frage.
-            Abnahmen und Artefakte trägt die Lehrkraft unten ein.</p>
+            Qualität = Qualität des Arbeitsprozesses (Quiz, Artefakt, Abnahme).
+            Ein Protokoll ist eine eigene Note: BE nach Punktetabelle, erst wenn alle Abschnitte eingetragen sind.
+            Abnahmen, Artefakte und Protokolle trägt die Lehrkraft unten ein.</p>
         {% set lehrer = [] %}
         {% for u in units if u.typ != 'quiz' and u.checkpoint_id not in lehrer|map(attribute='checkpoint_id')|list %}{% set _ = lehrer.append(u) %}{% endfor %}
         {% if lehrer %}
@@ -103,12 +106,14 @@
     </div>
     {% if noten %}
     <table class="table">
-        <thead><tr><th>Schüler</th><th>Qualität</th><th>Arbeitsprozess</th><th>Abdeckung</th>
+        <thead><tr><th>Schüler</th><th>Qualität</th><th>Abdeckung</th>
+            {% for p in noten[0].protokolle %}<th>Protokoll {{ p.titel }}</th>{% endfor %}
             <th>fehlt</th><th></th></tr></thead>
         <tbody>
         {% for r in noten %}
         <tr><td>{{ r.student.nachname }}, {{ r.student.vorname }}</td>
-            <td>{{ zahl(r.qualitaet) }}</td><td>{{ zahl(r.arbeitsprozess) }}</td><td>{{ zahl(r.abdeckung) }}</td>
+            <td>{{ zahl(r.qualitaet) }}</td><td>{{ zahl(r.abdeckung) }}</td>
+            {% for p in r.protokolle %}<td>{{ p.be }} von {{ p.max }} BE{% if p.offen %} ({{ p.offen }} offen){% elif p.punkte is not none %} = {{ p.punkte }} Punkte{% endif %}</td>{% endfor %}
             <td>{{ r.fehlend }}{% if r.offene_kern %} ({{ r.offene_kern|length }} Kern offen){% endif %}</td>
             <td>{% if r.vorlaeufig %}<span class="badge">vorläufig</span>{% endif %}
                 {% set luecken = [] %}

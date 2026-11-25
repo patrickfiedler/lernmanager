@@ -283,7 +283,7 @@ def init_db():
                 hidden INTEGER DEFAULT 0,  -- 1=hidden from all students (admin override)
                 fertig_wenn TEXT,
                 tipps TEXT,
-                checkpoint_type TEXT,  -- quiz/abnahme/artefakt (Chemie Checkpoint-Punktekonto; NULL = not a checkpoint)
+                checkpoint_type TEXT,  -- quiz/abnahme/artefakt/protokoll (Chemie Checkpoint-Punktekonto; NULL = not a checkpoint)
                 kern_standard_tag TEXT,  -- kern/standard (NULL = not a checkpoint)
                 checkpoint_hints_json TEXT,  -- JSON array of escalating Tipp-button hints (quiz checkpoints)
                 school_only INTEGER NOT NULL DEFAULT 0,  -- 1=Quiz-Checkpoint only accessible from school network
@@ -3438,7 +3438,7 @@ def update_subtasks(task_id, subtasks_list, estimated_minutes_list=None, quiz_js
             checkpoint_type = None
             if checkpoint_type_list and i < len(checkpoint_type_list):
                 ct = checkpoint_type_list[i].strip() if checkpoint_type_list[i] else ''
-                checkpoint_type = ct if ct in ('quiz', 'abnahme', 'artefakt') else None
+                checkpoint_type = ct if ct in CHECKPOINT_TYPES else None
 
             kern_standard_tag = None
             if kern_standard_tag_list and i < len(kern_standard_tag_list):
@@ -3560,7 +3560,7 @@ def update_subtasks_from_import(task_id, subtasks_data):
             fertig_wenn = sub.get('fertig_wenn') or None
             tipps = sub.get('tipps') or None
             checkpoint_type = sub.get('checkpoint_type') or None
-            kern_standard_tag = sub.get('kern_standard_tag') or None
+            kern_standard_tag = None if checkpoint_type == 'protokoll' else (sub.get('kern_standard_tag') or None)
             checkpoint_hints = json.dumps(sub['checkpoint_hints'], ensure_ascii=False) if sub.get('checkpoint_hints') else None
             fork_group = sub.get('fork_group') or None
             fork_branch = sub.get('fork_branch') or None
@@ -4730,8 +4730,14 @@ def quiz_questions(quiz_json):
         return []
 
 
+# Chemie checkpoint kinds. 'protokoll' = own grade per required experiment, outside
+# the axes (decision 2026-11-25-protokoll-eigene-note-arbeitsprozess-verschmolzen).
+CHECKPOINT_TYPES = ('quiz', 'abnahme', 'artefakt', 'protokoll')
+TEACHER_GRADED_TYPES = ('abnahme', 'artefakt', 'protokoll')
+
+
 def checkpoint_sections(subtask):
-    """Teacher-graded sections of an abnahme/artefakt: [{'id', 'text'}], [] = one whole.
+    """Teacher-graded sections of an abnahme/artefakt/protokoll: [{'id', 'text'}], [] = one whole.
 
     Chemie docs/32 § 3: an Artefakt section counts like one quiz question."""
     raw = subtask.get('abschnitte_json')
@@ -4748,8 +4754,8 @@ def abschnitte_json_from_subtask(sub):
     if not sections:
         return None
     where = f"Abschnitte von „{(sub.get('beschreibung') or '').splitlines()[0][:60]}“"
-    if sub.get('checkpoint_type') not in ('abnahme', 'artefakt'):
-        raise QuizIdError(f"{where}: nur bei checkpoint_type abnahme oder artefakt.")
+    if sub.get('checkpoint_type') not in TEACHER_GRADED_TYPES:
+        raise QuizIdError(f"{where}: nur bei checkpoint_type abnahme, artefakt oder protokoll.")
     if not isinstance(sections, list):
         raise QuizIdError(f"{where}: muss eine Liste sein.")
     seen = set()
@@ -5027,8 +5033,8 @@ def save_teacher_checkpoint_grades(admin_id, subtask, klasse_id, datum, entries)
     as history (no superseded_at -- that marks a reset, not a correction). The
     sections go in as the snapshot, so a section added later reads as `frage_neu`.
     """
-    if subtask.get('checkpoint_type') not in ('abnahme', 'artefakt'):
-        raise ValueError('Nur Abnahme- und Artefakt-Checkpoints werden hier eingetragen.')
+    if subtask.get('checkpoint_type') not in TEACHER_GRADED_TYPES:
+        raise ValueError('Nur Abnahme-, Artefakt- und Protokoll-Checkpoints werden hier eingetragen.')
     if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', datum or ''):
         raise ValueError('Datum fehlt oder ist ungültig.')
     frozen = frozen_fenster_blocking(klasse_id, subtask['task_id'], datum)

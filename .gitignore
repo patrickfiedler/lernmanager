@@ -38,6 +38,7 @@
 !/checkpoint_questions.py
 !/checkpoint_overview.py
 !/grading_window.py
+!/punktetabelle_oberstufe.json
 !/analytics_queue.py
 !/import_task.py
 !/inline_images.py

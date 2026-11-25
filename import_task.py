@@ -451,7 +451,7 @@ def validate_task_structure(data, warnings=None):
     # Validate subtasks
     VALID_PATHS = ('wanderweg', 'bergweg', 'gipfeltour', 'seilbahn')
     VALID_PATH_MODELS = ('skip', 'depth')
-    VALID_CHECKPOINT_TYPES = ('quiz', 'abnahme', 'artefakt')
+    VALID_CHECKPOINT_TYPES = models.CHECKPOINT_TYPES
     VALID_KERN_STANDARD_TAGS = ('kern', 'standard')
     if 'subtasks' in task:
         if not isinstance(task['subtasks'], list):
@@ -472,7 +472,13 @@ def validate_task_structure(data, warnings=None):
                 # checkpoint_type/kern_standard_tag are optional, but required together (Chemie checkpoints)
                 if 'checkpoint_type' in sub and sub['checkpoint_type'] not in VALID_CHECKPOINT_TYPES:
                     errors.append(f"Subtask {i+1} invalid 'checkpoint_type'. Must be one of: {', '.join(VALID_CHECKPOINT_TYPES)}")
-                if sub.get('checkpoint_type') and sub.get('kern_standard_tag') not in VALID_KERN_STANDARD_TAGS:
+                # protokoll is its own grade, outside coverage: no kern/standard, sections required
+                if sub.get('checkpoint_type') == 'protokoll':
+                    if sub.get('kern_standard_tag') and warnings is not None:
+                        warnings.append(f"Subtask {i+1}: 'kern_standard_tag' is ignored for checkpoint_type 'protokoll'")
+                    if not sub.get('abschnitte'):
+                        errors.append(f"Subtask {i+1}: checkpoint_type 'protokoll' requires 'abschnitte'")
+                elif sub.get('checkpoint_type') and sub.get('kern_standard_tag') not in VALID_KERN_STANDARD_TAGS:
                     errors.append(f"Subtask {i+1} has checkpoint_type but missing/invalid 'kern_standard_tag'. Must be one of: {', '.join(VALID_KERN_STANDARD_TAGS)}")
                 if sub.get('kern_standard_tag') and not sub.get('checkpoint_type'):
                     errors.append(f"Subtask {i+1} has 'kern_standard_tag' but no 'checkpoint_type'")
@@ -827,7 +833,7 @@ def import_task(task_data, dry_run=False, warnings=None):
         fertig_wenn = sub.get('fertig_wenn') or None
         tipps = sub.get('tipps') or None
         checkpoint_type = sub.get('checkpoint_type') or None
-        kern_standard_tag = sub.get('kern_standard_tag') or None
+        kern_standard_tag = None if checkpoint_type == 'protokoll' else (sub.get('kern_standard_tag') or None)
         checkpoint_hints_json = json.dumps(sub['checkpoint_hints'], ensure_ascii=False) if sub.get('checkpoint_hints') else None
         fork_group = sub.get('fork_group') or None
         fork_branch = sub.get('fork_branch') or None

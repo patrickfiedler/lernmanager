@@ -6,8 +6,9 @@
 <p>{% if zurueck %}<a href="{{ url_for('admin_bewertungsfenster_detail', fenster_id=zurueck) }}">← Bewertungsfenster</a>
    {% else %}<a href="{{ url_for('admin_bewertungsfenster', klasse_id=klasse.id) }}">← Bewertungsfenster der Klasse</a>{% endif %}</p>
 <h1>{{ titel }}</h1>
-<p class="text-muted">{{ klasse.name }} · {{ 'Abnahme' if subtask.checkpoint_type == 'abnahme' else 'Artefakt' }}
-    · zählt für {{ 'Arbeitsprozess' if subtask.checkpoint_type == 'abnahme' else 'Qualität' }}</p>
+{% set art = {'abnahme': 'Abnahme', 'artefakt': 'Artefakt', 'protokoll': 'Protokoll'} %}
+<p class="text-muted">{{ klasse.name }} · {{ art[subtask.checkpoint_type] }}
+    · {{ 'eigene Note (BE nach Punktetabelle)' if subtask.checkpoint_type == 'protokoll' else 'zählt für Qualität' }}</p>
 
 {% macro punkte(name, wert) -%}
 <select name="{{ name }}" class="form-control" style="width: auto;">
@@ -19,7 +20,7 @@
 <div class="card mb-2">
     <div class="card-body">
         {% if sections %}
-        <p class="mb-1">Jeder Abschnitt bekommt eine eigene 0/2/3 und zählt wie eine Quizfrage:</p>
+        <p class="mb-1">Jeder Abschnitt bekommt eine eigene 0/2/3{% if subtask.checkpoint_type == 'protokoll' %} BE. Die Note kommt erst, wenn alle Abschnitte eingetragen sind{% else %} und zählt wie eine Quizfrage{% endif %}:</p>
         <ol class="mb-1">{% for s in sections %}<li><strong>{{ s.id }}</strong>: {{ s.text }}</li>{% endfor %}</ol>
         {% else %}
         <p class="mb-1">Eine 0/2/3 für den ganzen Checkpoint. (Abschnitte kommen mit dem Feld <code>abschnitte</code> im Import.)</p>

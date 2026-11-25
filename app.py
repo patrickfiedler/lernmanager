@@ -2239,7 +2239,7 @@ def admin_checkpoint_eintragen(klasse_id, subtask_id):
     """
     klasse = models.get_klasse(klasse_id)
     subtask = models.get_subtask(subtask_id)
-    if not klasse or not subtask or subtask.get('checkpoint_type') not in ('abnahme', 'artefakt'):
+    if not klasse or not subtask or subtask.get('checkpoint_type') not in models.TEACHER_GRADED_TYPES:
         abort(404)
     students = models.get_students_in_klasse(klasse_id)
     sections = models.checkpoint_sections(subtask)
@@ -3129,8 +3129,7 @@ def admin_thema_aufgaben(task_id):
             except ValueError as e:
                 flash(f'Aufgabe {i+1} Quiz-JSON: {e}', 'danger')
                 return redirect(url_for('admin_thema_detail', task_id=task_id))
-            is_checkpoint = i < len(checkpoint_type_list) and checkpoint_type_list[i] in (
-                'quiz', 'abnahme', 'artefakt')
+            is_checkpoint = i < len(checkpoint_type_list) and checkpoint_type_list[i] in models.CHECKPOINT_TYPES
             problem = validated and is_checkpoint and models.check_checkpoint_quiz_ids(
                 old_subtask_ids.get(i), validated)
             if problem:

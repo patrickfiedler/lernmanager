@@ -72,7 +72,7 @@ def test_bad_sections_stop_the_import(db, abschnitte, fehler):
 
 
 def test_sections_only_on_teacher_checkpoints(db):
-    with pytest.raises(ValidationError, match='abnahme oder artefakt'):
+    with pytest.raises(ValidationError, match='abnahme, artefakt oder protokoll'):
         validate_task_structure(topic(checkpoint_type='quiz'))
 
 
@@ -83,9 +83,7 @@ def test_each_section_is_one_unit_and_counts_for_quality(fx):
     rows, units = noten(fx)
     assert [(u['typ'], u['question_id']) for u in units] == [
         ('abnahme', None), ('artefakt', 'durchfuehrung'), ('artefakt', 'auswertung')]
-    assert rows['Adler']['qualitaet'] == pytest.approx(5 * 5 / 2)
-    assert rows['Adler']['arbeitsprozess'] == 15
-    assert rows['Biber']['arbeitsprozess'] == 0
+    assert rows['Adler']['qualitaet'] == pytest.approx(5 * 8 / 3)   # abnahme counts too
     assert rows['Biber']['qualitaet'] == 0
 
 
@@ -105,7 +103,7 @@ def test_unchanged_entry_writes_nothing_and_a_correction_wins(fx):
     assert save(fx, 'abnahme', entry) == 0
     assert save(fx, 'abnahme', {adler: {'scores': {None: 3}, 'notiz': 'sauber'}}) == 1
     rows, _ = noten(fx)
-    assert rows['Adler']['arbeitsprozess'] == 15
+    assert rows['Adler']['cells'][0]['punkte'] == 3
     standing = models.standing_teacher_attempts(fx['abnahme']['id'], [adler])[adler]
     assert standing['teacher_note'] == 'sauber' and standing['reviewed_by'] == 1
 
@@ -169,3 +167,46 @@ def test_route_refuses_quiz_checkpoint(as_admin):
     quiz = models.get_subtasks(task_id)[1]
     klasse = models.create_klasse('11z')
     assert as_admin.get(f"/admin/klasse/{klasse}/checkpoint/{quiz['id']}/eintragen").status_code == 404
+
+
+# ---- Protokoll (2026-11-25): own grade, sections required, no kern/standard ----
+
+PROTOKOLL = [{'id': s, 'text': s} for s in
+             ('durchfuehrung', 'beobachtungen', 'rechnung', 'deutung',
+              'fehlerbetrachtung', 'praktische-durchfuehrung')]
+
+
+def test_protokoll_needs_sections(db):
+    with pytest.raises(ValidationError, match="'protokoll' requires 'abschnitte'"):
+        validate_task_structure(topic(abschnitte=None, checkpoint_type='protokoll'))
+
+
+def test_protokoll_drops_kern_tag_with_a_warning(db):
+    warnings = []
+    validate_task_structure(topic(PROTOKOLL, 'protokoll'), warnings)
+    assert any('ignored' in w for w in warnings)
+    task_id = import_task(topic(PROTOKOLL, 'protokoll'))
+    assert models.get_subtasks(task_id)[1]['kern_standard_tag'] is None
+
+
+def test_protokoll_grade_on_the_window_page(db, as_admin):
+    task_id = import_task(topic(PROTOKOLL, 'protokoll'))
+    protokoll = dict(models.get_subtasks(task_id)[1])
+    klasse = models.create_klasse('11z')
+    adler = models.create_student('Adler', 'Kim', 'u0', 'pw')
+    models.add_student_to_klasse(adler, klasse)
+    fid = models.create_fenster(klasse, 'Fenster II', '2026-12-01', '2026-12-20', [task_id], None)
+    fx = {'protokoll': protokoll, 'klasse': klasse, 'f': fid}
+    save(fx, 'protokoll', {adler: {'scores': {'praktische-durchfuehrung': 3}}})
+    rows, _ = noten(fx)
+    assert rows['Adler']['protokolle'][0]['offen'] == 5
+    assert rows['Adler']['fehlend'] == 1                     # only the unentered 3.6
+    scores = {s['id']: 2 for s in PROTOKOLL} | {'durchfuehrung': 3, 'praktische-durchfuehrung': 3}
+    save(fx, 'protokoll', {adler: {'scores': scores}})
+    rows, _ = noten(fx)
+    g = rows['Adler']['protokolle'][0]
+    assert (g['be'], g['max'], g['punkte']) == (14, 18, 11)
+    page = as_admin.get(f'/admin/bewertungsfenster/{fid}').get_data(as_text=True)
+    assert '14 von 18 BE = 11 Punkte' in page and '<th>Arbeitsprozess</th>' not in page
+    form = as_admin.get(f"/admin/klasse/{klasse}/checkpoint/{protokoll['id']}/eintragen")
+    assert form.status_code == 200 and 'eigene Note' in form.get_data(as_text=True)

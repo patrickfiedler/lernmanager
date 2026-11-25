@@ -184,6 +184,7 @@
                             <option value="quiz" {% if st.checkpoint_type == 'quiz' %}selected{% endif %}>🧠 Quiz</option>
                             <option value="abnahme" {% if st.checkpoint_type == 'abnahme' %}selected{% endif %}>🗣️ Abnahme</option>
                             <option value="artefakt" {% if st.checkpoint_type == 'artefakt' %}selected{% endif %}>📎 Artefakt</option>
+                            <option value="protokoll" {% if st.checkpoint_type == 'protokoll' %}selected{% endif %}>🧪 Protokoll</option>
                         </select>
                         <select name="kern_standard_tag[]" class="form-control" style="width: 110px;" title="Kern/Standard">
                             <option value="" {% if not st.kern_standard_tag %}selected{% endif %}>– –</option>
@@ -632,6 +633,7 @@ function addSubtask() {
                     <option value="quiz">🧠 Quiz</option>
                     <option value="abnahme">🗣️ Abnahme</option>
                     <option value="artefakt">📎 Artefakt</option>
+                    <option value="protokoll">🧪 Protokoll</option>
                 </select>
                 <select name="kern_standard_tag[]" class="form-control" style="width: 110px;" title="Kern/Standard">
                     <option value="" selected>– –</option>
