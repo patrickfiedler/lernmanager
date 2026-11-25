@@ -93,7 +93,13 @@
             {% if excluded_count %}({{ excluded_count }} Frage(n) für alle aus der Wertung){% endif %}.
             Gezählt wird, was bis {{ fenster.stichtag }} 23:59 vorlag; laufende Sitzungen zählen mit.
             Fehlendes zählt 0. <em>vorläufig</em> = mindestens eine Frage zählt noch weder Punkte noch Maximum: gemeldet und nicht entschieden, oder aus einer alten Sitzung ohne Punkte je Frage.
-            Arbeitsprozess bleibt 0, bis Abnahmen eintragbar sind (Phase 3).</p>
+            Abnahmen und Artefakte trägt die Lehrkraft unten ein.</p>
+        {% set lehrer = [] %}
+        {% for u in units if u.typ != 'quiz' and u.checkpoint_id not in lehrer|map(attribute='checkpoint_id')|list %}{% set _ = lehrer.append(u) %}{% endfor %}
+        {% if lehrer %}
+        <p class="mb-0"><strong>Eintragen:</strong>
+            {% for u in lehrer %}<a href="{{ url_for('admin_checkpoint_eintragen', klasse_id=klasse.id, subtask_id=u.checkpoint_id, zurueck=fenster.id) }}">{{ u.titel }}</a>{% if not loop.last %} · {% endif %}{% endfor %}</p>
+        {% endif %}
     </div>
     {% if noten %}
     <table class="table">

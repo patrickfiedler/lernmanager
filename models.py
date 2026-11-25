@@ -294,6 +294,7 @@ def init_db():
                 fork_required INTEGER NOT NULL DEFAULT 1,  -- 0=enrichment fork (unpicked branches stay as Zusatz)
                 is_intro INTEGER NOT NULL DEFAULT 0,  -- 1=Einführung subtask, excluded from progress-count denominator
                 sammeln_json TEXT,  -- migrate_078: {"sammeln": {...}} and/or {"sammeln_download": {...}}
+                abschnitte_json TEXT,  -- migrate_087: [{"id", "text"}] teacher-graded sections of an abnahme/artefakt; NULL = one whole
                 content_changed_at DATETIME,  -- migrate_081: last edit of SUBTASK_CONTENT_FIELDS; NULL = unchanged since creation (or before 081)
                 FOREIGN KEY (task_id) REFERENCES task(id) ON DELETE CASCADE
             );
@@ -2927,6 +2928,8 @@ def export_task_to_dict(task_id):
             }
             if subtask.get('quiz_json'):
                 st_data['quiz'] = json.loads(subtask['quiz_json'])
+            if subtask.get('abschnitte_json'):
+                st_data['abschnitte'] = json.loads(subtask['abschnitte_json'])
             if subtask.get('graded_artifact_json'):
                 st_data['graded_artifact'] = json.loads(subtask['graded_artifact_json'])
             if subtask.get('artifact_gate_json'):
@@ -3308,7 +3311,7 @@ def create_subtask(task_id, beschreibung, reihenfolge=0, estimated_minutes=None,
                    artifact_gate_json=None, checkpoint_type=None, kern_standard_tag=None,
                    checkpoint_hints_json=None, fork_group=None, fork_branch=None,
                    fork_branch_label=None, fork_branch_note=None, fork_required=1, is_intro=0,
-                   sammeln_json=None):
+                   sammeln_json=None, abschnitte_json=None):
     """Create a subtask."""
     with db_session() as conn:
         if checkpoint_type:
@@ -3317,6 +3320,9 @@ def create_subtask(task_id, beschreibung, reihenfolge=0, estimated_minutes=None,
             "INSERT INTO subtask (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json, artifact_gate_json, fertig_wenn, tipps, checkpoint_type, kern_standard_tag, checkpoint_hints_json, fork_group, fork_branch, fork_branch_label, fork_branch_note, fork_required, is_intro, sammeln_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (task_id, beschreibung, reihenfolge, estimated_minutes, quiz_json, path, path_model, graded_artifact_json, artifact_gate_json, fertig_wenn, tipps, checkpoint_type, kern_standard_tag, checkpoint_hints_json, fork_group, fork_branch, fork_branch_label, fork_branch_note, fork_required, is_intro, sammeln_json)
         )
+        if abschnitte_json:
+            conn.execute("UPDATE subtask SET abschnitte_json = ? WHERE id = ?",
+                         (abschnitte_json, cursor.lastrowid))
         return cursor.lastrowid
 
 
@@ -3563,6 +3569,7 @@ def update_subtasks_from_import(task_id, subtasks_data):
             fork_required = 1 if sub.get('fork_required', True) else 0
             is_intro = 1 if sub.get('is_intro') else 0
             sammeln_json = sammeln_json_from_subtask(sub)
+            abschnitte_json = abschnitte_json_from_subtask(sub)
             if checkpoint_type:
                 quiz_json = checkpoint_quiz_with_ids(
                     conn, old_by_pos[pos]['id'] if pos in old_by_pos else None, quiz_json)
@@ -3598,6 +3605,9 @@ def update_subtasks_from_import(task_id, subtasks_data):
                      fork_group, fork_branch, fork_branch_label, fork_branch_note, fork_required, is_intro, sammeln_json)
                 )
                 subtask_id_by_position[pos] = cursor.lastrowid
+            # Import carries the whole Aufgabe: no `abschnitte` = graded as one whole.
+            conn.execute("UPDATE subtask SET abschnitte_json = ? WHERE id = ?",
+                         (abschnitte_json, subtask_id_by_position[pos]))
 
         # Delete old subtasks at positions no longer present
         for old_pos, old_sub in old_by_pos.items():
@@ -4720,6 +4730,41 @@ def quiz_questions(quiz_json):
         return []
 
 
+def checkpoint_sections(subtask):
+    """Teacher-graded sections of an abnahme/artefakt: [{'id', 'text'}], [] = one whole.
+
+    Chemie docs/32 § 3: an Artefakt section counts like one quiz question."""
+    raw = subtask.get('abschnitte_json')
+    return json.loads(raw) if raw else []
+
+
+def abschnitte_json_from_subtask(sub):
+    """The `abschnitte` of an import subtask dict as column value; raises QuizIdError.
+
+    Every section needs its own id from the author -- no filling in, unlike quiz
+    questions: sections are graded by hand, there is no first import without
+    stakes, and a guessed id would hand a grade to the wrong part of the work."""
+    sections = sub.get('abschnitte')
+    if not sections:
+        return None
+    where = f"Abschnitte von „{(sub.get('beschreibung') or '').splitlines()[0][:60]}“"
+    if sub.get('checkpoint_type') not in ('abnahme', 'artefakt'):
+        raise QuizIdError(f"{where}: nur bei checkpoint_type abnahme oder artefakt.")
+    if not isinstance(sections, list):
+        raise QuizIdError(f"{where}: muss eine Liste sein.")
+    seen = set()
+    for s in sections:
+        sid = s.get('id') if isinstance(s, dict) else None
+        if not sid or not QUESTION_ID_RE.match(str(sid)):
+            raise QuizIdError(f"{where}: jeder Abschnitt braucht eine id aus a-z, 0-9, - ({s!r}).")
+        if sid in seen:
+            raise QuizIdError(f"{where}: id „{sid}“ doppelt.")
+        if not str(s.get('text') or '').strip():
+            raise QuizIdError(f"{where}: Abschnitt „{sid}“ ohne text.")
+        seen.add(sid)
+    return json.dumps([{'id': s['id'], 'text': s['text']} for s in sections], ensure_ascii=False)
+
+
 def question_id_at(questions, index):
     """Id of the question at 0-based `index` in this list; None if out of range or
     the question has none."""
@@ -4942,6 +4987,101 @@ def create_checkpoint_attempt(student_id, checkpoint_id, module_id, checkpoint_t
                 WHERE session_uid = ? AND checkpoint_attempt_id IS NULL
             ''', (attempt_id, session_uid))
         return attempt_id
+
+
+TEACHER_SCORES = (0, 2, 3)
+
+
+def standing_teacher_attempts(checkpoint_id, student_ids):
+    """{student_id: newest attempt row} for one checkpoint -- what the entry form shows."""
+    if not student_ids:
+        return {}
+    marks = ','.join('?' * len(student_ids))
+    with db_session() as conn:
+        rows = conn.execute(f"""
+            SELECT * FROM checkpoint_attempt
+            WHERE checkpoint_id = ? AND student_id IN ({marks}) AND superseded_at IS NULL
+            ORDER BY id
+        """, [checkpoint_id] + list(student_ids)).fetchall()
+    return {r['student_id']: dict(r) for r in rows}   # newest wins, as in the grade
+
+
+def frozen_fenster_blocking(klasse_id, task_id, datum):
+    """Name of a frozen window of this class that covers the module and whose Stichtag
+    is on or after `datum` -- an entry dated then would change a frozen grade."""
+    for f in list_fenster(klasse_id):
+        if (f['eingefroren'] and datum <= f['stichtag']
+                and task_id in get_fenster(f['id'])['task_ids']):
+            return f['name']
+    return None
+
+
+def save_teacher_checkpoint_grades(admin_id, subtask, klasse_id, datum, entries):
+    """Write the teacher's 0/2/3 for an abnahme/artefakt (Phase 3). Returns rows written.
+
+    entries: {student_id: {'scores': {section_id: score}, 'notiz': str}}. For a
+    checkpoint without sections the one key is None. An empty cell is absent, not 0:
+    "not entered yet" must stay a gap, a 0 is a verdict.
+
+    One new checkpoint_attempt per changed student; the newest wins, older rows stay
+    as history (no superseded_at -- that marks a reset, not a correction). The
+    sections go in as the snapshot, so a section added later reads as `frage_neu`.
+    """
+    if subtask.get('checkpoint_type') not in ('abnahme', 'artefakt'):
+        raise ValueError('Nur Abnahme- und Artefakt-Checkpoints werden hier eingetragen.')
+    if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', datum or ''):
+        raise ValueError('Datum fehlt oder ist ungültig.')
+    frozen = frozen_fenster_blocking(klasse_id, subtask['task_id'], datum)
+    if frozen:
+        raise ValueError(f'„{frozen}“ ist eingefroren und reicht bis über dieses Datum. '
+                         'Ein späteres Datum wählen.')
+    sections = checkpoint_sections(subtask)
+    keys = [s['id'] for s in sections] or [None]
+    snapshot = json.dumps({'questions': sections}, ensure_ascii=False) if sections else None
+    standing = standing_teacher_attempts(subtask['id'], list(entries))
+    now = now_local()
+    timestamp = now if datum == now[:10] else f'{datum} 12:00:00'
+    todo = []                       # check everything first: no half-saved class
+    for student_id, entry in entries.items():
+        given = {k: v for k, v in (entry.get('scores') or {}).items()
+                 if k in keys and v is not None}
+        if any(v not in TEACHER_SCORES for v in given.values()):
+            raise ValueError('Punkte nur 0, 2 oder 3.')
+        notiz = (entry.get('notiz') or '').strip() or None
+        if not given:
+            if notiz and not standing.get(student_id):
+                raise ValueError('Eine Notiz braucht Punkte -- sonst stünde dort eine 0, '
+                                 'die niemand vergeben hat.')
+            continue
+        old = standing.get(student_id)
+        if old and _teacher_entry_of(old, keys) == (given, notiz):
+            continue
+        todo.append((student_id, given, notiz))
+
+    for student_id, given, notiz in todo:
+        if sections:
+            scores_json = json.dumps({str(i): given.get(k) for i, k in enumerate(keys)})
+            score = sum(given.values())
+        else:
+            scores_json, score = None, given[None]
+        attempt_id = create_checkpoint_attempt(
+            student_id, subtask['id'], subtask['task_id'], subtask['checkpoint_type'],
+            subtask.get('kern_standard_tag') or 'kern', score, timestamp=timestamp,
+            quiz_snapshot_json=snapshot, question_scores_json=scores_json)
+        with db_session() as conn:
+            conn.execute("""UPDATE checkpoint_attempt SET teacher_note = ?, reviewed_by = ?,
+                            reviewed_at = ? WHERE id = ?""", (notiz, admin_id, now, attempt_id))
+    return len(todo)
+
+
+def _teacher_entry_of(attempt, keys):
+    """(scores, note) of a stored attempt in the shape the form sends."""
+    if keys == [None]:
+        given = {None: attempt['score']} if attempt.get('score') is not None else {}
+    else:
+        given = {k: v for k, v in (attempt_scores_by_id(attempt) or {}).items()
+                 if k in keys and v is not None}
+    return given, attempt.get('teacher_note')
 
 
 def normalized_answer_text(text):

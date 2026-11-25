@@ -476,6 +476,12 @@ def validate_task_structure(data, warnings=None):
                     errors.append(f"Subtask {i+1} has checkpoint_type but missing/invalid 'kern_standard_tag'. Must be one of: {', '.join(VALID_KERN_STANDARD_TAGS)}")
                 if sub.get('kern_standard_tag') and not sub.get('checkpoint_type'):
                     errors.append(f"Subtask {i+1} has 'kern_standard_tag' but no 'checkpoint_type'")
+                # abschnitte: teacher-graded sections of an abnahme/artefakt (migrate_087)
+                if sub.get('abschnitte'):
+                    try:
+                        models.abschnitte_json_from_subtask(sub)
+                    except models.QuizIdError as e:
+                        errors.append(f"Subtask {i+1}: {e}")
                 # fork_group/fork_branch are required together (Fork/Choice Artifact Model)
                 if bool(sub.get('fork_group')) != bool(sub.get('fork_branch')):
                     errors.append(f"Subtask {i+1}: 'fork_group' and 'fork_branch' must both be set or both empty")
@@ -837,7 +843,8 @@ def import_task(task_data, dry_run=False, warnings=None):
                                        fork_group=fork_group, fork_branch=fork_branch,
                                        fork_branch_label=fork_branch_label, fork_branch_note=fork_branch_note,
                                        fork_required=fork_required, is_intro=is_intro,
-                                       sammeln_json=models.sammeln_json_from_subtask(sub))
+                                       sammeln_json=models.sammeln_json_from_subtask(sub),
+                                       abschnitte_json=models.abschnitte_json_from_subtask(sub))
         subtask_id_by_position[reihenfolge] = sub_id
 
     # Create materials and restore subtask assignments

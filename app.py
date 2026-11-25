@@ -2158,6 +2158,14 @@ def admin_bewertungsfenster(klasse_id):
                            themen_exact=themen_exact, themen_other=themen_other)
 
 
+def _checkpoint_unit_ids(subtask):
+    """Ids that count as one unit each: quiz questions, or the teacher-graded sections
+    of an abnahme/artefakt ([] = the checkpoint counts as one whole)."""
+    if subtask['checkpoint_type'] == 'quiz':
+        return [q.get('id') for q in models.quiz_questions(subtask['quiz_json'])]
+    return [a['id'] for a in models.checkpoint_sections(subtask)]
+
+
 def _fenster_noten(fenster):
     """Grades of one window: (rows, units, excluded_count). Loads in models, adds up in
     grading_window; here only what needs app: the 0/2/3 rule for running sittings."""
@@ -2166,7 +2174,7 @@ def _fenster_noten(fenster):
     checkpoints = [{'id': s['id'], 'checkpoint_type': s['checkpoint_type'],
                     'kern_standard_tag': s.get('kern_standard_tag'),
                     'titel': aufgabe_titel(s['beschreibung']),
-                    'question_ids': [q.get('id') for q in models.quiz_questions(s['quiz_json'])]}
+                    'question_ids': _checkpoint_unit_ids(s)}
                    for s in subtasks]
     units, excluded_count = grading_window.expected_units(checkpoints, excluded)
     for data in per_student.values():
@@ -2219,6 +2227,53 @@ def admin_bewertungsfenster_detail(fenster_id):
                            log=models.get_fenster_log(fenster_id), noten=noten,
                            units=units, excluded_count=excluded_count,
                            themen_exact=themen_exact, themen_other=themen_other)
+
+
+@app.route('/admin/klasse/<int:klasse_id>/checkpoint/<int:subtask_id>/eintragen',
+           methods=['GET', 'POST'])
+@admin_required
+def admin_checkpoint_eintragen(klasse_id, subtask_id):
+    """Teacher's 0/2/3 for an Abnahme/Artefakt, per student and section (Phase 3).
+
+    Form fields: datum, p_<student>_<section id | ganz>, n_<student> (note).
+    """
+    klasse = models.get_klasse(klasse_id)
+    subtask = models.get_subtask(subtask_id)
+    if not klasse or not subtask or subtask.get('checkpoint_type') not in ('abnahme', 'artefakt'):
+        abort(404)
+    students = models.get_students_in_klasse(klasse_id)
+    sections = models.checkpoint_sections(subtask)
+    keys = [s['id'] for s in sections] or [None]
+    if request.method == 'POST':
+        entries = {}
+        for s in students:
+            scores = {}
+            for k in keys:
+                raw = request.form.get(f"p_{s['id']}_{k or 'ganz'}", '')
+                if raw != '':
+                    scores[k] = int(raw) if raw.isdigit() else -1   # -1 is refused below
+            entries[s['id']] = {'scores': scores, 'notiz': request.form.get(f"n_{s['id']}", '')}
+        try:
+            n = models.save_teacher_checkpoint_grades(
+                session.get('admin_id'), subtask, klasse_id, request.form.get('datum', ''), entries)
+            flash(f'{n} Schüler eingetragen. ✅' if n else 'Keine Änderung.', 'success')
+        except ValueError as e:
+            flash(str(e), 'danger')
+        return redirect(url_for('admin_checkpoint_eintragen', klasse_id=klasse_id,
+                                subtask_id=subtask_id, zurueck=request.args.get('zurueck')))
+    standing = models.standing_teacher_attempts(subtask_id, [s['id'] for s in students])
+    current = {}
+    for s in students:
+        a = standing.get(s['id'])
+        if a:
+            given, notiz = models._teacher_entry_of(a, keys)
+            current[s['id']] = {'scores': {(k or 'ganz'): v for k, v in given.items()},
+                                'notiz': notiz, 'datum': a['timestamp'][:10]}
+    zurueck = request.args.get('zurueck', type=int)
+    return render_template('admin/checkpoint_eintragen.html', klasse=klasse, subtask=subtask,
+                           titel=aufgabe_titel(subtask['beschreibung']), students=students,
+                           sections=sections, current=current, heute=models.now_local()[:10],
+                           zurueck=zurueck)
 
 
 # ============ Admin: Schüler ============
