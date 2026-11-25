@@ -112,6 +112,20 @@ def _inline_image_resolver(materials):
     return resolve
 
 
+@app.template_filter('name')
+def name_filter(person):
+    """A student's name in the account's order: "Nachname, Vorname" (default) or
+    "Vorname Nachname" (admin.name_order). Lists use it; headings keep their own."""
+    def part(key):                      # dict, sqlite Row or nothing: never crash a page
+        try:
+            return person[key] or ''
+        except (KeyError, IndexError, TypeError):
+            return ''
+    if models.current_name_order() == 'vorname':
+        return f"{part('vorname')} {part('nachname')}".strip()
+    return f"{part('nachname')}, {part('vorname')}"
+
+
 @app.template_filter('slugify')
 def slugify_filter(text):
     """Convert text to URL-friendly slug."""
@@ -651,6 +665,7 @@ def login():
         if admin:
             session['admin_id'] = admin['id']
             session['admin_username'] = admin['username']
+            session['name_order'] = admin.get('name_order') or 'nachname'
             # Log login event
             models.log_analytics_event(
                 event_type='login',
@@ -3442,7 +3457,19 @@ def admin_passwort():
         flash('Passwort erfolgreich geändert.', 'success')
         return redirect(url_for('admin_dashboard'))
 
-    return render_template('admin/passwort.html')
+    return render_template('admin/passwort.html',
+                           name_order=models.current_name_order())
+
+
+@app.route('/admin/namensreihenfolge', methods=['POST'])
+@staff_required
+def admin_name_order():
+    """Switch how student lists are sorted and shown, for this account."""
+    order = request.form.get('name_order')
+    if models.set_admin_name_order(session['admin_id'], order):
+        session['name_order'] = order
+        flash('Namensreihenfolge gespeichert.', 'success')
+    return redirect(url_for('admin_passwort'))
 
 
 # ============ Admin: Teacher Accounts ============
@@ -5597,12 +5624,12 @@ def admin_unterricht_datum(klasse_id, datum):
         lesson_comment = unterricht['kommentar'] if unterricht else None
 
         # Get students with ratings
-        students = conn.execute('''
+        students = conn.execute(f'''
             SELECT us.*, s.nachname, s.vorname
             FROM unterricht_student us
             JOIN student s ON us.student_id = s.id
             WHERE us.unterricht_id = ?
-            ORDER BY s.nachname, s.vorname
+            ORDER BY {models.student_order()}
         ''', (unterricht_id,)).fetchall()
         students = [dict(s) for s in students]
 

@@ -31,7 +31,7 @@
                     <td style="white-space: nowrap;">{{ e.at|replace('T', ' ') }}</td>
                     <td>{{ e.actor or ('beim Import' if e.action == 'unchanged' else '—') }}</td>
                     {% if not run %}<td>{{ e.run_name or e.task_name or ('Lauf ' ~ e.grading_run_id) }}</td>{% endif %}
-                    <td>{% if e.nachname %}{{ e.nachname }}, {{ e.vorname }}{% else %}—{% endif %}</td>
+                    <td>{% if e.nachname %}{{ e|name }}{% else %}—{% endif %}</td>
                     <td>{{ e.label }}{% if e.undone_by %} <span class="badge">zurückgenommen</span>{% endif %}</td>
                     <td>{{ e.summary or '' }}</td>
                     <td style="white-space: nowrap;">

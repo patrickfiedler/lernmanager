@@ -39,7 +39,7 @@
 {% for t in teachers %}
 <div class="card mb-2">
     <div class="card-header flex flex-between flex-center">
-        <span>{% if t.nachname %}{{ t.nachname }}, {{ t.vorname }} ({{ t.username }}){% else %}{{ t.username }}{% endif %}{% if not t.active %} <span class="badge badge-warning">deaktiviert</span>{% endif %}</span>
+        <span>{% if t.nachname %}{{ t|name }} ({{ t.username }}){% else %}{{ t.username }}{% endif %}{% if not t.active %} <span class="badge badge-warning">deaktiviert</span>{% endif %}</span>
         <span class="flex gap-1">
             <form method="POST" action="{{ url_for('admin_lehrkraft_passwort', admin_id=t.id) }}" onsubmit="return confirm('Neues Passwort für {{ t.username }} erzeugen?');">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

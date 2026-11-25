@@ -277,7 +277,7 @@
                     <td><input type="checkbox" name="student_ids" value="{{ student.id }}" class="mv-student-cb"></td>
                     <td>
                         <a href="{{ url_for('admin_schueler_detail', student_id=student.id) }}">
-                            <strong>{{ student.nachname }}, {{ student.vorname }}</strong>
+                            <strong>{{ student|name }}</strong>
                         </a>
                     </td>
                     <td><code>{{ student.username }}</code></td>
@@ -351,7 +351,7 @@
             </label>
             {% for student in students %}
             <label style="display: block;">
-                <input type="checkbox" name="student_ids" value="{{ student.id }}" class="sq-student-cb"> {{ student.nachname }}, {{ student.vorname }}
+                <input type="checkbox" name="student_ids" value="{{ student.id }}" class="sq-student-cb"> {{ student|name }}
             </label>
             {% endfor %}
         </div>
@@ -382,7 +382,7 @@
             <tbody>
             {% for z in s.zeilen %}
             <tr{% if z.wartet %} style="background: #fef9c3;"{% endif %}>
-                <td>{{ z.nachname }}, {{ z.vorname }}</td>
+                <td>{{ z|name }}</td>
                 <td><code style="white-space: pre-wrap;">{{ z.text }}</code>
                     {% if z.formel %}<span class="badge" style="background: #fef3c7; color: #92400e;" title="Beginnt eine Zelle mit = + - @, kann Excel sie als Formel ausführen (z. B. Link). Prüfen, ggf. ablehnen.">⚠️ Formel?</span>{% endif %}
                     {% if (z.wartet or z.abgelehnt) and z.text_frei is not none and z.text_frei != z.text %}<br><span class="text-muted">in den Daten: <code>{{ z.text_frei }}</code></span>{% endif %}

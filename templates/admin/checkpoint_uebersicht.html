@@ -97,7 +97,7 @@
         <tbody>
             {% for row in overview.rows %}
             <tr>
-                <td class="cu-name">{{ row.student.nachname }}, {{ row.student.vorname }}</td>
+                <td class="cu-name">{{ row.student|name }}</td>
                 {% set ns = namespace(i=0) %}
                 {% for cp in checkpoints %}
                     {% for text in cp.questions %}

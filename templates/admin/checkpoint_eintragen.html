@@ -41,7 +41,7 @@
         <tbody>
         {% for st in students %}
         {% set c = current.get(st.id, {}) %}
-        <tr><td>{{ st.nachname }}, {{ st.vorname }}</td>
+        <tr><td>{{ st|name }}</td>
             {% for s in sections %}<td>{{ punkte('p_%d_%s'|format(st.id, s.id), c.get('scores', {}).get(s.id)) }}</td>
             {% else %}<td>{{ punkte('p_%d_ganz'|format(st.id), c.get('scores', {}).get('ganz')) }}</td>{% endfor %}
             <td><input type="text" name="n_{{ st.id }}" class="form-control" value="{{ c.notiz or '' }}"></td>

@@ -111,7 +111,7 @@
         <ul style="margin: 0.25rem 0 0; padding-left: 1.5rem;">
             {% for r in needs_decision %}
             <li>
-                {{ r.nachname }}, {{ r.vorname }} —
+                {{ r|name }} —
                 <a href="{{ url_for('admin_grading_result_supersede', result_id=r.id) }}">Vergleichen &amp; entscheiden</a>
             </li>
             {% endfor %}
@@ -127,7 +127,7 @@
         <tbody>
             {% for r in non_submitters %}
             <tr>
-                <td>{{ r.nachname or '—' }}, {{ r.vorname or '' }}{% if not r.student_id %}<span class="badge badge-warning">nicht zugeordnet ({{ r.netzwerk_id }})</span>{% endif %}</td>
+                <td>{% if r.student_id %}{{ r|name }}{% else %}—{% endif %}{% if not r.student_id %}<span class="badge badge-warning">nicht zugeordnet ({{ r.netzwerk_id }})</span>{% endif %}</td>
                 {% if is_admin %}<td style="width: 1%;">{{ klasse_select(r) }}</td>{% endif %}
                 <td style="width: 1%; white-space: nowrap;">
                     {% if r.status == 'active' %}
@@ -165,7 +165,7 @@
             <tr {% if r.is_open and (r.hints.unconfirmed or r.error) %}style="border-left: 3px solid #dc2626;"{% elif r.is_open and r.hints.zero %}style="border-left: 3px solid #f59e0b;"{% endif %}>
                 <td>
                     {% if r.student_id %}
-                    <a href="{{ url_for('admin_schueler_detail', student_id=r.student_id) }}">{{ r.nachname }}, {{ r.vorname }}</a>
+                    <a href="{{ url_for('admin_schueler_detail', student_id=r.student_id) }}">{{ r|name }}</a>
                     {% else %}
                     <span class="badge badge-warning">nicht zugeordnet</span> {{ r.netzwerk_id }}
                     {% endif %}

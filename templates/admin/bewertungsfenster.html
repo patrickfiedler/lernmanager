@@ -111,7 +111,7 @@
             <th>fehlt</th><th></th></tr></thead>
         <tbody>
         {% for r in noten %}
-        <tr><td>{{ r.student.nachname }}, {{ r.student.vorname }}</td>
+        <tr><td>{{ r.student|name }}</td>
             <td>{{ zahl(r.qualitaet) }}</td><td>{{ zahl(r.abdeckung) }}</td>
             {% for p in r.protokolle %}<td>{{ p.be }} von {{ p.max }} BE{% if p.offen %} ({{ p.offen }} offen){% elif p.punkte is not none %} = {{ p.punkte }} Punkte{% endif %}</td>{% endfor %}
             <td>{{ r.fehlend }}{% if r.offene_kern %} ({{ r.offene_kern|length }} Kern offen){% endif %}</td>

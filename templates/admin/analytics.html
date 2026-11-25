@@ -83,7 +83,7 @@
         <tbody>
             {% for student in stats.active_students %}
             <tr>
-                <td>{{ student.nachname }}, {{ student.vorname }}</td>
+                <td>{{ student|name }}</td>
                 <td><span class="badge badge-primary">{{ student.event_count }}</span></td>
                 <td>
                     <a href="{{ url_for('admin_student_activity', student_id=student.user_id) }}" class="btn btn-sm btn-secondary">

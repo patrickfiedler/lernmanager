@@ -60,7 +60,7 @@
         <tbody>
             {% for student in students %}
             <tr data-student-id="{{ student.student_id }}" data-saved="{{ student.has_been_saved }}">
-                <td><strong>{{ student.nachname }}, {{ student.vorname }}</strong></td>
+                <td><strong>{{ student|name }}</strong></td>
                 <td>
                     <label class="attendance-toggle" data-student-id="{{ student.student_id }}">
                         <input type="checkbox" {% if student.anwesend %}checked{% endif %} onchange="toggleAttendance(this, {{ student.student_id }})">

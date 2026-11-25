@@ -23,7 +23,7 @@ from utils import material_filename
 
 import sqlite3
 
-from flask import g, has_request_context
+from flask import g, has_request_context, session
 
 
 def hash_password(password):
@@ -166,7 +166,8 @@ def init_db():
                 active INTEGER NOT NULL DEFAULT 1,  -- 0 = login blocked, row kept for resolved_by etc.
                 nachname TEXT,  -- teachers only, NULL for older accounts (migrate_071)
                 vorname TEXT,
-                grading_view TEXT NOT NULL DEFAULT 'ki'  -- review page: ki/vorschau/beides (migrate_075)
+                grading_view TEXT NOT NULL DEFAULT 'ki',  -- review page: ki/vorschau/beides (migrate_075)
+                name_order TEXT NOT NULL DEFAULT 'nachname'  -- student lists: nachname/vorname first (migrate_088)
             );
 
             -- Classes (Klassen)
@@ -1082,6 +1083,33 @@ def set_admin_grading_view(admin_id, view):
     return True
 
 
+NAME_ORDERS = ('nachname', 'vorname')
+
+
+def set_admin_name_order(admin_id, order):
+    """Store how this account sorts and shows student names; unknown values ignored."""
+    if order not in NAME_ORDERS:
+        return False
+    with db_session() as conn:
+        conn.execute("UPDATE admin SET name_order = ? WHERE id = ?", (order, admin_id))
+    return True
+
+
+def current_name_order():
+    """'vorname' or 'nachname' (default) for the logged-in account. Read from the
+    session (set at login and by the switch), so no query per page."""
+    if has_request_context() and session.get('name_order') == 'vorname':
+        return 'vorname'
+    return 'nachname'
+
+
+def student_order(alias='s'):
+    """ORDER BY columns for student lists in the account's name order."""
+    first, second = ('vorname', 'nachname') if current_name_order() == 'vorname' \
+        else ('nachname', 'vorname')
+    return f'{alias}.{first}, {alias}.{second}'
+
+
 def get_klasse_ids_for_teacher(admin_id):
     """Class ids linked to this teacher in klasse_lehrer (see permissions.py)."""
     with db_session() as conn:
@@ -1395,7 +1423,7 @@ def get_all_students_with_netzwerk_id():
             "FROM student s "
             "LEFT JOIN student_klasse sk ON sk.student_id = s.id "
             "LEFT JOIN klasse k ON k.id = sk.klasse_id "
-            "GROUP BY s.id ORDER BY s.nachname, s.vorname"
+            f"GROUP BY s.id ORDER BY {student_order()}"
         ).fetchall()
         return [dict(r) for r in rows]
 
@@ -2041,7 +2069,7 @@ def get_students_in_klasse(klasse_id):
     a student can be moved to (move_seilbahn_students_to_twin).
     """
     with db_session() as conn:
-        rows = conn.execute('''
+        rows = conn.execute(f'''
             SELECT s.*, st.task_id, t.name as task_name, st.abgeschlossen, st.manuell_abgeschlossen,
                 CASE WHEN s.lernpfad = 'seilbahn' AND st.task_id IS NOT NULL
                           AND NOT EXISTS (SELECT 1 FROM subtask
@@ -2059,7 +2087,7 @@ def get_students_in_klasse(klasse_id):
             )
             LEFT JOIN task t ON st.task_id = t.id
             WHERE sk.klasse_id = ?
-            ORDER BY s.nachname, s.vorname
+            ORDER BY {student_order()}
         ''', (klasse_id, klasse_id)).fetchall()
         result = [dict(r) for r in rows]
     return result
@@ -2740,11 +2768,11 @@ def get_fenster_grading_data(fenster):
     cutoff = fenster_cutoff(fenster)
     task_ids = fenster['task_ids']
     with db_session() as conn:
-        students = [dict(r) for r in conn.execute("""
+        students = [dict(r) for r in conn.execute(f"""
             SELECT s.id, s.vorname, s.nachname
             FROM student s JOIN student_klasse sk ON sk.student_id = s.id
             WHERE sk.klasse_id = ?
-            ORDER BY s.nachname, s.vorname
+            ORDER BY {student_order()}
         """, (fenster['klasse_id'],)).fetchall()]
         checkpoints = []
         for task_id in task_ids:
@@ -4311,13 +4339,13 @@ def get_all_student_tasks(student_id, klasse_id):
 def get_sidequests_for_klasse(klasse_id):
     """Get all active sidequests for students in a class."""
     with db_session() as conn:
-        rows = conn.execute('''
+        rows = conn.execute(f'''
             SELECT s.vorname, s.nachname, t.name AS task_name
             FROM student_task st
             JOIN student s ON st.student_id = s.id
             JOIN task t ON st.task_id = t.id
             WHERE st.klasse_id = ? AND st.rolle = 'sidequest' AND st.abgeschlossen = 0
-            ORDER BY s.nachname, s.vorname
+            ORDER BY {student_order()}
         ''', (klasse_id,)).fetchall()
         return [dict(r) for r in rows]
 
@@ -5680,12 +5708,12 @@ def get_checkpoint_students():
     people there is something to review for, not the whole school.
     """
     with db_session() as conn:
-        rows = conn.execute('''
+        rows = conn.execute(f'''
             SELECT DISTINCT s.id, s.vorname, s.nachname
             FROM checkpoint_attempt ca
             JOIN student s ON ca.student_id = s.id
             WHERE ca.superseded_at IS NULL
-            ORDER BY s.nachname, s.vorname
+            ORDER BY {student_order()}
         ''').fetchall()
     return [dict(r) for r in rows]
 
@@ -5744,11 +5772,11 @@ def get_checkpoint_overview_data(klasse_id, task_id):
                    human, flags on excluded questions left out
     """
     with db_session() as conn:
-        students = [dict(r) for r in conn.execute("""
+        students = [dict(r) for r in conn.execute(f"""
             SELECT s.id, s.vorname, s.nachname
             FROM student s JOIN student_klasse sk ON sk.student_id = s.id
             WHERE sk.klasse_id = ?
-            ORDER BY s.nachname, s.vorname
+            ORDER BY {student_order()}
         """, (klasse_id,)).fetchall()]
         checkpoints = [dict(r) for r in conn.execute("""
             SELECT * FROM subtask
@@ -6978,11 +7006,11 @@ def get_unterricht_klasse_id(unterricht_id):
 def get_unterricht_students(unterricht_id):
     """Get all students with their evaluations for a lesson."""
     with db_session() as conn:
-        rows = conn.execute('''
+        rows = conn.execute(f'''
             SELECT us.*, s.nachname, s.vorname
             FROM unterricht_student us
             JOIN student s ON us.student_id = s.id
-            ORDER BY s.nachname, s.vorname
+            ORDER BY {student_order()}
         ''').fetchall()
         return [dict(r) for r in rows]
 
@@ -9321,7 +9349,7 @@ def list_grading_results(grading_run_id):
         rows = conn.execute(
             "SELECT gres.*, s.nachname, s.vorname "
             "FROM grading_result gres LEFT JOIN student s ON s.id = gres.student_id "
-            "WHERE gres.grading_run_id = ? ORDER BY s.nachname, s.vorname, gres.netzwerk_id",
+            f"WHERE gres.grading_run_id = ? ORDER BY {student_order()}, gres.netzwerk_id",
             (grading_run_id,)
         ).fetchall()
     return [_row_to_grading_result(r) for r in rows]
@@ -10362,15 +10390,15 @@ def get_sammel_zeilen_for_klasse(klasse_id):
                    s.vorname, s.nachname, {_SAMMEL_WARTET_SQL} AS wartet
             FROM sammel_zeile z JOIN student s ON s.id = z.student_id
             WHERE z.klasse_id = ?
-            ORDER BY z.thema, z.sammel_id, wartet DESC, z.abgelehnt DESC, s.nachname, s.vorname
+            ORDER BY z.thema, z.sammel_id, wartet DESC, z.abgelehnt DESC, {student_order()}
         """, (klasse_id,)).fetchall()
         log = conn.execute(
             "SELECT thema, sammel_id, student_id, aktion, text, zeit FROM sammel_zeile_log "
             "WHERE klasse_id = ? ORDER BY id DESC", (klasse_id,)).fetchall()
-        roster = conn.execute("""
+        roster = conn.execute(f"""
             SELECT s.id, s.vorname, s.nachname FROM student s
             JOIN student_klasse sk ON sk.student_id = s.id
-            WHERE sk.klasse_id = ? ORDER BY s.nachname, s.vorname
+            WHERE sk.klasse_id = ? ORDER BY {student_order()}
         """, (klasse_id,)).fetchall()
         names = {t: _sammel_thema_name(conn, t) for t in {r['thema'] for r in rows}}
     verlauf = {}

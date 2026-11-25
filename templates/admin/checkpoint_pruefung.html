@@ -27,7 +27,7 @@
         <select name="student_id" id="student_id">
             <option value="">Alle</option>
             {% for s in students %}
-            <option value="{{ s.id }}" {{ 'selected' if student_id == s.id }}>{{ s.nachname }}, {{ s.vorname }}</option>
+            <option value="{{ s.id }}" {{ 'selected' if student_id == s.id }}>{{ s|name }}</option>
             {% endfor %}
         </select>
 

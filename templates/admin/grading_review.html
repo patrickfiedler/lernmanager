@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 
-{% block title %}Prüfen: {{ result.nachname }}, {{ result.vorname }} - Lernmanager{% endblock %}
+{% block title %}Prüfen: {{ result|name }} - Lernmanager{% endblock %}
 
 {% set source_labels = {
     'document': '📄 Dokumenttext (links)',
@@ -13,7 +13,7 @@
 {% block content %}
 <div class="flex flex-between flex-center mb-2">
     <h1>
-        {% if result.student_id %}{{ result.nachname }}, {{ result.vorname }}{% else %}{{ result.netzwerk_id }} (nicht zugeordnet){% endif %}
+        {% if result.student_id %}{{ result|name }}{% else %}{{ result.netzwerk_id }} (nicht zugeordnet){% endif %}
         {% if position %}<span class="text-muted" style="font-size: 1rem;">{{ position }} / {{ queue_total }}</span>{% endif %}
         {% if remaining_open %}<span class="badge badge-warning">noch {{ remaining_open }} offen</span>{% else %}<span class="badge badge-success">alle geprüft</span>{% endif %}
     </h1>
