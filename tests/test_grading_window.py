@@ -92,6 +92,17 @@ def test_cell_reasons():
     assert gw.unit_cell(whole, attempt, None, {}, {}) == pts(2)
 
 
+
+def test_question_added_after_the_sitting_is_frage_neu():
+    """Checkpoint 611 (12w): quiz swapped after the sitting, the new ids were never asked."""
+    u = {'question_id': 'f2'}
+    old = {'score': 3, 'quiz_snapshot_json': '{"questions": [{"id": "x-1"}, {"id": "f1"}]}'}
+    asked = {'score': 3, 'quiz_snapshot_json': '{"questions": [{"id": "f1"}, {"id": "f2"}]}'}
+    assert gw.unit_cell(u, old, {'f1': 3}, {}, {}) == {'state': 'fehlt', 'punkte': None,
+                                                       'grund': 'frage_neu'}
+    assert gw.unit_cell(u, asked, {'f1': 3}, {}, {})['grund'] == 'llm_kontingent'
+
+
 def test_excluded_and_removed_questions_are_no_units():
     excluded = {1: models.QuestionExclusions({'f2': {}}, current_ids=['f1', 'f2'])}
     units, out = gw.expected_units(

@@ -15,7 +15,7 @@ Unit = what one 0/2/3 belongs to:
 State of one student x one unit:
     punkte      0, 2 or 3 -- counts
     fehlt       no score: counts as 0. `grund` says why (nicht_bearbeitet,
-                llm_kontingent, abgelehnt, nachbesserung, frage_kaputt, ...).
+                frage_neu, llm_kontingent, abgelehnt, nachbesserung, frage_kaputt, ...).
                 A reason is a report field only, never an exclusion (Chemie 2026-09-01)
     vorlaeufig  open report, or a sitting without per-question scores: in neither
                 points nor maximum, and the whole result is marked provisional
@@ -24,6 +24,9 @@ State of one student x one unit:
 Excluded for everyone (checkpoint_question_exclusion) and questions deleted from the
 quiz are not units at all.
 """
+
+import json
+
 MAX_POINTS = 3
 SOLVED = 2          # a question counts as solved from 2 points (§ 3)
 
@@ -55,6 +58,18 @@ def expected_units(checkpoints, excluded):
     return units, out
 
 
+def _snapshot_ids(attempt):
+    """IDs of the questions the sitting actually showed, None if unknown."""
+    raw = attempt.get('quiz_snapshot_json')
+    if not raw:
+        return None
+    quiz = json.loads(raw)
+    questions = quiz if isinstance(quiz, list) else quiz.get('questions')
+    if questions is None:
+        return None
+    return {q.get('id') for q in questions}
+
+
 def unit_cell(unit, attempt, scores, running, flags):
     """One student x one unit -> {'state', 'punkte', 'grund'}.
 
@@ -75,7 +90,12 @@ def unit_cell(unit, attempt, scores, running, flags):
     if scores is None:
         return {'state': 'vorlaeufig', 'punkte': None, 'grund': 'ohne_aufschluesselung'}
     if qid not in scores:
-        return {'state': 'fehlt', 'punkte': None, 'grund': 'llm_kontingent'}
+        # Not in the sitting's own snapshot = question came in after the student
+        # sat it (ID rule: new question, open for all, 0 until done). In it but
+        # unscored = the grader gave nothing back.
+        asked = _snapshot_ids(attempt)
+        grund = 'frage_neu' if asked is not None and qid not in asked else 'llm_kontingent'
+        return {'state': 'fehlt', 'punkte': None, 'grund': grund}
     if scores[qid] is not None:
         return {'state': 'punkte', 'punkte': scores[qid], 'grund': None}
     status = flags.get(qid)

@@ -76,6 +76,7 @@
 
 {% macro zahl(x) %}{% if x is none %}–{% else %}{{ '%.1f'|format(x)|replace('.', ',') }}{% endif %}{% endmacro %}
 {% set gruende = {'nicht_bearbeitet': 'nicht bearbeitet', 'llm_kontingent': 'nicht gestellt (KI-Kontingent)',
+                  'frage_neu': 'Frage nach der Sitzung neu, nachholen',
                   'abgelehnt': 'Meldung abgelehnt, nachholen', 'nachbesserung': 'zur Nachbesserung zurück',
                   'frage_kaputt': 'Frage kaputt', 'kontext_falsch': 'falscher Platz',
                   'design_fehlerhaft': 'Aufgabe bereitet nicht vor', 'ohne_wertung': 'ohne Wertung',
