@@ -7810,12 +7810,17 @@ def student_checkpoint_answer():
         # for a failure that is ours. Reporting scores nothing, keeps the answer
         # hidden, logs what they typed as evidence, and puts it in front of a teacher
         # -- which is exactly what "we could not grade this" should do.
-        return jsonify({
-            'error': 'llm_unavailable',
-            'message': ('Bewertung aktuell nicht möglich. Versuch es gleich nochmal — '
-                        'falls es weiter nicht klappt, nutze „Frage melden“, '
-                        'deine Lehrkraft prüft die Antwort dann von Hand.')
-        }), 503
+        message = ('Bewertung aktuell nicht möglich. Versuch es gleich nochmal — '
+                   'falls es weiter nicht klappt, nutze „Frage melden“, '
+                   'deine Lehrkraft prüft die Antwort dann von Hand.')
+        # Formula code pasted from a chatbot (B13): a backslash is the tell, nobody
+        # types one in a chemistry answer. Plain text is the retry most likely to work.
+        if '\\' in answer_text:
+            message = ('Bewertung aktuell nicht möglich. Deine Antwort enthält Formel-Code '
+                       '(Zeichen wie \\ oder {,}). Schreib sie bitte als normalen Text, '
+                       'z. B. „-1,82 J“, und schick sie nochmal. Klappt es dann immer '
+                       'noch nicht, nutze „Frage melden“.')
+        return jsonify({'error': 'llm_unavailable', 'message': message}), 503
 
     # Write first, count second. The guard above ran in its own transaction before a
     # grading call that takes seconds; a second request can clear it in that window and

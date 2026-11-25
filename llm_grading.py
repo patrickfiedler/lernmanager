@@ -273,6 +273,29 @@ def _record_call(student_id, usage_tag, started, *, prompt_version=None, usage=N
         ok=error is None, error=error, **(usage or {}))
 
 
+# A backslash in JSON must start one of these escapes. Pairs are matched first, so an
+# already escaped "\\" is kept and its second backslash is not read as a new escape.
+_JSON_ESCAPE = re.compile(r'\\(["\\/bfnrtu])|\\')
+
+
+def _loads_model_json(text):
+    """json.loads for model output, tolerant of stray backslashes.
+
+    A student who pastes LaTeX from a chatbot (B13, 2026-09-28: "-1{,}82\\{ J}") gets
+    it quoted back in the feedback, and the model does not always escape the
+    backslash. "\\{" is no JSON escape, json.loads fails, and the answer counts as
+    "could not grade". Second try with every lone backslash doubled: the text then
+    reads exactly as the model wrote it.
+    """
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        repaired = _JSON_ESCAPE.sub(lambda m: m.group(0) if m.group(1) else r'\\', text)
+        if repaired == text:
+            raise
+        return json.loads(repaired)
+
+
 def _call_llm(question_text, expected_or_rubric, student_answer, system_prompt=SYSTEM_PROMPT,
               timeout=None, want_confidence=False, model=None, backend=None):
     """Send grading request to LLM and parse JSON response.
@@ -363,7 +386,7 @@ def _call_llm(question_text, expected_or_rubric, student_answer, system_prompt=S
         return None
 
     # Parse JSON — if it fails, the answer can't be graded
-    result = json.loads(text)
+    result = _loads_model_json(text)
     if "correct" not in result or "feedback" not in result:
         return None
     confidence = None
@@ -668,7 +691,7 @@ def generate_checkpoint_hint(question_text, rubric, student_answer, hints, stude
                                                               student_answer, hints)},
             ],
             timeout=config.LLM_CHECKPOINT_TIMEOUT, **_reasoning_kwargs())
-        data = json.loads(_message_text(response) or '')
+        data = _loads_model_json(_message_text(response) or '')
     except Exception as e:
         print(f"LLM checkpoint hint error: {type(e).__name__}: {e}", file=sys.stderr)
         _record_call(student_id, 'checkpoint_hint', started, prompt_version=prompt_version,
