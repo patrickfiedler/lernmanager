@@ -36,6 +36,7 @@ import inline_images
 import key_combos
 import checkpoint_questions
 import checkpoint_overview
+import grading_window
 from utils import generate_username, generate_password, allowed_file, file_extension, material_pfad, material_filename, content_matches_extension, generate_credentials_pdf, generate_credentials_pdf_grouped, generate_name_username_pdf, generate_student_self_report_pdf, generate_class_report_pdf, generate_student_report_pdf, slugify, format_bytes, is_ip_allowed, is_within_time_window, parse_netzwerk_csv, split_tasks_by_stufe, stufe_sort_key, normalize_markdown_lists
 from import_task import validate_task_structure, check_duplicate, import_task as do_import_task, overwrite_task_from_import, ValidationError, zip_entry_for
 
@@ -2157,6 +2158,34 @@ def admin_bewertungsfenster(klasse_id):
                            themen_exact=themen_exact, themen_other=themen_other)
 
 
+def _fenster_noten(fenster):
+    """Grades of one window: (rows, units, excluded_count). Loads in models, adds up in
+    grading_window; here only what needs app: the 0/2/3 rule for running sittings."""
+    students, subtasks, per_student, running = models.get_fenster_grading_data(fenster)
+    excluded = models.get_excluded_questions([s['id'] for s in subtasks])
+    checkpoints = [{'id': s['id'], 'checkpoint_type': s['checkpoint_type'],
+                    'kern_standard_tag': s.get('kern_standard_tag'),
+                    'titel': aufgabe_titel(s['beschreibung']),
+                    'question_ids': [q.get('id') for q in models.quiz_questions(s['quiz_json'])]}
+                   for s in subtasks]
+    units, excluded_count = grading_window.expected_units(checkpoints, excluded)
+    for data in per_student.values():
+        data['scores'] = {cid: models.attempt_scores_by_id(a)
+                          for cid, a in data['attempts'].items()}
+        data['running'] = {}
+    for r in running:
+        if r['solved']:
+            score = _checkpoint_question_scores([dict(r, solved=True)])[0]
+            per_student[r['student_id']]['running'].setdefault(
+                r['checkpoint_id'], {})[r['question_id']] = score
+    by_id = {c['id']: c for c in checkpoints}
+    for u in units:
+        cp = by_id[u['checkpoint_id']]
+        u['titel'] = cp['titel']
+        u['nr'] = cp['question_ids'].index(u['question_id']) + 1 if u['question_id'] else None
+    return grading_window.build_noten(students, units, per_student), units, excluded_count
+
+
 @app.route('/admin/bewertungsfenster/<int:fenster_id>', methods=['GET', 'POST'])
 @admin_required
 def admin_bewertungsfenster_detail(fenster_id):
@@ -2185,8 +2214,10 @@ def admin_bewertungsfenster_detail(fenster_id):
     klasse = models.get_klasse(fenster['klasse_id'])
     themen_exact, themen_other = split_tasks_by_stufe(models.get_all_tasks(),
                                                       [klasse.get('klassenstufe')])
+    noten, units, excluded_count = _fenster_noten(fenster)
     return render_template('admin/bewertungsfenster.html', klasse=klasse, fenster=fenster,
-                           log=models.get_fenster_log(fenster_id),
+                           log=models.get_fenster_log(fenster_id), noten=noten,
+                           units=units, excluded_count=excluded_count,
                            themen_exact=themen_exact, themen_other=themen_other)
 
 

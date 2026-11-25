@@ -37,6 +37,7 @@
 !/artifact_processor.py
 !/checkpoint_questions.py
 !/checkpoint_overview.py
+!/grading_window.py
 !/analytics_queue.py
 !/import_task.py
 !/inline_images.py

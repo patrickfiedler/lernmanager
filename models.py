@@ -2715,6 +2715,89 @@ def get_fenster_log(fenster_id):
     return [dict(r) for r in rows]
 
 
+def fenster_cutoff(fenster):
+    """Last moment that counts: the end of the Stichtag (students work on it)."""
+    return f"{fenster['stichtag']} 23:59:59"
+
+
+def get_fenster_grading_data(fenster):
+    """Raw rows behind the grades of one window (grading_window.build_noten).
+
+    Returns (students, checkpoints, per_student, running):
+    students     everyone in the window's class, by name
+    checkpoints  every visible checkpoint (quiz/abnahme/artefakt) of the window's
+                 modules, module by module in the window's order, then page order
+    per_student  {student_id: {'attempts': {cid: row}, 'flags': {cid: {qid: status}}}}
+                 attempts = the one standing at the cutoff: written by then and not
+                 superseded by then (a retake after the Stichtag must not erase it).
+                 flags = newest report per question, as it stands today
+    running      [{student_id, checkpoint_id, question_id, solved, attempts,
+                   hints_used}] of sittings not finished yet, answers up to the cutoff
+                 (Chemie 2026-11-24: running sittings count). Scored by the caller,
+                 the 0/2/3 rule lives in app._checkpoint_question_scores
+    """
+    cutoff = fenster_cutoff(fenster)
+    task_ids = fenster['task_ids']
+    with db_session() as conn:
+        students = [dict(r) for r in conn.execute("""
+            SELECT s.id, s.vorname, s.nachname
+            FROM student s JOIN student_klasse sk ON sk.student_id = s.id
+            WHERE sk.klasse_id = ?
+            ORDER BY s.nachname, s.vorname
+        """, (fenster['klasse_id'],)).fetchall()]
+        checkpoints = []
+        for task_id in task_ids:
+            checkpoints += [dict(r) for r in conn.execute("""
+                SELECT * FROM subtask
+                WHERE task_id = ? AND checkpoint_type IS NOT NULL AND checkpoint_type != ''
+                  AND COALESCE(hidden, 0) = 0
+                ORDER BY reihenfolge
+            """, (task_id,)).fetchall()]
+        per_student = {s['id']: {'attempts': {}, 'flags': {}} for s in students}
+        if not students or not checkpoints:
+            return students, checkpoints, per_student, []
+
+        s_marks = ','.join('?' * len(students))
+        c_marks = ','.join('?' * len(checkpoints))
+        ids = [s['id'] for s in students] + [c['id'] for c in checkpoints]
+        for r in conn.execute(f"""
+            SELECT * FROM checkpoint_attempt
+            WHERE student_id IN ({s_marks}) AND checkpoint_id IN ({c_marks})
+              AND timestamp <= ? AND (superseded_at IS NULL OR superseded_at > ?)
+            ORDER BY id
+        """, ids + [cutoff, cutoff]).fetchall():
+            per_student[r['student_id']]['attempts'][r['checkpoint_id']] = dict(r)  # newest wins
+        for r in conn.execute(f"""
+            SELECT student_id, checkpoint_id, question_id, status FROM checkpoint_flag
+            WHERE student_id IN ({s_marks}) AND checkpoint_id IN ({c_marks})
+              AND question_id IS NOT NULL
+            ORDER BY id
+        """, ids).fetchall():
+            per_student[r['student_id']]['flags'].setdefault(
+                r['checkpoint_id'], {})[r['question_id']] = r['status']   # newest wins
+        running = [dict(r) for r in conn.execute(f"""
+            SELECT r.student_id, r.checkpoint_id, r.question_id,
+                   MAX(CASE WHEN r.correct = 1 THEN 1 ELSE 0 END) AS solved,
+                   SUM(CASE WHEN r.correct IS NOT NULL AND r.gave_up = 0 THEN 1 ELSE 0 END)
+                       AS attempts,
+                   COALESCE(MAX(r.hints_used_before), 0) AS hints_used
+            FROM checkpoint_answer r
+            WHERE r.student_id IN ({s_marks}) AND r.checkpoint_id IN ({c_marks})
+              AND r.question_id IS NOT NULL AND r.timestamp <= ?
+              -- unfinished at the cutoff: no attempt yet, or one written after it
+              AND (r.checkpoint_attempt_id IS NULL OR EXISTS (
+                       SELECT 1 FROM checkpoint_attempt a
+                       WHERE a.id = r.checkpoint_attempt_id AND a.timestamp > ?))
+              -- a reset by the cutoff means start over
+              AND r.timestamp > COALESCE((SELECT MAX(old.superseded_at) FROM checkpoint_attempt old
+                                          WHERE old.student_id = r.student_id
+                                            AND old.checkpoint_id = r.checkpoint_id
+                                            AND old.superseded_at <= ?), '')
+            GROUP BY r.student_id, r.checkpoint_id, r.question_id
+        """, ids + [cutoff] * 3).fetchall()]
+    return students, checkpoints, per_student, running
+
+
 def get_next_open_queued_topic(student_id, klasse_id, current_task_id=None):
     """First queue entry the student has not been assigned yet -- the failsafe
     behind every "Naechstes Thema" link.

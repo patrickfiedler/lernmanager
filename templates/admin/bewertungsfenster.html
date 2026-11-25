@@ -74,6 +74,51 @@
     </div>
 </div>
 
+{% macro zahl(x) %}{% if x is none %}–{% else %}{{ '%.1f'|format(x)|replace('.', ',') }}{% endif %}{% endmacro %}
+{% set gruende = {'nicht_bearbeitet': 'nicht bearbeitet', 'llm_kontingent': 'nicht gestellt (KI-Kontingent)',
+                  'abgelehnt': 'Meldung abgelehnt, nachholen', 'nachbesserung': 'zur Nachbesserung zurück',
+                  'frage_kaputt': 'Frage kaputt', 'kontext_falsch': 'falscher Platz',
+                  'design_fehlerhaft': 'Aufgabe bereitet nicht vor', 'ohne_wertung': 'ohne Wertung',
+                  'gemeldet': 'gemeldet, wartet auf Entscheidung',
+                  'ohne_aufschluesselung': 'alte Sitzung ohne Punkte je Frage'} %}
+<div class="card mb-2">
+    <div class="card-header">Noten (0-15) -- nur für Admin sichtbar</div>
+    <div class="card-body">
+        <p class="text-muted mb-1">
+            {{ units|selectattr('typ', 'equalto', 'quiz')|rejectattr('niveau', 'equalto', 'standard')|list|length }} Kern-Fragen,
+            {{ units|selectattr('typ', 'equalto', 'quiz')|selectattr('niveau', 'equalto', 'standard')|list|length }} Standard-Fragen,
+            {{ units|selectattr('typ', 'equalto', 'abnahme')|list|length }} Abnahme-Einheiten,
+            {{ units|selectattr('typ', 'equalto', 'artefakt')|list|length }} Artefakt-Einheiten
+            {% if excluded_count %}({{ excluded_count }} Frage(n) für alle aus der Wertung){% endif %}.
+            Gezählt wird, was bis {{ fenster.stichtag }} 23:59 vorlag; laufende Sitzungen zählen mit.
+            Fehlendes zählt 0. <em>vorläufig</em> = mindestens eine Frage zählt noch weder Punkte noch Maximum: gemeldet und nicht entschieden, oder aus einer alten Sitzung ohne Punkte je Frage.
+            Arbeitsprozess bleibt 0, bis Abnahmen eintragbar sind (Phase 3).</p>
+    </div>
+    {% if noten %}
+    <table class="table">
+        <thead><tr><th>Schüler</th><th>Qualität</th><th>Arbeitsprozess</th><th>Abdeckung</th>
+            <th>fehlt</th><th></th></tr></thead>
+        <tbody>
+        {% for r in noten %}
+        <tr><td>{{ r.student.nachname }}, {{ r.student.vorname }}</td>
+            <td>{{ zahl(r.qualitaet) }}</td><td>{{ zahl(r.arbeitsprozess) }}</td><td>{{ zahl(r.abdeckung) }}</td>
+            <td>{{ r.fehlend }}{% if r.offene_kern %} ({{ r.offene_kern|length }} Kern offen){% endif %}</td>
+            <td>{% if r.vorlaeufig %}<span class="badge">vorläufig</span>{% endif %}
+                {% set luecken = [] %}
+                {% for c in r.cells %}{% if c.state != 'punkte' %}{% set _ = luecken.append((units[loop.index0], c)) %}{% endif %}{% endfor %}
+                {% if luecken %}
+                <details><summary>Lücken</summary>
+                    <ul class="mb-0">{% for u, c in luecken %}
+                        <li>{{ u.titel }}{% if u.nr %}, F{{ u.nr }}{% endif %}: {{ gruende.get(c.grund, c.grund) }}</li>
+                    {% endfor %}</ul>
+                </details>
+                {% endif %}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+</div>
+
 <div class="card mb-2">
     <div class="card-header">Änderungsprotokoll</div>
     <table class="table">
