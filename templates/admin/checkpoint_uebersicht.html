@@ -61,7 +61,7 @@
         Stand heute, gerechnet wie im Bewertungsfenster.
         <strong>{{ units|rejectattr('typ', 'equalto', 'protokoll')|list|length }}</strong> gewertete Einheiten{% if excluded_count %},
         <strong>{{ excluded_count }}</strong> Frage(n) für alle nicht gewertet{% endif %}. Je Einheit 0, 2 oder 3 Punkte.
-        Qualität und Abdeckung nur für dieses Thema -- die Note rechnet das ganze Fenster.
+        Werkstattnote nur für dieses Thema -- die Note rechnet das ganze Fenster.
         Ein Protokoll ist eine eigene Note (BE nach Punktetabelle, erst wenn alle Abschnitte eingetragen sind).
     </p>
     <p class="cu-legend text-muted" style="margin: 0; font-size: 0.85rem;">
@@ -88,8 +88,7 @@
                 <th rowspan="2">von</th>
                 <th rowspan="2">fehlend</th>
                 <th rowspan="2">offen</th>
-                <th rowspan="2" title="Qualität des Arbeitsprozesses, 0-15, nur dieses Thema">Qualität</th>
-                <th rowspan="2" title="Abdeckung, 0-15, nur dieses Thema">Abdeckung</th>
+                <th rowspan="2" title="Punkte ÷ von × 15, nur dieses Thema">Werkstattnote</th>
                 {% for g in groups if g.typ == 'protokoll' %}
                 <th colspan="{{ g.units + 1 }}" class="cu-first" title="{{ g.titel }}">
                     {{ g.titel|truncate(28) }} <span class="badge">Protokoll</span></th>
@@ -112,8 +111,7 @@
                 <td>{{ row.max }}</td>
                 <td>{{ row.fehlend or '' }}</td>
                 <td>{{ row.offen or '' }}</td>
-                <td>{{ zahl(row.qualitaet) }}</td>
-                <td>{{ zahl(row.abdeckung) }}</td>
+                <td>{{ zahl(row.werkstattnote) }}</td>
             {% endmacro %}
             {% set nicht_gestellt = ('nicht_bearbeitet', 'llm_kontingent', 'frage_neu') %}
             {% for row in rows %}

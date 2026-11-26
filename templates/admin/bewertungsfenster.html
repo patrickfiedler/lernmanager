@@ -87,7 +87,7 @@
             {% if excluded_count %}({{ excluded_count }} Frage(n) für alle aus der Wertung){% endif %}.
             Gezählt wird, was bis {{ fenster.stichtag }} 23:59 vorlag; laufende Sitzungen zählen mit.
             Fehlendes zählt 0. <em>vorläufig</em> = mindestens eine Frage zählt noch weder Punkte noch Maximum: gemeldet und nicht entschieden, oder aus einer alten Sitzung ohne Punkte je Frage.
-            Qualität = Qualität des Arbeitsprozesses (Quiz, Artefakt, Abnahme).
+            Werkstattnote = Punkte ÷ von × 15 über alle Quizfragen (Kern und Standard gleich), Artefakt-Abschnitte und Abnahmen außerhalb eines Protokolls.
             Ein Protokoll ist eine eigene Note: BE nach Punktetabelle, erst wenn alle Abschnitte eingetragen sind.
             Abnahmen, Artefakte und Protokolle trägt die Lehrkraft unten ein.</p>
         {% set lehrer = [] %}
@@ -99,15 +99,15 @@
     </div>
     {% if noten %}
     <table class="table">
-        <thead><tr><th>Schüler</th><th>Qualität</th><th>Abdeckung</th>
+        <thead><tr><th>Schüler</th><th>Punkte</th><th>von</th><th>Werkstattnote</th>
             {% for p in noten[0].protokolle %}<th>Protokoll {{ p.titel }}</th>{% endfor %}
             <th>fehlt</th><th></th></tr></thead>
         <tbody>
         {% for r in noten %}
         <tr><td>{{ r.student|name }}</td>
-            <td>{{ zahl(r.qualitaet) }}</td><td>{{ zahl(r.abdeckung) }}</td>
+            <td>{{ r.punkte }}</td><td>{{ r.max }}</td><td>{{ zahl(r.werkstattnote) }}</td>
             {% for p in r.protokolle %}<td>{{ p.be }} von {{ p.max }} BE{% if p.offen %} ({{ p.offen }} offen){% elif p.punkte is not none %} = {{ p.punkte }} Punkte{% endif %}</td>{% endfor %}
-            <td>{{ r.fehlend }}{% if r.offene_kern %} ({{ r.offene_kern|length }} Kern offen){% endif %}</td>
+            <td>{{ r.fehlend }}</td>
             <td>{% if r.vorlaeufig %}<span class="badge">vorläufig</span>{% endif %}
                 {% set luecken = [] %}
                 {% for c in r.cells %}{% if c.state != 'punkte' %}{% set _ = luecken.append((units[loop.index0], c)) %}{% endif %}{% endfor %}

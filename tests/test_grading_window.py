@@ -1,6 +1,6 @@
 """Rechenwerk of a Bewertungsfenster (task_plan.md § Notenrechnung, Phase 2).
 
-Formulas: Chemie docs/32-bewertungsregeln.md § 3, § 6, § 9b. The worked examples
+Formulas: Chemie docs/32-bewertungsregeln.md § 2, § 3a, § 9b. The worked examples
 from that document are the first tests here.
 """
 import json
@@ -28,51 +28,42 @@ FEHLT = {'state': 'fehlt', 'punkte': None, 'grund': 'nicht_bearbeitet'}
 OFFEN = {'state': 'vorlaeufig', 'punkte': None, 'grund': 'gemeldet'}
 
 
-# ---- the axes, pure ----
+# ---- the Werkstattnote, pure (decision 2026-11-26) ----
 
-def test_docs32_example_quality_capped_without_solved_standard():
-    """§ 6: 24 kern on 3, 6 standard untouched -> 72/30*5 = 12, capped at 10."""
+def test_decision_example_30_of_45_is_10():
+    """The student from the decision record: 30 of 45 points -> 10.0, no second number."""
+    a = gw.axes([unit()] * 15, [pts(2)] * 15)
+    assert (a['punkte'], a['max'], a['werkstattnote']) == (30, 45, 10.0)
+    assert 'abdeckung' not in a and 'qualitaet' not in a
+
+
+def test_kern_and_standard_count_alike_and_nothing_caps():
+    """Old rule capped this at 10 (no standard solved). Now linear: 72/90*15 = 12."""
     units = [unit()] * 24 + [unit(niveau='standard')] * 6
     a = gw.axes(units, [pts(3)] * 24 + [FEHLT] * 6)
-    assert a['qualitaet'] == 10
-    assert a['abdeckung'] == 10          # kern full, no standard solved
+    assert a['werkstattnote'] == 12.0
+    assert a['fehlend'] == 6
 
 
-def test_one_solved_standard_lifts_both_caps():
-    units = [unit()] * 24 + [unit(niveau='standard')] * 6
-    a = gw.axes(units, [pts(3)] * 24 + [pts(2)] + [FEHLT] * 5)
-    assert a['qualitaet'] == pytest.approx(5 * 74 / 30)
-    assert a['abdeckung'] == pytest.approx(10 + 5 / 6)
-
-
-def test_docs32_example_one_open_kern_caps_coverage():
-    """§ 9.1: 24 kern, one open -> 9.6 kern points; standard does not count yet."""
-    units = [unit()] * 24 + [unit(niveau='standard')] * 2
-    a = gw.axes(units, [pts(3)] * 23 + [FEHLT] + [pts(3)] * 2)
-    assert a['abdeckung'] == 10          # 9.58 + 5, capped while kern is open
-    assert len(a['offene_kern']) == 1
-
-
-def test_window_without_standard_has_no_quality_cap():
-    a = gw.axes([unit()] * 4, [pts(3)] * 4)
-    assert a['qualitaet'] == 15
-    assert a['abdeckung'] == 10          # empty standard share = 0 (open question)
+def test_one_decimal():
+    a = gw.axes([unit()] * 3, [pts(3), pts(2), pts(0)])     # 5/9*15 = 8.33
+    assert a['werkstattnote'] == 8.3
 
 
 def test_open_report_is_in_neither_points_nor_maximum():
     a = gw.axes([unit()] * 3, [pts(3), pts(3), OFFEN])
-    assert a['qualitaet'] == 15 and a['vorlaeufig']
-    assert a['offene_kern'] == []        # waits on the teacher, not on the student
+    assert a['werkstattnote'] == 15 and a['vorlaeufig'] and a['max'] == 6
 
 
-def test_abnahme_counts_for_quality_under_the_cap():
-    """2026-11-25: Arbeitsprozess merged into quality; an Abnahme is one more unit."""
-    units = [unit()] * 2 + [unit(niveau='standard')] + [unit('abnahme', qid=None, cid=2)]
-    a = gw.axes(units, [pts(3), pts(3), FEHLT, pts(3)])
-    assert 'arbeitsprozess' not in a
-    assert a['qualitaet'] == 10          # 9/4*5 = 11.25, capped: no standard solved
-    a = gw.axes(units, [pts(3), pts(3), pts(2), pts(0)])
-    assert a['qualitaet'] == pytest.approx(5 * 8 / 4)
+def test_nothing_counted_has_no_grade():
+    assert gw.axes([unit()], [OFFEN])['werkstattnote'] is None
+
+
+def test_abnahme_and_artefakt_count_like_questions():
+    """Abnahme on its own or as a section of a quiz/artefakt checkpoint: one more unit."""
+    units = [unit(), unit('artefakt', cid=3, qid='a'), unit('abnahme', qid=None, cid=2)]
+    a = gw.axes(units, [pts(3), pts(2), pts(0)])
+    assert (a['punkte'], a['max'], a['werkstattnote']) == (5, 9, 8.3)
 
 
 # ---- Protokoll: own grade (docs/32 § 3a) ----
@@ -84,7 +75,7 @@ def proto(sid, cid=5):
 def test_protokoll_is_in_no_axis():
     units = [unit(), proto('a'), proto('b')]
     a = gw.axes(units, [pts(3), pts(0), FEHLT])
-    assert a['qualitaet'] == 15 and a['abdeckung'] == 10   # no standard: tops at 10
+    assert a['werkstattnote'] == 15 and a['max'] == 3
     assert a['fehlend'] == 0 and not a['vorlaeufig']
 
 
@@ -106,13 +97,6 @@ def test_protokoll_without_all_sections_has_no_grade_yet():
 def test_total_missing_from_table_gives_be_only():
     assert gw.notenpunkte(0, 18) == 0 and gw.notenpunkte(18, 18) == 15
     assert gw.notenpunkte(6, 6) is None      # table starts at 10 BE
-
-
-def test_artefakt_counts_for_quality_but_not_coverage_or_cap():
-    units = [unit(), unit(niveau='standard'), unit('artefakt', niveau='standard', cid=3)]
-    a = gw.axes(units, [pts(3), FEHLT, pts(3)])
-    assert a['qualitaet'] == 10          # artefakt section does not lift the cap (§ 9b)
-    assert a['abdeckung'] == 10          # kern 1/1, standard 0/1
 
 
 # ---- cells ----
@@ -199,9 +183,17 @@ def test_window_grades_from_database(fenster):
     rows, units = noten(fx)
     assert len(units) == 3
     adler, biber = rows['Adler'], rows['Biber']
-    assert adler['qualitaet'] == pytest.approx(5 * 8 / 3)
-    assert adler['abdeckung'] == 15
-    assert biber['qualitaet'] == 0 and biber['fehlend'] == 3
+    assert (adler['punkte'], adler['max'], adler['werkstattnote']) == (8, 9, 13.3)
+    assert biber['werkstattnote'] == 0 and biber['fehlend'] == 3
+
+
+def test_window_page_shows_points_and_werkstattnote(fenster, as_admin):
+    fx = fenster
+    sit(fx, fx['s'][0], fx['kern'], {'0': 3, '1': 2}, '2026-11-10 09:00:00')
+    html = as_admin.get(f"/admin/bewertungsfenster/{fx['f']}").get_data(as_text=True)
+    assert '<th>Punkte</th><th>von</th><th>Werkstattnote</th>' in html
+    assert '<td>5</td><td>9</td><td>8,3</td>' in html
+    assert 'Abdeckung' not in html and 'Kern offen' not in html
 
 
 def test_only_what_stood_at_the_stichtag_counts(fenster):

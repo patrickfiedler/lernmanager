@@ -83,8 +83,8 @@ def test_each_section_is_one_unit_and_counts_for_quality(fx):
     rows, units = noten(fx)
     assert [(u['typ'], u['question_id']) for u in units] == [
         ('abnahme', None), ('artefakt', 'durchfuehrung'), ('artefakt', 'auswertung')]
-    assert rows['Adler']['qualitaet'] == pytest.approx(5 * 8 / 3)   # abnahme counts too
-    assert rows['Biber']['qualitaet'] == 0
+    assert rows['Adler']['werkstattnote'] == 13.3   # 8 of 9, abnahme counts too
+    assert rows['Biber']['werkstattnote'] == 0
 
 
 def test_empty_cell_is_a_gap_not_a_zero(fx):

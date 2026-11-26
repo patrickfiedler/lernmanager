@@ -88,7 +88,7 @@ def test_both_totals_and_protokoll_outside_them(data, as_admin):
     teacher(data, "protokoll", {s["id"]: 0 for s in SECTIONS})
     html = page(as_admin, data)
     assert re.search(r'cu-sum">9</td>\s*<td>9</td>', html)      # Protokoll's zeros not in it
-    assert "15,0" in html                                        # Qualität 9/9
+    assert "15,0" in html                                        # Werkstattnote 9/9
 
 
 def test_columns_line_up(data, as_admin):

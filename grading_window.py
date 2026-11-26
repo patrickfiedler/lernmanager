@@ -1,5 +1,5 @@
-"""The grades (0-15) of one Bewertungsfenster, per student: two axes + one Protokoll
-grade per required experiment.
+"""The grades (0-15) of one Bewertungsfenster, per student: one Werkstattnote + one
+Protokoll grade per required experiment.
 
 Pure functions, no Flask and no database: the numbers a
 grade is read off must be testable without a browser. app._fenster_noten loads the
@@ -8,7 +8,9 @@ rows, this module only decides what each unit is worth and adds it up.
 Rules: Chemie `docs/32-bewertungsregeln.md` § 3, § 3a, § 6 and § 9b; plan in
 `task_plan.md` § Chemies Notenrechnung, Phase 2 + 3b. Since 2026-11-25 the
 Arbeitsprozess axis is merged into quality and a Protokoll is its own grade
-(decision 2026-11-25-protokoll-eigene-note-arbeitsprozess-verschmolzen).
+(decision 2026-11-25-protokoll-eigene-note-arbeitsprozess-verschmolzen). Since
+2026-11-26 quality and coverage are one Werkstattnote, without Kern-Tor and cap
+(decision 2026-11-26-chemie-eine-werkstattnote-ohne-kern-tor-und-deckel).
 
 Unit = what one 0/2/3 belongs to:
     quiz checkpoint             one unit per question of today's quiz
@@ -33,7 +35,6 @@ from functools import lru_cache
 from pathlib import Path
 
 MAX_POINTS = 3
-SOLVED = 2          # a question counts as solved from 2 points (§ 3)
 
 # Reports that still wait on a teacher. 'abgelehnt' and 'nachbesserung' do not: the
 # teacher has ruled and the student owes the question, so it counts 0 until redone.
@@ -136,62 +137,34 @@ def unit_cell(unit, attempt, scores, running, flags):
     return {'state': 'fehlt', 'punkte': None, 'grund': status or 'ohne_wertung'}
 
 
-def _mean_x5(cells):
-    counted = [c for c in cells if c['state'] != 'vorlaeufig']
-    if not counted:
-        return None
-    return 5 * sum(c['punkte'] or 0 for c in counted) / len(counted)
-
-
-def _share_solved(cells):
-    """(solved, counted): vorläufig units are in neither."""
-    counted = [c for c in cells if c['state'] != 'vorlaeufig']
-    return sum(1 for c in counted if (c['punkte'] or 0) >= SOLVED), len(counted)
+def werkstattnote(punkte, max_punkte):
+    """Points / possible points x 15, one decimal (decision 2026-11-26). None = nothing counted."""
+    return round(15 * punkte / max_punkte, 1) if max_punkte else None
 
 
 def axes(units, cells):
-    """The two axes for one student. units and cells: same length, same order.
+    """The Werkstattnote for one student. units and cells: same length, same order.
 
-    qualitaet      "Qualität des Arbeitsprozesses": mean of quiz + artefakt + abnahme
-                   units x 5; capped at 10 while the window offers a standard quiz
-                   question and none is solved (§ 6). Artefakt and abnahme never
-                   lift the cap (§ 9b)
-    abdeckung      10 x share of kern solved + 5 x share of standard solved, capped
-                   at 10 while a kern question is unsolved (§ 3). Quiz only
-    punkte / max   raw sum and maximum (3 per unit that is not vorläufig), what the
-                   checkpoint overview reads at a glance
+    werkstattnote  punkte / max x 15 over every unit that is not a Protokoll: quiz
+                   questions (Kern and Standard alike), artefakt sections, abnahmen --
+                   an Abnahme section inside a quiz or artefakt checkpoint counts here,
+                   one inside a Protokoll checkpoint belongs to the Protokoll grade.
+                   No Kern-Tor, no cap (decision
+                   2026-11-26-chemie-eine-werkstattnote-ohne-kern-tor-und-deckel)
+    punkte / max   raw sum and maximum (3 per unit that is not vorläufig)
     fehlend / offen units without a score (count 0) / reported and undecided
     Protokoll units are in none of these (own grade, see protokoll_noten).
     """
-    pairs = [(u, c) for u, c in zip(units, cells) if u['typ'] != 'protokoll']
-    quiz = [(u, c) for u, c in pairs if u['typ'] == 'quiz']
-    kern = [c for u, c in quiz if u['niveau'] != 'standard']
-    standard = [c for u, c in quiz if u['niveau'] == 'standard']
-
-    qualitaet = _mean_x5([c for u, c in pairs if u['typ'] in ('quiz', 'artefakt', 'abnahme')])
-    standard_solved, _ = _share_solved(standard)
-    if qualitaet is not None and standard and not standard_solved:
-        qualitaet = min(qualitaet, 10)
-
-    k_solved, k_total = _share_solved(kern)
-    s_solved, s_total = _share_solved(standard)
-    abdeckung = None
-    if k_total or s_total:
-        # Empty share = 0 points (window without standard: abdeckung tops at 10).
-        # Open question to Chemie, see task_plan.md § Phase 2.
-        abdeckung = (10 * k_solved / k_total if k_total else 0) \
-            + (5 * s_solved / s_total if s_total else 0)
-        if k_solved < k_total:
-            abdeckung = min(abdeckung, 10)
-
-    return {'qualitaet': qualitaet,
-            'abdeckung': abdeckung,
-            'vorlaeufig': any(c['state'] == 'vorlaeufig' for _, c in pairs),
-            'fehlend': sum(1 for _, c in pairs if c['state'] == 'fehlt'),
-            'punkte': sum(c['punkte'] or 0 for _, c in pairs if c['state'] == 'punkte'),
-            'max': MAX_POINTS * sum(1 for _, c in pairs if c['state'] != 'vorlaeufig'),
-            'offen': sum(1 for _, c in pairs if c['grund'] == 'gemeldet'),
-            'offene_kern': [u for u, c in quiz if u['niveau'] != 'standard' and _open(c)]}
+    pairs = [c for u, c in zip(units, cells) if u['typ'] != 'protokoll']
+    counted = [c for c in pairs if c['state'] != 'vorlaeufig']
+    punkte = sum(c['punkte'] or 0 for c in counted)
+    max_punkte = MAX_POINTS * len(counted)
+    return {'werkstattnote': werkstattnote(punkte, max_punkte),
+            'vorlaeufig': any(c['state'] == 'vorlaeufig' for c in pairs),
+            'fehlend': sum(1 for c in pairs if c['state'] == 'fehlt'),
+            'punkte': punkte,
+            'max': max_punkte,
+            'offen': sum(1 for c in pairs if c['grund'] == 'gemeldet')}
 
 
 def protokoll_noten(units, cells):
@@ -218,11 +191,6 @@ def protokoll_noten(units, cells):
         if not g['offen']:
             g['punkte'] = notenpunkte(g['be'], g['max'])
     return list(grades.values())
-
-
-def _open(cell):
-    """Unsolved and up to the student (a reported question waits on the teacher)."""
-    return cell['state'] == 'fehlt' or (cell['state'] == 'punkte' and cell['punkte'] < SOLVED)
 
 
 def build_noten(students, units, per_student):
