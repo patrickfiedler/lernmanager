@@ -2148,33 +2148,6 @@ def admin_topic_queue(klasse_id):
 
 # ============ Admin: Bewertungsfenster ============
 
-def _fenster_form():
-    return (request.form.get('name', ''), request.form.get('start_datum', ''),
-            request.form.get('stichtag', ''), request.form.getlist('task_ids', type=int))
-
-
-@app.route('/admin/klasse/<int:klasse_id>/bewertungsfenster', methods=['GET', 'POST'])
-@admin_required
-def admin_bewertungsfenster(klasse_id):
-    """List a class's grading windows and create a new one."""
-    klasse = models.get_klasse(klasse_id)
-    if not klasse:
-        abort(404)
-    if request.method == 'POST':
-        try:
-            fenster_id = models.create_fenster(klasse_id, *_fenster_form(), session.get('admin_id'))
-        except ValueError as e:
-            flash(str(e), 'danger')
-            return redirect(url_for('admin_bewertungsfenster', klasse_id=klasse_id))
-        flash('Bewertungsfenster angelegt. ✅', 'success')
-        return redirect(url_for('admin_bewertungsfenster_detail', fenster_id=fenster_id))
-    themen_exact, themen_other = split_tasks_by_stufe(models.get_all_tasks(),
-                                                      [klasse.get('klassenstufe')])
-    return render_template('admin/bewertungsfenster.html', klasse=klasse,
-                           fenster_liste=models.list_fenster(klasse_id), fenster=None,
-                           themen_exact=themen_exact, themen_other=themen_other)
-
-
 def _checkpoint_unit_texts(subtask):
     """{unit id: wording} for column tooltips: question text or section text."""
     if subtask['checkpoint_type'] == 'quiz':
@@ -2220,39 +2193,6 @@ def _fenster_noten(fenster):
     return grading_window.build_noten(students, units, per_student), units, excluded_count
 
 
-@app.route('/admin/bewertungsfenster/<int:fenster_id>', methods=['GET', 'POST'])
-@admin_required
-def admin_bewertungsfenster_detail(fenster_id):
-    """Edit one window (until frozen) and show its change log."""
-    fenster = models.get_fenster(fenster_id)
-    if not fenster:
-        abort(404)
-    if request.method == 'POST':
-        try:
-            if request.form.get('aktion') == 'loeschen':
-                models.delete_fenster(fenster_id)
-                flash('Bewertungsfenster gelöscht.', 'success')
-                return redirect(url_for('admin_bewertungsfenster', klasse_id=fenster['klasse_id']))
-            if request.form.get('aktion') == 'einfrieren':
-                if request.form.get('bestaetigt') != '1':
-                    raise ValueError('Bitte das Einfrieren bestätigen (Häkchen setzen).')
-                models.freeze_fenster(fenster_id, session.get('admin_id'))
-                flash('Fenster eingefroren. 🔒', 'success')
-                return redirect(url_for('admin_bewertungsfenster_detail', fenster_id=fenster_id))
-            n = models.update_fenster(fenster_id, *_fenster_form(), session.get('admin_id'))
-            flash(f'Gespeichert, {n} Änderung(en) protokolliert. ✅' if n else 'Keine Änderung.',
-                  'success')
-        except ValueError as e:
-            flash(str(e), 'danger')
-        return redirect(url_for('admin_bewertungsfenster_detail', fenster_id=fenster_id))
-    klasse = models.get_klasse(fenster['klasse_id'])
-    themen_exact, themen_other = split_tasks_by_stufe(models.get_all_tasks(),
-                                                      [klasse.get('klassenstufe')])
-    noten, units, excluded_count = _fenster_noten(fenster)
-    return render_template('admin/bewertungsfenster.html', klasse=klasse, fenster=fenster,
-                           log=models.get_fenster_log(fenster_id), noten=noten,
-                           units=units, excluded_count=excluded_count,
-                           themen_exact=themen_exact, themen_other=themen_other)
 
 
 @app.route('/admin/klasse/<int:klasse_id>/checkpoint/<int:subtask_id>/eintragen',
@@ -2286,7 +2226,7 @@ def admin_checkpoint_eintragen(klasse_id, subtask_id):
         except ValueError as e:
             flash(str(e), 'danger')
         return redirect(url_for('admin_checkpoint_eintragen', klasse_id=klasse_id,
-                                subtask_id=subtask_id, zurueck=request.args.get('zurueck')))
+                                subtask_id=subtask_id))
     standing = models.standing_teacher_attempts(subtask_id, [s['id'] for s in students])
     current = {}
     for s in students:
@@ -2295,11 +2235,9 @@ def admin_checkpoint_eintragen(klasse_id, subtask_id):
             given, notiz = models._teacher_entry_of(a, keys)
             current[s['id']] = {'scores': {(k or 'ganz'): v for k, v in given.items()},
                                 'notiz': notiz, 'datum': a['timestamp'][:10]}
-    zurueck = request.args.get('zurueck', type=int)
     return render_template('admin/checkpoint_eintragen.html', klasse=klasse, subtask=subtask,
                            titel=aufgabe_titel(subtask['beschreibung']), students=students,
-                           sections=sections, current=current, heute=models.now_local()[:10],
-                           zurueck=zurueck)
+                           sections=sections, current=current, heute=models.now_local()[:10])
 
 
 # ============ Admin: Schüler ============
@@ -4748,11 +4686,11 @@ def admin_checkpoint_flag_question(checkpoint_id, question_index):
 @app.route('/admin/checkpoint-uebersicht')
 @staff_required
 def admin_checkpoint_uebersicht():
-    """Points per student and unit for one class and Thema, as of today.
+    """Points per student and unit for one class and Thema = the module's grade.
 
-    Same numbers as the Bewertungsfenster (app._fenster_noten + grading_window), for
-    one topic and without a Stichtag: what counts there counts here (Patrick
-    2026-11-25: a confirmed report without points is 0 in both). Protokolle are their
+    One grade per module (Chemie 2026-11-26): with a Stichtag set for this class and
+    module, what stood then counts (models.get_modul_fenster); without one, everything
+    up to today. Numbers from app._fenster_noten + grading_window. Protokolle are their
     own grade and sit in their own block on the right. Below: the switch that takes a
     quiz question out of the grading.
 
@@ -4768,9 +4706,12 @@ def admin_checkpoint_uebersicht():
         task_id = tasks[0]['id'] if tasks else None
 
     rows, units, groups, quiz_checkpoints, excluded, excluded_count = [], [], [], [], {}, 0
+    fenster = models.get_modul_fenster(klasse_id, task_id) if task_id else None
     if task_id:
-        heute = {'klasse_id': klasse_id, 'task_ids': [task_id], 'stichtag': '9999-12-31'}
-        rows, units, excluded_count = _fenster_noten(heute)
+        # task_ids pinned to this module: a row from before migrate_090 may still list several
+        stand = dict(fenster or {'klasse_id': klasse_id, 'stichtag': '9999-12-31'},
+                     task_ids=[task_id])
+        rows, units, excluded_count = _fenster_noten(stand)
         # Protokoll columns to the right edge; cells follow their units
         order = sorted(range(len(units)), key=lambda i: units[i]['typ'] == 'protokoll')
         units = [units[i] for i in order]
@@ -4793,7 +4734,28 @@ def admin_checkpoint_uebersicht():
                            klassen=klassen, klasse_id=klasse_id,
                            tasks=tasks, task_id=task_id, rows=rows, units=units,
                            groups=groups, checkpoints=quiz_checkpoints, excluded=excluded,
-                           excluded_count=excluded_count)
+                           excluded_count=excluded_count, fenster=fenster,
+                           log=models.get_fenster_log(fenster['id']) if fenster else [])
+
+
+@app.route('/admin/checkpoint-uebersicht/stichtag', methods=['POST'])
+@admin_required
+def admin_modul_stichtag():
+    """Set, move or remove the Stichtag of one module in one class."""
+    klasse_id = request.form.get('klasse_id', type=int)
+    task_id = request.form.get('task_id', type=int)
+    if not models.get_klasse(klasse_id) or not models.get_task(task_id):
+        abort(404)
+    try:
+        if request.form.get('aktion') == 'entfernen':
+            models.remove_modul_stichtag(klasse_id, task_id)
+            flash('Stichtag entfernt. Die Note zählt wieder bis heute.', 'success')
+        elif models.set_modul_stichtag(klasse_id, task_id, request.form.get('stichtag', ''),
+                                       session.get('admin_id')):
+            flash('Stichtag gespeichert. ✅', 'success')
+    except ValueError as e:
+        flash(str(e), 'danger')
+    return redirect(url_for('admin_checkpoint_uebersicht', klasse_id=klasse_id, task_id=task_id))
 
 
 @app.route('/admin/checkpoint-uebersicht/frage/<int:checkpoint_id>/<int:question_index>/wertung',

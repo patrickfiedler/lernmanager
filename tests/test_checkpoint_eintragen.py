@@ -33,7 +33,8 @@ def fx(db):
         sid = models.create_student(name, 'Kim', f'u{i}', 'pw')
         models.add_student_to_klasse(sid, klasse)
         students.append(sid)
-    fid = models.create_fenster(klasse, 'Fenster II', '2026-12-01', '2026-12-20', [task_id], None)
+    models.set_modul_stichtag(klasse, task_id, '2026-12-20', None)
+    fid = models.get_modul_fenster(klasse, task_id)['id']
     return {'task': task_id, 'abnahme': dict(abnahme), 'artefakt': dict(artefakt),
             'klasse': klasse, 's': students, 'f': fid}
 
@@ -121,7 +122,8 @@ def test_only_0_2_3(fx):
 
 
 def test_entry_dated_into_a_frozen_window_is_refused(fx):
-    models.freeze_fenster(fx['f'], None)
+    with models.db_session() as conn:                     # frozen by hand (old rows)
+        conn.execute("UPDATE bewertungsfenster SET eingefroren_am = '2026-12-01' WHERE id = ?", (fx['f'],))
     with pytest.raises(ValueError, match='eingefroren'):
         save(fx, 'abnahme', {fx['s'][0]: {'scores': {None: 3}}}, datum='2026-12-20')
     assert save(fx, 'abnahme', {fx['s'][0]: {'scores': {None: 3}}}, datum='2026-12-21') == 1
@@ -189,13 +191,14 @@ def test_protokoll_drops_kern_tag_with_a_warning(db):
     assert models.get_subtasks(task_id)[1]['kern_standard_tag'] is None
 
 
-def test_protokoll_grade_on_the_window_page(db, as_admin):
+def test_protokoll_grade_on_the_overview(db, as_admin):
     task_id = import_task(topic(PROTOKOLL, 'protokoll'))
     protokoll = dict(models.get_subtasks(task_id)[1])
     klasse = models.create_klasse('11z')
     adler = models.create_student('Adler', 'Kim', 'u0', 'pw')
     models.add_student_to_klasse(adler, klasse)
-    fid = models.create_fenster(klasse, 'Fenster II', '2026-12-01', '2026-12-20', [task_id], None)
+    models.set_modul_stichtag(klasse, task_id, '2026-12-20', None)
+    fid = models.get_modul_fenster(klasse, task_id)['id']
     fx = {'protokoll': protokoll, 'klasse': klasse, 'f': fid}
     save(fx, 'protokoll', {adler: {'scores': {'praktische-durchfuehrung': 3}}})
     rows, _ = noten(fx)
@@ -206,8 +209,9 @@ def test_protokoll_grade_on_the_window_page(db, as_admin):
     rows, _ = noten(fx)
     g = rows['Adler']['protokolle'][0]
     assert (g['be'], g['max'], g['punkte']) == (14, 18, 11)
-    page = as_admin.get(f'/admin/bewertungsfenster/{fid}').get_data(as_text=True)
-    assert '14 von 18 BE = 11 Punkte' in page and '<th>Arbeitsprozess</th>' not in page
+    models.assign_task_to_klasse(klasse, task_id)          # the overview lists assigned topics
+    page = as_admin.get(f'/admin/checkpoint-uebersicht?klasse_id={klasse}&task_id={task_id}').get_data(as_text=True)
+    assert '14/18 = 11' in page and 'Arbeitsprozess' not in page
     form = as_admin.get(f"/admin/klasse/{klasse}/checkpoint/{protokoll['id']}/eintragen")
     assert form.status_code == 200 and 'eigene Note' in form.get_data(as_text=True)
 

@@ -57,11 +57,51 @@
 {% set typ_label = {'quiz': '', 'abnahme': 'Abnahme', 'artefakt': 'Artefakt', 'protokoll': 'Protokoll'} %}
 
 <div class="card mb-2">
+    <p style="margin: 0 0 0.5rem 0;"><strong>Stichtag:</strong>
+        {% if fenster %}{{ fenster.stichtag }}{% if fenster.eingefroren %} 🔒 vorbei, die Note steht{% endif %}
+        {% else %}keiner -- die Note zählt bis heute{% endif %}</p>
+    {% if is_admin and not (fenster and fenster.eingefroren) %}
+    <div class="flex gap-1 flex-center flex-wrap">
+        <form method="POST" action="{{ url_for('admin_modul_stichtag') }}" class="flex gap-1 flex-center">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="klasse_id" value="{{ klasse_id }}">
+            <input type="hidden" name="task_id" value="{{ task_id }}">
+            <input type="date" name="stichtag" class="form-control" required value="{{ fenster.stichtag if fenster else '' }}">
+            <button type="submit" class="btn btn-primary btn-sm">💾 Stichtag speichern</button>
+        </form>
+        {% if fenster %}
+        <form method="POST" action="{{ url_for('admin_modul_stichtag') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="klasse_id" value="{{ klasse_id }}">
+            <input type="hidden" name="task_id" value="{{ task_id }}">
+            <input type="hidden" name="aktion" value="entfernen">
+            <button type="submit" class="btn btn-secondary btn-sm">Stichtag entfernen</button>
+        </form>
+        {% endif %}
+    </div>
+    <p class="text-muted" style="margin: 0.5rem 0 0 0; font-size: 0.85rem;">Es zählt, was bis zum Stichtag 23:59 vorlag. Ab dem Tag danach steht die Note fest und der Stichtag lässt sich nicht mehr ändern. Ein Datum in der Vergangenheit sperrt also sofort.</p>
+    {% endif %}
+    {% if log %}
+    <details style="margin-top: 0.5rem;"><summary>Änderungsprotokoll</summary>
+        <table class="table">
+            {% for e in log %}
+            <tr><td>{{ e.zeitpunkt }}</td><td>{{ e.username or '–' }}</td>
+                <td>{{ {'angelegt': 'angelegt', 'daten': 'geändert', 'modul_hinzu': 'Modul hinzu',
+                        'modul_entfernt': 'Modul entfernt', 'eingefroren': 'eingefroren',
+                        'aufgeteilt': 'aufgeteilt'}.get(e.aktion, e.aktion) }}</td>
+                <td>{{ e.detail }}</td></tr>
+            {% endfor %}
+        </table>
+    </details>
+    {% endif %}
+</div>
+
+<div class="card mb-2">
     <p style="margin: 0 0 0.5rem 0;">
-        Stand heute, gerechnet wie im Bewertungsfenster.
+        Stand {% if fenster %}Stichtag {{ fenster.stichtag }}, 23:59{% else %}heute{% endif %}.
         <strong>{{ units|rejectattr('typ', 'equalto', 'protokoll')|list|length }}</strong> gewertete Einheiten{% if excluded_count %},
         <strong>{{ excluded_count }}</strong> Frage(n) für alle nicht gewertet{% endif %}. Je Einheit 0, 2 oder 3 Punkte.
-        Werkstattnote nur für dieses Thema -- die Note rechnet das ganze Fenster.
+        Die Werkstattnote ist die Note dieses Moduls: Punkte ÷ von × 15.
         Ein Protokoll ist eine eigene Note (BE nach Punktetabelle, erst wenn alle Abschnitte eingetragen sind).
     </p>
     <p class="cu-legend text-muted" style="margin: 0; font-size: 0.85rem;">

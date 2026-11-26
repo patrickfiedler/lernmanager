@@ -3,8 +3,7 @@
 {% block title %}{{ titel }} eintragen - {{ klasse.name }}{% endblock %}
 
 {% block content %}
-<p>{% if zurueck %}<a href="{{ url_for('admin_bewertungsfenster_detail', fenster_id=zurueck) }}">← Bewertungsfenster</a>
-   {% else %}<a href="{{ url_for('admin_bewertungsfenster', klasse_id=klasse.id) }}">← Bewertungsfenster der Klasse</a>{% endif %}</p>
+<p><a href="{{ url_for('admin_checkpoint_uebersicht', klasse_id=klasse.id, task_id=subtask.task_id) }}">← Checkpoint-Übersicht</a></p>
 <h1>{{ titel }}</h1>
 {% set art = {'abnahme': 'Abnahme', 'artefakt': 'Artefakt', 'protokoll': 'Protokoll'} %}
 <p class="text-muted">{{ klasse.name }} · {{ art[subtask.checkpoint_type] }}

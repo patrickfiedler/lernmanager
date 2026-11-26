@@ -158,7 +158,8 @@ def fenster(db):
         sid = models.create_student(name, 'Kim', f'u{i}', 'pw')
         models.add_student_to_klasse(sid, klasse)
         students.append(sid)
-    fid = models.create_fenster(klasse, 'Fenster II', '2026-11-01', '2026-11-20', [task], None)
+    models.set_modul_stichtag(klasse, task, '2026-11-20', None)
+    fid = models.get_modul_fenster(klasse, task)['id']
     return {'f': fid, 'task': task, 'kern': kern, 'std': std, 's': students}
 
 
@@ -187,12 +188,15 @@ def test_window_grades_from_database(fenster):
     assert biber['werkstattnote'] == 0 and biber['fehlend'] == 3
 
 
-def test_window_page_shows_points_and_werkstattnote(fenster, as_admin):
+def test_overview_shows_the_grade_at_the_stichtag(fenster, as_admin):
     fx = fenster
     sit(fx, fx['s'][0], fx['kern'], {'0': 3, '1': 2}, '2026-11-10 09:00:00')
-    html = as_admin.get(f"/admin/bewertungsfenster/{fx['f']}").get_data(as_text=True)
-    assert '<th>Punkte</th><th>von</th><th>Werkstattnote</th>' in html
-    assert '<td>5</td><td>9</td><td>8,3</td>' in html
+    klasse = models.get_fenster(fx['f'])['klasse_id']
+    models.assign_task_to_klasse(klasse, fx['task'])       # the overview lists assigned topics
+    html = as_admin.get(f"/admin/checkpoint-uebersicht?klasse_id={klasse}&task_id={fx['task']}"
+                        ).get_data(as_text=True)
+    assert 'Stand Stichtag 2026-11-20' in html and 'vorbei, die Note steht' in html
+    assert '<td>8,3</td>' in html                         # 5 of 9 x 15
     assert 'Abdeckung' not in html and 'Kern offen' not in html
 
 

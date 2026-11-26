@@ -2592,35 +2592,22 @@ def set_topic_queue(klasse_id, task_ids_ordered):
             )
 
 
-# ============ Bewertungsfenster ============
-# Period + expected modules a grade is computed over (chemie, task_plan.md § Notenrechnung).
-# The module list is the only input for the denominator, so every change is logged.
+# ============ Bewertungsfenster = Stichtag je Modul ============
+# Since Chemie 2026-11-26 every module has its own grade with its own Stichtag. One
+# bewertungsfenster row = the Stichtag of one module in one class (exactly one
+# bewertungsfenster_modul row). No row = no Stichtag, the grade counts up to today.
+# The table names stay from the multi-module windows (migrate_086, split by migrate_090).
 
 def fenster_ist_eingefroren(fenster, heute=None):
-    """True once the window may no longer change (name, dates, modules).
+    """True once the Stichtag may no longer change: from the day after it (students still
+    work on the Stichtag itself), or frozen by hand earlier (eingefroren_am, old rows).
 
     fenster: dict with 'stichtag' (YYYY-MM-DD). heute: YYYY-MM-DD, default today.
-    Frozen by hand (eingefroren_am, freeze_fenster) or from the day after the
-    Stichtag: students still work on the Stichtag itself.
     """
     if fenster.get('eingefroren_am'):
         return True
     heute = heute or now_local('%Y-%m-%d')
     return heute > fenster['stichtag']
-
-
-def _check_fenster_daten(name, start_datum, stichtag):
-    name = (name or '').strip()
-    if not name:
-        raise ValueError('Name fehlt.')
-    try:
-        start = datetime.strptime(start_datum, '%Y-%m-%d').date()
-        ende = datetime.strptime(stichtag, '%Y-%m-%d').date()
-    except (TypeError, ValueError):
-        raise ValueError('Datum fehlt oder ist ungültig.')
-    if ende < start:
-        raise ValueError('Der Stichtag liegt vor dem Start.')
-    return name
 
 
 def _log_fenster(conn, fenster_id, admin_id, aktion, detail=''):
@@ -2629,34 +2616,8 @@ def _log_fenster(conn, fenster_id, admin_id, aktion, detail=''):
         "VALUES (?, ?, ?, ?, ?)", (fenster_id, now_local(), admin_id, aktion, detail))
 
 
-def _task_names(conn, task_ids):
-    if not task_ids:
-        return []
-    marks = ','.join('?' * len(task_ids))
-    rows = conn.execute(f"SELECT name FROM task WHERE id IN ({marks}) ORDER BY name",
-                        list(task_ids)).fetchall()
-    return [r['name'] for r in rows]
-
-
-def create_fenster(klasse_id, name, start_datum, stichtag, task_ids, admin_id):
-    """New window for a class; returns its id. Raises ValueError on bad input."""
-    name = _check_fenster_daten(name, start_datum, stichtag)
-    task_ids = sorted(set(task_ids))
-    with db_session() as conn:
-        fenster_id = conn.execute(
-            "INSERT INTO bewertungsfenster (klasse_id, name, start_datum, stichtag, created_at) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (klasse_id, name, start_datum, stichtag, now_local())).lastrowid
-        conn.executemany("INSERT INTO bewertungsfenster_modul (fenster_id, task_id) VALUES (?, ?)",
-                         [(fenster_id, t) for t in task_ids])
-        _log_fenster(conn, fenster_id, admin_id, 'angelegt',
-                     f'{start_datum} bis {stichtag}; Module: '
-                     + (', '.join(_task_names(conn, task_ids)) or 'keine'))
-    return fenster_id
-
-
 def get_fenster(fenster_id):
-    """Window as dict with 'task_ids' and 'module' (id, name), or None."""
+    """Window as dict with 'task_ids', 'module' (id, name) and 'eingefroren', or None."""
     with db_session() as conn:
         row = conn.execute("SELECT * FROM bewertungsfenster WHERE id = ?", (fenster_id,)).fetchone()
         if not row:
@@ -2671,67 +2632,62 @@ def get_fenster(fenster_id):
     return fenster
 
 
-def list_fenster(klasse_id):
-    """All windows of a class, newest start first, each with module count + frozen flag."""
+def get_modul_fenster(klasse_id, task_id):
+    """The Stichtag row of one module in one class, or None (= grade counts to today)."""
     with db_session() as conn:
-        rows = conn.execute(
-            "SELECT f.*, (SELECT COUNT(*) FROM bewertungsfenster_modul m WHERE m.fenster_id = f.id) "
-            "AS modul_anzahl FROM bewertungsfenster f WHERE f.klasse_id = ? "
-            "ORDER BY f.start_datum DESC, f.id DESC", (klasse_id,)).fetchall()
-    result = [dict(r) for r in rows]
-    for f in result:
-        f['eingefroren'] = fenster_ist_eingefroren(f)
-    return result
+        row = conn.execute(
+            "SELECT f.id FROM bewertungsfenster f "
+            "JOIN bewertungsfenster_modul m ON m.fenster_id = f.id "
+            "WHERE f.klasse_id = ? AND m.task_id = ? ORDER BY f.id DESC LIMIT 1",
+            (klasse_id, task_id)).fetchone()
+    return get_fenster(row['id']) if row else None
 
 
-def update_fenster(fenster_id, name, start_datum, stichtag, task_ids, admin_id):
-    """Save name, dates and module list; one log row per change. Returns the number of
-    changes. Raises ValueError on bad input or when the window is frozen."""
-    fenster = get_fenster(fenster_id)
-    if fenster['eingefroren']:
-        raise ValueError('Das Fenster ist eingefroren und lässt sich nicht mehr ändern.')
-    name = _check_fenster_daten(name, start_datum, stichtag)
-    alt, neu = set(fenster['task_ids']), set(task_ids)
-    changes = 0
+def set_modul_stichtag(klasse_id, task_id, stichtag, admin_id):
+    """Set or move the Stichtag of one module in one class, logged. Returns True when
+    something changed. Raises ValueError on a bad date or once the Stichtag is past.
+
+    A date in the past is allowed (a module that already ended) and is final at once.
+    start_datum is a label only (nothing filters on it): the day it was set.
+    """
+    try:
+        datetime.strptime(stichtag or '', '%Y-%m-%d')
+    except ValueError:
+        raise ValueError('Datum fehlt oder ist ungültig.')
+    fenster = get_modul_fenster(klasse_id, task_id)
+    if fenster and fenster['eingefroren']:
+        raise ValueError('Der Stichtag ist vorbei, die Note steht. Er lässt sich nicht mehr ändern.')
     with db_session() as conn:
-        for feld, label, wert in (('name', 'Name', name), ('start_datum', 'Start', start_datum),
-                                  ('stichtag', 'Stichtag', stichtag)):
-            if fenster[feld] != wert:
-                conn.execute(f"UPDATE bewertungsfenster SET {feld} = ? WHERE id = ?",
-                             (wert, fenster_id))
-                _log_fenster(conn, fenster_id, admin_id, 'daten',
-                             f'{label}: {fenster[feld]} -> {wert}')
-                changes += 1
-        for task_id in sorted(neu - alt):
+        if fenster is None:
+            name = conn.execute("SELECT name FROM task WHERE id = ?", (task_id,)).fetchone()['name']
+            fenster_id = conn.execute(
+                "INSERT INTO bewertungsfenster (klasse_id, name, start_datum, stichtag, created_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (klasse_id, name, min(now_local('%Y-%m-%d'), stichtag), stichtag,
+                 now_local())).lastrowid
             conn.execute("INSERT INTO bewertungsfenster_modul (fenster_id, task_id) VALUES (?, ?)",
                          (fenster_id, task_id))
-        for task_id in sorted(alt - neu):
-            conn.execute("DELETE FROM bewertungsfenster_modul WHERE fenster_id = ? AND task_id = ?",
-                         (fenster_id, task_id))
-        for aktion, ids in (('modul_hinzu', neu - alt), ('modul_entfernt', alt - neu)):
-            for modul in _task_names(conn, ids):
-                _log_fenster(conn, fenster_id, admin_id, aktion, modul)
-                changes += 1
-    return changes
+            _log_fenster(conn, fenster_id, admin_id, 'angelegt', f'Stichtag {stichtag}')
+            return True
+        if fenster['stichtag'] == stichtag:
+            return False
+        conn.execute("UPDATE bewertungsfenster SET stichtag = ?, start_datum = MIN(start_datum, ?) "
+                     "WHERE id = ?", (stichtag, stichtag, fenster['id']))
+        _log_fenster(conn, fenster['id'], admin_id, 'daten',
+                     f"Stichtag: {fenster['stichtag']} -> {stichtag}")
+        return True
 
 
-def delete_fenster(fenster_id):
-    """Delete a window with its log. Refused once frozen: it is the evidence for a grade."""
-    fenster = get_fenster(fenster_id)
+def remove_modul_stichtag(klasse_id, task_id):
+    """Drop the Stichtag (the grade counts to today again). Refused once past: it is the
+    evidence for a grade."""
+    fenster = get_modul_fenster(klasse_id, task_id)
+    if not fenster:
+        return
     if fenster['eingefroren']:
-        raise ValueError('Ein eingefrorenes Fenster bleibt erhalten.')
+        raise ValueError('Ein vergangener Stichtag bleibt erhalten: er belegt eine Note.')
     with db_session() as conn:
-        conn.execute("DELETE FROM bewertungsfenster WHERE id = ?", (fenster_id,))
-
-
-def freeze_fenster(fenster_id, admin_id):
-    """Freeze a window by hand before its Stichtag. Cannot be undone."""
-    if get_fenster(fenster_id)['eingefroren']:
-        raise ValueError('Das Fenster ist schon eingefroren.')
-    with db_session() as conn:
-        conn.execute("UPDATE bewertungsfenster SET eingefroren_am = ? WHERE id = ?",
-                     (now_local(), fenster_id))
-        _log_fenster(conn, fenster_id, admin_id, 'eingefroren', 'von Hand')
+        conn.execute("DELETE FROM bewertungsfenster WHERE id = ?", (fenster['id'],))
 
 
 def get_fenster_log(fenster_id):
@@ -5041,13 +4997,10 @@ def standing_teacher_attempts(checkpoint_id, student_ids):
 
 
 def frozen_fenster_blocking(klasse_id, task_id, datum):
-    """Name of a frozen window of this class that covers the module and whose Stichtag
-    is on or after `datum` -- an entry dated then would change a frozen grade."""
-    for f in list_fenster(klasse_id):
-        if (f['eingefroren'] and datum <= f['stichtag']
-                and task_id in get_fenster(f['id'])['task_ids']):
-            return f['name']
-    return None
+    """Name of the module's Stichtag row when it is past and `datum` is on or before it --
+    an entry dated then would change a grade that stands."""
+    f = get_modul_fenster(klasse_id, task_id)
+    return f['name'] if f and f['eingefroren'] and datum <= f['stichtag'] else None
 
 
 def save_teacher_checkpoint_grades(admin_id, subtask, klasse_id, datum, entries):
