@@ -274,7 +274,7 @@
 
             <!-- Materials Section (collapsible, default open) -->
             {% if materials %}
-            <details class="materials-toggle mt-2" open>
+            <details id="materialien" class="materials-toggle mt-2" open>
                 <summary>📎 Materialien</summary>
                 <div class="materials-content">
                     <ul class="material-list">
@@ -308,7 +308,7 @@
                         {% else %}
                           {% set mat_icon = '📄' %}{% set mat_icon_svg = '' %}
                         {% endif %}
-                        <li class="material-item">
+                        <li class="material-item" id="material-{{ mat.id }}"{% if mat.typ == 'datei' %} data-filename="{{ mat.pfad|material_filename }}"{% endif %}>
                             {% if mat_locked %}
                             <span class="material-icon"><img src="{{ url_for('static', filename='icons/book-locked.svg') }}" alt="" width="20" height="20"></span>
                             {% elif mat_icon_svg %}
@@ -1493,4 +1493,64 @@ wireGateCard('inline-gate', 'inline-gate-feedback', inlineGateKeyword);
     refreshNudge();
 })();
 {% endif %}
+
+// Material references in the task text jump to the material box below.
+// `Datei.docx` in backticks -> that file's row; the word "Materialien" -> the box.
+// Done here, not in the markdown filter: only this page has the box to jump to
+// (the print view renders the same text without one).
+(function () {
+    const box = document.getElementById('materialien');
+    if (!box) return;
+    const texts = document.querySelectorAll('.task-content, .tipps-content, .fertig-wenn-callout');
+
+    function jumpLink(target, inner) {
+        const a = document.createElement('a');
+        a.href = '#' + target.id;
+        a.className = 'material-ref';
+        a.appendChild(inner);
+        return a;
+    }
+
+    // 1. File names: <code>name</code> equal to a material's file name.
+    const byName = {};
+    box.querySelectorAll('.material-item[data-filename]').forEach(li => { byName[li.dataset.filename] = li; });
+    texts.forEach(t => t.querySelectorAll('code').forEach(code => {
+        const li = byName[code.textContent.trim()];
+        if (li && !code.closest('a')) code.replaceWith(jumpLink(li, code.cloneNode(true)));
+    }));
+
+    // 2. Mentions of the box itself.
+    // Only the word: mouse use (MBI on PCs), a small target is enough. Plural only,
+    // "im Material" means the content in general, not the box.
+    const phrase = /Materialien/;
+    if (phrase) {
+        texts.forEach(t => {
+            const walker = document.createTreeWalker(t, NodeFilter.SHOW_TEXT);
+            const hits = [];
+            while (walker.nextNode()) {
+                if (!walker.currentNode.parentElement.closest('a, code, h1, h2, h3, h4')) hits.push(walker.currentNode);
+            }
+            hits.forEach(node => {
+                const m = node.textContent.match(phrase);
+                if (!m) return;
+                const rest = node.splitText(m.index);
+                rest.splitText(m[0].length);
+                rest.replaceWith(jumpLink(box, document.createTextNode(m[0])));
+            });
+        });
+    }
+
+    // Landing: open the box if the student had folded it, scroll, flash the row.
+    document.addEventListener('click', ev => {
+        const a = ev.target.closest('a.material-ref');
+        if (!a) return;
+        ev.preventDefault();
+        const target = document.getElementById(a.hash.slice(1));
+        box.open = true;
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        target.classList.remove('material-flash');
+        void target.offsetWidth;            // restart the animation on a second click
+        target.classList.add('material-flash');
+    });
+})();
 {% endblock %}
