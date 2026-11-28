@@ -168,7 +168,6 @@ LLM_CLIENT_TIMEOUT_MS = (LLM_CHECKPOINT_TIMEOUT + LLM_RETRY_FLOOR + LLM_CLIENT_M
 # issue, and a used-up pool now blocks a quiz instead of shortening it. The
 # ceilings stay as a guard against loops and abuse, not as a budget.
 LLM_MAX_CALLS_PER_STUDENT_PER_HOUR = 60          # quiz/warmup answers
-LLM_MAX_ARTIFACT_CHECKS_PER_STUDENT_PER_HOUR = 10  # artifact KI-Check uploads
 # Chemie Checkpoint-Punktekonto: graded checkpoint quizzes must not run out of
 # budget mid-session just because the same student also did warmup/practice
 # earlier that hour -- own pool, own (higher) ceiling. A module has up to ~8

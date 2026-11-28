@@ -38,9 +38,8 @@ def _setup(app, tmp_path, n_subtasks):
     models.save_artifact_gate_result(student_task["id"], gate_id, True)
     models.save_artifact_feedback(student_id, gate_id, FEEDBACK)
 
-    # The fold-out only renders feedback when a real upload exists on disk AND
-    # the class has LLM feedback on -- without both, this test proves nothing.
-    models.set_klasse_llm_feedback(klasse_id, True)
+    # The fold-out only renders feedback when a real upload exists on disk --
+    # without it, this test proves nothing.
     artefakte = os.path.join(str(tmp_path / "uploads"), "artefakte")
     os.makedirs(artefakte, exist_ok=True)
     disk_filename = f"{student_id}_{task_id}.txt"

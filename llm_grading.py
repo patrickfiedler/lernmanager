@@ -472,80 +472,6 @@ ARTIFACT_CHECKLIST_SYSTEM_PROMPT = (
 )
 
 
-def grade_artifact_checklist(extracted_text: str, criteria: list, student_id=None) -> list:
-    """Check an extracted artifact against a list of criteria strings.
-
-    Args:
-        extracted_text: Pseudonymized text extracted from the student's file.
-        criteria: List of criterion strings (from graded_artifact_json['criteria']).
-            Filenames belong in graded_artifact.expected_filename, not here — see
-            artifact_checker.check_filename. Authoring rule, not enforced here:
-            a "Datei..." criterion used to be dropped silently, which also ate
-            legitimate ones ("Dateiformat ist .odt").
-
-    Returns:
-        List of dicts: [{"criterion": str, "passed": bool, "note": str, "source": "llm"}, ...]
-        Returns an empty list on failure (caller should handle gracefully).
-        student_id: recorded in llm_usage ('artifact_feedback'), never sent to the LLM.
-    """
-    if not config.LLM_ENABLED or not criteria or not extracted_text:
-        return []
-
-    numbered = "\n".join(f"{i+1}. {c}" for i, c in enumerate(criteria))
-    user_prompt = (
-        f"Kriterien:\n{numbered}\n\n"
-        f"Dokument:\n{extracted_text}"
-    )
-
-    client = _get_client()
-    started = time.monotonic()
-    try:
-        response = client.chat.completions.create(
-            model=config.LLM_MODEL,
-            max_tokens=1200,
-            temperature=0,
-            response_format={"type": "json_object"},
-            messages=[
-                {"role": "system", "content": ARTIFACT_CHECKLIST_SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ],
-            timeout=config.LLM_ARTIFACT_TIMEOUT,
-            **_reasoning_kwargs(),
-        )
-        text = _message_text(response)
-
-        if not text:
-            print("LLM artifact checklist: empty response", file=sys.stderr)
-            _record_call(student_id, 'artifact_feedback', started, error='empty')
-            return []
-
-        parsed = json.loads(text)
-        results = parsed.get("results", parsed) if isinstance(parsed, dict) else parsed
-        results = [r for r in results if isinstance(r, dict)]
-
-        if len(results) != len(criteria):
-            print(f"LLM artifact checklist: expected {len(criteria)} results, got {len(results)}", file=sys.stderr)
-
-        _record_call(student_id, 'artifact_feedback', started,
-                     prompt_version=prompt_version_for(ARTIFACT_CHECKLIST_SYSTEM_PROMPT),
-                     usage=_token_usage(response))
-        # Match positionally — the original criterion text (not the model's echo of it) is
-        # always used, so criteria containing quotes/special chars can't break JSON escaping.
-        return [
-            {
-                "criterion": criterion,
-                "passed": bool(r.get("passed", False)),
-                "note": str(r.get("note", "")),
-                "source": "llm",
-            }
-            for criterion, r in zip(criteria, results)
-        ]
-    except Exception as e:
-        print(f"LLM artifact checklist error: {type(e).__name__}: {e}", file=sys.stderr)
-        _record_call(student_id, 'artifact_feedback', started, error=type(e).__name__)
-        return []
-
-
 def grade_answer(question_text, expected_or_rubric, student_answer, student_id=None,
                   usage_tag='llm_grading', strict=False):
     """Grade a free-text answer using LLM.
@@ -803,7 +729,7 @@ def _tutor_system_prompt(question_text, rubric, hints, grader_feedback):
 def diagnostic_call(kind, **fields):
     """Run a raw diagnostic LLM call for the admin LLM-check page.
 
-    Unlike grade_answer/filter_noise_answers/grade_artifact_checklist, this never
+    Unlike grade_answer/filter_noise_answers, this never
     swallows errors into a fallback — it returns full diagnostics so an admin can
     confirm the configured model+params actually work in production.
 

@@ -7812,18 +7812,6 @@ def llm_rate_limit_free_at(student_id, usage_tag='llm_grading'):
     return (expiring + timedelta(hours=1, minutes=1)).strftime('%H:%M')
 
 
-def get_artifact_checks_remaining(student_id):
-    """Return how many artifact KI-Checks the student can still do this hour."""
-    with db_session() as conn:
-        row = conn.execute(
-            "SELECT COUNT(*) as cnt FROM llm_usage "
-            "WHERE student_id = ? AND question_type = 'artifact_feedback' AND ok = 1 "
-            "AND timestamp > ?",
-            (student_id, local_cutoff(hours=1))
-        ).fetchone()
-        return max(0, config.LLM_MAX_ARTIFACT_CHECKS_PER_STUDENT_PER_HOUR - row['cnt'])
-
-
 # --- Artifact feedback ---
 
 def save_artifact_feedback(student_id, subtask_id, feedback_list, timezone='Europe/Berlin'):
@@ -7965,15 +7953,6 @@ def get_all_student_artifact_files_for_student(student_id):
         }
         for r in rows
     ]
-
-
-def set_klasse_llm_feedback(klasse_id, enabled: bool):
-    """Enable or disable LLM artifact feedback for a class."""
-    with db_session() as conn:
-        conn.execute(
-            "UPDATE klasse SET llm_artifact_feedback_enabled = ? WHERE id = ?",
-            (1 if enabled else 0, klasse_id)
-        )
 
 
 def set_klasse_show_completed_topics(klasse_id, show: bool):

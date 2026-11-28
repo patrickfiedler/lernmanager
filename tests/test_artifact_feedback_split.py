@@ -1,9 +1,6 @@
-"""Regression: the deterministic filename check must run independently of the
-class's LLM-feedback toggle. Previously `check_filename()` was called from inside
-the same `if llm_artifact_feedback_enabled:` block as the LLM criteria call in both
-the gate route and the standalone feedback route -- so disabling LLM feedback for a
-class silently disabled the (free, non-LLM) filename check too. See
-_build_level2_feedback() in app.py.
+"""The deterministic filename check runs on every artifact upload, and no upload
+reaches the LLM directly: AI feedback on artifacts goes only through the grading
+service on the m920x (removed 2026-11-28, see _build_level2_feedback() in app.py).
 """
 import io
 import json
@@ -38,11 +35,16 @@ def _student_with_graded_gate(app, tmp_path):
     return student_id, klasse_id, task_id, subtask_id
 
 
-def test_gate_check_filename_feedback_runs_with_llm_disabled(app, client, tmp_path):
-    """klasse.llm_artifact_feedback_enabled defaults to 0 -- filename check must
-    still appear in the chained Level-2 feedback."""
+def test_gate_check_runs_filename_check_and_never_the_llm(app, client, tmp_path, monkeypatch):
+    """Even with the old class switch set in the DB, a gate upload calls no LLM."""
+    import llm_grading
     student_id, klasse_id, task_id, subtask_id = _student_with_graded_gate(app, tmp_path)
-    assert not models.get_klasse(klasse_id)["llm_artifact_feedback_enabled"]
+    with models.db_session() as conn:
+        conn.execute("UPDATE klasse SET llm_artifact_feedback_enabled = 1 WHERE id = ?", (klasse_id,))
+    # LLM switched on with a client that fails loudly: any call would show up here.
+    monkeypatch.setattr(config, "LLM_ENABLED", True)
+    monkeypatch.setattr(llm_grading, "_get_client",
+                        lambda: (_ for _ in ()).throw(AssertionError("LLM called")))
 
     with client.session_transaction() as sess:
         sess["student_id"] = student_id
@@ -79,22 +81,3 @@ def test_standalone_feedback_llm_disabled_still_checks_filename(app, client, tmp
     assert len(body["feedback"]) == 1
     assert body["feedback"][0]["source"] == "deterministic"
 
-
-def test_standalone_feedback_llm_enabled_keeps_filename_check(app, client, tmp_path):
-    """With LLM feedback enabled, filename check must still be present alongside
-    (an empty, since config.LLM_ENABLED=False in tests) LLM criteria result."""
-    student_id, klasse_id, task_id, subtask_id = _student_with_graded_gate(app, tmp_path)
-    models.set_klasse_llm_feedback(klasse_id, True)
-
-    with client.session_transaction() as sess:
-        sess["student_id"] = student_id
-
-    resp = client.post(
-        "/schueler/thema/testthema/aufgabe-1/artefakt/feedback",
-        json={"text": "Anonymisierter Text der Abgabe.", "filename": "Abgabe-Alex.txt"},
-    )
-    assert resp.status_code == 200
-    body = resp.get_json()
-    assert body["llm_disabled"] is False
-    assert len(body["feedback"]) == 1
-    assert body["feedback"][0]["source"] == "deterministic"
