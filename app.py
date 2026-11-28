@@ -23,6 +23,7 @@ from flask_compress import Compress
 from werkzeug.utils import secure_filename
 from markupsafe import Markup
 import markdown as md
+import step_keys
 
 import config
 import models
@@ -76,6 +77,29 @@ def markdown_filter(text, materials=None):
                   key_combos.KeyComboExtension(config.KEY_COMBO_MODIFIERS)]
     html = md.markdown(text, extensions=extensions, tab_length=3)
     return Markup(html)
+
+
+def _step_texts_by_subtask(task_id):
+    """Work-step texts of each Aufgabe of a topic, as a student's page shows them.
+
+    Rendered in an empty request context: an admin session would turn a broken
+    image into an admin warning, and the step text (and its key) would differ
+    from what the student's browser hashed.
+    """
+    materials = models.get_materials(task_id)
+    with app.test_request_context():
+        return {s['id']: step_keys.step_texts(markdown_filter(s['beschreibung'], materials))
+                for s in models.get_subtasks(task_id)}
+
+
+def _carry_step_ticks(task_id, steps_before):
+    """After an edit of a topic's Aufgaben: move students' step ticks from the
+    old wording of a step to the new one (step_keys.remap_ticks)."""
+    steps_after = _step_texts_by_subtask(task_id)
+    for subtask_id, old in steps_before.items():
+        new = steps_after.get(subtask_id)
+        if new is not None and new != old:
+            models.remap_step_ticks(subtask_id, lambda keys: step_keys.remap_ticks(keys, old, new))
 
 
 def _inline_image_resolver(materials):
@@ -2886,7 +2910,10 @@ def admin_themen_import():
                 try:
                     target_id = int(action_value)
                     w = []
+                    steps_before = None if reset else _step_texts_by_subtask(target_id)
                     overwrite_task_from_import(target_id, wrapped, reset_progress=reset, warnings=w)
+                    if steps_before:
+                        _carry_step_ticks(target_id, steps_before)
                     warnings.extend(w)
                     import_targets.append((target_id, task_entry))
                     if reset:
@@ -3097,6 +3124,7 @@ def admin_thema_aufgaben(task_id):
                         flash(f'Aufgabe {i+1}, Frage {qi+1}: Quiz-Checkpoints brauchen genau eine richtige Antwort.', 'danger')
                         return redirect(url_for('admin_thema_detail', task_id=task_id))
 
+        steps_before = _step_texts_by_subtask(task_id)
         models.update_subtasks(task_id, subtasks_list, estimated_minutes_list, quiz_json_list,
                                path_list=path_list, path_model_list=path_model_list,
                                fertig_wenn_list=fertig_wenn_list, tipps_list=tipps_list,
@@ -3108,6 +3136,7 @@ def admin_thema_aufgaben(task_id):
                                fork_branch_label_list=fork_branch_label_list,
                                fork_branch_note_list=fork_branch_note_list,
                                fork_required_list=fork_required_list)
+        _carry_step_ticks(task_id, steps_before)
         flash('Aufgaben aktualisiert.', 'success')
         return redirect(url_for('admin_thema_detail', task_id=task_id))
 

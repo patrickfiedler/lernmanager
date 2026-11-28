@@ -37,6 +37,7 @@
 !/artifact_processor.py
 !/checkpoint_questions.py
 !/grading_window.py
+!/step_keys.py
 !/punktetabelle_oberstufe.json
 !/analytics_queue.py
 !/import_task.py

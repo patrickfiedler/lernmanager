@@ -4350,6 +4350,25 @@ def get_step_ticks(student_id, subtask_ids):
     return {r['subtask_id']: json.loads(r['step_keys']) for r in rows}
 
 
+def remap_step_ticks(subtask_id, remap):
+    """Rewrite every student's ticks on one Aufgabe: remap(keys) -> new keys.
+    A row left without keys is deleted, as save_step_ticks does."""
+    with db_session() as conn:
+        rows = conn.execute('SELECT student_id, step_keys FROM step_tick WHERE subtask_id = ?',
+                            (subtask_id,)).fetchall()
+        for row in rows:
+            keys = json.loads(row['step_keys'])
+            new_keys = remap(keys)
+            if new_keys == sorted(keys):
+                continue
+            if new_keys:
+                conn.execute('UPDATE step_tick SET step_keys = ? WHERE student_id = ? AND subtask_id = ?',
+                             (json.dumps(new_keys), row['student_id'], subtask_id))
+            else:
+                conn.execute('DELETE FROM step_tick WHERE student_id = ? AND subtask_id = ?',
+                             (row['student_id'], subtask_id))
+
+
 def save_step_ticks(student_id, subtask_id, step_keys):
     """Replace the whole tick list; an empty list deletes the row."""
     with db_session() as conn:
